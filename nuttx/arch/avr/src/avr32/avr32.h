@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/avr/src/avr32/avr32.h
  *
- *   Copyright (C) 2011-2012 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -51,13 +38,25 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
+/* The AVR32 stack must be aligned at word (4 byte) boundaries. If necessary
+ * frame_size must be rounded up to the next boundary
+ */
+
+#define STACK_ALIGNMENT     4
+
+/* Stack alignment macros */
+
+#define STACK_ALIGN_MASK    (STACK_ALIGNMENT - 1)
+#define STACK_ALIGN_DOWN(a) ((a) & ~STACK_ALIGN_MASK)
+#define STACK_ALIGN_UP(a)   (((a) + STACK_ALIGN_MASK) & ~STACK_ALIGN_MASK)
+
 /* Macros to handle saving and restore interrupt state.  The state is copied
  * from the stack to the TCB, but only a referenced is passed to get the
  * state from the TCB.
  */
 
-#define up_savestate(regs)    up_copystate(regs, (uint32_t*)g_current_regs)
-#define up_restorestate(regs) (g_current_regs = regs)
+#define avr_savestate(regs)     avr_copystate(regs, up_current_regs())
+#define avr_restorestate(regs)  up_set_current_regs(regs)
 
 /****************************************************************************
  * Public Types
@@ -68,15 +67,9 @@
  ****************************************************************************/
 
 #ifndef __ASSEMBLY__
-/* This holds a references to the current interrupt level register storage
- * structure.  If is non-NULL only during interrupt processing.
- */
-
-extern volatile uint32_t *g_current_regs;
-
-/* This is the beginning of heap as provided from up_head.S. This is the first
- * address in DRAM after the loaded program+bss+idle stack.  The end of the
- * heap is CONFIG_RAM_END
+/* This is the beginning of heap as provided from up_head.S. This is the
+ * first address in DRAM after the loaded program+bss+idle stack.
+ * The end of the heap is CONFIG_RAM_END
  */
 
 extern uint32_t g_idle_topstack;
@@ -93,46 +86,46 @@ extern uint32_t g_idle_topstack;
 
 #ifndef __ASSEMBLY__
 
-/************************************************************************************
- * Name:  up_copystate
+/****************************************************************************
+ * Name:  avr_copystate
  *
  * Description:
- *   Copy the contents of a register state save structure from one location to
- *   another.
+ *   Copy the contents of a register state save structure from one location
+ *   to another.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
-void up_copystate(uint32_t *dest, uint32_t *src);
+void avr_copystate(uint32_t *dest, uint32_t *src);
 
-/************************************************************************************
- * Name:  up_fullcontextrestore
+/****************************************************************************
+ * Name:  avr_fullcontextrestore
  *
  * Description:
  *   Restore the full context of a saved thread/task.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
-void up_fullcontextrestore(uint32_t *restoreregs) noreturn_function;
+void avr_fullcontextrestore(uint32_t *restoreregs) noreturn_function;
 
-/************************************************************************************
- * Name:  up_switchcontext
+/****************************************************************************
+ * Name:  avr_switchcontext
  *
  * Description:
  *   Switch from one thread/task context to another.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
-void up_switchcontext(uint32_t *saveregs, uint32_t *restoreregs);
+void avr_switchcontext(uint32_t *saveregs, uint32_t *restoreregs);
 
-/************************************************************************************
- * Name:  up_doirq
+/****************************************************************************
+ * Name:  avr_doirq
  *
  * Description:
  *   Dispatch an interrupt.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
-uint32_t *up_doirq(int irq, uint32_t *regs);
+uint32_t *avr_doirq(int irq, uint32_t *regs);
 
 #endif /* __ASSEMBLY__ */
 #endif /* __ARCH_AVR_SRC_AVR32_AVR32_H */

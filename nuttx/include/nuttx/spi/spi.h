@@ -1,35 +1,22 @@
 /****************************************************************************
  * include/nuttx/spi/spi.h
  *
- *   Copyright(C) 2008-2013, 2015-2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES(INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -45,7 +32,6 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <assert.h>
 #include <errno.h>
 
 /****************************************************************************
@@ -57,7 +43,7 @@
 /* These SPI configuration options affect the form of the SPI interface:
  *
  * CONFIG_SPI_EXCHANGE - Driver supports a single exchange method
- *   (vs a recvblock() and sndblock ()methods).
+ *   (vs a recvblock() and sndblock() methods).
  * CONFIG_SPI_CMDDATA - Devices on the SPI bus require out-of-band support
  *   to distinguish command transfers from data transfers.  Such devices
  *   will often support either 9-bit SPI (yech) or 8-bit SPI and a GPIO
@@ -95,7 +81,7 @@
  * Name: SPI_SELECT
  *
  * Description:
- *   Enable/disable the SPI chip select.   The implementation of this method
+ *   Enable/disable the SPI chip select.  The implementation of this method
  *   must include handshaking:  If a device is selected, it must hold off
  *   all other attempts to select the device until the device is deselected.
  *   Required.
@@ -140,6 +126,7 @@
  *   startdelay - The delay between CS active and first CLK
  *   stopdelay  - The delay between last CLK and CS inactive
  *   csdelay    - The delay between CS inactive and CS active again
+ *   ifdelay    - The delay between frames
  *
  * Returned Value:
  *   Returns zero (OK) on success; a negated errno value is return on any
@@ -147,8 +134,8 @@
  *
  ****************************************************************************/
 
-#ifdef CONFIG_SPI_CS_DELAY_CONTROL
-#  define SPI_SETDELAY(d,a,b,c) ((d)->ops->setdelay(d,a,b,c))
+#ifdef CONFIG_SPI_DELAY_CONTROL
+#  define SPI_SETDELAY(d,a,b,c,i) ((d)->ops->setdelay(d,a,b,c,i))
 #endif
 
 /****************************************************************************
@@ -173,7 +160,7 @@
  * Name: SPI_SETBITS
  *
  * Description:
- *   Set the number if bits per word.
+ *   Set the number of bits per word.
  *
  * Input Parameters:
  *   dev -  Device-specific state data
@@ -290,7 +277,7 @@
  * Name: SPI_CMDDATA
  *
  * Description:
- *   Some devices require and additional out-of-band bit to specify if the
+ *   Some devices require an additional out-of-band bit to specify if the
  *   next word sent to the device is a command or data. This is typical, for
  *   example, in "9-bit" displays where the 9th bit is the CMD/DATA bit.
  *   This function provides selection of command or data.
@@ -322,7 +309,7 @@
  *
  * Input Parameters:
  *   dev - Device-specific state data
- *   wd  - The word to send.  the size of the data is determined by the
+ *   wd  - The word to send.  The size of the data is determined by the
  *         number of bits selected for the SPI interface.
  *
  * Returned Value:
@@ -341,7 +328,7 @@
  * Input Parameters:
  *   dev    - Device-specific state data
  *   buffer - A pointer to the buffer of data to be sent
- *   nwords - the length of data to send from the buffer in number of words.
+ *   nwords - The length of data to send from the buffer in number of words.
  *            The wordsize is determined by the number of bits-per-word
  *            selected for the SPI interface.  If nbits <= 8, the data is
  *            packed into uint8_t's; if nbits >8, the data is packed into
@@ -367,10 +354,10 @@
  * Input Parameters:
  *   dev -    Device-specific state data
  *   buffer - A pointer to the buffer in which to receive data
- *   nwords - the length of data that can be received in the buffer in number
+ *   nwords - The length of data that can be received in the buffer in number
  *            of words.  The wordsize is determined by the number of bits-
  *            per-word selected for the SPI interface.  If nbits <= 8, the
- *            data is packed into uint8_t's; if nbits >8, the data is packed
+ *            data is packed into uint8_t's; if nbits > 8, the data is packed
  *            into uint16_t's
  *
  * Returned Value:
@@ -394,8 +381,8 @@
  *   dev      - Device-specific state data
  *   txbuffer - A pointer to the buffer of data to be sent
  *   rxbuffer - A pointer to the buffer in which to receive data
- *   nwords   - the length of data that to be exchanged in units of words.
- *              The wordsize is determined by the number of bits-per-word
+ *   nwords   - The length of data to be exchanged in units of words. The
+ *              wordsize is determined by the number of bits-per-word
  *              selected for the SPI interface.  If nbits <= 8, the data is
  *              packed into uint8_t's; if nbits >8, the data is packed into
  *              uint16_t's
@@ -413,8 +400,8 @@
  * Name: SPI_REGISTERCALLBACK
  *
  * Description:
- *   Register a callback that that will be invoked on any media status
- *   change (i.e, anything that would be reported differently by SPI_STATUS).
+ *   Register a callback that will be invoked on any media status change
+ *   (i.e, anything that would be reported differently by SPI_STATUS).
  *   Optional
  *
  * Input Parameters:
@@ -458,7 +445,7 @@
 
 /* This retrieves the fields from a SPI devid */
 
-#define SPIDEVID_TYPE (devid) (((uint32_t)(devid) >> 16) & 0xffff)
+#define SPIDEVID_TYPE(devid) (((uint32_t)(devid) >> 16) & 0xffff)
 #define SPIDEVID_INDEX(devid)  ((uint32_t)(devid)        & 0xffff)
 
 /* These are standard definitions for the defined SPI device IDs.  The index
@@ -489,6 +476,8 @@
 #define SPIDEV_USBHOST(n)       SPIDEV_ID(SPIDEVTYPE_USBHOST,       (n))
 #define SPIDEV_LPWAN(n)         SPIDEV_ID(SPIDEVTYPE_LPWAN,         (n))
 #define SPIDEV_ADC(n)           SPIDEV_ID(SPIDEVTYPE_ADC,           (n))
+#define SPIDEV_MOTOR(n)         SPIDEV_ID(SPIDEVTYPE_MOTOR,         (n))
+#define SPIDEV_IMU(n)           SPIDEV_ID(SPIDEVTYPE_IMU,           (n))
 #define SPIDEV_USER(n)          SPIDEV_ID(SPIDEVTYPE_USER,          (n))
 
 /****************************************************************************
@@ -528,6 +517,8 @@ enum spi_devtype_e
   SPIDEVTYPE_USBHOST,       /* Select SPI USB host controller over SPI */
   SPIDEVTYPE_LPWAN,         /* Select SPI LPWAN controller over SPI */
   SPIDEVTYPE_ADC,           /* Select SPI ADC device */
+  SPIDEVTYPE_MOTOR,         /* Select SPI motor device */
+  SPIDEVTYPE_IMU,           /* Select SPI IMU device */
   SPIDEVTYPE_USER           /* Board-specific values start here
                              * This must always be the last definition. */
 };
@@ -536,10 +527,10 @@ enum spi_devtype_e
 
 enum spi_mode_e
 {
-  SPIDEV_MODE0 = 0,     /* CPOL=0 CHPHA=0 */
-  SPIDEV_MODE1,         /* CPOL=0 CHPHA=1 */
-  SPIDEV_MODE2,         /* CPOL=1 CHPHA=0 */
-  SPIDEV_MODE3,         /* CPOL=1 CHPHA=1 */
+  SPIDEV_MODE0 = 0,     /* CPOL=0 CPHA=0 */
+  SPIDEV_MODE1,         /* CPOL=0 CPHA=1 */
+  SPIDEV_MODE2,         /* CPOL=1 CPHA=0 */
+  SPIDEV_MODE3,         /* CPOL=1 CPHA=1 */
   SPIDEV_MODETI,        /* CPOL=0 CPHA=1 TI Synchronous Serial Frame Format */
 };
 
@@ -559,9 +550,9 @@ struct spi_ops_s
                   bool selected);
   CODE uint32_t (*setfrequency)(FAR struct spi_dev_s *dev,
                   uint32_t frequency);
-#ifdef CONFIG_SPI_CS_DELAY_CONTROL
+#ifdef CONFIG_SPI_DELAY_CONTROL
   CODE int      (*setdelay)(FAR struct spi_dev_s *dev, uint32_t a,
-                  uint32_t b, uint32_t c);
+                  uint32_t b, uint32_t c, uint32_t i);
 #endif
   CODE void     (*setmode)(FAR struct spi_dev_s *dev, enum spi_mode_e mode);
   CODE void     (*setbits)(FAR struct spi_dev_s *dev, int nbits);

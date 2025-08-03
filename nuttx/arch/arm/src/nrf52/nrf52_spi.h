@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/nrf52/nrf52_spi.h
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *   Author: Mateusz Szafoni <raiden00@railab.me>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -63,7 +50,7 @@
  *
  ****************************************************************************/
 
-FAR struct spi_dev_s *nrf52_spibus_initialize(int port);
+struct spi_dev_s *nrf52_spibus_initialize(int port);
 
 /****************************************************************************
  * Name:  nrf52_spi0/1/...select and nrf52_spi0/1/...status
@@ -96,31 +83,73 @@ FAR struct spi_dev_s *nrf52_spibus_initialize(int port);
  ****************************************************************************/
 
 #ifdef CONFIG_NRF52_SPI0_MASTER
-void nrf52_spi0select(FAR struct spi_dev_s *dev, uint32_t devid,
+void nrf52_spi0select(struct spi_dev_s *dev, uint32_t devid,
                       bool selected);
-uint8_t nrf52_spi0status(FAR struct spi_dev_s *dev, uint32_t devid);
-int nrf52_spi0cmddata(FAR struct spi_dev_s *dev, uint32_t devid, bool cmd);
+uint8_t nrf52_spi0status(struct spi_dev_s *dev, uint32_t devid);
+int nrf52_spi0cmddata(struct spi_dev_s *dev, uint32_t devid, bool cmd);
 #endif
 
 #ifdef CONFIG_NRF52_SPI1_MASTER
-void nrf52_spi1select(FAR struct spi_dev_s *dev, uint32_t devid,
+void nrf52_spi1select(struct spi_dev_s *dev, uint32_t devid,
                       bool selected);
-uint8_t nrf52_spi1status(FAR struct spi_dev_s *dev, uint32_t devid);
-int nrf52_spi1cmddata(FAR struct spi_dev_s *dev, uint32_t devid, bool cmd);
+uint8_t nrf52_spi1status(struct spi_dev_s *dev, uint32_t devid);
+int nrf52_spi1cmddata(struct spi_dev_s *dev, uint32_t devid, bool cmd);
 #endif
 
 #ifdef CONFIG_NRF52_SPI2_MASTER
-void nrf52_spi2select(FAR struct spi_dev_s *dev, uint32_t devid,
+void nrf52_spi2select(struct spi_dev_s *dev, uint32_t devid,
                       bool selected);
-uint8_t nrf52_spi2status(FAR struct spi_dev_s *dev, uint32_t devid);
-int nrf52_spi2cmddata(FAR struct spi_dev_s *dev, uint32_t devid, bool cmd);
+uint8_t nrf52_spi2status(struct spi_dev_s *dev, uint32_t devid);
+int nrf52_spi2cmddata(struct spi_dev_s *dev, uint32_t devid, bool cmd);
 #endif
 
 #ifdef CONFIG_NRF52_SPI3_MASTER
-void nrf52_spi3select(FAR struct spi_dev_s *dev, uint32_t devid,
+void nrf52_spi3select(struct spi_dev_s *dev, uint32_t devid,
                       bool selected);
-uint8_t nrf52_spi3status(FAR struct spi_dev_s *dev, uint32_t devid);
-int nrf52_spi3cmddata(FAR struct spi_dev_s *dev, uint32_t devid, bool cmd);
+uint8_t nrf52_spi3status(struct spi_dev_s *dev, uint32_t devid);
+int nrf52_spi3cmddata(struct spi_dev_s *dev, uint32_t devid, bool cmd);
+#endif
+
+/****************************************************************************
+ * Name: nrf52_spi0/1/2/3register
+ *
+ * Description:
+ *   If the board supports a card detect callback to inform the SPI-based
+ *   MMC/SD driver when an SD card is inserted or removed, then
+ *   CONFIG_SPI_CALLBACK should be defined and the following function(s) must
+ *   be implemented.  These functions implements the registercallback method
+ *   of the SPI interface (see include/nuttx/spi/spi.h for details)
+ *
+ * Input Parameters:
+ *   dev -      Device-specific state data
+ *   callback - The function to call on the media change
+ *   arg -      A caller provided value to return with the callback
+ *
+ * Returned Value:
+ *   0 on success; negated errno on failure.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_SPI_CALLBACK
+#ifdef CONFIG_NRF52_SPI0_MASTER
+int nrf52_spi0register(struct spi_dev_s *dev, spi_mediachange_t callback,
+                       void *arg);
+#endif
+
+#ifdef CONFIG_NRF52_SPI1_MASTER
+int nrf52_spi1register(struct spi_dev_s *dev, spi_mediachange_t callback,
+                       void *arg);
+#endif
+
+#ifdef CONFIG_NRF52_SPI2_MASTER
+int nrf52_spi2register(struct spi_dev_s *dev, spi_mediachange_t callback,
+                       void *arg);
+#endif
+
+#ifdef CONFIG_NRF52_SPI3_MASTER
+int nrf52_spi3register(struct spi_dev_s *dev, spi_mediachange_t callback,
+                       void *arg);
+#endif
 #endif
 
 #endif /* __ARCH_ARM_SRC_NRF52_NRF52_SPI_H */

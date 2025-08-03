@@ -1,8 +1,9 @@
 /****************************************************************************
- * drivers/sensors/vl53l1x.h
+ * include/nuttx/sensors/vl53l1x.h
  *
- *   Copyright (C) 2019 Acutronics Robotics. All rights reserved.
- *   Author: Acutronics Robotics (Juan Flores Muñoz) <juan@erlerobotics.com>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2019 Acutronics Robotics. All rights reserved.
+ * SPDX-FileContributor: Juan Flores Muñoz <juan@erlerobotics.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,6 +37,9 @@
 #ifndef __INCLUDE_NUTTX_SENSORS_VL53L1X_H
 #define __INCLUDE_NUTTX_SENSORS_VL53L1X_H
 
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
 #include <nuttx/config.h>
 
 #if defined(CONFIG_I2C) && defined(CONFIG_SENSORS_VL53L1X)

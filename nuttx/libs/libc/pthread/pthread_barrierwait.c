@@ -1,35 +1,22 @@
 /****************************************************************************
  * libs/libc/pthread/pthread_barrierwait.c
  *
- *   Copyright (C) 2007, 2009, 2014, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,9 +26,9 @@
 
 #include <nuttx/config.h>
 
+#include <nuttx/irq.h>
+#include <nuttx/semaphore.h>
 #include <pthread.h>
-#include <semaphore.h>
-#include <sched.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -95,70 +82,46 @@
 
 int pthread_barrier_wait(FAR pthread_barrier_t *barrier)
 {
-  int semcount;
-  int ret = OK;
-
-  if (!barrier)
+  if (barrier == NULL)
     {
-      return EINVAL;
-    }
-
-  /* Disable pre-emption throughout the following */
-
-  sched_lock();
-
-  /* Find out how many threads are already waiting at the barrier */
-
-  ret = sem_getvalue(&barrier->sem, &semcount);
-  if (ret != OK)
-    {
-      sched_unlock();
       return EINVAL;
     }
 
   /* If the number of waiters would be equal to the count, then we are done */
 
-  if ((1 - semcount) >= (int)barrier->count)
+  nxmutex_lock(&barrier->mutex);
+
+  if ((barrier->wait_count + 1) >= barrier->count)
     {
       /* Free all of the waiting threads */
 
-      while (semcount < 0)
+      while (barrier->wait_count > 0)
         {
-          sem_post(&barrier->sem);
-          sem_getvalue(&barrier->sem, &semcount);
+          barrier->wait_count--;
+          nxsem_post(&barrier->sem);
         }
 
       /* Then return PTHREAD_BARRIER_SERIAL_THREAD to the final thread */
 
-      sched_unlock();
+      nxmutex_unlock(&barrier->mutex);
+
       return PTHREAD_BARRIER_SERIAL_THREAD;
     }
-  else
+
+  barrier->wait_count++;
+
+  nxmutex_unlock(&barrier->mutex);
+
+  while (sem_wait(&barrier->sem) != OK)
     {
-      /* Otherwise, this thread must wait as well */
+      /* If the thread is awakened by a signal, just continue to wait */
 
-      while (sem_wait(&barrier->sem) != OK)
+      int errornumber = get_errno();
+      if (errornumber != EINTR)
         {
-          /* If the thread is awakened by a signal, just continue to wait */
-
-          int errornumber = get_errno();
-          if (errornumber != EINTR)
-            {
-              /* If it is awakened by some other error, then there is a
-               * problem
-               */
-
-              sched_unlock();
-              return errornumber;
-            }
+          return errornumber;
         }
-
-      /* We will only get here when we are one of the N-1 threads that were
-       * waiting for the final thread at the barrier.  We just need to return
-       * zero.
-       */
-
-      sched_unlock();
-      return 0;
     }
+
+  return OK;
 }

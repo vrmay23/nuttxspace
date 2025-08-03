@@ -1,37 +1,22 @@
 /****************************************************************************
- * examples/usrsocktest/usrsocktest_noblock_recv.c
- * Receive from the socket in non-blocking mode
+ * apps/examples/usrsocktest/usrsocktest_noblock_recv.c
  *
- *   Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
- *   Authors: Roman Saveljev <roman.saveljev@haltian.com>
- *            Jussi Kivilinna <jussi.kivilinna@haltian.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -45,6 +30,7 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -78,7 +64,7 @@ static int sd;
  ****************************************************************************/
 
 /****************************************************************************
- * Name: Receive
+ * Name: receive
  *
  * Description:
  *   Non-blocking & instant connect+recv
@@ -94,7 +80,7 @@ static int sd;
  *
  ****************************************************************************/
 
-static void Receive(struct usrsocktest_daemon_conf_s *dconf)
+static void receive(struct usrsocktest_daemon_conf_s *dconf)
 {
   int flags;
   int count;
@@ -149,7 +135,7 @@ static void Receive(struct usrsocktest_daemon_conf_s *dconf)
       TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
       TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
       TEST_ASSERT_EQUAL(0,
-                        usrsocktest_daemon_get_num_waiting_connect_sockets());
+                      usrsocktest_daemon_get_num_waiting_connect_sockets());
       TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_recv_empty_sockets());
     }
   else
@@ -159,7 +145,7 @@ static void Receive(struct usrsocktest_daemon_conf_s *dconf)
       TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
       TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
       TEST_ASSERT_EQUAL(0,
-                        usrsocktest_daemon_get_num_waiting_connect_sockets());
+                      usrsocktest_daemon_get_num_waiting_connect_sockets());
 
       for (count = 0; usrsocktest_daemon_get_num_connected_sockets() != 1;
            count++)
@@ -197,7 +183,8 @@ static void Receive(struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(3, ret);
   TEST_ASSERT_EQUAL_UINT8_ARRAY("abc", data, 3);
   TEST_ASSERT_EQUAL(addrlen, sizeof(remoteaddr));
-  TEST_ASSERT_EQUAL_UINT8_ARRAY(&remoteaddr, &addr, addrlen);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(&remoteaddr, &addr,
+                                addrlen - sizeof(addr.sin_zero));
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(datalen + ret, usrsocktest_daemon_get_recv_bytes());
@@ -230,11 +217,13 @@ static void Receive(struct usrsocktest_daemon_conf_s *dconf)
   /* Reset recv buffer for open sockets */
 
   TEST_ASSERT_TRUE(usrsocktest_send_delayed_command('r', 0));
-  for (count = 0; usrsocktest_daemon_get_num_recv_empty_sockets() > 0; count++)
+  for (count = 0;
+       usrsocktest_daemon_get_num_recv_empty_sockets() > 0; count++)
     {
       TEST_ASSERT_TRUE(count <= 5);
       usleep(5 * 1000);
     }
+
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_recv_empty_sockets());
 
   /* Receive data from remote, daemon returns 4 bytes. */
@@ -270,7 +259,7 @@ static void Receive(struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: DelayedConnect
+ * Name: delayed_connect
  *
  * Description:
  *   Non-blocking & delayed connect
@@ -286,7 +275,7 @@ static void Receive(struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void DelayedConnect(struct usrsocktest_daemon_conf_s *dconf)
+static void delayed_connect(struct usrsocktest_daemon_conf_s *dconf)
 {
   int flags;
   int count;
@@ -330,7 +319,9 @@ static void DelayedConnect(struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(O_RDWR, flags & O_RDWR);
   TEST_ASSERT_EQUAL(O_NONBLOCK, flags & O_NONBLOCK);
 
-  /* Launch connect attempt, daemon delays actual connection until triggered. */
+  /* Launch connect attempt, daemon delays actual connection until
+   * triggered.
+   */
 
   inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr.s_addr);
   addr.sin_family = AF_INET;
@@ -363,6 +354,7 @@ static void DelayedConnect(struct usrsocktest_daemon_conf_s *dconf)
       TEST_ASSERT_TRUE(count <= 5);
       usleep(10 * 1000);
     }
+
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
@@ -377,7 +369,7 @@ static void DelayedConnect(struct usrsocktest_daemon_conf_s *dconf)
                  &addrlen);
   TEST_ASSERT_EQUAL(-1, ret);
   TEST_ASSERT_EQUAL(EAGAIN, errno);
-  TEST_ASSERT_EQUAL(0, addrlen);
+  TEST_ASSERT_EQUAL(sizeof(remoteaddr), addrlen);
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_send_bytes());
@@ -386,7 +378,8 @@ static void DelayedConnect(struct usrsocktest_daemon_conf_s *dconf)
   /* Reset recv buffer for open sockets */
 
   TEST_ASSERT_TRUE(usrsocktest_send_delayed_command('r', 0));
-  for (count = 0; usrsocktest_daemon_get_num_recv_empty_sockets() > 0; count++)
+  for (count = 0;
+       usrsocktest_daemon_get_num_recv_empty_sockets() > 0; count++)
     {
       TEST_ASSERT_TRUE(count <= 5);
       usleep(5 * 1000);
@@ -422,13 +415,14 @@ static void DelayedConnect(struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(-ENODEV,
                     usrsocktest_daemon_get_num_waiting_connect_sockets());
-  TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_recv_empty_sockets());
+  TEST_ASSERT_EQUAL(-ENODEV,
+                    usrsocktest_daemon_get_num_recv_empty_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_endp_malloc_cnt);
   TEST_ASSERT_EQUAL(0, usrsocktest_dcmd_malloc_cnt);
 }
 
 /****************************************************************************
- * Name: NoBlockRecv test group setup
+ * Name: no_block_recv test group setup
  *
  * Description:
  *   Setup function executed before each testcase in this test group
@@ -444,14 +438,14 @@ static void DelayedConnect(struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-TEST_SETUP(NoBlockRecv)
+TEST_SETUP(no_block_recv)
 {
   sd = -1;
   started = false;
 }
 
 /****************************************************************************
- * Name: NoBlockRecv test group teardown
+ * Name: no_block_recv test group teardown
  *
  * Description:
  *   Setup function executed after each testcase in this test group
@@ -467,55 +461,56 @@ TEST_SETUP(NoBlockRecv)
  *
  ****************************************************************************/
 
-TEST_TEAR_DOWN(NoBlockRecv)
+TEST_TEAR_DOWN(no_block_recv)
 {
-  int ret;
+  int unused_data ret;
   if (sd >= 0)
     {
       ret = close(sd);
-      assert(ret >= 0);
+      TEST_ASSERT_TRUE(ret >= 0);
     }
+
   if (started)
     {
       ret = usrsocktest_daemon_stop();
-      assert(ret == OK);
+      TEST_ASSERT_EQUAL(ret, OK);
     }
 }
 
-TEST(NoBlockRecv, Receive)
+TEST(no_block_recv, receive)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  Receive(&usrsocktest_daemon_config);
+  receive(&usrsocktest_daemon_config);
 }
 
-TEST(NoBlockRecv, ReceiveDelay)
+TEST(no_block_recv, receive_delay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  Receive(&usrsocktest_daemon_config);
+  receive(&usrsocktest_daemon_config);
 }
 
-TEST(NoBlockRecv, DelayedConnect)
+TEST(no_block_recv, delayed_connect)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  DelayedConnect(&usrsocktest_daemon_config);
+  delayed_connect(&usrsocktest_daemon_config);
 }
 
-TEST(NoBlockRecv, DelayedConnectDelay)
+TEST(no_block_recv, delayed_connect_delay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  DelayedConnect(&usrsocktest_daemon_config);
+  delayed_connect(&usrsocktest_daemon_config);
 }
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-TEST_GROUP(NoBlockRecv)
+TEST_GROUP(no_block_recv)
 {
-  RUN_TEST_CASE(NoBlockRecv, Receive);
-  RUN_TEST_CASE(NoBlockRecv, ReceiveDelay);
-  RUN_TEST_CASE(NoBlockRecv, DelayedConnect);
-  RUN_TEST_CASE(NoBlockRecv, DelayedConnectDelay);
+  RUN_TEST_CASE(no_block_recv, receive);
+  RUN_TEST_CASE(no_block_recv, receive_delay);
+  RUN_TEST_CASE(no_block_recv, delayed_connect);
+  RUN_TEST_CASE(no_block_recv, delayed_connect_delay);
 }

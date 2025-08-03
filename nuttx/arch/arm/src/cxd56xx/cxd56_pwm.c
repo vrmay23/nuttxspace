@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/cxd56xx/cxd56_pwm.c
  *
- *   Copyright 2018 Sony Semiconductor Solutions Corporation
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
- *    the names of its contributors may be used to endorse or promote
- *    products derived from this software without specific prior written
- *    permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,6 +28,7 @@
 #include <nuttx/timers/pwm.h>
 
 #include <sys/types.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <errno.h>
@@ -48,11 +36,13 @@
 #include <debug.h>
 
 #include "chip.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "cxd56_pinconfig.h"
 #include "cxd56_clock.h"
 #include "cxd56_pwm.h"
+
+#if defined(CONFIG_CXD56_PWM0) || defined(CONFIG_CXD56_PWM1) || \
+    defined(CONFIG_CXD56_PWM2) || defined(CONFIG_CXD56_PWM3)
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -63,16 +53,17 @@
 
 #define PWM_REG(ch) \
   ( \
-    (PWM_REG_t*)(PWM_REG_BASE + (sizeof(PWM_REG_t) * (ch))) \
+    (pwm_reg_t*)(PWM_REG_BASE + (sizeof(pwm_reg_t) * (ch))) \
   )
 
 #define PWM_PHASE_REG(ch) \
   ( \
-    (PWM_PHASE_REG_t*) \
-    (PWM_PHASE_REG_BASE + (sizeof(PWM_PHASE_REG_t) * (ch))) \
+    (pwm_phase_reg_t*) \
+    (PWM_PHASE_REG_BASE + (sizeof(pwm_phase_reg_t) * (ch))) \
   )
 
 #define PWM_PARAM_OFFPERIOD_SHIFT   (16)
+#define PWM_PHASE_PRESCALE_SHIFT    (16)
 
 #ifndef itemsof
 #  define itemsof(array) (sizeof(array)/sizeof(array[0]))
@@ -96,12 +87,12 @@ typedef struct
   volatile uint32_t PARAM;
   volatile uint32_t EN;
   volatile uint32_t UPDATE;
-} PWM_REG_t;
+} pwm_reg_t;
 
 typedef struct
 {
   volatile uint32_t PHASE;
-} PWM_PHASE_REG_t;
+} pwm_phase_reg_t;
 
 /****************************************************************************
  * Static Function Prototypes
@@ -109,12 +100,12 @@ typedef struct
 
 /* PWM driver methods */
 
-static int pwm_setup(FAR struct pwm_lowerhalf_s *dev);
-static int pwm_shutdown(FAR struct pwm_lowerhalf_s *dev);
-static int pwm_start(FAR struct pwm_lowerhalf_s *dev,
-                     FAR const struct pwm_info_s *info);
-static int pwm_stop(FAR struct pwm_lowerhalf_s *dev);
-static int pwm_ioctl(FAR struct pwm_lowerhalf_s *dev,
+static int pwm_setup(struct pwm_lowerhalf_s *dev);
+static int pwm_shutdown(struct pwm_lowerhalf_s *dev);
+static int pwm_start(struct pwm_lowerhalf_s *dev,
+                     const struct pwm_info_s *info);
+static int pwm_stop(struct pwm_lowerhalf_s *dev);
+static int pwm_ioctl(struct pwm_lowerhalf_s *dev,
                      int cmd, unsigned long arg);
 
 /****************************************************************************
@@ -218,19 +209,23 @@ static int pwm_pin_config(uint32_t channel)
  *
  * Output Parameters:
  *   param  - set value of PWM_PARAM register
+ *   phase  - set value of PWM_PHASE register
  *
  * Returned Value:
  *   OK on success; A negated errno value on failure.
  *
  ****************************************************************************/
 
-static int convert_freq2period(uint32_t freq, ub16_t duty, uint32_t *param)
+static int convert_freq2period(uint32_t freq, ub16_t duty, uint32_t *param,
+                               uint32_t *phase)
 {
   DEBUGASSERT(param);
+  DEBUGASSERT(phase);
 
   uint32_t pwmfreq = 0;
   uint32_t period = 0;
   uint32_t offperiod = 0;
+  uint32_t prescale = 0;
 
   /* Get frequency of pwm base clock */
 
@@ -243,10 +238,11 @@ static int convert_freq2period(uint32_t freq, ub16_t duty, uint32_t *param)
 
   /* check frequency range */
 
-  if ((freq > ((pwmfreq + 1) >> 1)) || (freq < (pwmfreq >> 16)))
+  if ((freq > ((pwmfreq + 1) >> 1)) || (freq <= 0))
     {
-      pwmerr("Frequency out of range. %d [Effective range:%d - %d]\n",
-                freq, pwmfreq >> 16, (pwmfreq + 1) >> 1);
+      pwmerr("Frequency out of range. %" PRId32
+             " [Effective range:%d - %" PRId32 "]\n",
+             freq, 1, (pwmfreq + 1) >> 1);
       return -1;
     }
 
@@ -254,30 +250,71 @@ static int convert_freq2period(uint32_t freq, ub16_t duty, uint32_t *param)
 
   if ((duty < 0x00000001) || (duty > 0x0000ffff))
     {
-      pwmerr("Duty out of range. %d\n", duty);
+      pwmerr("Duty out of range. %" PRId32 "\n", duty);
       return -1;
+    }
+
+  /* calculate prescale */
+
+  if ((freq << 8) < (pwmfreq >> 8))
+    {
+      for (prescale = 1; prescale <= 8; prescale++)
+        {
+          if (freq > ((pwmfreq >> prescale) / 65535))
+            {
+              break;
+            }
+        }
     }
 
   /* calculate period and offperiod */
 
-  period = (pwmfreq * 10 / freq - 5) / 10;
+  if (prescale > 0)
+    {
+      period = (((pwmfreq * 10) >> prescale) / freq + 5) / 10;
+    }
+  else
+    {
+      period = (pwmfreq * 10 / freq - 5) / 10;
+    }
+
   if (period > 0xffff)
     {
       period = 0xffff;
     }
 
-  offperiod = ((0x10000 - duty) * (period + 1) + 0x8000) >> 16;
-  if (offperiod == 0)
+  if (prescale > 0)
     {
-      offperiod = 0;
+      offperiod = ((0x10000 - duty) * period + (1 << (16 - prescale))) >> 16;
+      if (offperiod < 2)
+        {
+          pwmerr("Duty out of range. %" PRId32 "\n", duty);
+          return -1;
+        }
     }
-  else if (period < offperiod)
+  else
+    {
+      offperiod = ((0x10000 - duty) * (period + 1) + 0x8000) >> 16;
+    }
+
+  if (period < offperiod)
     {
       offperiod = period;
     }
 
+  pwminfo("Cycle = %" PRId32 ", Low = %" PRId32
+          ", High = %" PRId32 ", Clock = %" PRId32 " Hz\n",
+          (prescale) ? (period << prescale) : period + 1,
+          (prescale) ? (offperiod << prescale) - 1 : offperiod,
+          (prescale) ? (period << prescale) - (offperiod << prescale) + 1
+                     : period + 1 - offperiod, pwmfreq);
+  pwminfo("period/off/on = 0x%04" PRIx32 "/0x%04" PRIx32
+          "/0x%04" PRIx32 ", prescale = %" PRId32 "\n",
+          period, offperiod, period - offperiod, prescale);
+
   *param = (period & 0xffff) |
            ((offperiod & 0xffff) << PWM_PARAM_OFFPERIOD_SHIFT);
+  *phase = prescale << PWM_PHASE_PRESCALE_SHIFT;
 
   return OK;
 }
@@ -298,15 +335,15 @@ static int convert_freq2period(uint32_t freq, ub16_t duty, uint32_t *param)
  *
  ****************************************************************************/
 
-static int pwm_setup(FAR struct pwm_lowerhalf_s *dev)
+static int pwm_setup(struct pwm_lowerhalf_s *dev)
 {
-  FAR struct cxd56_pwm_chan_s *priv = (FAR struct cxd56_pwm_chan_s *)dev;
+  struct cxd56_pwm_chan_s *priv = (struct cxd56_pwm_chan_s *)dev;
   int ret;
 
   ret = pwm_pin_config(priv->ch);
   if (ret < 0)
     {
-      pwmerr("Failed to pinconf():%d\n", channel);
+      pwmerr("Failed to pinconf() channel: %d\n", priv->ch);
       return -EINVAL;
     }
 
@@ -329,7 +366,7 @@ static int pwm_setup(FAR struct pwm_lowerhalf_s *dev)
  *
  ****************************************************************************/
 
-static int pwm_shutdown(FAR struct pwm_lowerhalf_s *dev)
+static int pwm_shutdown(struct pwm_lowerhalf_s *dev)
 {
   return OK;
 }
@@ -349,11 +386,12 @@ static int pwm_shutdown(FAR struct pwm_lowerhalf_s *dev)
  *
  ****************************************************************************/
 
-static int pwm_start(FAR struct pwm_lowerhalf_s *dev,
-                     FAR const struct pwm_info_s *info)
+static int pwm_start(struct pwm_lowerhalf_s *dev,
+                     const struct pwm_info_s *info)
 {
-  FAR struct cxd56_pwm_chan_s *priv = (FAR struct cxd56_pwm_chan_s *)dev;
+  struct cxd56_pwm_chan_s *priv = (struct cxd56_pwm_chan_s *)dev;
   uint32_t param;
+  uint32_t phase;
   int ret;
 
   if (info->duty <= 0)
@@ -371,7 +409,7 @@ static int pwm_start(FAR struct pwm_lowerhalf_s *dev,
     }
   else
     {
-      ret = convert_freq2period(info->frequency, info->duty, &param);
+      ret = convert_freq2period(info->frequency, info->duty, &param, &phase);
       if (ret < 0)
         {
           return -EINVAL;
@@ -387,10 +425,7 @@ static int pwm_start(FAR struct pwm_lowerhalf_s *dev,
 
       PWM_REG(priv->ch)->EN = 0x0;
       PWM_REG(priv->ch)->PARAM = param;
-
-      /* Since prescale is not supported, always set to a fixed value '0' */
-
-      PWM_PHASE_REG(priv->ch)->PHASE = 0x0;
+      PWM_PHASE_REG(priv->ch)->PHASE = phase;
 
       PWM_REG(priv->ch)->EN = 0x1;
     }
@@ -412,9 +447,9 @@ static int pwm_start(FAR struct pwm_lowerhalf_s *dev,
  *
  ****************************************************************************/
 
-static int pwm_stop(FAR struct pwm_lowerhalf_s *dev)
+static int pwm_stop(struct pwm_lowerhalf_s *dev)
 {
-  FAR struct cxd56_pwm_chan_s *priv = (FAR struct cxd56_pwm_chan_s *)dev;
+  struct cxd56_pwm_chan_s *priv = (struct cxd56_pwm_chan_s *)dev;
 
   PWM_REG(priv->ch)->EN = 0x0;
 
@@ -437,7 +472,7 @@ static int pwm_stop(FAR struct pwm_lowerhalf_s *dev)
  *
  ****************************************************************************/
 
-static int pwm_ioctl(FAR struct pwm_lowerhalf_s *dev, int cmd,
+static int pwm_ioctl(struct pwm_lowerhalf_s *dev, int cmd,
                      unsigned long arg)
 {
   return -ENOTTY;
@@ -462,9 +497,9 @@ static int pwm_ioctl(FAR struct pwm_lowerhalf_s *dev, int cmd,
  *
  ****************************************************************************/
 
-FAR struct pwm_lowerhalf_s *cxd56_pwminitialize(uint32_t channel)
+struct pwm_lowerhalf_s *cxd56_pwminitialize(uint32_t channel)
 {
-  FAR struct cxd56_pwm_chan_s *pwmch;
+  struct cxd56_pwm_chan_s *pwmch;
 
   switch (channel)
     {
@@ -489,9 +524,11 @@ FAR struct pwm_lowerhalf_s *cxd56_pwminitialize(uint32_t channel)
         break;
 #endif
       default:
-        pwmerr("Illeagal channel number:%d\n", channel);
+        pwmerr("Illeagal channel number:%" PRId32 "\n", channel);
         return NULL;
     }
 
-  return (FAR struct pwm_lowerhalf_s *)pwmch;
+  return (struct pwm_lowerhalf_s *)pwmch;
 }
+
+#endif

@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/fboverlay/fboverlay_main.c
+ * apps/examples/fboverlay/fboverlay_main.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Marco Krahl <ocram.lhark@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -37,6 +24,7 @@
  * Included Files
  ****************************************************************************/
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +32,8 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <errno.h>
+#include <unistd.h>
+
 #include <nuttx/video/fb.h>
 
 #include <nuttx/config.h>
@@ -127,8 +117,8 @@ static uint16_t rgb565(uint32_t argb)
  ****************************************************************************/
 
 #ifdef CONFIG_FB_CMAP
-static void draw_rect8(FAR void *fbmem, FAR struct fb_overlayinfo_s * oinfo,
-                       FAR const struct fb_area_s * area, uint8_t color)
+static void draw_rect8(FAR void *fbmem, FAR struct fb_overlayinfo_s *oinfo,
+                       FAR const struct fb_area_s *area, uint8_t color)
 {
   FAR uint8_t *dest;
   FAR uint8_t *row;
@@ -166,8 +156,8 @@ static void draw_rect8(FAR void *fbmem, FAR struct fb_overlayinfo_s * oinfo,
  *
  ****************************************************************************/
 
-static void draw_rect16(FAR void *fbmem, FAR struct fb_overlayinfo_s * oinfo,
-                        FAR const struct fb_area_s * area, uint16_t rgb)
+static void draw_rect16(FAR void *fbmem, FAR struct fb_overlayinfo_s *oinfo,
+                        FAR const struct fb_area_s *area, uint16_t rgb)
 {
   FAR uint16_t *dest;
   FAR uint8_t *row;
@@ -204,8 +194,8 @@ static void draw_rect16(FAR void *fbmem, FAR struct fb_overlayinfo_s * oinfo,
  *
  ****************************************************************************/
 
-static void draw_rect24(FAR void *fbmem, FAR struct fb_overlayinfo_s * oinfo,
-                        FAR const struct fb_area_s * area, uint32_t rgb)
+static void draw_rect24(FAR void *fbmem, FAR struct fb_overlayinfo_s *oinfo,
+                        FAR const struct fb_area_s *area, uint32_t rgb)
 {
   int         x;
   int         y;
@@ -219,7 +209,7 @@ static void draw_rect24(FAR void *fbmem, FAR struct fb_overlayinfo_s * oinfo,
   g = (rgb >> 8);
   b = (rgb >> 16);
 
-  printf("Fill area (%d,%d,%d,%d) with color: %08x -> (r,g,b) = "
+  printf("Fill area (%d,%d,%d,%d) with color: %08" PRIx32 " -> (r,g,b) = "
          "(%02x,%02x,%02x)\n", area->x, area->y, area->w, area->h,
          rgb, b, g, r);
 
@@ -252,16 +242,17 @@ static void draw_rect24(FAR void *fbmem, FAR struct fb_overlayinfo_s * oinfo,
  *
  ****************************************************************************/
 
-static void draw_rect32(FAR void *fbmem, FAR struct fb_overlayinfo_s * oinfo,
-                        FAR const struct fb_area_s * area, uint32_t argb)
+static void draw_rect32(FAR void *fbmem, FAR struct fb_overlayinfo_s *oinfo,
+                        FAR const struct fb_area_s *area, uint32_t argb)
 {
   int          x;
   int          y;
   FAR uint32_t *dest;
   FAR uint8_t  *row;
 
-  printf("Fill area (%d,%d,%d,%d) with color: %08x -> (a,r,g,b) = "
-         "(%02x,%02x,%02x,%02x)\n", area->x, area->y, area->w, area->h,
+  printf("Fill area (%d,%d,%d,%d) with color: %08" PRIx32 " -> (a,r,g,b) = "
+         "(%02" PRIx32 ",%02" PRIx32 ",%02" PRIx32 ",%02" PRIx32 ")\n",
+         area->x, area->y, area->w, area->h,
          argb, argb >> 24, argb >> 16, argb >> 8, argb);
 
   row = (FAR uint8_t *)fbmem + oinfo->stride * area->y;
@@ -292,30 +283,30 @@ static void draw_rect32(FAR void *fbmem, FAR struct fb_overlayinfo_s * oinfo,
 #ifdef CONFIG_FB_CMAP
 static int video_putcmap(int fb, FAR const struct fb_cmap_s *cmap)
 {
-    int n;
-    int ret;
+  int n;
+  int ret;
 
-    printf("Set cmap\n");
-    for (n = cmap->first; n < cmap->len; n++)
-      {
-          printf("  Color %d: (a,r,g,b) = (%02x,%02x,%02x,%02x)\n", n,
+  printf("Set cmap\n");
+  for (n = cmap->first; n < cmap->len; n++)
+    {
+      printf("  Color %d: (a,r,g,b) = (%02x,%02x,%02x,%02x)\n", n,
 #  ifdef CONFIG_CMAP_TRANSPARENCY
-                 cmap->transp[n],
+             cmap->transp[n],
 #  else
-                 (uint8_t)0xff,
+             (uint8_t)0xff,
 #  endif
-                 cmap->red[n],
-                 cmap->green[n],
-                 cmap->blue[n]);
-      }
+             cmap->red[n],
+             cmap->green[n],
+             cmap->blue[n]);
+    }
 
-    ret = ioctl(fb, FBIOPUT_CMAP, (unsigned long)(uintptr_t)cmap);
-    if (ret != OK)
-      {
-          fprintf(stderr, "Unable to set camp\n");
-      }
+  ret = ioctl(fb, FBIOPUT_CMAP, (unsigned long)(uintptr_t)cmap);
+  if (ret != OK)
+    {
+      fprintf(stderr, "Unable to set camp\n");
+    }
 
-    return ret;
+  return ret;
 }
 
 /****************************************************************************
@@ -332,30 +323,30 @@ static int video_putcmap(int fb, FAR const struct fb_cmap_s *cmap)
 
 static int video_getcmap(int fb, FAR struct fb_cmap_s *cmap)
 {
-    int n;
-    int ret;
+  int n;
+  int ret;
 
-    ret = ioctl(fb, FBIOGET_CMAP, (unsigned long)(uintptr_t)cmap);
-    if (ret != OK)
-      {
-          fprintf(stderr, "Unable to set camp\n");
-      }
+  ret = ioctl(fb, FBIOGET_CMAP, (unsigned long)(uintptr_t)cmap);
+  if (ret != OK)
+    {
+      fprintf(stderr, "Unable to set camp\n");
+    }
 
-    printf("Get cmap\n");
-    for (n = cmap->first; n < cmap->len; n++)
-      {
-          printf("  Color %d: (a,r,g,b) = (%02x,%02x,%02x,%02x)\n", n,
+  printf("Get cmap\n");
+  for (n = cmap->first; n < cmap->len; n++)
+    {
+      printf("  Color %d: (a,r,g,b) = (%02x,%02x,%02x,%02x)\n", n,
 #  ifdef CONFIG_CMAP_TRANSPARENCY
-                 cmap->transp[n],
+             cmap->transp[n],
 #  else
-                 (uint8_t)0xff,
+             (uint8_t)0xff,
 #  endif
-                 cmap->red[n],
-                 cmap->green[n],
-                 cmap->blue[n]);
-      }
+             cmap->red[n],
+             cmap->green[n],
+             cmap->blue[n]);
+    }
 
-    return ret;
+  return ret;
 }
 #endif /* CONFIG_FB_CMAP */
 
@@ -415,8 +406,8 @@ static void print_plane_info(int fb)
       return;
     }
 
-  fbmem = mmap(NULL, pinfo.fblen, PROT_READ|PROT_WRITE,
-      MAP_SHARED|MAP_FILE, fb, 0);
+  fbmem = mmap(NULL, pinfo.fblen, PROT_READ | PROT_WRITE,
+               MAP_SHARED | MAP_FILE, fb, 0);
 
   if (fbmem == MAP_FAILED)
     {
@@ -426,11 +417,13 @@ static void print_plane_info(int fb)
 
   printf("PlaneInfo:\n"
          "    fbmem: %p\n"
-         "    fblen: %lu\n"
+         "    fblen: %zu\n"
          "   stride: %u\n"
          "  display: %u\n"
-         "      bpp: %u\n",
-         pinfo.fbmem, (unsigned long)pinfo.fblen, pinfo.stride, pinfo.display,
+         "      bpp: %u\n"
+         "    fbmem: %p\n",
+         pinfo.fbmem, pinfo.fblen, pinfo.stride,
+         pinfo.display,
          pinfo.bpp, fbmem);
 }
 
@@ -470,8 +463,8 @@ static void print_overlay_info(int fb, uint8_t overlayno)
       return;
     }
 
-  fbmem = mmap(NULL, oinfo.fblen, PROT_READ|PROT_WRITE,
-               MAP_SHARED|MAP_FILE, fb, 0);
+  fbmem = mmap(NULL, oinfo.fblen, PROT_READ | PROT_WRITE,
+               MAP_SHARED | MAP_FILE, fb, 0);
 
   if (fbmem == MAP_FAILED)
     {
@@ -481,18 +474,19 @@ static void print_overlay_info(int fb, uint8_t overlayno)
 
   printf("OverlayInfo:\n"
          "    fbmem: %p\n"
-         "    fblen: %lu\n"
+         "    fblen: %zu\n"
          "   stride: %u\n"
          "  overlay: %u\n"
          "      bpp: %u\n"
          "    blank: %08x\n"
-         "chromakey: %08x\n"
-         "    color: %08x\n"
+         "chromakey: %08" PRIx32 "\n"
+         "    color: %08" PRIx32 "\n"
          "   transp: %02x\n"
          "     mode: %08x\n"
-         "     accl: %08x\n"
+         "     accl: %08" PRIx32 "\n"
          "     mmap: %p\n",
-         oinfo.fbmem, (unsigned long)oinfo.fblen, oinfo.stride, oinfo.overlay,
+         oinfo.fbmem, oinfo.fblen, oinfo.stride,
+         oinfo.overlay,
          oinfo.bpp, oinfo.blank, oinfo.chromakey, oinfo.color,
          oinfo.transp.transp, oinfo.transp.transp_mode, oinfo.accl, fbmem);
 }
@@ -511,7 +505,7 @@ static void print_overlay_info(int fb, uint8_t overlayno)
  ****************************************************************************/
 
 static int overlay_fill(int fb, uint8_t overlayno, uint32_t color,
-                        FAR const struct fb_area_s * area)
+                        FAR const struct fb_area_s *area)
 {
   int ret;
   FAR void *fbmem;
@@ -541,8 +535,8 @@ static int overlay_fill(int fb, uint8_t overlayno, uint32_t color,
       return -1;
     }
 
-  fbmem = mmap(NULL, oinfo.fblen, PROT_READ|PROT_WRITE,
-               MAP_SHARED|MAP_FILE, fb, 0);
+  fbmem = mmap(NULL, oinfo.fblen, PROT_READ | PROT_WRITE,
+               MAP_SHARED | MAP_FILE, fb, 0);
 
   if (fbmem == MAP_FAILED)
     {
@@ -556,7 +550,8 @@ static int overlay_fill(int fb, uint8_t overlayno, uint32_t color,
 
       if (offset > oinfo.fblen)
         {
-          fprintf(stderr, "Area is out of range: %d >= %d\n", offset, oinfo.fblen);
+          fprintf(stderr, "Area is out of range: %" PRId32 " >= %zu\n",
+                  offset, oinfo.fblen);
           return -1;
         }
 
@@ -621,7 +616,7 @@ static int overlay_accl(int fb, uint8_t overlayno, uint32_t accl)
       return -1;
     }
 
-  printf("%s: %08x %08x\n", __func__, oinfo.accl, accl);
+  printf("%s: %08" PRIx32 " %08" PRIx32 "\n", __func__, oinfo.accl, accl);
   return (oinfo.accl & accl) ? OK : -1;
 }
 
@@ -641,7 +636,8 @@ static int overlay_color(int fb, FAR struct fb_overlayinfo_s *oinfo)
 {
   int ret;
 
-  printf("Overlay: %d, set color: 0x%08x\n", oinfo->overlay, oinfo->color);
+  printf("Overlay: %d, set color: 0x%08" PRIx32 "\n",
+         oinfo->overlay, oinfo->color);
 
   ret = overlay_accl(fb, oinfo->overlay, FB_ACCL_COLOR);
   if (ret != OK)
@@ -685,7 +681,7 @@ static int overlay_chromakey(int fb, FAR struct fb_overlayinfo_s *oinfo)
 {
   int ret;
 
-  printf("Overlay: %d, set chromakey: 0x%08x\n", oinfo->overlay,
+  printf("Overlay: %d, set chromakey: 0x%08" PRIx32 "\n", oinfo->overlay,
          oinfo->chromakey);
 
   ret = overlay_accl(fb, oinfo->overlay, FB_ACCL_CHROMA);
@@ -736,7 +732,8 @@ static int overlay_transp(int fb, FAR struct fb_overlayinfo_s *oinfo)
   ret = overlay_accl(fb, oinfo->overlay, FB_ACCL_TRANSP);
   if (ret != OK)
     {
-      fprintf(stderr, "No hardware acceleration to set the transparency within "
+      fprintf(stderr,
+              "No hardware acceleration to set the transparency within "
               "the selected overlay area\n");
     }
   else
@@ -893,6 +890,7 @@ static int overlay_blend(int fb, FAR struct fb_overlayblend_s *blend)
     {
       ret = overlay_accl(fb, blend->background.overlay, FB_ACCL_BLEND);
     }
+
   if (ret == OK)
     {
       ret = overlay_accl(fb, blend->dest.overlay, FB_ACCL_BLEND);
@@ -991,7 +989,8 @@ static void usage(const char * progname)
           "      1 : Off\n"
           "    -area overlayno <xpos> <ypos> <xres> <yres>\n"
 #ifdef CONFIG_FB_OVERLAY_BLIT
-          "    -blit doverlayno <destxpos> <destypos> <destxres> <destyres>\n"
+          "    -blit doverlayno <destxpos> <destypos> <destxres> "
+          "<destyres>\n"
           "          soverlayno <srcxpos> <srcypos> <srcxres> <srcyres>\n"
           "    -blend doverlayno <dxpos> <dypos> <dxres> <dyres>\n"
           "           foverlayno <fxpos> <fypos> <fxres> <fyres>\n"
@@ -1012,7 +1011,6 @@ static void usage(const char * progname)
 
 int main(int argc, FAR char *argv[])
 {
-
   char *fbdevice;
   int  fb = -1;
 
@@ -1092,21 +1090,26 @@ int main(int argc, FAR char *argv[])
           rgb8888(strtoul(argv[3], NULL, 16), &a[1], &r[1], &g[1], &b[1]);
           cmap.len = 2;
         }
+
       if (argc >= 4)
         {
           rgb8888(strtoul(argv[4], NULL, 16), &a[2], &r[2], &g[2], &b[2]);
           cmap.len = 3;
         }
+
       if (argc >= 5)
+
         {
           rgb8888(strtoul(argv[5], NULL, 16), &a[3], &r[3], &g[3], &b[3]);
           cmap.len = 4;
         }
+
       if (argc >= 6)
         {
           rgb8888(strtoul(argv[6], NULL, 16), &a[4], &r[4], &g[4], &b[4]);
           cmap.len = 5;
         }
+
 #  ifdef CONFIG_FB_TRANSPARENCY
       cmap.transp = a;
 #  endif

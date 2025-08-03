@@ -1,35 +1,22 @@
 /****************************************************************************
  * include/netinet/ip.h
  *
- *   Copyright (C) 2007, 2009 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,6 +33,53 @@
 /****************************************************************************
  * Public Type Definitions
  ****************************************************************************/
+
+#define IPVERSION 4     /* IP version number */
+#define IPDEFTTL  64    /* default ttl, from RFC 1340 */
+
+/* Values for the TOS field */
+
+#define IPTOS_TOS_MASK    0x1e
+#define IPTOS_TOS(tos)    ((tos) & IPTOS_TOS_MASK)
+#define IPTOS_LOWDELAY    0x10
+#define IPTOS_THROUGHPUT  0x08
+#define IPTOS_RELIABILITY 0x04
+#define IPTOS_MINCOST     0x02
+
+#define IPTOS_PREC_MASK            0xe0
+#define IPTOS_PREC(tos)            ((tos) & IPTOS_PREC_MASK)
+#define IPTOS_PREC_NETCONTROL      0xe0
+#define IPTOS_PREC_INTERNETCONTROL 0xc0
+#define IPTOS_PREC_CRITIC_ECP      0xa0
+#define IPTOS_PREC_FLASHOVERRIDE   0x80
+#define IPTOS_PREC_FLASH           0x60
+#define IPTOS_PREC_IMMEDIATE       0x40
+#define IPTOS_PREC_PRIORITY        0x20
+#define IPTOS_PREC_ROUTINE         0x00
+
+struct iphdr
+{
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+  unsigned int ihl:4;
+  unsigned int version:4;
+#elif __BYTE_ORDER == __BIG_ENDIAN
+  unsigned int version:4;
+  unsigned int ihl:4;
+#else
+# error "unknown endian"
+#endif
+  uint8_t tos;
+  uint16_t tot_len;
+  uint16_t id;
+  uint16_t frag_off;
+  uint8_t ttl;
+  uint8_t protocol;
+  uint16_t check;
+  uint32_t saddr;
+  uint32_t daddr;
+
+  /* The options start here. */
+};
 
 /****************************************************************************
  * Public Function Prototypes

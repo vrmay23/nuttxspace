@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/arm/src/sama5/sam_ehci.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -24,6 +26,7 @@
 
 #include <nuttx/config.h>
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -36,6 +39,7 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/signal.h>
+#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/cache.h>
 #include <nuttx/usb/usb.h>
@@ -44,7 +48,7 @@
 #include <nuttx/usb/usbhost_devaddr.h>
 #include <nuttx/usb/usbhost_trace.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "chip.h"
 #include "sam_periphclks.h"
 #include "sam_memories.h"
@@ -108,17 +112,15 @@
 #undef CONFIG_USBHOST_ISOC_DISABLE
 #define CONFIG_USBHOST_ISOC_DISABLE 1
 
-/* If UDPHS is enabled, then don't use port A */
-
-#ifdef CONFIG_SAMA5_UDPHS
-#  undef CONFIG_SAMA5_UHPHS_RHPORT1
-#endif
-
-/* For now, suppress use of PORTA in any event.  I use that for SAM-BA and
- * would prefer that the board not try to drive VBUS on that port!
+/* Suppress use of PORTA unless board-specific dual-role-port support
+ * has been included. Generally port A is used as a device-only port,
+ * typically for SAM-BA and the possibility of enabling host VBUS power
+ * for this port would be a BAD idea
  */
 
-#undef CONFIG_SAMA5_UHPHS_RHPORT1
+#if defined(CONFIG_SAMA5_UDPHS) && !defined(CONFIG_SAMA5_USB_DRP)
+#  undef CONFIG_SAMA5_UHPHS_RHPORT1
+#endif
 
 /* Driver-private Definitions ***********************************************/
 
@@ -140,6 +142,8 @@
 
 /* Port numbers */
 
+#define HPNDX(hp)             ((hp)->port)
+#define HPORT(hp)             (HPNDX(hp)+1)
 #define RHPNDX(rh)            ((rh)->hport.hport.port)
 #define RHPORT(rh)            (RHPNDX(rh)+1)
 
@@ -163,7 +167,9 @@ struct sam_qh_s
   uint8_t pad[8];              /* Padding to assure 32-byte alignment */
 };
 
-/* Internal representation of the EHCI Queue Element Transfer Descriptor (qTD) */
+/* Internal representation of the EHCI Queue Element Transfer Descriptor
+ * (qTD)
+ */
 
 struct sam_qtd_s
 {
@@ -208,9 +214,15 @@ struct sam_epinfo_s
   uint32_t xfrd;               /* On completion, will hold the number of bytes transferred */
   sem_t iocsem;                /* Semaphore used to wait for transfer completion */
 #ifdef CONFIG_USBHOST_ASYNCH
-  usbhost_asynch_t callback;     /* Transfer complete callback */
-  void *arg;                     /* Argument that accompanies the callback */
+  usbhost_asynch_t callback;   /* Transfer complete callback */
+  void *arg;                   /* Argument that accompanies the callback */
 #endif
+
+  /* These fields are used in the split-transaction protocol. */
+
+  uint8_t hubaddr;             /* USB device address of the high-speed hub below */
+                               /* which a full/low-speed device is attached. */
+  uint8_t hubport;             /* The port on the above high-speed hub. */
 };
 
 /* This structure retains the state of one root hub port */
@@ -240,7 +252,7 @@ struct sam_ehci_s
 {
   volatile bool pscwait;       /* TRUE: Thread is waiting for port status change event */
 
-  sem_t exclsem;               /* Support mutually exclusive access */
+  rmutex_t lock;               /* Support mutually exclusive access */
   sem_t pscsem;                /* Semaphore to wait for port status change events */
 
   struct sam_epinfo_s ep0;     /* Endpoint 0 */
@@ -253,6 +265,8 @@ struct sam_ehci_s
 
   volatile struct usbhost_hubport_s *hport;
 #endif
+
+  struct usbhost_devaddr_s devgen;  /* Address generation data */
 
   /* Root hub ports */
 
@@ -294,12 +308,6 @@ static inline void sam_putreg(uint32_t regval, volatile uint32_t *regaddr);
 static int ehci_wait_usbsts(uint32_t maskbits, uint32_t donebits,
          unsigned int delay);
 
-/* Semaphores ***************************************************************/
-
-static int  sam_takesem(sem_t *sem);
-static int  sam_takesem_noncancelable(sem_t *sem);
-#define sam_givesem(s) nxsem_post(s);
-
 /* Allocators ***************************************************************/
 
 static struct sam_qh_s *sam_qh_alloc(void);
@@ -336,8 +344,8 @@ static int sam_qh_dump(struct sam_qh_s *qh, uint32_t **bp, void *arg);
 #else
 #  define sam_qtd_print(qtd)
 #  define sam_qh_print(qh)
-#  define sam_qtd_dump(qtd, bp, arg) OK
-#  define sam_qh_dump(qh, bp, arg)   OK
+#  define sam_qtd_dump(qtd, bp, arg)
+#  define sam_qh_dump(qh, bp, arg)
 #endif
 
 static inline uint8_t sam_ehci_speed(uint8_t usbspeed);
@@ -365,7 +373,7 @@ static ssize_t sam_transfer_wait(struct sam_epinfo_s *epinfo);
 #ifdef CONFIG_USBHOST_ASYNCH
 static inline int sam_ioc_async_setup(struct sam_rhport_s *rhport,
          struct sam_epinfo_s *epinfo, usbhost_asynch_t callback,
-         FAR void *arg);
+         void *arg);
 static void sam_asynch_completion(struct sam_epinfo_s *epinfo);
 #endif
 
@@ -379,49 +387,50 @@ static inline void sam_ioc_bottomhalf(void);
 static inline void sam_portsc_bottomhalf(void);
 static inline void sam_syserr_bottomhalf(void);
 static inline void sam_async_advance_bottomhalf(void);
-static void sam_ehci_bottomhalf(FAR void *arg);
-static int sam_ehci_tophalf(int irq, FAR void *context, FAR void *arg);
+static void sam_ehci_bottomhalf(void *arg);
+static int sam_ehci_tophalf(int irq, void *context, void *arg);
 
 /* USB Host Controller Operations *******************************************/
 
-static int sam_wait(FAR struct usbhost_connection_s *conn,
-         FAR struct usbhost_hubport_s **hport);
-static int sam_rh_enumerate(FAR struct usbhost_connection_s *conn,
-         FAR struct usbhost_hubport_s *hport);
-static int sam_enumerate(FAR struct usbhost_connection_s *conn,
-         FAR struct usbhost_hubport_s *hport);
+static int sam_wait(struct usbhost_connection_s *conn,
+         struct usbhost_hubport_s **hport);
+static int sam_rh_enumerate(struct usbhost_connection_s *conn,
+         struct usbhost_hubport_s *hport);
+static int sam_enumerate(struct usbhost_connection_s *conn,
+         struct usbhost_hubport_s *hport);
 
-static int sam_ep0configure(FAR struct usbhost_driver_s *drvr,
+static int sam_ep0configure(struct usbhost_driver_s *drvr,
          usbhost_ep_t ep0, uint8_t funcaddr, uint8_t speed,
          uint16_t maxpacketsize);
-static int sam_epalloc(FAR struct usbhost_driver_s *drvr,
-         const FAR struct usbhost_epdesc_s *epdesc, usbhost_ep_t *ep);
-static int sam_epfree(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep);
-static int sam_alloc(FAR struct usbhost_driver_s *drvr,
-         FAR uint8_t **buffer, FAR size_t *maxlen);
-static int sam_free(FAR struct usbhost_driver_s *drvr, FAR uint8_t *buffer);
-static int sam_ioalloc(FAR struct usbhost_driver_s *drvr,
-         FAR uint8_t **buffer, size_t buflen);
-static int sam_iofree(FAR struct usbhost_driver_s *drvr,
-         FAR uint8_t *buffer);
-static int sam_ctrlin(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
-         FAR const struct usb_ctrlreq_s *req, FAR uint8_t *buffer);
-static int sam_ctrlout(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
-         FAR const struct usb_ctrlreq_s *req, FAR const uint8_t *buffer);
-static ssize_t sam_transfer(FAR struct usbhost_driver_s *drvr,
-         usbhost_ep_t ep, FAR uint8_t *buffer, size_t buflen);
+static int sam_epalloc(struct usbhost_driver_s *drvr,
+                       const struct usbhost_epdesc_s *epdesc,
+                       usbhost_ep_t *ep);
+static int sam_epfree(struct usbhost_driver_s *drvr, usbhost_ep_t ep);
+static int sam_alloc(struct usbhost_driver_s *drvr,
+         uint8_t **buffer, size_t *maxlen);
+static int sam_free(struct usbhost_driver_s *drvr, uint8_t *buffer);
+static int sam_ioalloc(struct usbhost_driver_s *drvr,
+         uint8_t **buffer, size_t buflen);
+static int sam_iofree(struct usbhost_driver_s *drvr,
+         uint8_t *buffer);
+static int sam_ctrlin(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
+         const struct usb_ctrlreq_s *req, uint8_t *buffer);
+static int sam_ctrlout(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
+         const struct usb_ctrlreq_s *req, const uint8_t *buffer);
+static ssize_t sam_transfer(struct usbhost_driver_s *drvr,
+         usbhost_ep_t ep, uint8_t *buffer, size_t buflen);
 #ifdef CONFIG_USBHOST_ASYNCH
-static int sam_asynch(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep,
-         FAR uint8_t *buffer, size_t buflen, usbhost_asynch_t callback,
-         FAR void *arg);
+static int sam_asynch(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
+         uint8_t *buffer, size_t buflen, usbhost_asynch_t callback,
+         void *arg);
 #endif
-static int sam_cancel(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep);
+static int sam_cancel(struct usbhost_driver_s *drvr, usbhost_ep_t ep);
 #ifdef CONFIG_USBHOST_HUB
-static int sam_connect(FAR struct usbhost_driver_s *drvr,
-         FAR struct usbhost_hubport_s *hport, bool connected);
+static int sam_connect(struct usbhost_driver_s *drvr,
+         struct usbhost_hubport_s *hport, bool connected);
 #endif
-static void sam_disconnect(FAR struct usbhost_driver_s *drvr,
-                           FAR struct usbhost_hubport_s *hport);
+static void sam_disconnect(struct usbhost_driver_s *drvr,
+                           struct usbhost_hubport_s *hport);
 
 /* Initialization ***********************************************************/
 
@@ -436,11 +445,20 @@ static int sam_reset(void);
  * global instance.
  */
 
-static struct sam_ehci_s g_ehci;
+static struct sam_ehci_s g_ehci =
+{
+  .lock = NXRMUTEX_INITIALIZER,
+  .pscsem = SEM_INITIALIZER(0),
+  .ep0.iocsem = SEM_INITIALIZER(1),
+};
 
 /* This is the connection/enumeration interface */
 
-static struct usbhost_connection_s g_ehciconn;
+static struct usbhost_connection_s g_ehciconn =
+{
+  .wait = sam_wait,
+  .enumerate = sam_enumerate,
+};
 
 /* Maps USB chapter 9 speed to EHCI speed */
 
@@ -451,17 +469,17 @@ static const uint8_t g_ehci_speed[4] =
 
 /* The head of the asynchronous queue */
 
-static struct sam_qh_s g_asynchead __attribute__ ((aligned(32)));
+static struct sam_qh_s g_asynchead aligned_data(32);
 
 #ifndef CONFIG_USBHOST_INT_DISABLE
 /* The head of the periodic queue */
 
-static struct sam_qh_s g_intrhead   __attribute__ ((aligned(32)));
+static struct sam_qh_s g_intrhead   aligned_data(32);
 
 /* The frame list */
 
 #ifdef CONFIG_SAMA5_EHCI_PREALLOCATE
-static uint32_t g_framelist[FRAME_LIST_SIZE] __attribute__ ((aligned(4096)));
+static uint32_t g_framelist[FRAME_LIST_SIZE] aligned_data(4096);
 #else
 static uint32_t *g_framelist;
 #endif
@@ -475,12 +493,12 @@ static uint32_t *g_framelist;
 /* Queue Head (QH) pool */
 
 static struct sam_qh_s g_qhpool[CONFIG_SAMA5_EHCI_NQHS]
-                       __attribute__ ((aligned(32)));
+                       aligned_data(32);
 
 /* Queue Element Transfer Descriptor (qTD) pool */
 
 static struct sam_qtd_s g_qtdpool[CONFIG_SAMA5_EHCI_NQTDS]
-                        __attribute__ ((aligned(32)));
+                        aligned_data(32);
 
 #else
 /* Pools of dynamically data structures.  These will all be linked into the
@@ -796,60 +814,12 @@ static int ehci_wait_usbsts(uint32_t maskbits, uint32_t donebits,
 }
 
 /****************************************************************************
- * Name: sam_takesem
- *
- * Description:
- *   This is just a wrapper to handle the annoying behavior of semaphore
- *   waits that return due to the receipt of a signal.
- *
- ****************************************************************************/
-
-static int sam_takesem(sem_t *sem)
-{
-  return nxsem_wait_uninterruptible(sem);
-}
-
-/****************************************************************************
- * Name: sam_takesem_noncancelable
- *
- * Description:
- *   This is just a wrapper to handle the annoying behavior of semaphore
- *   waits that return due to the receipt of a signal.  This version also
- *   ignores attempts to cancel the thread.
- *
- ****************************************************************************/
-
-static int sam_takesem_noncancelable(sem_t *sem)
-{
-  int result;
-  int ret = OK;
-
-  do
-    {
-      result = nxsem_wait_uninterruptible(sem);
-
-      /* The only expected error is ECANCELED which would occur if the
-       * calling thread were canceled.
-       */
-
-      DEBUGASSERT(result == OK || result == -ECANCELED);
-      if (ret == OK && result < 0)
-        {
-          ret = result;
-        }
-    }
-  while (result < 0);
-
-  return ret;
-}
-
-/****************************************************************************
  * Name: sam_qh_alloc
  *
  * Description:
  *   Allocate a Queue Head (QH) structure by removing it from the free list
  *
- * Assumption:  Caller holds the exclsem
+ * Assumption:  Caller holds the lock
  *
  ****************************************************************************/
 
@@ -875,7 +845,7 @@ static struct sam_qh_s *sam_qh_alloc(void)
  * Description:
  *   Free a Queue Head (QH) structure by returning it to the free list
  *
- * Assumption:  Caller holds the exclsem
+ * Assumption:  Caller holds the lock
  *
  ****************************************************************************/
 
@@ -896,7 +866,7 @@ static void sam_qh_free(struct sam_qh_s *qh)
  *   Allocate a Queue Element Transfer Descriptor (qTD) by removing it from
  *   the free list
  *
- * Assumption:  Caller holds the exclsem
+ * Assumption:  Caller holds the lock
  *
  ****************************************************************************/
 
@@ -923,7 +893,7 @@ static struct sam_qtd_s *sam_qtd_alloc(void)
  *   Free a Queue Element Transfer Descriptor (qTD) by returning it to the
  *   free list
  *
- * Assumption:  Caller holds the exclsem
+ * Assumption:  Caller holds the lock
  *
  ****************************************************************************/
 
@@ -1385,7 +1355,7 @@ static inline uint8_t sam_ehci_speed(uint8_t usbspeed)
  *   this to minimize race conditions.  This logic would have to be expanded
  *   if we want to have more than one packet in flight at a time!
  *
- * Assumption:  The caller holds tex EHCI exclsem
+ * Assumption:  The caller holds tex EHCI lock
  *
  ****************************************************************************/
 
@@ -1431,7 +1401,7 @@ static int sam_ioc_setup(struct sam_rhport_s *rhport,
  * Description:
  *   Wait for the IOC event.
  *
- * Assumption:  The caller does *NOT* hold the EHCI exclsem.  That would
+ * Assumption:  The caller does *NOT* hold the EHCI lock.  That would
  * cause a deadlock when the bottom-half, worker thread needs to take the
  * semaphore.
  *
@@ -1447,7 +1417,7 @@ static int sam_ioc_wait(struct sam_epinfo_s *epinfo)
 
   while (epinfo->iocwait)
     {
-      ret = sam_takesem(&epinfo->iocsem);
+      ret = nxsem_wait_uninterruptible(&epinfo->iocsem);
       if (ret < 0)
         {
           break;
@@ -1463,7 +1433,7 @@ static int sam_ioc_wait(struct sam_epinfo_s *epinfo)
  * Description:
  *   Add a new, ready-to-go QH w/attached qTDs to the asynchronous queue.
  *
- * Assumptions:  The caller holds the EHCI exclsem
+ * Assumptions:  The caller holds the EHCI lock
  *
  ****************************************************************************/
 
@@ -1510,10 +1480,8 @@ static struct sam_qh_s *sam_qh_create(struct sam_rhport_s *rhport,
                                       struct sam_epinfo_s *epinfo)
 {
   struct sam_qh_s *qh;
-  uint32_t rhpndx;
   uint32_t regval;
-  uint8_t hubaddr;
-  uint8_t hubport;
+  uint32_t rl = 0;
 
   /* Allocate a new queue head structure */
 
@@ -1533,21 +1501,28 @@ static struct sam_qh_s *sam_qh_create(struct sam_rhport_s *rhport,
    * FIELD    DESCRIPTION                     VALUE/SOURCE
    * -------- ------------------------------- --------------------
    * DEVADDR  Device address                  Endpoint structure
-   * I        Inactivate on Next Transaction  0
+   * I        Deactivate on Next Transaction  0
    * ENDPT    Endpoint number                 Endpoint structure
    * EPS      Endpoint speed                  Endpoint structure
    * DTC      Data toggle control             1
    * MAXPKT   Max packet size                 Endpoint structure
    * C        Control endpoint                Calculated
-   * RL       NAK count reloaded              8
+   * RL       NAK count reloaded              Depends on speed and
+   *                                          epinfo->xfrtype
    */
+
+  if (epinfo->speed == USB_SPEED_HIGH &&
+      epinfo->xfrtype != USB_EP_ATTR_XFER_INT)
+    {
+      rl = 8;
+    }
 
   regval = ((uint32_t)epinfo->devaddr << QH_EPCHAR_DEVADDR_SHIFT) |
            ((uint32_t)epinfo->epno << QH_EPCHAR_ENDPT_SHIFT) |
            ((uint32_t)sam_ehci_speed(epinfo->speed) << QH_EPCHAR_EPS_SHIFT) |
            QH_EPCHAR_DTC |
            ((uint32_t)epinfo->maxpacket << QH_EPCHAR_MAXPKT_SHIFT) |
-           ((uint32_t)8 << QH_EPCHAR_RL_SHIFT);
+           (rl << QH_EPCHAR_RL_SHIFT);
 
   /* Paragraph 3.6.3: "Control Endpoint Flag (C). If the QH.EPS field
    * indicates the endpoint is not a high-speed device, and the endpoint
@@ -1570,37 +1545,14 @@ static struct sam_qh_s *sam_qh_create(struct sam_rhport_s *rhport,
    * FIELD    DESCRIPTION                     VALUE/SOURCE
    * -------- ------------------------------- --------------------
    * SSMASK   Interrupt Schedule Mask         Depends on epinfo->xfrtype
-   * SCMASK   Split Completion Mask           0
-   * HUBADDR  Hub Address                     Always 0 for now
-   * PORT     Port number                     RH port index + 1
+   * SCMASK   Split Completion Mask           Depends on epinfo->speed
+   * HUBADDR  Hub Address                     epinfo->hubaddr
+   * PORT     Port number                     epinfo->hubport
    * MULT     High band width multiplier      1
    */
 
-  rhpndx = RHPNDX(rhport);
-
-#ifdef CONFIG_USBHOST_HUB
-  /* REVISIT:  Future HUB support will require the HUB port number
-   * and HUB device address to be included here:
-   *
-   * - The HUB device address is the USB device address of the USB 2.0 Hub
-   *   below which a full- or low-speed device is attached.
-   * - The HUB port number is the port number on the above USB 2.0 Hub
-   *
-   * These fields are used in the split-transaction protocol.  The kludge
-   * below should work for hubs connected directly to a root hub port,
-   * but would not work for devices connected to downstream hubs.
-   */
-
-#warning Missing logic
-  hubaddr = rhport->ep0.devaddr;
-  hubport = rhpndx + 1;
-#else
-  hubaddr = rhport->ep0.devaddr;
-  hubport = rhpndx + 1;
-#endif
-
-  regval  = ((uint32_t)hubaddr << QH_EPCAPS_HUBADDR_SHIFT) |
-            ((uint32_t)hubport << QH_EPCAPS_PORT_SHIFT) |
+  regval  = ((uint32_t)(epinfo->hubaddr) << QH_EPCAPS_HUBADDR_SHIFT) |
+            ((uint32_t)(epinfo->hubport) << QH_EPCAPS_PORT_SHIFT) |
             ((uint32_t)1       << QH_EPCAPS_MULT_SHIFT);
 
 #ifndef CONFIG_USBHOST_INT_DISABLE
@@ -1619,9 +1571,16 @@ static struct sam_qh_s *sam_qh_create(struct sam_rhport_s *rhport,
        */
 #warning REVISIT
 
-      regval |= ((uint32_t)1               << QH_EPCAPS_SSMASK_SHIFT);
+      regval |= ((uint32_t)(1 << 0)        << QH_EPCAPS_SSMASK_SHIFT);
     }
 #endif
+
+  if (epinfo->speed != USB_SPEED_HIGH)
+    {
+      /* Choose micro-frame 2. */
+
+      regval |= ((uint32_t)(1 << 2)        << QH_EPCAPS_SCMASK_SHIFT);
+    }
 
   qh->hw.epcaps = sam_swap32(regval);
 
@@ -1912,7 +1871,7 @@ static struct sam_qtd_s *sam_qtd_statusphase(uint32_t tokenbits)
  *   This is a blocking function; it will not return until the control
  *   transfer has completed.
  *
- * Assumption:  The caller holds the EHCI exclsem.
+ * Assumption:  The caller holds the EHCI lock.
  *
  * Returned Value:
  *   Zero (OK) is returned on success; a negated errno value is return on
@@ -2115,7 +2074,9 @@ static int sam_async_setup(struct sam_rhport_s *rhport,
           tokenbits |= QTD_TOKEN_PID_IN;
         }
 
-      /* Allocate a new Queue Element Transfer Descriptor (qTD) for the status */
+      /* Allocate a new Queue Element Transfer Descriptor (qTD) for the
+       * status
+       */
 
       qtd = sam_qtd_statusphase(tokenbits);
       if (qtd == NULL)
@@ -2193,7 +2154,7 @@ errout_with_qh:
  *     frame list), followed by shorter poll rates, with queue heads with a
  *     poll rate of one, on the very end."
  *
- * Assumption:  The caller holds the EHCI exclsem.
+ * Assumption:  The caller holds the EHCI lock.
  *
  * Returned Value:
  *   Zero (OK) is returned on success; a negated errno value is return on
@@ -2297,8 +2258,8 @@ errout_with_qh:
  * Description:
  *   Wait for an IN or OUT transfer to complete.
  *
- * Assumption:  The caller holds the EHCI exclsem.  The caller must be aware
- *   that the EHCI exclsem will released while waiting for the transfer to
+ * Assumption:  The caller holds the EHCI lock.  The caller must be aware
+ *   that the EHCI lock will released while waiting for the transfer to
  *   complete, but will be re-acquired when before returning.  The state of
  *   EHCI resources could be very different upon return.
  *
@@ -2321,12 +2282,12 @@ static ssize_t sam_transfer_wait(struct sam_epinfo_s *epinfo)
    *
    * REVISIT:  Is this safe?  NO.  This is a bug and needs rethinking.
    * We need to lock all of the port-resources (not EHCI common) until
-   * the transfer is complete.  But we can't use the common EHCI exclsem
+   * the transfer is complete.  But we can't use the common EHCI lock
    * or we will deadlock while waiting (because the working thread that
-   * wakes this thread up needs the exclsem).
+   * wakes this thread up needs the lock).
    */
 #warning REVISIT
-  sam_givesem(&g_ehci.exclsem);
+  nxrmutex_unlock(&g_ehci.lock);
 
   /* Wait for the IOC completion event */
 
@@ -2336,7 +2297,7 @@ static ssize_t sam_transfer_wait(struct sam_epinfo_s *epinfo)
    * this upon return.
    */
 
-  ret2 = sam_takesem_noncancelable(&g_ehci.exclsem);
+  ret2 = nxrmutex_lock(&g_ehci.lock);
   if (ret2 < 0)
     {
       ret = ret2;
@@ -2360,7 +2321,7 @@ static ssize_t sam_transfer_wait(struct sam_epinfo_s *epinfo)
     }
 #endif
 
-  /* Did sam_ioc_wait() or sam_takesem_noncancelable() report an error? */
+  /* Did sam_ioc_wait() or nxrmutex_lock report an error? */
 
   if (ret < 0)
     {
@@ -2399,7 +2360,7 @@ static ssize_t sam_transfer_wait(struct sam_epinfo_s *epinfo)
 #ifdef CONFIG_USBHOST_ASYNCH
 static inline int sam_ioc_async_setup(struct sam_rhport_s *rhport,
                                    struct sam_epinfo_s *epinfo,
-                                   usbhost_asynch_t callback, FAR void *arg)
+                                   usbhost_asynch_t callback, void *arg)
 {
   irqstate_t flags;
   int ret = -ENODEV;
@@ -2665,7 +2626,7 @@ static int sam_qh_ioccheck(struct sam_qh_s *qh, uint32_t **bp, void *arg)
         {
           /* Yes... wake it up */
 
-          sam_givesem(&epinfo->iocsem);
+          nxsem_post(&epinfo->iocsem);
           epinfo->iocwait = 0;
         }
 
@@ -2737,7 +2698,7 @@ static int sam_qtd_cancel(struct sam_qtd_s *qtd, uint32_t **bp, void *arg)
  * Name: sam_qh_cancel
  *
  * Description:
- *   This function is a imxrt_qh_foreach() callback function.  It cancels
+ *   This function is a sam_qh_foreach() callback function.  It cancels
  *   one QH in the asynchronous queue.  It will remove all attached qTD
  *   structures and remove all of the structures that are no longer active.
  *   Then QH itself will also be removed.
@@ -2760,7 +2721,7 @@ static int sam_qh_cancel(struct sam_qh_s *qh, uint32_t **bp, void *arg)
 
   /* Check if this is the QH that we are looking for */
 
-  if (qh->epinfo == epinfo)
+  if (qh->epinfo != epinfo)
     {
       /* No... keep looking */
 
@@ -2820,7 +2781,7 @@ static int sam_qh_cancel(struct sam_qh_s *qh, uint32_t **bp, void *arg)
  *   detected (actual number of bytes received was less than the expected
  *   number of bytes)."
  *
- * Assumptions:  The caller holds the EHCI exclsem
+ * Assumptions:  The caller holds the EHCI lock
  *
  ****************************************************************************/
 
@@ -2954,7 +2915,7 @@ static inline void sam_portsc_bottomhalf(void)
 
                   if (g_ehci.pscwait)
                     {
-                      sam_givesem(&g_ehci.pscsem);
+                      nxsem_post(&g_ehci.pscsem);
                       g_ehci.pscwait = false;
                     }
                 }
@@ -2993,7 +2954,7 @@ static inline void sam_portsc_bottomhalf(void)
 
                   if (g_ehci.pscwait)
                     {
-                      sam_givesem(&g_ehci.pscsem);
+                      nxsem_post(&g_ehci.pscsem);
                       g_ehci.pscwait = false;
                     }
                 }
@@ -3061,7 +3022,7 @@ static inline void sam_async_advance_bottomhalf(void)
  *
  ****************************************************************************/
 
-static void sam_ehci_bottomhalf(FAR void *arg)
+static void sam_ehci_bottomhalf(void *arg)
 {
   uint32_t pending = (uint32_t)arg;
 
@@ -3070,7 +3031,7 @@ static void sam_ehci_bottomhalf(FAR void *arg)
    * real option (other than to reschedule and delay).
    */
 
-  sam_takesem_noncancelable(&g_ehci.exclsem);
+  nxrmutex_lock(&g_ehci.lock);
 
   /* Handle all unmasked interrupt sources */
 
@@ -3180,7 +3141,7 @@ static void sam_ehci_bottomhalf(FAR void *arg)
 
   /* We are done with the EHCI structures */
 
-  sam_givesem(&g_ehci.exclsem);
+  nxrmutex_unlock(&g_ehci.lock);
 
   /* Re-enable relevant EHCI interrupts.  Interrupts should still be enabled
    * at the level of the AIC.
@@ -3197,7 +3158,7 @@ static void sam_ehci_bottomhalf(FAR void *arg)
  *
  ****************************************************************************/
 
-static int sam_ehci_tophalf(int irq, FAR void *context, FAR void *arg)
+static int sam_ehci_tophalf(int irq, void *context, void *arg)
 {
   uint32_t usbsts;
   uint32_t pending;
@@ -3211,7 +3172,7 @@ static int sam_ehci_tophalf(int irq, FAR void *context, FAR void *arg)
 #ifdef CONFIG_USBHOST_TRACE
   usbhost_vtrace1(EHCI_VTRACE1_TOPHALF, usbsts & regval);
 #else
-  uinfo("USBSTS: %08x USBINTR: %08x\n", usbsts, regval);
+  uinfo("USBSTS: %08" PRIx32 " USBINTR: %08" PRIx32 "\n", usbsts, regval);
 #endif
 
   /* Handle all unmasked interrupt sources */
@@ -3229,7 +3190,7 @@ static int sam_ehci_tophalf(int irq, FAR void *context, FAR void *arg)
 
       DEBUGASSERT(work_available(&g_ehci.work));
       DEBUGVERIFY(work_queue(HPWORK, &g_ehci.work, sam_ehci_bottomhalf,
-                            (FAR void *)pending, 0));
+                            (void *)pending, 0));
 
       /* Disable further EHCI interrupts so that we do not overrun the work
        * queue.
@@ -3258,7 +3219,7 @@ static int sam_ehci_tophalf(int irq, FAR void *context, FAR void *arg)
  ****************************************************************************/
 
 #ifdef CONFIG_SAMA5_OHCI
-static int sam_uhphs_interrupt(int irq, FAR void *context, FAR void *arg)
+static int sam_uhphs_interrupt(int irq, void *context, void *arg)
 {
   int ohci;
   int ehci;
@@ -3299,8 +3260,8 @@ static int sam_uhphs_interrupt(int irq, FAR void *context, FAR void *arg)
  *
  ****************************************************************************/
 
-static int sam_wait(FAR struct usbhost_connection_s *conn,
-                    FAR struct usbhost_hubport_s **hport)
+static int sam_wait(struct usbhost_connection_s *conn,
+                    struct usbhost_hubport_s **hport)
 {
   irqstate_t flags;
   int rhpndx;
@@ -3356,7 +3317,7 @@ static int sam_wait(FAR struct usbhost_connection_s *conn,
           leave_critical_section(flags);
 
           usbhost_vtrace2(EHCI_VTRACE2_MONWAKEUP,
-                          connport->port + 1, connport->connected);
+                          HPORT(connport), connport->connected);
           return OK;
         }
 #endif
@@ -3366,7 +3327,7 @@ static int sam_wait(FAR struct usbhost_connection_s *conn,
        */
 
       g_ehci.pscwait = true;
-      ret = sam_takesem(&g_ehci.pscsem);
+      ret = nxsem_wait_uninterruptible(&g_ehci.pscsem);
       if (ret < 0)
         {
           return ret;
@@ -3402,8 +3363,8 @@ static int sam_wait(FAR struct usbhost_connection_s *conn,
  *
  ****************************************************************************/
 
-static int sam_rh_enumerate(FAR struct usbhost_connection_s *conn,
-                            FAR struct usbhost_hubport_s *hport)
+static int sam_rh_enumerate(struct usbhost_connection_s *conn,
+                            struct usbhost_hubport_s *hport)
 {
   struct sam_rhport_s *rhport;
   volatile uint32_t *regaddr;
@@ -3481,9 +3442,13 @@ static int sam_rh_enumerate(FAR struct usbhost_connection_s *conn,
        *    repeat."
        */
 
+#if defined(CONFIG_SAMA5_OHCI)
       hport->speed = USB_SPEED_LOW;
       regval |= EHCI_PORTSC_OWNER;
       sam_putreg(regval, &HCOR->portsc[rhpndx]);
+#else
+      uerr("EHCI Root hub does not support low speed, use a hub.\n");
+#endif
 
 #if 0 /* #ifdef CONFIG_SAMA5_OHCI */
       /* Give the port to the OHCI controller. Zero is the reset value for
@@ -3604,8 +3569,12 @@ static int sam_rh_enumerate(FAR struct usbhost_connection_s *conn,
        *    repeat."
        */
 
+#if defined(CONFIG_SAMA5_OHCI)
       regval |= EHCI_PORTSC_OWNER;
       sam_putreg(regval, &HCOR->portsc[rhpndx]);
+#else
+      uerr("EHCI Root hub does not support this device, use a hub.\n");
+#endif
 
 #if 0 /* #ifdef CONFIG_SAMA5_OHCI */
       /* Give the port to the OHCI controller. Zero is the reset value for
@@ -3626,8 +3595,8 @@ static int sam_rh_enumerate(FAR struct usbhost_connection_s *conn,
   return OK;
 }
 
-static int sam_enumerate(FAR struct usbhost_connection_s *conn,
-                         FAR struct usbhost_hubport_s *hport)
+static int sam_enumerate(struct usbhost_connection_s *conn,
+                         struct usbhost_hubport_s *hport)
 {
   int ret;
 
@@ -3650,13 +3619,13 @@ static int sam_enumerate(FAR struct usbhost_connection_s *conn,
 
   /* Then let the common usbhost_enumerate do the real enumeration. */
 
-  usbhost_vtrace1(EHCI_VTRACE1_CLASSENUM, hport->port);
+  usbhost_vtrace1(EHCI_VTRACE1_CLASSENUM, HPORT(hport));
   ret = usbhost_enumerate(hport, &hport->devclass);
   if (ret < 0)
     {
       /* Failed to enumerate */
 
-      usbhost_trace2(EHCI_TRACE2_CLASSENUM_FAILED, hport->port + 1, -ret);
+      usbhost_trace2(EHCI_TRACE2_CLASSENUM_FAILED, HPORT(hport), -ret);
 
       /* If this is a root hub port, then marking the hub port not connected
        * will cause sam_wait() to return and we will try the connection
@@ -3696,7 +3665,7 @@ static int sam_enumerate(FAR struct usbhost_connection_s *conn,
  *
  ****************************************************************************/
 
-static int sam_ep0configure(FAR struct usbhost_driver_s *drvr,
+static int sam_ep0configure(struct usbhost_driver_s *drvr,
                             usbhost_ep_t ep0, uint8_t funcaddr,
                             uint8_t speed, uint16_t maxpacketsize)
 {
@@ -3708,7 +3677,7 @@ static int sam_ep0configure(FAR struct usbhost_driver_s *drvr,
 
   /* We must have exclusive access to the EHCI data structures. */
 
-  ret = sam_takesem(&g_ehci.exclsem);
+  ret = nxrmutex_lock(&g_ehci.lock);
   if (ret >= 0)
     {
       /* Remember the new device address and max packet size */
@@ -3717,7 +3686,7 @@ static int sam_ep0configure(FAR struct usbhost_driver_s *drvr,
       epinfo->speed     = speed;
       epinfo->maxpacket = maxpacketsize;
 
-      sam_givesem(&g_ehci.exclsem);
+      nxrmutex_unlock(&g_ehci.lock);
     }
 
   return ret;
@@ -3745,8 +3714,8 @@ static int sam_ep0configure(FAR struct usbhost_driver_s *drvr,
  *
  ****************************************************************************/
 
-static int sam_epalloc(FAR struct usbhost_driver_s *drvr,
-                       const FAR struct usbhost_epdesc_s *epdesc,
+static int sam_epalloc(struct usbhost_driver_s *drvr,
+                       const struct usbhost_epdesc_s *epdesc,
                        usbhost_ep_t *ep)
 {
   struct sam_epinfo_s *epinfo;
@@ -3772,7 +3741,7 @@ static int sam_epalloc(FAR struct usbhost_driver_s *drvr,
 
   /* Allocate a endpoint information structure */
 
-  epinfo = (struct sam_epinfo_s *)kmm_zalloc(sizeof(struct sam_epinfo_s));
+  epinfo = kmm_zalloc(sizeof(struct sam_epinfo_s));
   if (!epinfo)
     {
       usbhost_trace1(EHCI_TRACE1_EPALLOC_FAILED, 0);
@@ -3794,13 +3763,33 @@ static int sam_epalloc(FAR struct usbhost_driver_s *drvr,
   epinfo->maxpacket = epdesc->mxpacketsize;
   epinfo->xfrtype   = epdesc->xfrtype;
   epinfo->speed     = hport->speed;
-
-  /* The endpoint iocsem semaphore is used for signaling and, hence,
-   * should not have priority inheritance enabled.
-   */
-
   nxsem_init(&epinfo->iocsem, 0, 0);
-  nxsem_setprotocol(&epinfo->iocsem, SEM_PRIO_NONE);
+
+#ifdef CONFIG_USBHOST_HUB
+  if (hport->speed != USB_SPEED_HIGH)
+    {
+      /* A high speed hub exists between this device and the root hub
+       * otherwise we would not get here.
+       */
+
+      struct usbhost_hubport_s *parent = hport->parent;
+
+      for (; parent->speed != USB_SPEED_HIGH; parent = hport->parent)
+        {
+          hport = parent;
+        }
+
+      if (parent->speed == USB_SPEED_HIGH)
+        {
+          epinfo->hubport = HPORT(hport);
+          epinfo->hubaddr = hport->parent->funcaddr;
+        }
+      else
+        {
+          return -EINVAL;
+        }
+    }
+#endif
 
   /* Success.. return an opaque reference to the endpoint information
    * structure instance
@@ -3819,7 +3808,7 @@ static int sam_epalloc(FAR struct usbhost_driver_s *drvr,
  * Input Parameters:
  *   drvr - The USB host driver instance obtained as a parameter from the
  *           call to the class create() method.
- *   ep   - The endpint to be freed.
+ *   ep   - The endpoint to be freed.
  *
  * Returned Value:
  *   On success, zero (OK) is returned. On a failure, a negated errno value
@@ -3830,7 +3819,7 @@ static int sam_epalloc(FAR struct usbhost_driver_s *drvr,
  *
  ****************************************************************************/
 
-static int sam_epfree(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep)
+static int sam_epfree(struct usbhost_driver_s *drvr, usbhost_ep_t ep)
 {
   struct sam_epinfo_s *epinfo = (struct sam_epinfo_s *)ep;
 
@@ -3877,8 +3866,8 @@ static int sam_epfree(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep)
  *
  ****************************************************************************/
 
-static int sam_alloc(FAR struct usbhost_driver_s *drvr,
-                     FAR uint8_t **buffer, FAR size_t *maxlen)
+static int sam_alloc(struct usbhost_driver_s *drvr,
+                     uint8_t **buffer, size_t *maxlen)
 {
   int ret = -ENOMEM;
   DEBUGASSERT(drvr && buffer && maxlen);
@@ -3888,7 +3877,7 @@ static int sam_alloc(FAR struct usbhost_driver_s *drvr,
    * multiple of the cache line size in length.
    */
 
-  *buffer = (FAR uint8_t *)
+  *buffer = (uint8_t *)
     kmm_memalign(ARMV7A_DCACHE_LINESIZE, SAMA5_EHCI_BUFSIZE);
   if (*buffer)
     {
@@ -3923,11 +3912,13 @@ static int sam_alloc(FAR struct usbhost_driver_s *drvr,
  *
  ****************************************************************************/
 
-static int sam_free(FAR struct usbhost_driver_s *drvr, FAR uint8_t *buffer)
+static int sam_free(struct usbhost_driver_s *drvr, uint8_t *buffer)
 {
   DEBUGASSERT(drvr && buffer);
 
-  /* No special action is require to free the transfer/descriptor buffer memory */
+  /* No special action is require to free the transfer/descriptor buffer
+   * memory
+   */
 
   kmm_free(buffer);
   return OK;
@@ -3962,8 +3953,8 @@ static int sam_free(FAR struct usbhost_driver_s *drvr, FAR uint8_t *buffer)
  *
  ****************************************************************************/
 
-static int sam_ioalloc(FAR struct usbhost_driver_s *drvr,
-                       FAR uint8_t **buffer, size_t buflen)
+static int sam_ioalloc(struct usbhost_driver_s *drvr,
+                       uint8_t **buffer, size_t buflen)
 {
   DEBUGASSERT(drvr && buffer && buflen > 0);
 
@@ -3974,7 +3965,7 @@ static int sam_ioalloc(FAR struct usbhost_driver_s *drvr,
    */
 
   buflen  = (buflen + DCACHE_LINEMASK) & ~DCACHE_LINEMASK;
-  *buffer = (FAR uint8_t *)kumm_memalign(ARMV7A_DCACHE_LINESIZE, buflen);
+  *buffer = kumm_memalign(ARMV7A_DCACHE_LINESIZE, buflen);
   return *buffer ? OK : -ENOMEM;
 }
 
@@ -4001,7 +3992,7 @@ static int sam_ioalloc(FAR struct usbhost_driver_s *drvr,
  *
  ****************************************************************************/
 
-static int sam_iofree(FAR struct usbhost_driver_s *drvr, FAR uint8_t *buffer)
+static int sam_iofree(struct usbhost_driver_s *drvr, uint8_t *buffer)
 {
   DEBUGASSERT(drvr && buffer);
 
@@ -4047,9 +4038,9 @@ static int sam_iofree(FAR struct usbhost_driver_s *drvr, FAR uint8_t *buffer)
  *
  ****************************************************************************/
 
-static int sam_ctrlin(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
-                      FAR const struct usb_ctrlreq_s *req,
-                      FAR uint8_t *buffer)
+static int sam_ctrlin(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
+                      const struct usb_ctrlreq_s *req,
+                      uint8_t *buffer)
 {
   struct sam_rhport_s *rhport = (struct sam_rhport_s *)drvr;
   struct sam_epinfo_s *ep0info = (struct sam_epinfo_s *)ep0;
@@ -4072,9 +4063,11 @@ static int sam_ctrlin(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
         req->index[1], req->index[0], len);
 #endif
 
-  /* We must have exclusive access to the EHCI hardware and data structures. */
+  /* We must have exclusive access to the EHCI hardware and data
+   * structures.
+   */
 
-  ret = sam_takesem(&g_ehci.exclsem);
+  ret = nxrmutex_lock(&g_ehci.lock);
   if (ret < 0)
     {
       return ret;
@@ -4086,7 +4079,7 @@ static int sam_ctrlin(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
   if (ret != OK)
     {
       usbhost_trace1(EHCI_TRACE1_DEVDISCONNECTED, -ret);
-      goto errout_with_sem;
+      goto errout_with_lock;
     }
 
   /* Now initiate the transfer */
@@ -4101,19 +4094,19 @@ static int sam_ctrlin(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
   /* And wait for the transfer to complete */
 
   nbytes = sam_transfer_wait(ep0info);
-  sam_givesem(&g_ehci.exclsem);
+  nxrmutex_unlock(&g_ehci.lock);
   return nbytes >= 0 ? OK : (int)nbytes;
 
 errout_with_iocwait:
   ep0info->iocwait = false;
-errout_with_sem:
-  sam_givesem(&g_ehci.exclsem);
+errout_with_lock:
+  nxrmutex_unlock(&g_ehci.lock);
   return ret;
 }
 
-static int sam_ctrlout(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
-                       FAR const struct usb_ctrlreq_s *req,
-                       FAR const uint8_t *buffer)
+static int sam_ctrlout(struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
+                       const struct usb_ctrlreq_s *req,
+                       const uint8_t *buffer)
 {
   /* sam_ctrlin can handle both directions.  We just need to work around the
    * differences in the function signatures.
@@ -4161,8 +4154,8 @@ static int sam_ctrlout(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep0,
  *
  ****************************************************************************/
 
-static ssize_t sam_transfer(FAR struct usbhost_driver_s *drvr,
-                            usbhost_ep_t ep, FAR uint8_t *buffer,
+static ssize_t sam_transfer(struct usbhost_driver_s *drvr,
+                            usbhost_ep_t ep, uint8_t *buffer,
                             size_t buflen)
 {
   struct sam_rhport_s *rhport = (struct sam_rhport_s *)drvr;
@@ -4172,9 +4165,11 @@ static ssize_t sam_transfer(FAR struct usbhost_driver_s *drvr,
 
   DEBUGASSERT(rhport && epinfo && buffer && buflen > 0);
 
-  /* We must have exclusive access to the EHCI hardware and data structures. */
+  /* We must have exclusive access to the EHCI hardware and data
+   * structures.
+   */
 
-  ret = sam_takesem(&g_ehci.exclsem);
+  ret = nxrmutex_lock(&g_ehci.lock);
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -4186,7 +4181,7 @@ static ssize_t sam_transfer(FAR struct usbhost_driver_s *drvr,
   if (ret != OK)
     {
       usbhost_trace1(EHCI_TRACE1_DEVDISCONNECTED, -ret);
-      goto errout_with_sem;
+      goto errout_with_lock;
     }
 
   /* Initiate the transfer */
@@ -4225,13 +4220,13 @@ static ssize_t sam_transfer(FAR struct usbhost_driver_s *drvr,
   /* Then wait for the transfer to complete */
 
   nbytes = sam_transfer_wait(epinfo);
-  sam_givesem(&g_ehci.exclsem);
+  nxrmutex_unlock(&g_ehci.lock);
   return nbytes;
 
 errout_with_iocwait:
   epinfo->iocwait = false;
-errout_with_sem:
-  sam_givesem(&g_ehci.exclsem);
+errout_with_lock:
+  nxrmutex_unlock(&g_ehci.lock);
   return (ssize_t)ret;
 }
 
@@ -4272,9 +4267,9 @@ errout_with_sem:
  ****************************************************************************/
 
 #ifdef CONFIG_USBHOST_ASYNCH
-static int sam_asynch(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep,
-                      FAR uint8_t *buffer, size_t buflen,
-                      usbhost_asynch_t callback, FAR void *arg)
+static int sam_asynch(struct usbhost_driver_s *drvr, usbhost_ep_t ep,
+                      uint8_t *buffer, size_t buflen,
+                      usbhost_asynch_t callback, void *arg)
 {
   struct sam_rhport_s *rhport = (struct sam_rhport_s *)drvr;
   struct sam_epinfo_s *epinfo = (struct sam_epinfo_s *)ep;
@@ -4282,9 +4277,11 @@ static int sam_asynch(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep,
 
   DEBUGASSERT(rhport && epinfo && buffer && buflen > 0);
 
-  /* We must have exclusive access to the EHCI hardware and data structures. */
+  /* We must have exclusive access to the EHCI hardware and data
+   * structures.
+   */
 
-  ret = sam_takesem(&g_ehci.exclsem);
+  ret = nxrmutex_lock(&g_ehci.lock);
   if (ret < 0)
     {
       return ret;
@@ -4296,7 +4293,7 @@ static int sam_asynch(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep,
   if (ret != OK)
     {
       usbhost_trace1(EHCI_TRACE1_DEVDISCONNECTED, -ret);
-      goto errout_with_sem;
+      goto errout_with_lock;
     }
 
   /* Initiate the transfer */
@@ -4333,14 +4330,14 @@ static int sam_asynch(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep,
 
   /* The transfer is in progress */
 
-  sam_givesem(&g_ehci.exclsem);
+  nxrmutex_unlock(&g_ehci.lock);
   return OK;
 
 errout_with_callback:
   epinfo->callback = NULL;
   epinfo->arg      = NULL;
-errout_with_sem:
-  sam_givesem(&g_ehci.exclsem);
+errout_with_lock:
+  nxrmutex_unlock(&g_ehci.lock);
   return ret;
 }
 #endif /* CONFIG_USBHOST_ASYNCH */
@@ -4349,24 +4346,22 @@ errout_with_sem:
  * Name: sam_cancel
  *
  * Description:
- *   New connections may be detected by an attached hub.  This method is the
- *   mechanism that is used by the hub class to introduce a new connection
- *   and port description to the system.
+ *   Cancel a pending transfer on an endpoint.  Cancelled synchronous or
+ *   asynchronous transfer will complete normally with the error -ESHUTDOWN.
  *
  * Input Parameters:
  *   drvr - The USB host driver instance obtained as a parameter from the
  *     call to the class create() method.
- *   hport - The descriptor of the hub port that detected the connection
- *     related event
- *   connected - True: device connected; false: device disconnected
+ *   ep - The IN or OUT endpoint descriptor for the device endpoint on which
+ *     an asynchronous transfer should be transferred.
  *
  * Returned Value:
  *   On success, zero (OK) is returned. On a failure, a negated errno value
- *   is returned indicating the nature of the failure
+ *   is returned indicating the nature of the failure.
  *
  ****************************************************************************/
 
-static int sam_cancel(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep)
+static int sam_cancel(struct usbhost_driver_s *drvr, usbhost_ep_t ep)
 {
   struct sam_epinfo_s *epinfo = (struct sam_epinfo_s *)ep;
   struct sam_qh_s *qh;
@@ -4390,7 +4385,7 @@ static int sam_cancel(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep)
    * interrupt level.
    */
 
-  ret = sam_takesem(&g_ehci.exclsem);
+  ret = nxrmutex_lock(&g_ehci.lock);
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -4425,7 +4420,7 @@ static int sam_cancel(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep)
 #endif
     {
       ret = OK;
-      goto errout_with_sem;
+      goto errout_with_lock;
     }
 
   /* Handle the cancellation according to the type of the transfer */
@@ -4448,7 +4443,7 @@ static int sam_cancel(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep)
            * head.
            */
 
-          if (qh && qh != &g_asynchead)
+          if (qh && qh == &g_asynchead)
             {
               /* Claim that we successfully cancelled the transfer */
 
@@ -4488,7 +4483,7 @@ static int sam_cancel(FAR struct usbhost_driver_s *drvr, usbhost_ep_t ep)
       default:
         usbhost_trace1(EHCI_TRACE1_BADXFRTYPE, epinfo->xfrtype);
         ret = -ENOSYS;
-        goto errout_with_sem;
+        goto errout_with_lock;
     }
 
   /* Find and remove the QH.  There are four possibilities:
@@ -4518,7 +4513,7 @@ exit_terminate:
       /* Yes... wake it up */
 
       DEBUGASSERT(callback == NULL);
-      sam_givesem(&epinfo->iocsem);
+      nxsem_post(&epinfo->iocsem);
     }
 
   /* No.. Is there a pending asynchronous transfer? */
@@ -4533,11 +4528,11 @@ exit_terminate:
 #else
   /* Wake up the waiting thread */
 
-  sam_givesem(&epinfo->iocsem);
+  nxsem_post(&epinfo->iocsem);
 #endif
 
-errout_with_sem:
-  sam_givesem(&g_ehci.exclsem);
+errout_with_lock:
+  nxrmutex_unlock(&g_ehci.lock);
   return ret;
 }
 
@@ -4563,8 +4558,8 @@ errout_with_sem:
  ****************************************************************************/
 
 #ifdef CONFIG_USBHOST_HUB
-static int sam_connect(FAR struct usbhost_driver_s *drvr,
-                       FAR struct usbhost_hubport_s *hport,
+static int sam_connect(struct usbhost_driver_s *drvr,
+                       struct usbhost_hubport_s *hport,
                        bool connected)
 {
   irqstate_t flags;
@@ -4584,7 +4579,7 @@ static int sam_connect(FAR struct usbhost_driver_s *drvr,
   if (g_ehci.pscwait)
     {
       g_ehci.pscwait = false;
-      sam_givesem(&g_ehci.pscsem);
+      nxsem_post(&g_ehci.pscsem);
     }
 
   leave_critical_section(flags);
@@ -4618,8 +4613,8 @@ static int sam_connect(FAR struct usbhost_driver_s *drvr,
  *
  ****************************************************************************/
 
-static void sam_disconnect(FAR struct usbhost_driver_s *drvr,
-                           FAR struct usbhost_hubport_s *hport)
+static void sam_disconnect(struct usbhost_driver_s *drvr,
+                           struct usbhost_hubport_s *hport)
 {
   DEBUGASSERT(hport != NULL);
   hport->devclass = NULL;
@@ -4713,7 +4708,9 @@ static int sam_reset(void)
       return -ETIMEDOUT;
     }
 
-  /* Now we can set the HCReset bit in the USBCMD register to initiate the reset */
+  /* Now we can set the HCReset bit in the USBCMD register to initiate the
+   * reset
+   */
 
   regval  = sam_getreg(&HCOR->usbcmd);
   regval |= EHCI_USBCMD_HCRESET;
@@ -4771,9 +4768,9 @@ static int sam_reset(void)
  *
  ****************************************************************************/
 
-FAR struct usbhost_connection_s *sam_ehci_initialize(int controller)
+struct usbhost_connection_s *sam_ehci_initialize(int controller)
 {
-  FAR struct usbhost_hubport_s *hport;
+  struct usbhost_hubport_s *hport;
   irqstate_t flags;
   uint32_t regval;
 #if defined(CONFIG_DEBUG_USB) && defined(CONFIG_DEBUG_ASSERTIONS)
@@ -4865,20 +4862,9 @@ FAR struct usbhost_connection_s *sam_ehci_initialize(int controller)
 
   usbhost_vtrace1(EHCI_VTRACE1_INITIALIZING, 0);
 
-  /* Initialize the EHCI state data structure */
+  /* Initialize function address generation logic */
 
-  nxsem_init(&g_ehci.exclsem, 0, 1);
-  nxsem_init(&g_ehci.pscsem,  0, 0);
-
-  /* The pscsem semaphore is used for signaling and, hence, should not have
-   * priority inheritance enabled.
-   */
-
-  nxsem_setprotocol(&g_ehci.pscsem, SEM_PRIO_NONE);
-
-  /* Initialize EP0 */
-
-  nxsem_init(&g_ehci.ep0.iocsem, 0, 1);
+  usbhost_devaddr_initialize(&g_ehci.devgen);
 
   /* Initialize the root hub port structures */
 
@@ -4906,19 +4892,14 @@ FAR struct usbhost_connection_s *sam_ehci_initialize(int controller)
       rhport->drvr.connect        = sam_connect;
 #endif
       rhport->drvr.disconnect     = sam_disconnect;
+      rhport->hport.pdevgen       = &g_ehci.devgen;
 
       /* Initialize EP0 */
 
       rhport->ep0.xfrtype         = USB_EP_ATTR_XFER_CONTROL;
       rhport->ep0.speed           = USB_SPEED_FULL;
       rhport->ep0.maxpacket       = 8;
-
-      /* The endpoint 0 iocsem semaphore is used for signaling and, hence,
-       * should not have priority inheritance enabled.
-       */
-
       nxsem_init(&rhport->ep0.iocsem, 0, 0);
-      nxsem_setprotocol(&rhport->ep0.iocsem, SEM_PRIO_NONE);
 
       /* Initialize the public port representation */
 
@@ -4930,10 +4911,6 @@ FAR struct usbhost_connection_s *sam_ehci_initialize(int controller)
       hport->ep0                  = &rhport->ep0;
       hport->port                 = i;
       hport->speed                = USB_SPEED_FULL;
-
-      /* Initialize function address generation logic */
-
-      usbhost_devaddr_initialize(&rhport->hport);
     }
 
 #ifndef CONFIG_SAMA5_EHCI_PREALLOCATE
@@ -5154,7 +5131,9 @@ FAR struct usbhost_connection_s *sam_ehci_initialize(int controller)
 
   sam_putreg(regval, &HCOR->usbcmd);
 
-  /* Start the host controller by setting the RUN bit in the USBCMD register. */
+  /* Start the host controller by setting the RUN bit in the USBCMD
+   * register.
+   */
 
   regval  = sam_getreg(&HCOR->usbcmd);
   regval |= EHCI_USBCMD_RUN;
@@ -5236,10 +5215,6 @@ FAR struct usbhost_connection_s *sam_ehci_initialize(int controller)
   up_enable_irq(SAM_IRQ_UHPHS); /* enable USB interrupt */
   usbhost_vtrace1(EHCI_VTRACE1_INIITIALIZED, 0);
 
-  /* Initialize and return the connection interface */
-
-  g_ehciconn.wait      = sam_wait;
-  g_ehciconn.enumerate = sam_enumerate;
   return &g_ehciconn;
 }
 

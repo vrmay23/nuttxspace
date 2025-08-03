@@ -1,36 +1,22 @@
 /****************************************************************************
  * arch/arm/src/stm32l4/stm32l4_iwdg.c
  *
- *   Copyright (C) 2012, 2016, 2017 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *            Juha Niskanen <juha.niskanen@haltian.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,7 +27,8 @@
 #include <nuttx/config.h>
 #include <nuttx/arch.h>
 
-#include <stdint.h>
+#include <inttypes.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -50,7 +37,7 @@
 #include <nuttx/timers/watchdog.h>
 #include <arch/board/board.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "stm32l4_rcc.h"
 #include "stm32l4_dbgmcu.h"
 #include "stm32l4_wdg.h"
@@ -102,13 +89,13 @@
 
 struct stm32l4_lowerhalf_s
 {
-  FAR const struct watchdog_ops_s  *ops;  /* Lower half operations */
-  uint32_t lsifreq;   /* The calibrated frequency of the LSI oscillator */
-  uint32_t timeout;   /* The (actual) selected timeout */
-  uint32_t lastreset; /* The last reset time */
-  bool     started;   /* true: The watchdog timer has been started */
-  uint8_t  prescaler; /* Clock prescaler value */
-  uint16_t reload;    /* Timer reload value */
+  const struct watchdog_ops_s  *ops; /* Lower half operations */
+  uint32_t lsifreq;                  /* The calibrated frequency of the LSI oscillator */
+  uint32_t timeout;                  /* The (actual) selected timeout */
+  uint32_t lastreset;                /* The last reset time */
+  bool     started;                  /* true: The watchdog timer has been started */
+  uint8_t  prescaler;                /* Clock prescaler value */
+  uint16_t reload;                   /* Timer reload value */
 };
 
 /****************************************************************************
@@ -121,20 +108,21 @@ struct stm32l4_lowerhalf_s
 static uint16_t stm32l4_getreg(uint32_t addr);
 static void     stm32l4_putreg(uint16_t val, uint32_t addr);
 #else
-# define        stm32l4_getreg(addr)     getreg16(addr)
-# define        stm32l4_putreg(val,addr) putreg16(val,addr)
+#  define       stm32l4_getreg(addr)     getreg16(addr)
+#  define       stm32l4_putreg(val,addr) putreg16(val,addr)
 #endif
 
-static inline void stm32l4_setprescaler(FAR struct stm32l4_lowerhalf_s *priv);
+static inline void
+stm32l4_setprescaler(struct stm32l4_lowerhalf_s *priv);
 
 /* "Lower half" driver methods **********************************************/
 
-static int      stm32l4_start(FAR struct watchdog_lowerhalf_s *lower);
-static int      stm32l4_stop(FAR struct watchdog_lowerhalf_s *lower);
-static int      stm32l4_keepalive(FAR struct watchdog_lowerhalf_s *lower);
-static int      stm32l4_getstatus(FAR struct watchdog_lowerhalf_s *lower,
-                  FAR struct watchdog_status_s *status);
-static int      stm32l4_settimeout(FAR struct watchdog_lowerhalf_s *lower,
+static int      stm32l4_start(struct watchdog_lowerhalf_s *lower);
+static int      stm32l4_stop(struct watchdog_lowerhalf_s *lower);
+static int      stm32l4_keepalive(struct watchdog_lowerhalf_s *lower);
+static int      stm32l4_getstatus(struct watchdog_lowerhalf_s *lower,
+                  struct watchdog_status_s *status);
+static int      stm32l4_settimeout(struct watchdog_lowerhalf_s *lower,
                   uint32_t timeout);
 
 /****************************************************************************
@@ -181,8 +169,8 @@ static uint16_t stm32l4_getreg(uint32_t addr)
 
   uint16_t val = getreg16(addr);
 
-  /* Is this the same value that we read from the same register last time?  Are
-   * we polling the register?  If so, suppress some of the output.
+  /* Is this the same value that we read from the same register last time?
+   * Are we polling the register?  If so, suppress some of the output.
    */
 
   if (addr == prevaddr && val == preval)
@@ -258,7 +246,7 @@ static void stm32l4_putreg(uint16_t val, uint32_t addr)
  *
  ****************************************************************************/
 
-static inline void stm32l4_setprescaler(FAR struct stm32l4_lowerhalf_s *priv)
+static inline void stm32l4_setprescaler(struct stm32l4_lowerhalf_s *priv)
 {
   irqstate_t flags;
 
@@ -273,11 +261,11 @@ static inline void stm32l4_setprescaler(FAR struct stm32l4_lowerhalf_s *priv)
    * yet be cleared.
    */
 
-  while ((stm32l4_getreg(STM32L4_IWDG_SR) & (IWDG_SR_PVU | IWDG_SR_RVU)) != 0);
+  while (stm32l4_getreg(STM32L4_IWDG_SR) & (IWDG_SR_PVU | IWDG_SR_RVU));
 
   /* Set the prescaler */
 
-  stm32l4_putreg((uint16_t)priv->prescaler << IWDG_PR_SHIFT, STM32L4_IWDG_PR);
+  stm32l4_putreg(priv->prescaler << IWDG_PR_SHIFT, STM32L4_IWDG_PR);
 
   /* Set the reload value */
 
@@ -301,7 +289,7 @@ static inline void stm32l4_setprescaler(FAR struct stm32l4_lowerhalf_s *priv)
 
   if (priv->started)
     {
-      while ((stm32l4_getreg(STM32L4_IWDG_SR) & (IWDG_SR_PVU | IWDG_SR_RVU)) != 0);
+      while (stm32l4_getreg(STM32L4_IWDG_SR) & (IWDG_SR_PVU | IWDG_SR_RVU));
     }
 
   leave_critical_section(flags);
@@ -314,20 +302,21 @@ static inline void stm32l4_setprescaler(FAR struct stm32l4_lowerhalf_s *priv)
  *   Start the watchdog timer, resetting the time to the current timeout,
  *
  * Input Parameters:
- *   lower - A pointer the publicly visible representation of the "lower-half"
- *           driver state structure.
+ *   lower - A pointer the publicly visible representation of the
+ *           "lower-half" driver state structure.
  *
  * Returned Value:
  *   Zero on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-static int stm32l4_start(FAR struct watchdog_lowerhalf_s *lower)
+static int stm32l4_start(struct watchdog_lowerhalf_s *lower)
 {
-  FAR struct stm32l4_lowerhalf_s *priv = (FAR struct stm32l4_lowerhalf_s *)lower;
+  struct stm32l4_lowerhalf_s *priv =
+    (struct stm32l4_lowerhalf_s *)lower;
   irqstate_t flags;
 
-  wdinfo("Entry: started=%d\n");
+  wdinfo("Entry: started\n");
   DEBUGASSERT(priv);
 
   /* Have we already been started? */
@@ -341,13 +330,13 @@ static int stm32l4_start(FAR struct watchdog_lowerhalf_s *lower)
       stm32l4_setprescaler(priv);
 
       /* Enable IWDG (the LSI oscillator will be enabled by hardware).  NOTE:
-       * If the "Hardware watchdog" feature is enabled through the device option
-       * bits, the watchdog is automatically enabled at power-on.
+       * If the "Hardware watchdog" feature is enabled through the device
+       * option bits, the watchdog is automatically enabled at power-on.
        */
 
       flags           = enter_critical_section();
       stm32l4_putreg(IWDG_KR_KEY_START, STM32L4_IWDG_KR);
-      priv->lastreset = clock_systimer();
+      priv->lastreset = clock_systime_ticks();
       priv->started   = true;
       leave_critical_section(flags);
     }
@@ -362,15 +351,15 @@ static int stm32l4_start(FAR struct watchdog_lowerhalf_s *lower)
  *   Stop the watchdog timer
  *
  * Input Parameters:
- *   lower - A pointer the publicly visible representation of the "lower-half"
- *           driver state structure.
+ *   lower - A pointer the publicly visible representation of the
+ *           "lower-half" driver state structure.
  *
  * Returned Value:
  *   Zero on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-static int stm32l4_stop(FAR struct watchdog_lowerhalf_s *lower)
+static int stm32l4_stop(struct watchdog_lowerhalf_s *lower)
 {
   /* There is no way to disable the IDWG timer once it has been started */
 
@@ -387,17 +376,18 @@ static int stm32l4_stop(FAR struct watchdog_lowerhalf_s *lower)
  *   the watchdog timer or "petting the dog".
  *
  * Input Parameters:
- *   lower - A pointer the publicly visible representation of the "lower-half"
- *           driver state structure.
+ *   lower - A pointer the publicly visible representation of the
+ *           "lower-half" driver state structure.
  *
  * Returned Value:
  *   Zero on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-static int stm32l4_keepalive(FAR struct watchdog_lowerhalf_s *lower)
+static int stm32l4_keepalive(struct watchdog_lowerhalf_s *lower)
 {
-  FAR struct stm32l4_lowerhalf_s *priv = (FAR struct stm32l4_lowerhalf_s *)lower;
+  struct stm32l4_lowerhalf_s *priv =
+    (struct stm32l4_lowerhalf_s *)lower;
   irqstate_t flags;
 
   wdinfo("Entry\n");
@@ -406,7 +396,7 @@ static int stm32l4_keepalive(FAR struct watchdog_lowerhalf_s *lower)
 
   flags = enter_critical_section();
   stm32l4_putreg(IWDG_KR_KEY_RELOAD, STM32L4_IWDG_KR);
-  priv->lastreset = clock_systimer();
+  priv->lastreset = clock_systime_ticks();
   leave_critical_section(flags);
 
   return OK;
@@ -419,8 +409,8 @@ static int stm32l4_keepalive(FAR struct watchdog_lowerhalf_s *lower)
  *   Get the current watchdog timer status
  *
  * Input Parameters:
- *   lower  - A pointer the publicly visible representation of the "lower-half"
- *            driver state structure.
+ *   lower  - A pointer the publicly visible representation of the
+ *            "lower-half" driver state structure.
  *   status - The location to return the watchdog status information.
  *
  * Returned Value:
@@ -428,10 +418,11 @@ static int stm32l4_keepalive(FAR struct watchdog_lowerhalf_s *lower)
  *
  ****************************************************************************/
 
-static int stm32l4_getstatus(FAR struct watchdog_lowerhalf_s *lower,
-                             FAR struct watchdog_status_s *status)
+static int stm32l4_getstatus(struct watchdog_lowerhalf_s *lower,
+                             struct watchdog_status_s *status)
 {
-  FAR struct stm32l4_lowerhalf_s *priv = (FAR struct stm32l4_lowerhalf_s *)lower;
+  struct stm32l4_lowerhalf_s *priv =
+    (struct stm32l4_lowerhalf_s *)lower;
   uint32_t ticks;
   uint32_t elapsed;
 
@@ -452,7 +443,7 @@ static int stm32l4_getstatus(FAR struct watchdog_lowerhalf_s *lower,
 
   /* Get the elapsed time since the last ping */
 
-  ticks   = clock_systimer() - priv->lastreset;
+  ticks   = clock_systime_ticks() - priv->lastreset;
   elapsed = (int32_t)TICK2MSEC(ticks);
 
   if (elapsed > priv->timeout)
@@ -465,9 +456,9 @@ static int stm32l4_getstatus(FAR struct watchdog_lowerhalf_s *lower,
   status->timeleft = priv->timeout - elapsed;
 
   wdinfo("Status     :\n");
-  wdinfo("  flags    : %08x\n", status->flags);
-  wdinfo("  timeout  : %d\n", status->timeout);
-  wdinfo("  timeleft : %d\n", status->timeleft);
+  wdinfo("  flags    : %08" PRIx32 "\n", status->flags);
+  wdinfo("  timeout  : %" PRId32 "\n", status->timeout);
+  wdinfo("  timeleft : %" PRId32 "\n", status->timeleft);
   return OK;
 }
 
@@ -478,8 +469,8 @@ static int stm32l4_getstatus(FAR struct watchdog_lowerhalf_s *lower,
  *   Set a new timeout value (and reset the watchdog timer)
  *
  * Input Parameters:
- *   lower   - A pointer the publicly visible representation of the "lower-half"
- *             driver state structure.
+ *   lower   - A pointer the publicly visible representation of the
+ *             "lower-half" driver state structure.
  *   timeout - The new timeout value in milliseconds.
  *
  * Returned Value:
@@ -487,23 +478,24 @@ static int stm32l4_getstatus(FAR struct watchdog_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static int stm32l4_settimeout(FAR struct watchdog_lowerhalf_s *lower,
+static int stm32l4_settimeout(struct watchdog_lowerhalf_s *lower,
                               uint32_t timeout)
 {
-  FAR struct stm32l4_lowerhalf_s *priv = (FAR struct stm32l4_lowerhalf_s *)lower;
+  struct stm32l4_lowerhalf_s *priv =
+    (struct stm32l4_lowerhalf_s *)lower;
   uint32_t fiwdg;
   uint64_t reload;
   int prescaler;
   int shift;
 
-  wdinfo("Entry: timeout=%d\n", timeout);
+  wdinfo("Entry: timeout=%" PRId32 "\n", timeout);
   DEBUGASSERT(priv);
 
   /* Can this timeout be represented? */
 
   if (timeout < 1 || timeout > IWDG_MAXTIMEOUT)
     {
-      wderr("ERROR: Cannot represent timeout=%d > %d\n",
+      wderr("ERROR: Cannot represent timeout=%" PRId32 " > %d\n",
             timeout, IWDG_MAXTIMEOUT);
       return -ERANGE;
     }
@@ -585,7 +577,8 @@ static int stm32l4_settimeout(FAR struct watchdog_lowerhalf_s *lower,
       stm32l4_setprescaler(priv);
     }
 
-  wdinfo("prescaler=%d fiwdg=%d reload=%d\n", prescaler, fiwdg, reload);
+  wdinfo("prescaler=%d fiwdg=%" PRId32 " reload=%" PRId64 "\n",
+         prescaler, fiwdg, reload);
 
   return OK;
 }
@@ -598,8 +591,8 @@ static int stm32l4_settimeout(FAR struct watchdog_lowerhalf_s *lower,
  * Name: stm32l4_iwdginitialize
  *
  * Description:
- *   Initialize the IWDG watchdog timer.  The watchdog timer is initialized and
- *   registers as 'devpath'.  The initial state of the watchdog timer is
+ *   Initialize the IWDG watchdog timer.  The watchdog timer is initialized
+ *   and registers as 'devpath'.  The initial state of the watchdog timer is
  *   disabled.
  *
  * Input Parameters:
@@ -612,11 +605,11 @@ static int stm32l4_settimeout(FAR struct watchdog_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-void stm32l4_iwdginitialize(FAR const char *devpath, uint32_t lsifreq)
+void stm32l4_iwdginitialize(const char *devpath, uint32_t lsifreq)
 {
-  FAR struct stm32l4_lowerhalf_s *priv = &g_wdgdev;
+  struct stm32l4_lowerhalf_s *priv = &g_wdgdev;
 
-  wdinfo("Entry: devpath=%s lsifreq=%d\n", devpath, lsifreq);
+  wdinfo("Entry: devpath=%s lsifreq=%" PRId32 "\n", devpath, lsifreq);
 
   /* NOTE we assume that clocking to the IWDG has already been provided by
    * the RCC initialization logic.
@@ -636,19 +629,19 @@ void stm32l4_iwdginitialize(FAR const char *devpath, uint32_t lsifreq)
    */
 
   stm32l4_rcc_enablelsi();
-  wdinfo("RCC CSR: %08x\n", getreg32(STM32L4_RCC_CSR));
+  wdinfo("RCC CSR: %08" PRIx32 "\n", getreg32(STM32L4_RCC_CSR));
 
   /* Select an arbitrary initial timeout value.  But don't start the watchdog
    * yet. NOTE: If the "Hardware watchdog" feature is enabled through the
    * device option bits, the watchdog is automatically enabled at power-on.
    */
 
-  stm32l4_settimeout((FAR struct watchdog_lowerhalf_s *)priv,
+  stm32l4_settimeout((struct watchdog_lowerhalf_s *)priv,
                      CONFIG_STM32L4_IWDG_DEFTIMOUT);
 
   /* Register the watchdog driver as /dev/watchdog0 */
 
-  watchdog_register(devpath, (FAR struct watchdog_lowerhalf_s *)priv);
+  watchdog_register(devpath, (struct watchdog_lowerhalf_s *)priv);
 
   /* When the microcontroller enters debug mode (Cortex-M4F core halted),
    * the IWDG counter either continues to work normally or stops, depending
@@ -658,13 +651,13 @@ void stm32l4_iwdginitialize(FAR const char *devpath, uint32_t lsifreq)
 #if defined(CONFIG_STM32L4_JTAG_FULL_ENABLE) || \
     defined(CONFIG_STM32L4_JTAG_NOJNTRST_ENABLE) || \
     defined(CONFIG_STM32L4_JTAG_SW_ENABLE)
-  {
-    uint32_t cr;
+    {
+      uint32_t cr;
 
-    cr = getreg32(STM32_DBGMCU_APB1_FZ);
-    cr |= DBGMCU_APB1_IWDGSTOP;
-    putreg32(cr, STM32_DBGMCU_APB1_FZ);
-  }
+      cr = getreg32(STM32_DBGMCU_APB1_FZ);
+      cr |= DBGMCU_APB1_IWDGSTOP;
+      putreg32(cr, STM32_DBGMCU_APB1_FZ);
+    }
 #endif
 }
 

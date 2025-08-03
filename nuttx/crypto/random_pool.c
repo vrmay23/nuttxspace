@@ -1,36 +1,22 @@
 /****************************************************************************
  * crypto/random_pool.c
  *
- *   Copyright (C) 2015-2017 Haltian Ltd. All rights reserved.
- *   Authors: Juha Niskanen <juha.niskanen@haltian.com>
- *            Jussi Kivilinna <jussi.kivilinna@haltian.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,27 +29,23 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <unistd.h>
+#include <sys/param.h>
 #include <debug.h>
 #include <assert.h>
 #include <errno.h>
 
-#include <nuttx/arch.h>
 #include <nuttx/random.h>
 #include <nuttx/board.h>
-
+#include <nuttx/clock.h>
+#include <nuttx/mutex.h>
 #include <nuttx/crypto/blake2s.h>
 
 /****************************************************************************
- * Definitions
+ * Pre-processor Definitions
  ****************************************************************************/
 
-#ifndef MIN
-#define MIN(a,b) ((a) < (b) ? (a) : (b))
-#endif
-
-#define ROTL_32(x,n) ( ((x) << (n)) | ((x) >> (32-(n))) )
-#define ROTR_32(x,n) ( ((x) >> (n)) | ((x) << (32-(n))) )
+#define ROTL_32(x,n) (((x) << (n)) | ((x) >> (32 - (n))))
+#define ROTR_32(x,n) (((x) >> (n)) | ((x) << (32 - (n))))
 
 /****************************************************************************
  * Private Function Prototypes
@@ -83,7 +65,7 @@ struct blake2xs_rng_s
 
 struct rng_s
 {
-  sem_t rd_sem; /* Threads can only exclusively access the RNG */
+  mutex_t rd_lock; /* Threads can only exclusively access the RNG */
   volatile uint32_t rd_addptr;
   volatile uint32_t rd_newentr;
   volatile uint8_t rd_rotate;
@@ -106,7 +88,10 @@ enum
  * Private Data
  ****************************************************************************/
 
-static struct rng_s g_rng;
+static struct rng_s g_rng =
+{
+  NXMUTEX_INITIALIZER,
+};
 
 #ifdef CONFIG_BOARD_ENTROPY_POOL
 /* Entropy pool structure can be provided by board source. Use for this is,
@@ -175,7 +160,7 @@ static void addentropy(FAR const uint32_t *buf, size_t n, bool inc_new)
       uint32_t i;
 
       rotate = g_rng.rd_rotate;
-      w = ROTL_32(*buf, rotate);
+      w = rotate ? ROTL_32(*buf, rotate) : *buf;
       i = g_rng.rd_addptr = (g_rng.rd_addptr - 1) & POOL_MASK;
 
       /* Normal round, we add 7 bits of rotation to the pool.
@@ -206,7 +191,7 @@ static void addentropy(FAR const uint32_t *buf, size_t n, bool inc_new)
 }
 
 /****************************************************************************
- * Name: getentropy
+ * Name: initentropy
  *
  * Description:
  *   Hash entropy pool to BLAKE2s context. This is an internal interface for
@@ -228,9 +213,9 @@ static void addentropy(FAR const uint32_t *buf, size_t n, bool inc_new)
  *
  ****************************************************************************/
 
-static void getentropy(FAR blake2s_state *S)
+static void initentropy(FAR blake2s_state *S)
 {
-#ifdef CONFIG_SCHED_CPULOAD
+#ifndef CONFIG_SCHED_CPULOAD_NONE
   struct cpuload_s load;
 #endif
   uint32_t tmp;
@@ -248,7 +233,7 @@ static void getentropy(FAR blake2s_state *S)
 
   tmp = sizeof(entropy_pool.pool);
   tmp <<= 27;
-#ifdef CONFIG_SCHED_CPULOAD
+#ifndef CONFIG_SCHED_CPULOAD_NONE
   clock_cpuload(0, &load);
   tmp += load.total ^ ROTL_32(load.active, 23);
 #endif
@@ -298,7 +283,7 @@ static void rng_reseed(void)
 
   /* Initialize with randomness from entropy pool */
 
-  getentropy(&g_rng.blake2xs.ctx);
+  initentropy(&g_rng.blake2xs.ctx);
 
   /* Absorb also the previous root */
 
@@ -323,7 +308,7 @@ static void rng_reseed(void)
   g_rng.output_initialized = true;
 }
 
-static void rng_buf_internal(FAR void *bytes, size_t nbytes)
+static void rng_buf_internal(FAR uint8_t *bytes, size_t nbytes)
 {
   if (!g_rng.output_initialized)
     {
@@ -372,21 +357,6 @@ static void rng_buf_internal(FAR void *bytes, size_t nbytes)
       bytes += block_size;
       nbytes -= block_size;
     }
-}
-
-static void rng_init(void)
-{
-  cryptinfo("Initializing RNG\n");
-
-  memset(&g_rng, 0, sizeof(struct rng_s));
-  nxsem_init(&g_rng.rd_sem, 0, 1);
-
-  /* We do not initialize output here because this is called
-   * quite early in boot and there may not be enough entropy.
-   *
-   * Board level may define CONFIG_BOARD_INITRNGSEED if it implements
-   * early random seeding.
-   */
 }
 
 /****************************************************************************
@@ -462,8 +432,8 @@ void up_rngaddentropy(enum rnd_source_t kindof, FAR const uint32_t *buf,
    * reseeding too fast.
    */
 
-  clock_gettime(CLOCK_REALTIME, &ts);
-  tbuf[0] = ROTL_32(ts.tv_nsec, 17) ^ ROTL_32(ts.tv_sec, 3);
+  clock_systime_timespec(&ts);
+  tbuf[0] = ROTL_32((uint32_t)ts.tv_nsec, 17) ^ ROTL_32(ts.tv_sec, 3);
   tbuf[0] += ROTL_32(kindof, 27);
   tbuf[0] += ROTL_32((uintptr_t)&tbuf[0], 11);
 
@@ -512,7 +482,7 @@ void up_rngreseed(void)
 {
   int ret;
 
-  ret = nxsem_wait_uninterruptible(&g_rng.rd_sem);
+  ret = nxmutex_lock(&g_rng.rd_lock);
   if (ret >= 0)
     {
       if (g_rng.rd_newentr >= MIN_SEED_NEW_ENTROPY_WORDS)
@@ -520,7 +490,7 @@ void up_rngreseed(void)
           rng_reseed();
         }
 
-      nxsem_post(&g_rng.rd_sem);
+      nxmutex_unlock(&g_rng.rd_lock);
     }
 }
 
@@ -534,23 +504,16 @@ void up_rngreseed(void)
 
 void up_randompool_initialize(void)
 {
-  rng_init();
-
 #ifdef CONFIG_BOARD_INITRNGSEED
   board_init_rngseed();
 #endif
 }
 
 /****************************************************************************
- * Name: getrandom
+ * Name: up_rngbuf
  *
  * Description:
- *   Fill a buffer of arbitrary length with randomness. This is the
- *   preferred interface for getting random numbers. The traditional
- *   /dev/random approach is susceptible for things like the attacker
- *   exhausting file descriptors on purpose.
- *
- *   Note that this function cannot fail, other than by asserting.
+ *   Fill a buffer of arbitrary length with randomness.
  *
  * Input Parameters:
  *   bytes  - Buffer for returned random bytes
@@ -561,14 +524,9 @@ void up_randompool_initialize(void)
  *
  ****************************************************************************/
 
-void getrandom(FAR void *bytes, size_t nbytes)
+void up_rngbuf(FAR void *bytes, size_t nbytes)
 {
-  int ret;
-
-  ret = nxsem_wait_uninterruptible(&g_rng.rd_sem);
-  if (ret >= 0)
-    {
-      rng_buf_internal(bytes, nbytes);
-      nxsem_post(&g_rng.rd_sem);
-    }
+  nxmutex_lock(&g_rng.rd_lock);
+  rng_buf_internal(bytes, nbytes);
+  nxmutex_unlock(&g_rng.rd_lock);
 }

@@ -1,35 +1,24 @@
 /****************************************************************************
  * tools/cxd56/clefia.c
  *
- * Copyright (C) 2007, 2008 Sony Corporation
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *****************************************************************************/
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
 
 /****************************************************************************
  * Included Files
@@ -136,7 +125,9 @@ static const unsigned char clefia_s1[256] =
  * Private Functions
  ****************************************************************************/
 
-static void bytecpy(unsigned char *dst, const unsigned char *src, int bytelen)
+static void bytecpy(unsigned char *dst,
+                    const unsigned char *src,
+                    int bytelen)
 {
   while (bytelen-- > 0)
     {
@@ -402,7 +393,7 @@ struct cipher *cipher_init(uint8_t * key, uint8_t * iv)
 {
   struct cipher *c;
 
-  c = (struct cipher *)malloc(sizeof(*c));
+  c = malloc(sizeof(*c));
   if (!c)
     {
       return NULL;
@@ -500,18 +491,18 @@ int clefiakeyset(unsigned char *rk, const unsigned char *skey)
 void clefiaencrypt(unsigned char *ct, const unsigned char *pt,
                    const unsigned char *rk, const int r)
 {
-  unsigned char rin[16];
-  unsigned char  rout[16];
+  unsigned char r_in[16];
+  unsigned char  r_out[16];
 
-  bytecpy(rin, pt, 16);
+  bytecpy(r_in, pt, 16);
 
-  bytexor(rin + 4, rin + 4, rk + 0, 4); /* initial key whitening */
-  bytexor(rin + 12, rin + 12, rk + 4, 4);
+  bytexor(r_in + 4, r_in + 4, rk + 0, 4); /* initial key whitening */
+  bytexor(r_in + 12, r_in + 12, rk + 4, 4);
   rk += 8;
 
-  clefiagfn4(rout, rin, rk, r); /* GFN_{4,r} */
+  clefiagfn4(r_out, r_in, rk, r); /* GFN_{4,r} */
 
-  bytecpy(ct, rout, 16);
+  bytecpy(ct, r_out, 16);
   bytexor(ct + 4, ct + 4, rk + r * 8 + 0, 4);   /* final key whitening */
   bytexor(ct + 12, ct + 12, rk + r * 8 + 4, 4);
 }

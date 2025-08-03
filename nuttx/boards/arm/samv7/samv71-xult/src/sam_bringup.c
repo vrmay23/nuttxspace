@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/samv7/samv71-xult/src/sam_bringup.c
  *
- *   Copyright (C) 2015-2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,12 +27,14 @@
 #include <nuttx/config.h>
 
 #include <sys/mount.h>
+#include <sys/param.h>
 
 #include <stdbool.h>
 #include <stdio.h>
 #include <syslog.h>
 #include <errno.h>
 #include <debug.h>
+#include <nuttx/signal.h>
 
 #ifdef CONFIG_USBMONITOR
 #  include <nuttx/usb/usbmonitor.h>
@@ -53,6 +42,7 @@
 
 #include <nuttx/drivers/drivers.h>
 #include <nuttx/drivers/ramdisk.h>
+#include <nuttx/fs/fs.h>
 #include <nuttx/fs/nxffs.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/video/fb.h>
@@ -73,8 +63,8 @@
 #  include <nuttx/leds/userled.h>
 #endif
 
-#ifdef HAVE_PROGMEM_CHARDEV
-#  include "sam_progmem.h"
+#ifdef CONFIG_VNCSERVER
+#  include <nuttx/video/vnc.h>
 #endif
 
 #if defined(HAVE_RTC_DSXXXX) || defined(HAVE_RTC_PCF85263)
@@ -88,8 +78,20 @@
 #  include "sam_twihs.h"
 #endif
 
+#ifdef HAVE_HSMCI
+#  include "board_hsmci.h"
+#endif /* HAVE_HSMCI */
+
+#ifdef HAVE_AUTOMOUNTER
+#  include "sam_automount.h"
+#endif /* HAVE_AUTOMOUNTER */
+
 #ifdef HAVE_ROMFS
 #  include <arch/board/boot_romfsimg.h>
+#endif
+
+#ifdef HAVE_PROGMEM_CHARDEV
+#  include "board_progmem.h"
 #endif
 
 /****************************************************************************
@@ -99,6 +101,37 @@
 #define NSECTORS(n) \
   (((n)+CONFIG_SAMV71XULT_ROMFS_ROMDISK_SECTSIZE-1) / \
    CONFIG_SAMV71XULT_ROMFS_ROMDISK_SECTSIZE)
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+#if defined(CONFIG_SAMV7_PROGMEM_OTA_PARTITION)
+static struct mtd_partition_s g_mtd_partition_table[] =
+{
+  {
+    .offset  = CONFIG_SAMV7_OTA_PRIMARY_SLOT_OFFSET,
+    .size    = CONFIG_SAMV7_OTA_SLOT_SIZE,
+    .devpath = CONFIG_SAMV7_OTA_PRIMARY_SLOT_DEVPATH
+  },
+  {
+    .offset  = CONFIG_SAMV7_OTA_SECONDARY_SLOT_OFFSET,
+    .size    = CONFIG_SAMV7_OTA_SLOT_SIZE,
+    .devpath = CONFIG_SAMV7_OTA_SECONDARY_SLOT_DEVPATH
+  },
+  {
+    .offset  = CONFIG_SAMV7_OTA_SCRATCH_OFFSET,
+    .size    = CONFIG_SAMV7_OTA_SCRATCH_SIZE,
+    .devpath = CONFIG_SAMV7_OTA_SCRATCH_DEVPATH
+  }
+};
+
+static const size_t g_mtd_partition_table_size =
+    nitems(g_mtd_partition_table);
+#else
+#  define g_mtd_partition_table         NULL
+#  define g_mtd_partition_table_size    0
+#endif /* CONFIG_SAMV7_PROGMEM_OTA_PARTITION */
 
 /****************************************************************************
  * Private Functions
@@ -115,7 +148,7 @@
 #ifdef HAVE_I2CTOOL
 static void sam_i2c_register(int bus)
 {
-  FAR struct i2c_master_s *i2c;
+  struct i2c_master_s *i2c;
   int ret;
 
   i2c = sam_i2cbus_initialize(bus);
@@ -176,17 +209,16 @@ static void sam_i2ctool(void)
 int sam_bringup(void)
 {
 #ifdef HAVE_S25FL1
-  FAR struct qspi_dev_s *qspi;
+  struct qspi_dev_s *qspi;
 #endif
-#if defined(HAVE_S25FL1) || defined(HAVE_PROGMEM_CHARDEV)
-  FAR struct mtd_dev_s *mtd;
+#if defined(HAVE_S25FL1)
+  struct mtd_dev_s *mtd;
 #endif
 #if defined(HAVE_RTC_DSXXXX) || defined(HAVE_RTC_PCF85263)
-  FAR struct i2c_master_s *i2c;
+  struct i2c_master_s *i2c;
 #endif
-#if defined(HAVE_S25FL1_CHARDEV) || defined(HAVE_PROGMEM_CHARDEV)
-  char blockdev[18];
-  char chardev[12];
+#if defined(HAVE_S25FL1_CHARDEV)
+  char mtddev[12];
 #endif
   int ret;
 
@@ -228,7 +260,7 @@ int sam_bringup(void)
         {
           /* Synchronize the system time to the RTC time */
 
-          clock_synchronize();
+          clock_synchronize(NULL);
         }
     }
 
@@ -255,7 +287,7 @@ int sam_bringup(void)
         {
           /* Synchronize the system time to the RTC time */
 
-          clock_synchronize();
+          clock_synchronize(NULL);
         }
     }
 #endif
@@ -285,7 +317,7 @@ int sam_bringup(void)
 #ifdef CONFIG_FS_PROCFS
   /* Mount the procfs file system */
 
-  ret = mount(NULL, SAMV71_PROCFS_MOUNTPOINT, "procfs", 0, NULL);
+  ret = nx_mount(NULL, SAMV71_PROCFS_MOUNTPOINT, "procfs", 0, NULL);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to mount procfs at %s: %d\n",
@@ -308,33 +340,37 @@ int sam_bringup(void)
 #ifdef HAVE_HSMCI
   /* Initialize the HSMCI0 driver */
 
-  ret = sam_hsmci_initialize(HSMCI0_SLOTNO, HSMCI0_MINOR);
+  ret = sam_hsmci_initialize(HSMCI0_SLOTNO, HSMCI0_MINOR, GPIO_HSMCI0_CD,
+                             IRQ_HSMCI0_CD, true);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: sam_hsmci_initialize(%d,%d) failed: %d\n",
              HSMCI0_SLOTNO, HSMCI0_MINOR, ret);
     }
 
-#ifdef CONFIG_SAMV71XULT_HSMCI0_MOUNT
+#ifdef CONFIG_SAMV7_HSMCI0_MOUNT
   else
     {
-      /* REVISIT:  A delay seems to be required here or the mount will fail. */
-
-      /* Mount the volume on HSMCI0 */
-
-      ret = mount(CONFIG_SAMV71XULT_HSMCI0_MOUNT_BLKDEV,
-                  CONFIG_SAMV71XULT_HSMCI0_MOUNT_MOUNTPOINT,
-                  CONFIG_SAMV71XULT_HSMCI0_MOUNT_FSTYPE,
-                  0, NULL);
-
-      if (ret < 0)
+      if (sam_cardinserted(HSMCI0_SLOTNO))
         {
-          syslog(LOG_ERR, "ERROR: Failed to mount %s: %d\n",
-                 CONFIG_SAMV71XULT_HSMCI0_MOUNT_MOUNTPOINT, errno);
+          nxsig_usleep(1000 * 1000);
+
+          /* Mount the volume on HSMCI0 */
+
+          ret = nx_mount(CONFIG_SAMV7_HSMCI0_MOUNT_BLKDEV,
+                         CONFIG_SAMV7_HSMCI0_MOUNT_MOUNTPOINT,
+                         CONFIG_SAMV7_HSMCI0_MOUNT_FSTYPE,
+                         0, NULL);
+
+          if (ret < 0)
+            {
+              syslog(LOG_ERR, "ERROR: Failed to mount %s: %d\n",
+                     CONFIG_SAMV7_HSMCI0_MOUNT_MOUNTPOINT, ret);
+            }
         }
     }
 
-#endif /* CONFIG_SAMV71XULT_HSMCI0_MOUNT */
+#endif /* CONFIG_SAMV7_HSMCI0_MOUNT */
 #endif /* HAVE_HSMCI */
 
 #ifdef HAVE_AUTOMOUNTER
@@ -357,14 +393,14 @@ int sam_bringup(void)
     {
       /* Mount the file system */
 
-      ret = mount(CONFIG_SAMV71XULT_ROMFS_ROMDISK_DEVNAME,
-                  CONFIG_SAMV71XULT_ROMFS_MOUNT_MOUNTPOINT,
-                  "romfs", MS_RDONLY, NULL);
+      ret = nx_mount(CONFIG_SAMV71XULT_ROMFS_ROMDISK_DEVNAME,
+                     CONFIG_SAMV71XULT_ROMFS_MOUNT_MOUNTPOINT,
+                     "romfs", MS_RDONLY, NULL);
       if (ret < 0)
         {
-          syslog(LOG_ERR, "ERROR: mount(%s,%s,romfs) failed: %d\n",
+          syslog(LOG_ERR, "ERROR: nx_mount(%s,%s,romfs) failed: %d\n",
                  CONFIG_SAMV71XULT_ROMFS_ROMDISK_DEVNAME,
-                 CONFIG_SAMV71XULT_ROMFS_MOUNT_MOUNTPOINT, errno);
+                 CONFIG_SAMV71XULT_ROMFS_MOUNT_MOUNTPOINT, ret);
         }
     }
 #endif
@@ -409,37 +445,26 @@ int sam_bringup(void)
 
       /* Mount the file system at /mnt/s25fl1 */
 
-      ret = mount(NULL, "/mnt/s25fl1", "nxffs", 0, NULL);
+      ret = nx_mount(NULL, "/mnt/s25fl1", "nxffs", 0, NULL);
       if (ret < 0)
         {
           syslog(LOG_ERR, "ERROR: Failed to mount the NXFFS volume: %d\n",
-                 errno);
-          return ret;
-        }
-
-#else /* if  defined(HAVE_S25FL1_CHARDEV) */
-      /* Use the FTL layer to wrap the MTD driver as a block driver */
-
-      ret = ftl_initialize(S25FL1_MTD_MINOR, mtd);
-      if (ret < 0)
-        {
-          syslog(LOG_ERR, "ERROR: Failed to initialize the FTL layer: %d\n",
                  ret);
           return ret;
         }
 
+#else /* if  defined(HAVE_S25FL1_CHARDEV) */
       /* Use the minor number to create device paths */
 
-      snprintf(blockdev, 18, "/dev/mtdblock%d", S25FL1_MTD_MINOR);
-      snprintf(chardev, 12, "/dev/mtd%d", S25FL1_MTD_MINOR);
+      snprintf(mtddev, sizeof(mtddev), "/dev/mtd%d", S25FL1_MTD_MINOR);
 
-      /* Now create a character device on the block device */
+      /* Register the MTD driver */
 
-      ret = bchdev_register(blockdev, chardev, false);
+      ret = register_mtddriver(mtddev, mtd, 0755, NULL);
       if (ret < 0)
         {
-          syslog(LOG_ERR, "ERROR: bchdev_register %s failed: %d\n",
-                 chardev, ret);
+          syslog(LOG_ERR, "ERROR: register_mtddriver %s failed: %d\n",
+                 mtddev, ret);
           return ret;
         }
 #endif
@@ -449,38 +474,11 @@ int sam_bringup(void)
 #ifdef HAVE_PROGMEM_CHARDEV
   /* Initialize the SAMV71 FLASH programming memory library */
 
-  sam_progmem_initialize();
-
-  /* Create an instance of the SAMV71 FLASH program memory device driver */
-
-  mtd = progmem_initialize();
-  if (!mtd)
-    {
-      syslog(LOG_ERR, "ERROR: progmem_initialize failed\n");
-    }
-
-  /* Use the FTL layer to wrap the MTD driver as a block driver */
-
-  ret = ftl_initialize(PROGMEM_MTD_MINOR, mtd);
+  ret = board_progmem_init(PROGMEM_MTD_MINOR, g_mtd_partition_table,
+                           g_mtd_partition_table_size);
   if (ret < 0)
     {
-      syslog(LOG_ERR, "ERROR: Failed to initialize the FTL layer: %d\n",
-             ret);
-      return ret;
-    }
-
-  /* Use the minor number to create device paths */
-
-  snprintf(blockdev, 18, "/dev/mtdblock%d", PROGMEM_MTD_MINOR);
-  snprintf(chardev, 12, "/dev/mtd%d", PROGMEM_MTD_MINOR);
-
-  /* Now create a character device on the block device */
-
-  ret = bchdev_register(blockdev, chardev, false);
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: bchdev_register %s failed: %d\n",
-             chardev, ret);
+      syslog(LOG_ERR, "ERROR: Failed to initialize progmem: %d\n", ret);
       return ret;
     }
 #endif
@@ -553,11 +551,19 @@ int sam_bringup(void)
 #ifdef CONFIG_VIDEO_FB
   /* Initialize and register the LCD framebuffer driver */
 
+#  ifdef CONFIG_VNCSERVER
+  ret = vnc_fb_register(0);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: vnc_fb_register() failed: %d\n", ret);
+    }
+#  else
   ret = fb_register(0, 0);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: fb_register() failed: %d\n", ret);
     }
+#  endif
 #endif
 
   /* If we got here then perhaps not all initialization was successful, but

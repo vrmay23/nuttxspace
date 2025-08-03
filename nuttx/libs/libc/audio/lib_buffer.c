@@ -1,35 +1,22 @@
 /****************************************************************************
  * libs/libc/audio/lib_buffer.c
  *
- *   Copyright (C) 2013 Ken Pettit. All rights reserved.
- *   Author: Ken Pettit <pettitkd@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -56,38 +43,8 @@
 #if defined(CONFIG_AUDIO)
 
 /****************************************************************************
- * Private Functions
+ * Public Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: apb_semtake
- *
- *       Take an Audio Pipeline Buffer.
- *
- ****************************************************************************/
-
-static void apb_semtake(FAR struct ap_buffer_s *apb)
-{
-  int ret;
-
-  /* Take the semaphore (perhaps waiting) */
-
-  while (_SEM_WAIT(&apb->sem) < 0)
-    {
-      /* The only case that an error should occr here is if
-       * the wait was awakened by a signal.
-       */
-
-      DEBUGASSERT(_SEM_ERRNO(ret) == EINTR || _SEM_ERRNO(ret) == ECANCELED);
-      UNUSED(ret);
-    }
-}
-
-/****************************************************************************
- * Name: apb_semgive
- ****************************************************************************/
-
-#define apb_semgive(b) _SEM_POST(&b->sem)
 
 /****************************************************************************
  * Name: apb_alloc
@@ -104,17 +61,17 @@ int apb_alloc(FAR struct audio_buf_desc_s *bufdesc)
   int                 ret;
   struct ap_buffer_s  *apb;
 
-  DEBUGASSERT(bufdesc->u.ppBuffer != NULL);
+  DEBUGASSERT(bufdesc->u.pbuffer != NULL);
 
   /* Perform a user mode allocation */
 
   bufsize = sizeof(struct ap_buffer_s) + bufdesc->numbytes;
   apb = lib_umalloc(bufsize);
-  *bufdesc->u.ppBuffer = apb;
+  *bufdesc->u.pbuffer = apb;
 
   /* Test if the allocation was successful or not */
 
-  if (*bufdesc->u.ppBuffer == NULL)
+  if (*bufdesc->u.pbuffer == NULL)
     {
       ret = -ENOMEM;
     }
@@ -133,7 +90,7 @@ int apb_alloc(FAR struct audio_buf_desc_s *bufdesc)
       apb->session    = bufdesc->session;
 #endif
 
-      _SEM_INIT(&apb->sem, 0, 1);
+      nxmutex_init(&apb->lock);
       ret = sizeof(struct audio_buf_desc_s);
     }
 
@@ -153,14 +110,14 @@ void apb_free(FAR struct ap_buffer_s *apb)
 
   /* Perform a reference count decrement and possibly release the memory */
 
-  apb_semtake(apb);
+  nxmutex_lock(&apb->lock);
   refcount = apb->crefs--;
-  apb_semgive(apb);
+  nxmutex_unlock(&apb->lock);
 
   if (refcount <= 1)
     {
       audinfo("Freeing %p\n", apb);
-      _SEM_DESTROY(&apb->sem);
+      nxmutex_destroy(&apb->lock);
       lib_ufree(apb);
     }
 }
@@ -176,11 +133,11 @@ void apb_free(FAR struct ap_buffer_s *apb)
 
 void apb_reference(FAR struct ap_buffer_s *apb)
 {
-  /* Do we need any thread protection here?  Almost certaily... */
+  /* Do we need any thread protection here?  Almost certainly... */
 
-  apb_semtake(apb);
+  nxmutex_lock(&apb->lock);
   apb->crefs++;
-  apb_semgive(apb);
+  nxmutex_unlock(&apb->lock);
 }
 
 #endif /* CONFIG_AUDIO */

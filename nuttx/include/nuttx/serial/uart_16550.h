@@ -1,66 +1,53 @@
-/************************************************************************************
+/****************************************************************************
  * include/nuttx/serial/uart_16550.h
- * Serial driver for 16550 UART
  *
- *   Copyright (C) 2011-2013, 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __INCLUDE_NUTTX_SERIAL_UART_16550_H
 #define __INCLUDE_NUTTX_SERIAL_UART_16550_H
 
-/************************************************************************************
+/****************************************************************************
  * Included Files
- ************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 
+#include <nuttx/serial/serial.h>
+#include <nuttx/spinlock.h>
+
 #ifdef CONFIG_16550_UART
 
-/************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- ************************************************************************************/
+ ****************************************************************************/
 
-/* CONFIGURATION ********************************************************************/
+/* CONFIGURATION ************************************************************/
 
-/* Are any UARTs enabled? */
-
-#undef HAVE_UART
-#if defined(CONFIG_16550_UART0) || defined(CONFIG_16550_UART1) || \
-    defined(CONFIG_16550_UART2) || defined(CONFIG_16550_UART3)
-#  define HAVE_UART 1
+#undef HAVE_16550_UART_DMA
+#if defined(CONFIG_16550_UART0_DMA) || defined(CONFIG_16550_UART1_DMA) || \
+    defined(CONFIG_16550_UART2_DMA) || defined(CONFIG_16550_UART3_DMA)
+#  define HAVE_16550_UART_DMA 1
 #endif
 
-/* We need to be told the address increment between registers and the register bit
- * width.
+/* We need to be told the address increment between registers and the
+ * register bit width.
  */
 
 #ifndef CONFIG_16550_REGINCR
@@ -83,11 +70,15 @@
 #  error "CONFIG_16550_ADDRWIDTH not defined"
 #endif
 
-#if CONFIG_16550_ADDRWIDTH != 8 && CONFIG_16550_ADDRWIDTH != 16 && CONFIG_16550_ADDRWIDTH != 32
+#if CONFIG_16550_ADDRWIDTH != 0 && CONFIG_16550_ADDRWIDTH != 8 && \
+    CONFIG_16550_ADDRWIDTH != 16 && CONFIG_16550_ADDRWIDTH != 32 && \
+    CONFIG_16550_ADDRWIDTH != 64
 #  error "CONFIG_16550_ADDRWIDTH not supported"
 #endif
 
-/* If a UART is enabled, then its base address, clock, and IRQ must also be provided */
+/* If a UART is enabled, then its base address, clock, and IRQ
+ * must also be provided
+ */
 
 #ifdef CONFIG_16550_UART0
 #  ifndef CONFIG_16550_UART0_BASE
@@ -149,8 +140,8 @@
 #  endif
 #endif
 
-/* Is there a serial console? There should be at most one defined.  It could be on
- * any UARTn, n=0,1,2,3
+/* Is there a serial console? There should be at most one defined.
+ * It could be on any UARTn, n=0,1,2,3
  */
 
 #if defined(CONFIG_16550_UART0_SERIAL_CONSOLE) && defined(CONFIG_16550_UART0)
@@ -181,35 +172,24 @@
 #  undef HAVE_16550_CONSOLE
 #endif
 
-/* Register offsets *****************************************************************/
+/* Register offsets *********************************************************/
 
-#define UART_RBR_INCR          0 /* (DLAB =0) Receiver Buffer Register */
-#define UART_THR_INCR          0 /* (DLAB =0) Transmit Holding Register */
-#define UART_DLL_INCR          0 /* (DLAB =1) Divisor Latch LSB */
-#define UART_DLM_INCR          1 /* (DLAB =1) Divisor Latch MSB */
-#define UART_IER_INCR          1 /* (DLAB =0) Interrupt Enable Register */
-#define UART_IIR_INCR          2 /* Interrupt ID Register */
-#define UART_FCR_INCR          2 /* FIFO Control Register */
-#define UART_LCR_INCR          3 /* Line Control Register */
-#define UART_MCR_INCR          4 /* Modem Control Register */
-#define UART_LSR_INCR          5 /* Line Status Register */
-#define UART_MSR_INCR          6 /* Modem Status Register */
-#define UART_SCR_INCR          7 /* Scratch Pad Register */
+#define UART_RBR_OFFSET        0  /* (DLAB =0) Receiver Buffer Register */
+#define UART_THR_OFFSET        0  /* (DLAB =0) Transmit Holding Register */
+#define UART_DLL_OFFSET        0  /* (DLAB =1) Divisor Latch LSB */
+#define UART_DLM_OFFSET        1  /* (DLAB =1) Divisor Latch MSB */
+#define UART_IER_OFFSET        1  /* (DLAB =0) Interrupt Enable Register */
+#define UART_IIR_OFFSET        2  /* Interrupt ID Register */
+#define UART_FCR_OFFSET        2  /* FIFO Control Register */
+#define UART_LCR_OFFSET        3  /* Line Control Register */
+#define UART_MCR_OFFSET        4  /* Modem Control Register */
+#define UART_LSR_OFFSET        5  /* Line Status Register */
+#define UART_MSR_OFFSET        6  /* Modem Status Register */
+#define UART_SCR_OFFSET        7  /* Scratch Pad Register */
+#define UART_USR_OFFSET        31 /* UART Status Register */
+#define UART_DLF_OFFSET        48 /* Divisor Latch Fraction Register */
 
-#define UART_RBR_OFFSET        (CONFIG_16550_REGINCR*UART_RBR_INCR)
-#define UART_THR_OFFSET        (CONFIG_16550_REGINCR*UART_THR_INCR)
-#define UART_DLL_OFFSET        (CONFIG_16550_REGINCR*UART_DLL_INCR)
-#define UART_DLM_OFFSET        (CONFIG_16550_REGINCR*UART_DLM_INCR)
-#define UART_IER_OFFSET        (CONFIG_16550_REGINCR*UART_IER_INCR)
-#define UART_IIR_OFFSET        (CONFIG_16550_REGINCR*UART_IIR_INCR)
-#define UART_FCR_OFFSET        (CONFIG_16550_REGINCR*UART_FCR_INCR)
-#define UART_LCR_OFFSET        (CONFIG_16550_REGINCR*UART_LCR_INCR)
-#define UART_MCR_OFFSET        (CONFIG_16550_REGINCR*UART_MCR_INCR)
-#define UART_LSR_OFFSET        (CONFIG_16550_REGINCR*UART_LSR_INCR)
-#define UART_MSR_OFFSET        (CONFIG_16550_REGINCR*UART_MSR_INCR)
-#define UART_SCR_OFFSET        (CONFIG_16550_REGINCR*UART_SCR_INCR)
-
-/* Register bit definitions *********************************************************/
+/* Register bit definitions *************************************************/
 
 /* RBR (DLAB =0) Receiver Buffer Register */
 
@@ -250,6 +230,7 @@
 #  define UART_IIR_INTID_RDA         (2 << UART_IIR_INTID_SHIFT) /* Receive Data Available (RDA) */
 #  define UART_IIR_INTID_RLS         (3 << UART_IIR_INTID_SHIFT) /* Receiver Line Status (RLS) */
 #  define UART_IIR_INTID_CTI         (6 << UART_IIR_INTID_SHIFT) /* Character Time-out Indicator (CTI) */
+
                                                /* Bits 4-5: Reserved */
 #define UART_IIR_FIFOEN_SHIFT        (6)       /* Bits 6-7: RCVR FIFO interrupt */
 #define UART_IIR_FIFOEN_MASK         (3 << UART_IIR_FIFOEN_SHIFT)
@@ -308,9 +289,13 @@
 
 #define UART_SCR_MASK                (0xff)    /* Bits 0-7: SCR data */
 
-/************************************************************************************
+/* USR UART Status Register */
+
+#define UART_USR_BUSY                (1 << 0)  /* Bit 0: UART Busy */
+
+/****************************************************************************
  * Public Types
- ************************************************************************************/
+ ****************************************************************************/
 
 #if CONFIG_16550_REGWIDTH == 8
 typedef uint8_t uart_datawidth_t;
@@ -320,39 +305,163 @@ typedef uint16_t uart_datawidth_t;
 typedef uint32_t uart_datawidth_t;
 #endif
 
-#if CONFIG_16550_ADDRWIDTH == 8
+#if CONFIG_16550_ADDRWIDTH == 0
+typedef uintptr_t uart_addrwidth_t;
+#elif CONFIG_16550_ADDRWIDTH == 8
 typedef uint8_t uart_addrwidth_t;
 #elif CONFIG_16550_ADDRWIDTH == 16
 typedef uint16_t uart_addrwidth_t;
 #elif CONFIG_16550_ADDRWIDTH == 32
 typedef uint32_t uart_addrwidth_t;
+#elif CONFIG_16550_ADDRWIDTH == 64
+typedef uint64_t uart_addrwidth_t;
 #endif
 
-/************************************************************************************
+/****************************************************************************
  * Public Data
- ************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************
- * Public Functions
- ************************************************************************************/
+/* UART 16550 ops */
 
-/************************************************************************************
+struct u16550_s;
+struct u16550_ops_s
+{
+  CODE int (*isr)(int irq, FAR void *context, FAR void *arg);
+  CODE uart_datawidth_t (*getreg)(FAR struct u16550_s *priv,
+                                  unsigned int offset);
+  CODE void (*putreg)(FAR struct u16550_s *priv,
+                      unsigned int offset,
+                      uart_datawidth_t value);
+  CODE int (*ioctl)(FAR struct u16550_s *priv, int cmd, unsigned long arg);
+  CODE FAR struct dma_chan_s *(*dmachan)(FAR struct u16550_s *priv,
+                                         unsigned int ident);
+};
+
+/* UART 16550 private data */
+
+struct u16550_s
+{
+  /* UART 16550 operations */
+
+  FAR const struct u16550_ops_s *ops;
+
+  uart_addrwidth_t       uartbase;  /* Base address of UART registers */
+  uint8_t                regincr;
+#ifdef HAVE_16550_UART_DMA
+  int32_t                dmatx;
+  FAR struct dma_chan_s *chantx;
+  int32_t                dmarx;
+  FAR struct dma_chan_s *chanrx;
+  FAR char              *dmarxbuf;
+  size_t                 dmarxsize;
+  volatile size_t        dmarxhead;
+  volatile size_t        dmarxtail;
+  int32_t                dmarxtimeout;
+#endif
+#if !defined(CONFIG_16550_SUPRESS_CONFIG) || defined(HAVE_16550_UART_DMA)
+  uint32_t               baud;      /* Configured baud */
+  uint32_t               uartclk;   /* UART clock frequency */
+#endif
+#ifdef CONFIG_CLK
+  FAR const char        *clk_name;  /* UART clock name */
+  FAR struct clk_s      *mclk;      /* UART clock descriptor */
+#endif
+  uart_datawidth_t       ier;       /* Saved IER value */
+  int                    irq;       /* IRQ associated with this UART */
+#ifndef CONFIG_16550_SUPRESS_CONFIG
+  uint8_t                parity;    /* 0=none, 1=odd, 2=even */
+  uint8_t                bits;      /* Number of bits (7 or 8) */
+  bool                   stopbits2; /* true: Configure with 2 stop bits instead of 1 */
+#if defined(CONFIG_SERIAL_IFLOWCONTROL) || defined(CONFIG_SERIAL_OFLOWCONTROL)
+  bool                   flow;      /* flow control (RTS/CTS) enabled */
+#endif
+#endif
+  uart_datawidth_t       rxtrigger; /* RX trigger level */
+  spinlock_t             lock;      /* Spinlock */
+};
+
+/****************************************************************************
+ * Public Functions Definitions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: u16550_earlyserialinit
+ *
+ * Description:
+ *   Performs the low level UART initialization early in debug so that the
+ *   serial console will be available during boot up.  This must be called
+ *   before uart_serialinit.
+ *
+ *   NOTE: Configuration of the CONSOLE UART was performed by uart_lowsetup()
+ *   very early in the boot sequence.
+ *
+ ****************************************************************************/
+
+void u16550_earlyserialinit(void);
+
+/****************************************************************************
+ * Name: u16550_serialinit
+ *
+ * Description:
+ *   Register serial console and serial ports.  This assumes that
+ *   u16550_earlyserialinit was called previously.
+ *
+ ****************************************************************************/
+
+void u16550_serialinit(void);
+
+/****************************************************************************
+ * Name: u16550_bind
+ *
+ * Description:
+ *   Bind 16550 compatible device with this driver.
+ *
+ ****************************************************************************/
+
+int u16550_bind(FAR uart_dev_t *dev);
+
+/****************************************************************************
+ * Name: u16550_interrupt
+ *
+ * Description:
+ *   Handle UART 16550 interrupt.
+ *
+ ****************************************************************************/
+
+int u16550_interrupt(int irq, FAR void *context, FAR void *arg);
+
+/****************************************************************************
+ * Name: u16550_putc
+ *
+ * Description:
+ *   Write one character to the UART (polled)
+ *
+ ****************************************************************************/
+
+void u16550_putc(FAR struct u16550_s *priv, int ch);
+
+/****************************************************************************
  * Name: uart_getreg(), uart_putreg(), uart_ioctl()
  *
  * Description:
- *   These functions must be provided by the processor-specific code in order to
- *   correctly access 16550 registers
+ *   These functions must be provided by the processor-specific code in order
+ *   to correctly access 16550 registers
  *   uart_ioctl() is optional to provide custom IOCTLs
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifndef CONFIG_SERIAL_UART_ARCH_MMIO
-uart_datawidth_t uart_getreg(uart_addrwidth_t base, unsigned int offset);
-void uart_putreg(uart_addrwidth_t base, unsigned int offset, uart_datawidth_t value);
+uart_datawidth_t uart_getreg(FAR struct u16550_s *priv, unsigned int offset);
+void uart_putreg(FAR struct u16550_s *priv,
+                 unsigned int offset,
+                 uart_datawidth_t value);
 #endif
 
-struct file;  /* Forward reference */
-int uart_ioctl(struct file *filep, int cmd, unsigned long arg);
+int uart_ioctl(FAR struct u16550_s *priv, int cmd, unsigned long arg);
+
+struct dma_chan_s;
+FAR struct dma_chan_s *uart_dmachan(FAR struct u16550_s *priv,
+                                    unsigned int ident);
 
 #endif /* CONFIG_16550_UART */
 #endif /* __INCLUDE_NUTTX_SERIAL_UART_16550_H */

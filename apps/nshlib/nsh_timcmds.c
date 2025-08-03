@@ -1,35 +1,22 @@
 /****************************************************************************
- * apps/nshlib/dbg_timcmds.c
+ * apps/nshlib/nsh_timcmds.c
  *
- *   Copyright (C) 2011-2012, 2014, 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,10 +26,18 @@
 
 #include <nuttx/config.h>
 
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <strings.h>
 #include <unistd.h>
 #include <time.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+#include <nuttx/timers/rtc.h>
 
 #include "nsh.h"
 #include "nsh_console.h"
@@ -52,12 +47,6 @@
  ****************************************************************************/
 
 #define MAX_TIME_STRING 80
-
-#ifdef CONFIG_CLOCK_MONOTONIC
-#  define TIME_CLOCK CLOCK_MONOTONIC
-#else
-#  define TIME_CLOCK CLOCK_REALTIME
-#endif
 
 /****************************************************************************
  * Private Function Prototypes
@@ -99,6 +88,7 @@ static inline int date_month(FAR const char *abbrev)
           return i;
         }
     }
+
   return ERROR;
 }
 #endif
@@ -108,9 +98,10 @@ static inline int date_month(FAR const char *abbrev)
  ****************************************************************************/
 
 #ifndef CONFIG_NSH_DISABLE_DATE
-static inline int date_showtime(FAR struct nsh_vtbl_s *vtbl, FAR const char *name)
+static inline int date_showtime(FAR struct nsh_vtbl_s *vtbl,
+                                FAR const char *name, bool utc,
+                                FAR const char *format)
 {
-  static const char format[] = "%a, %b %d %H:%M:%S %Y";
   struct timespec ts;
   struct tm tm;
   char timbuf[MAX_TIME_STRING];
@@ -127,10 +118,21 @@ static inline int date_showtime(FAR struct nsh_vtbl_s *vtbl, FAR const char *nam
 
   /* Break the current time up into the format needed by strftime */
 
-  if (gmtime_r((FAR const time_t*)&ts.tv_sec, &tm) == NULL)
+  if (utc)
     {
-      nsh_error(vtbl, g_fmtcmdfailed, name, "gmtime_r", NSH_ERRNO);
-      return ERROR;
+      if (gmtime_r((FAR const time_t *)&ts.tv_sec, &tm) == NULL)
+        {
+          nsh_error(vtbl, g_fmtcmdfailed, name, "gmtime_r", NSH_ERRNO);
+          return ERROR;
+        }
+    }
+  else
+    {
+      if (localtime_r((FAR const time_t *)&ts.tv_sec, &tm) == NULL)
+        {
+          nsh_error(vtbl, g_fmtcmdfailed, name, "localtime_r", NSH_ERRNO);
+          return ERROR;
+        }
     }
 
   /* Show the current time in the requested format */
@@ -152,7 +154,8 @@ static inline int date_showtime(FAR struct nsh_vtbl_s *vtbl, FAR const char *nam
  ****************************************************************************/
 
 #ifndef CONFIG_NSH_DISABLE_DATE
-static inline int date_settime(FAR struct nsh_vtbl_s *vtbl, FAR const char *name,
+static inline int date_settime(FAR struct nsh_vtbl_s *vtbl,
+                               FAR const char *name, bool utc,
                                FAR char *newtime)
 {
   struct timespec ts;
@@ -165,9 +168,10 @@ static inline int date_settime(FAR struct nsh_vtbl_s *vtbl, FAR const char *name
   memset(&tm, 0, sizeof(tm));
 
   /* Only this date format is supported: MMM DD HH:MM:SS YYYY */
+
   /* Get the month abbreviation */
 
-  token = strtok_r(newtime, " \t",&saveptr);
+  token = strtok_r(newtime, " \t", &saveptr);
   if (token == NULL)
     {
       goto errout_bad_parm;
@@ -179,9 +183,11 @@ static inline int date_settime(FAR struct nsh_vtbl_s *vtbl, FAR const char *name
       goto errout_bad_parm;
     }
 
-  /* Get the day of the month.  NOTE: Accepts day-of-month up to 31 for all months */
+  /* Get the day of the month.
+   * NOTE: Accepts day-of-month up to 31 for all months
+   */
 
-  token = strtok_r(NULL, " \t",&saveptr);
+  token = strtok_r(NULL, " \t", &saveptr);
   if (token == NULL)
     {
       goto errout_bad_parm;
@@ -261,7 +267,7 @@ static inline int date_settime(FAR struct nsh_vtbl_s *vtbl, FAR const char *name
 
   /* Convert this to the right form, then set the timer */
 
-  ts.tv_sec  = mktime(&tm);
+  ts.tv_sec  = utc ? timegm(&tm): mktime(&tm);
   ts.tv_nsec = 0;
 
   ret = clock_settime(CLOCK_REALTIME, &ts);
@@ -288,24 +294,25 @@ errout_bad_parm:
  ****************************************************************************/
 
 #ifndef CONFIG_NSH_DISABLE_TIME
-int cmd_time(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
+int cmd_time(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
+  UNUSED(argc);
+
   struct timespec start;
 #ifndef CONFIG_NSH_DISABLEBG
   bool bgsave;
 #endif
-#if CONFIG_NFILE_STREAMS > 0
-  bool redirsave;
-#endif
+  bool redirsave_out;
+  bool redirsave_in;
   int ret;
 
   /* Get the current time */
 
-  ret = clock_gettime(TIME_CLOCK, &start);
+  ret = clock_gettime(CLOCK_MONOTONIC, &start);
   if (ret < 0)
     {
-       nsh_error(vtbl, g_fmtcmdfailed, argv[0], "clock_gettime", NSH_ERRNO);
-       return ERROR;
+      nsh_error(vtbl, g_fmtcmdfailed, argv[0], "clock_gettime", NSH_ERRNO);
+      return ERROR;
     }
 
   /* Save state */
@@ -313,9 +320,8 @@ int cmd_time(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 #ifndef CONFIG_NSH_DISABLEBG
   bgsave    = vtbl->np.np_bg;
 #endif
-#if CONFIG_NFILE_STREAMS > 0
-  redirsave = vtbl->np.np_redirect;
-#endif
+  redirsave_out = vtbl->np.np_redir_out;
+  redirsave_in = vtbl->np.np_redir_in;
 
   /* Execute the command */
 
@@ -327,10 +333,11 @@ int cmd_time(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 
       /* Get and print the elapsed time */
 
-      ret = clock_gettime(TIME_CLOCK, &end);
+      ret = clock_gettime(CLOCK_MONOTONIC, &end);
       if (ret < 0)
         {
-           nsh_error(vtbl, g_fmtcmdfailed, argv[0], "clock_gettime", NSH_ERRNO);
+           nsh_error(vtbl, g_fmtcmdfailed,
+                     argv[0], "clock_gettime", NSH_ERRNO);
            ret = ERROR;
         }
       else
@@ -353,9 +360,8 @@ int cmd_time(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 #ifndef CONFIG_NSH_DISABLEBG
   vtbl->np.np_bg       = bgsave;
 #endif
-#if CONFIG_NFILE_STREAMS > 0
-  vtbl->np.np_redirect = redirsave;
-#endif
+  vtbl->np.np_redir_out = redirsave_out;
+  vtbl->np.np_redir_out = redirsave_in;
 
   return ret;
 }
@@ -366,17 +372,18 @@ int cmd_time(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
  ****************************************************************************/
 
 #ifndef CONFIG_NSH_DISABLE_DATE
-int cmd_date(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
+int cmd_date(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
   FAR char *newtime = NULL;
+  FAR const char *format = "%a, %b %d %H:%M:%S %Y";
   FAR const char *errfmt;
-  bool badarg = false;
+  bool utc = false;
   int option;
   int ret;
 
   /* Get the date options:  date [-s time] [+FORMAT] */
 
-  while ((option = getopt(argc, argv, "s:")) != ERROR)
+  while ((option = getopt(argc, argv, "s:u")) != ERROR)
     {
       if (option == 's')
         {
@@ -384,27 +391,34 @@ int cmd_date(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 
           newtime = optarg;
         }
+      else if (option == 'u')
+        {
+          /* We will use the UTC time */
+
+          utc = true;
+        }
       else /* option = '?' */
         {
-          /* We need to parse to the end anyway so that getopt stays healthy */
-
-          badarg = true;
+          errfmt = g_fmtarginvalid;
+          goto errout;
         }
-   }
-
-  /* If a bad argument was encountered then exit with an error */
-
-  if (badarg)
-    {
-      errfmt = g_fmtarginvalid;
-      goto errout;
     }
 
-  /* optind < argc-1 means that there are additional, unexpected arguments on
+  argc -= optind;
+
+  /* Display the time according to the format we set */
+
+  if (argv[optind] && *argv[optind] == '+')
+    {
+      format = argv[optind] + 1;
+      argc--;
+    }
+
+  /* argc > 0 means that there are additional, unexpected arguments on
    * th command-line
    */
 
-  if (optind < argc)
+  if (argc > 0)
     {
       errfmt = g_fmttoomanyargs;
       goto errout;
@@ -414,17 +428,191 @@ int cmd_date(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
 
   if (newtime)
     {
-      ret = date_settime(vtbl, argv[0], newtime);
+      ret = date_settime(vtbl, argv[0], utc, newtime);
     }
   else
     {
-      ret = date_showtime(vtbl, argv[0]);
+      ret = date_showtime(vtbl, argv[0], utc, format);
     }
 
   return ret;
 
 errout:
+  optind = 0;
   nsh_error(vtbl, errfmt, argv[0]);
   return ERROR;
+}
+#endif
+
+/****************************************************************************
+ * Name: cmd_timedatectl
+ ****************************************************************************/
+
+#ifndef CONFIG_NSH_DISABLE_TIMEDATECTL
+int cmd_timedatectl(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+{
+  char timbuf[MAX_TIME_STRING];
+  FAR char *newtz = NULL;
+  struct timespec ts;
+  struct tm tm;
+  int ret;
+
+  if (argc == 3 && strcmp(argv[1], "set-timezone") == 0)
+    {
+      newtz = argv[2];
+    }
+
+  /* Display or set the timedatectl */
+
+  if (newtz)
+    {
+      ret = setenv("TZ", newtz, true);
+      if (ret != 0)
+        {
+          nsh_error(vtbl, g_fmtcmdfailed, argv[0], "setenv", NSH_ERRNO);
+          return ERROR;
+        }
+
+      tzset();
+    }
+  else
+    {
+      ret = clock_gettime(CLOCK_REALTIME, &ts);
+      if (ret < 0)
+        {
+          nsh_error(vtbl, g_fmtcmdfailed, argv[0], "clock_gettime",
+                    NSH_ERRNO);
+          return ERROR;
+        }
+
+      if (localtime_r((FAR const time_t *)&ts.tv_sec, &tm) == NULL)
+        {
+          nsh_error(vtbl, g_fmtcmdfailed, argv[0], "localtime_r", NSH_ERRNO);
+          return ERROR;
+        }
+
+      /* Show the current time in the requested format */
+
+      ret = strftime(timbuf, MAX_TIME_STRING, "%a, %b %d %H:%M:%S %Y", &tm);
+      if (ret < 0)
+        {
+          nsh_error(vtbl, g_fmtcmdfailed, argv[0], "strftime", NSH_ERRNO);
+          return ERROR;
+        }
+
+      nsh_output(vtbl, "      TimeZone: %s, %ld\n", tm.tm_zone,
+                 tm.tm_gmtoff);
+      nsh_output(vtbl, "    Local time: %s %s\n", timbuf, tm.tm_zone);
+
+      if (gmtime_r((FAR const time_t *)&ts.tv_sec, &tm) == NULL)
+        {
+          nsh_error(vtbl, g_fmtcmdfailed, argv[0], "gmtime_r", NSH_ERRNO);
+          return ERROR;
+        }
+
+      /* Show the current time in the requested format */
+
+      ret = strftime(timbuf, MAX_TIME_STRING, "%a, %b %d %H:%M:%S %Y", &tm);
+      if (ret < 0)
+        {
+          nsh_error(vtbl, g_fmtcmdfailed, argv[0], "strftime", NSH_ERRNO);
+          return ERROR;
+        }
+
+      nsh_output(vtbl, "Universal time: %s %s\n", timbuf, tm.tm_zone);
+
+#ifdef CONFIG_RTC_DRIVER
+      ret = open("/dev/rtc0", O_RDONLY);
+      if (ret > 0)
+        {
+          struct rtc_time rtctime;
+
+          ioctl(ret, RTC_RD_TIME, &rtctime);
+          close(ret);
+
+          /* Show the current time in the requested format */
+
+          ret = strftime(timbuf, MAX_TIME_STRING, "%a, %b %d %H:%M:%S %Y",
+                         (FAR struct tm *)&rtctime);
+          if (ret < 0)
+            {
+              nsh_error(vtbl, g_fmtcmdfailed, argv[0], "strftime",
+                        NSH_ERRNO);
+              return ERROR;
+            }
+
+          nsh_output(vtbl, "      RTC time: %s\n", timbuf);
+        }
+#endif /* CONFIG_RTC_DRIVER */
+    }
+
+  return ret;
+}
+#endif
+
+#ifndef CONFIG_NSH_DISABLE_WATCH
+int cmd_watch(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
+{
+  int interval = 2;
+  int count = -1;
+  FAR char *cmd;
+  int option;
+  int ret;
+  int i;
+
+  while ((option = getopt(argc, argv, "n:c:")) != ERROR)
+    {
+      switch (option)
+        {
+          case 'n':
+            interval = atoi(optarg);
+            break;
+
+          case 'c':
+            count = atoi(optarg);
+            break;
+
+          default:
+            nsh_error(vtbl, g_fmtarginvalid, argv[0]);
+            return ERROR;
+        }
+    }
+
+  if (optind < argc)
+    {
+      cmd = argv[optind];
+    }
+  else
+    {
+      nsh_error(vtbl, g_fmtarginvalid, argv[0]);
+      return ERROR;
+    }
+
+  if (count < 0)
+    {
+      count = INT_MAX;
+    }
+
+  for (i = 0; i < count; i++)
+    {
+      FAR char *buffer = lib_get_tempbuffer(LINE_MAX);
+      if (buffer == NULL)
+        {
+          return ERROR;
+        }
+
+      strlcpy(buffer, cmd, LINE_MAX);
+      ret = nsh_parse(vtbl, buffer);
+      lib_put_tempbuffer(buffer);
+      if (ret < 0)
+        {
+          nsh_error(vtbl, g_fmtcmdfailed, argv[0], cmd, NSH_ERRNO);
+          return ERROR;
+        }
+
+      sleep(interval);
+    }
+
+  return OK;
 }
 #endif

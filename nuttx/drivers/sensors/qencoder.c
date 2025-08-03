@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/sensors/qencoder.c
  *
- *   Copyright (C) 2012-2013, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -53,7 +40,7 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/arch.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 #include <nuttx/sensors/qencoder.h>
 
 #include <arch/irq.h>
@@ -61,13 +48,7 @@
 #ifdef CONFIG_SENSORS_QENCODER
 
 /****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-/* Debug ********************************************************************/
-
-/****************************************************************************
- * Private Type Definitions
+ * Private Types
  ****************************************************************************/
 
 /* This structure describes the state of the upper half driver */
@@ -75,7 +56,7 @@
 struct qe_upperhalf_s
 {
   uint8_t                    crefs;    /* The number of times the device has been opened */
-  sem_t                      exclsem;  /* Supports mutual exclusion */
+  mutex_t                    lock;     /* Supports mutual exclusion */
   FAR struct qe_lowerhalf_s *lower;    /* lower-half state */
 };
 
@@ -103,20 +84,19 @@ static const struct file_operations g_qeops =
   qe_write, /* write */
   NULL,     /* seek */
   qe_ioctl, /* ioctl */
-  NULL      /* poll */
 };
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
-/************************************************************************************
+/****************************************************************************
  * Name: qe_open
  *
  * Description:
  *   This function is called whenever the QEncoder device is opened.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 static int qe_open(FAR struct file *filep)
 {
@@ -129,7 +109,7 @@ static int qe_open(FAR struct file *filep)
 
   /* Get exclusive access to the device structures */
 
-  ret = nxsem_wait(&upper->exclsem);
+  ret = nxmutex_lock(&upper->lock);
   if (ret < 0)
     {
       goto errout;
@@ -146,7 +126,7 @@ static int qe_open(FAR struct file *filep)
       /* More than 255 opens; uint8_t overflows to zero */
 
       ret = -EMFILE;
-      goto errout_with_sem;
+      goto errout_with_lock;
     }
 
   /* Check if this is the first time that the driver has been opened. */
@@ -163,7 +143,7 @@ static int qe_open(FAR struct file *filep)
       ret = lower->ops->setup(lower);
       if (ret < 0)
         {
-          goto errout_with_sem;
+          goto errout_with_lock;
         }
     }
 
@@ -172,20 +152,20 @@ static int qe_open(FAR struct file *filep)
   upper->crefs = tmp;
   ret = OK;
 
-errout_with_sem:
-  nxsem_post(&upper->exclsem);
+errout_with_lock:
+  nxmutex_unlock(&upper->lock);
 
 errout:
   return ret;
 }
 
-/************************************************************************************
+/****************************************************************************
  * Name: qe_close
  *
  * Description:
  *   This function is called when the QEncoder device is closed.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 static int qe_close(FAR struct file *filep)
 {
@@ -197,7 +177,7 @@ static int qe_close(FAR struct file *filep)
 
   /* Get exclusive access to the device structures */
 
-  ret = nxsem_wait(&upper->exclsem);
+  ret = nxmutex_lock(&upper->lock);
   if (ret < 0)
     {
       goto errout;
@@ -222,55 +202,60 @@ static int qe_close(FAR struct file *filep)
       /* Disable the QEncoder device */
 
       DEBUGASSERT(lower->ops->shutdown != NULL);
-      sninfo("calling shutdown: %d\n");
+      sninfo("calling shutdown\n");
 
       lower->ops->shutdown(lower);
     }
 
-  nxsem_post(&upper->exclsem);
+  nxmutex_unlock(&upper->lock);
   ret = OK;
 
 errout:
   return ret;
 }
 
-/************************************************************************************
+/****************************************************************************
  * Name: qe_read
  *
  * Description:
  *   A dummy read method.  This is provided only to satisfy the VFS layer.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
-static ssize_t qe_read(FAR struct file *filep, FAR char *buffer, size_t buflen)
+static ssize_t qe_read(FAR struct file *filep,
+                       FAR char *buffer,
+                       size_t buflen)
 {
   /* Return zero -- usually meaning end-of-file */
 
   return 0;
 }
 
-/************************************************************************************
+/****************************************************************************
  * Name: qe_write
  *
  * Description:
  *   A dummy write method.  This is provided only to satisfy the VFS layer.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
-static ssize_t qe_write(FAR struct file *filep, FAR const char *buffer, size_t buflen)
+static ssize_t qe_write(FAR struct file *filep,
+                        FAR const char *buffer,
+                        size_t buflen)
 {
   /* Return a failure */
 
   return -EPERM;
 }
 
-/************************************************************************************
+/****************************************************************************
  * Name: qe_ioctl
  *
  * Description:
- *   The standard ioctl method.  This is where ALL of the QEncoder work is done.
+ *   The standard ioctl method.
+ *   This is where ALL of the QEncoder work is done.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 static int qe_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
@@ -287,7 +272,7 @@ static int qe_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Get exclusive access to the device structures */
 
-  ret = nxsem_wait(&upper->exclsem);
+  ret = nxmutex_lock(&upper->lock);
   if (ret < 0)
     {
       return ret;
@@ -320,7 +305,45 @@ static int qe_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         }
         break;
 
-      /* Any unrecognized IOCTL commands might be platform-specific ioctl commands */
+      /* QEIOC_SETPOSMAX - Set the maximum encoder position.
+       *   Argument: uint32
+       */
+
+      case QEIOC_SETPOSMAX:
+        {
+          uint32_t maxpos = (uint32_t)arg;
+          if (lower->ops->setposmax != NULL)
+            {
+              ret = lower->ops->setposmax(lower, maxpos);
+            }
+          else
+            {
+              ret = -ENOTTY;
+            }
+        }
+        break;
+
+      /* QEIOC_SETINDEX - Set the index pin position
+       *   Argument: uint32
+       */
+
+      case QEIOC_SETINDEX:
+        {
+          uint32_t indexpos = (uint32_t)arg;
+          if (lower->ops->setindex != NULL)
+            {
+              ret = lower->ops->setindex(lower, indexpos);
+            }
+          else
+            {
+              ret = -ENOTTY;
+            }
+        }
+        break;
+
+      /* Any unrecognized IOCTL commands might be platform-specific ioctl
+       * commands
+       */
 
       default:
         {
@@ -331,7 +354,7 @@ static int qe_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         break;
     }
 
-  nxsem_post(&upper->exclsem);
+  nxmutex_unlock(&upper->lock);
   return ret;
 }
 
@@ -366,16 +389,19 @@ int qe_register(FAR const char *devpath, FAR struct qe_lowerhalf_s *lower)
 
   /* Allocate the upper-half data structure */
 
-  upper = (FAR struct qe_upperhalf_s *)kmm_zalloc(sizeof(struct qe_upperhalf_s));
+  upper = (FAR struct qe_upperhalf_s *)
+           kmm_zalloc(sizeof(struct qe_upperhalf_s));
   if (!upper)
     {
       snerr("ERROR: Allocation failed\n");
       return -ENOMEM;
     }
 
-  /* Initialize the QEncoder device structure (it was already zeroed by kmm_zalloc()) */
+  /* Initialize the QEncoder device structure
+   * (it was already zeroed by kmm_zalloc())
+   */
 
-  nxsem_init(&upper->exclsem, 0, 1);
+  nxmutex_init(&upper->lock);
   upper->lower = lower;
 
   /* Register the QEncoder device */

@@ -1,19 +1,10 @@
 /****************************************************************************
  * arch/arm/src/samv7/sam_freerun.c
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * References:
- *
- *   SAMV71 Series Data Sheet
- *   NuttX SAMA5 free-running timer driver
- *   Atmel NoOS sample code for the SAMA5D3.
- *
- * The Atmel sample code has a BSD compatible license that requires this
- * copyright notice:
- *
- *   Copyright (c) 2011, Atmel Corporation
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2015 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2011 Atmel Corporation
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,6 +35,13 @@
  *
  ****************************************************************************/
 
+/* References:
+ *
+ *   SAMV71 Series Data Sheet
+ *   NuttX SAMA5 free-running timer driver
+ *   Atmel NoOS sample code for the SAMA5D3.
+ */
+
 /****************************************************************************
  * Included Files
  ****************************************************************************/
@@ -67,7 +65,7 @@
  * Private Functions
  ****************************************************************************/
 
- /****************************************************************************
+/****************************************************************************
  * Name: sam_freerun_handler
  *
  * Description:
@@ -129,7 +127,7 @@ int sam_freerun_initialize(struct sam_freerun_s *freerun, int chan,
 
   /* Get the TC frequency the corresponds to the requested resolution */
 
-  frequency = USEC_PER_SEC / (uint32_t)resolution;
+  frequency = USEC_PER_SEC / resolution;
 
   /* The pre-calculate values to use when we start the timer */
 
@@ -154,7 +152,7 @@ int sam_freerun_initialize(struct sam_freerun_s *freerun, int chan,
    *   TC_CMR_EEVTEDG_NONE - No external events (and, hence, no edges
    *   TC_CMR_EEVT_TIOB    - ???? REVISIT
    *   TC_CMR_ENET=0       - External event trigger disabled
-   *   TC_CMR_WAVSEL_UP    - TC_CV is incremented from 0 to 0xffffffff
+   *   TC_CMR_WAVSEL_UP    - TC_CV is incremented from 0 to 0xffff
    *   TC_CMR_WAVE         - Waveform mode
    *   TC_CMR_ACPA_NONE    - RA compare has no effect on TIOA
    *   TC_CMR_ACPC_NONE    - RC compare has no effect on TIOA
@@ -184,13 +182,11 @@ int sam_freerun_initialize(struct sam_freerun_s *freerun, int chan,
    */
 
   freerun->chan     = chan;
-  freerun->running  = false;
   freerun->overflow = 0;
 
   /* Set up to receive the callback when the counter overflow occurs */
 
-  sam_tc_attach(freerun->tch, sam_freerun_handler, freerun,
-                TC_INT_COVFS);
+  sam_tc_attach(freerun->tch, sam_freerun_handler, freerun, TC_INT_COVFS);
 
   /* Start the counter */
 
@@ -220,17 +216,18 @@ int sam_freerun_initialize(struct sam_freerun_s *freerun, int chan,
 int sam_freerun_counter(struct sam_freerun_s *freerun, struct timespec *ts)
 {
   uint64_t usec;
-  uint32_t counter;
-  uint32_t verify;
   uint32_t sr;
   uint32_t overflow;
   uint32_t sec;
+  uint16_t counter;
+  uint16_t verify;
   irqstate_t flags;
 
   DEBUGASSERT(freerun && freerun->tch && ts);
 
-  /* Temporarily disable the overflow counter.  NOTE that we have to be careful
-   * here because  sam_tc_getpending() will reset the pending interrupt status.
+  /* Temporarily disable the overflow counter.
+   * NOTE that we have to be careful here because  sam_tc_getpending()
+   * will reset the pending interrupt status.
    * If we do not handle the overflow here then, it will be lost.
    */
 
@@ -309,7 +306,7 @@ int sam_freerun_uninitialize(struct sam_freerun_s *freerun)
 
   /* Now we can disable the timer interrupt and disable the timer. */
 
-  sam_tc_attach(freerun->tch, NULL, NULL, 0);
+  sam_tc_detach(freerun->tch);
   sam_tc_stop(freerun->tch);
 
   /* Free the timer */

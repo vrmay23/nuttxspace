@@ -1,9 +1,10 @@
 /****************************************************************************
  * arch/arm/src/stm32l4/stm32l4_pmlpr.c
  *
- *   Copyright (C) 2012, 2017 Gregory Nutt. All rights reserved.
- *   Copyright (C) 2015 Motorola Mobility, LLC. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2012, 2017 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2015 Motorola Mobility LLC. All rights reserved.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -42,7 +43,7 @@
 
 #include <stdbool.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "nvic.h"
 #include "stm32l4_pwr.h"
 #include "stm32l4_pm.h"
@@ -62,9 +63,9 @@
  *   None
  *
  * Returned Value:
- *   Zero means that LPR was successfully entered. Otherwise, LPR mode was not
- *   entered and a negated errno value is returned to indicate the cause of the
- *   failure.
+ *   Zero means that LPR was successfully entered. Otherwise, LPR mode was
+ *   not entered and a negated errno value is returned to indicate the cause
+ *   of the failure.
  *
  ****************************************************************************/
 
@@ -93,7 +94,8 @@ int stm32l4_pmlpr(void)
 
   /* Wait until the MSI source is used as the system clock source */
 
-  while ((getreg32(STM32L4_RCC_CFGR) & RCC_CFGR_SWS_MASK) != RCC_CFGR_SWS_MSI)
+  while ((getreg32(STM32L4_RCC_CFGR) & RCC_CFGR_SWS_MASK) !=
+          RCC_CFGR_SWS_MSI)
     {
     }
 

@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/cxd56xx/cxd56_icc.c
  *
- *   Copyright 2018 Sony Semiconductor Solutions Corporation
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
- *    the names of its contributors may be used to endorse or promote
- *    products derived from this software without specific prior written
- *    permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,16 +29,18 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/irq.h>
+#include <nuttx/queue.h>
+#include <nuttx/signal.h>
 #include <nuttx/semaphore.h>
 
-#include <queue.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "chip.h"
 #include "cxd56_cpufifo.h"
 #include "cxd56_icc.h"
@@ -120,17 +109,17 @@ struct iccdev_s
     cxd56_iccsighandler_t sighandler;
   } u;
 
-  FAR void *userdata;
+  void *userdata;
   sem_t rxwait;
-  WDOG_ID rxtimeout;
+  struct wdog_s rxtimeout;
 
   int flags;
 
   /* for POSIX signal */
 
   int signo;
-  int pid;
-  FAR void *sigdata;
+  pid_t pid;
+  void *sigdata;
 
   struct sq_queue_s recvq;
   struct sq_queue_s freelist;
@@ -142,9 +131,9 @@ struct iccdev_s
  ****************************************************************************/
 
 static int icc_sighandler(int cpuid, int protoid, uint32_t pdata,
-                          uint32_t data, FAR void *userdata);
+                          uint32_t data, void *userdata);
 static int icc_msghandler(int cpuid, int protoid, uint32_t pdata,
-                          uint32_t data, FAR void *userdata);
+                          uint32_t data, void *userdata);
 static int icc_irqhandler(int cpuid, uint32_t word[2]);
 
 /****************************************************************************
@@ -158,17 +147,7 @@ static struct iccdev_s *g_cpumsg[NCPUS];
  * Private Functions
  ****************************************************************************/
 
-static int icc_semtake(sem_t *semid)
-{
-  return nxsem_wait_uninterruptible(semid);
-}
-
-static void icc_semgive(sem_t *semid)
-{
-  nxsem_post(semid);
-}
-
-static FAR struct iccdev_s *icc_getprotocol(int protoid)
+static struct iccdev_s *icc_getprotocol(int protoid)
 {
   if (protoid < 0 || protoid >= NPROTOCOLS)
     {
@@ -178,7 +157,7 @@ static FAR struct iccdev_s *icc_getprotocol(int protoid)
   return g_protocol[protoid];
 }
 
-static FAR struct iccdev_s *icc_getcpu(int cpuid)
+static struct iccdev_s *icc_getcpu(int cpuid)
 {
   if (cpuid < 0 || cpuid >= NCPUS)
     {
@@ -190,8 +169,8 @@ static FAR struct iccdev_s *icc_getcpu(int cpuid)
 
 static int icc_irqhandler(int cpuid, uint32_t word[2])
 {
-  FAR struct iccdev_s *priv;
-  FAR struct iccreq_s *req;
+  struct iccdev_s *priv;
+  struct iccreq_s *req;
   int protoid;
 
   protoid = GET_PROTOCOLID(word);
@@ -230,7 +209,7 @@ static int icc_irqhandler(int cpuid, uint32_t word[2])
         }
     }
 
-  req = (FAR struct iccreq_s *)sq_remfirst(&priv->freelist);
+  req = (struct iccreq_s *)sq_remfirst(&priv->freelist);
   if (!req)
     {
       iccerr("Receive buffer is full.\n");
@@ -240,31 +219,29 @@ static int icc_irqhandler(int cpuid, uint32_t word[2])
   req->word[0] = word[0];
   req->word[1] = word[1];
 
-  sq_addlast((FAR sq_entry_t *)req, &priv->recvq);
+  sq_addlast((sq_entry_t *)req, &priv->recvq);
 
-  icc_semgive(&priv->rxwait);
+  nxsem_post(&priv->rxwait);
 
   /* If signal registered by cxd56_iccnotify(), then send POSIX signal to
    * process.
    */
 
-#ifndef CONFIG_DISABLE_SIGNAL
   if (priv->pid != INVALID_PROCESS_ID)
     {
       union sigval value;
 
       value.sival_ptr = priv->sigdata;
-      sigqueue(priv->pid, priv->signo, value);
+      nxsig_queue(priv->pid, priv->signo, value);
     }
-#endif
 
   return OK;
 }
 
 static int icc_sighandler(int cpuid, int protoid, uint32_t pdata,
-                          uint32_t data, FAR void *userdata)
+                          uint32_t data, void *userdata)
 {
-  FAR struct iccdev_s *priv = icc_getcpu(cpuid);
+  struct iccdev_s *priv = icc_getcpu(cpuid);
 
   if (!priv)
     {
@@ -292,7 +269,7 @@ static int icc_sighandler(int cpuid, int protoid, uint32_t pdata,
 }
 
 static int icc_msghandler(int cpuid, int protoid, uint32_t pdata,
-                               uint32_t data, FAR void *userdata)
+                          uint32_t data, void *userdata)
 {
   /* Do nothing. This handler used for reserve MSG protocol handler.
    * This handler returns -1 to indicate not consumed the passed
@@ -302,35 +279,44 @@ static int icc_msghandler(int cpuid, int protoid, uint32_t pdata,
   return -1;
 }
 
-static void icc_rxtimeout(int argc, uint32_t arg, ...)
+static void icc_rxtimeout(wdparm_t arg)
 {
-  FAR struct iccdev_s *priv = (FAR struct iccdev_s *)arg;
-  icc_semgive(&priv->rxwait);
+  struct iccdev_s *priv = (struct iccdev_s *)arg;
+  nxsem_post(&priv->rxwait);
 }
 
-static int icc_recv(FAR struct iccdev_s *priv, FAR iccmsg_t *msg, int32_t ms)
+static int icc_recv(struct iccdev_s *priv, iccmsg_t *msg, int32_t ms)
 {
-  FAR struct iccreq_s *req;
+  struct iccreq_s *req;
   irqstate_t flags;
   int ret = OK;
 
-  if (ms)
+  if (ms == -1)
+    {
+      /* Try to take the semaphore without waiging. */
+
+      ret = nxsem_trywait(&priv->rxwait);
+      if (ret < 0)
+        {
+          return ret;
+        }
+    }
+  else if (ms == 0)
+    {
+      nxsem_wait_uninterruptible(&priv->rxwait);
+    }
+  else
     {
       int32_t timo;
       timo = ms * 1000 / CONFIG_USEC_PER_TICK;
-      wd_start(priv->rxtimeout, timo, icc_rxtimeout, 1, (uint32_t)priv);
-    }
+      wd_start(&priv->rxtimeout, timo, icc_rxtimeout, (wdparm_t)priv);
 
-  ret = icc_semtake(&priv->rxwait);
-  if (ret < 0)
-    {
-      return ret;
+      nxsem_wait_uninterruptible(&priv->rxwait);
+      wd_cancel(&priv->rxtimeout);
     }
-
-  wd_cancel(priv->rxtimeout);
 
   flags = enter_critical_section();
-  req   = (FAR struct iccreq_s *)sq_remfirst(&priv->recvq);
+  req   = (struct iccreq_s *)sq_remfirst(&priv->recvq);
 
   if (req)
     {
@@ -338,7 +324,7 @@ static int icc_recv(FAR struct iccdev_s *priv, FAR iccmsg_t *msg, int32_t ms)
       msg->data  = req->msg.data;
       msg->cpuid = req->msg.cpuid;
       msg->protodata = req->msg.pdata;
-      sq_addlast((FAR sq_entry_t *)req, &priv->freelist);
+      sq_addlast((sq_entry_t *)req, &priv->freelist);
     }
   else
     {
@@ -350,20 +336,18 @@ static int icc_recv(FAR struct iccdev_s *priv, FAR iccmsg_t *msg, int32_t ms)
   return ret;
 }
 
-static FAR struct iccdev_s *icc_devnew(void)
+static struct iccdev_s *icc_devnew(void)
 {
-  FAR struct iccdev_s *priv;
+  struct iccdev_s *priv;
   int i;
 
-  priv = (struct iccdev_s *)kmm_malloc(sizeof(struct iccdev_s));
+  priv = kmm_malloc(sizeof(struct iccdev_s));
   if (!priv)
     {
       return NULL;
     }
 
   memset(priv, 0, sizeof(struct iccdev_s));
-
-  priv->rxtimeout = wd_create();
 
   nxsem_init(&priv->rxwait, 0, 0);
 
@@ -374,7 +358,7 @@ static FAR struct iccdev_s *icc_devnew(void)
 
   for (i = 0; i < NBUFFERS; i++)
     {
-      sq_addlast((FAR sq_entry_t *)&priv->pool[i], &priv->freelist);
+      sq_addlast((sq_entry_t *)&priv->pool[i], &priv->freelist);
     }
 
   priv->pid = INVALID_PROCESS_ID;
@@ -382,9 +366,9 @@ static FAR struct iccdev_s *icc_devnew(void)
   return priv;
 }
 
-static void icc_devfree(FAR struct iccdev_s *priv)
+static void icc_devfree(struct iccdev_s *priv)
 {
-  wd_delete(priv->rxtimeout);
+  wd_cancel(&priv->rxtimeout);
   kmm_free(priv);
 }
 
@@ -393,9 +377,9 @@ static void icc_devfree(FAR struct iccdev_s *priv)
  ****************************************************************************/
 
 int cxd56_iccregisterhandler(int protoid, cxd56_icchandler_t handler,
-                             FAR void *data)
+                             void *data)
 {
-  FAR struct iccdev_s *priv;
+  struct iccdev_s *priv;
   irqstate_t flags;
   int ret = OK;
 
@@ -417,9 +401,9 @@ int cxd56_iccregisterhandler(int protoid, cxd56_icchandler_t handler,
 }
 
 int cxd56_iccregistersighandler(int cpuid, cxd56_iccsighandler_t handler,
-                                FAR void *data)
+                                void *data)
 {
-  FAR struct iccdev_s *priv;
+  struct iccdev_s *priv;
   irqstate_t flags;
   int ret = OK;
 
@@ -440,9 +424,9 @@ int cxd56_iccregistersighandler(int cpuid, cxd56_iccsighandler_t handler,
   return ret;
 }
 
-int cxd56_iccsend(int protoid, FAR iccmsg_t *msg, int32_t ms)
+int cxd56_iccsend(int protoid, iccmsg_t *msg, int32_t ms)
 {
-  FAR struct iccdev_s *priv;
+  struct iccdev_s *priv;
   struct iccreq_s req;
 
   if (!msg)
@@ -467,14 +451,14 @@ int cxd56_iccsend(int protoid, FAR iccmsg_t *msg, int32_t ms)
   return cxd56_cfpush(req.word);
 }
 
-int cxd56_iccsendmsg(FAR iccmsg_t *msg, int32_t ms)
+int cxd56_iccsendmsg(iccmsg_t *msg, int32_t ms)
 {
   return cxd56_iccsend(CXD56_PROTO_MSG, msg, ms);
 }
 
-int cxd56_iccrecv(int protoid, FAR iccmsg_t *msg, int32_t ms)
+int cxd56_iccrecv(int protoid, iccmsg_t *msg, int32_t ms)
 {
-  FAR struct iccdev_s *priv;
+  struct iccdev_s *priv;
 
   if (!msg)
     {
@@ -490,9 +474,9 @@ int cxd56_iccrecv(int protoid, FAR iccmsg_t *msg, int32_t ms)
   return icc_recv(priv, msg, ms);
 }
 
-int cxd56_iccrecvmsg(FAR iccmsg_t *msg, int32_t ms)
+int cxd56_iccrecvmsg(iccmsg_t *msg, int32_t ms)
 {
-  FAR struct iccdev_s *priv;
+  struct iccdev_s *priv;
 
   if (!msg)
     {
@@ -513,7 +497,7 @@ int cxd56_iccsignal(int8_t cpuid, int8_t signo, int16_t sigdata,
 {
   struct iccreq_s req;
 
-  if (cpuid <= 2 && cpuid >= 7)
+  if (cpuid <= 2 || cpuid >= 7)
     {
       return -EINVAL;
     }
@@ -527,9 +511,9 @@ int cxd56_iccsignal(int8_t cpuid, int8_t signo, int16_t sigdata,
   return cxd56_cfpush(req.word);
 }
 
-int cxd56_iccnotify(int cpuid, int signo, FAR void *sigdata)
+int cxd56_iccnotify(int cpuid, int signo, void *sigdata)
 {
-  FAR struct iccdev_s *priv;
+  struct iccdev_s *priv;
 
   priv = icc_getcpu(cpuid);
   if (!priv)
@@ -537,7 +521,7 @@ int cxd56_iccnotify(int cpuid, int signo, FAR void *sigdata)
       return -ESRCH;
     }
 
-  priv->pid     = getpid();
+  priv->pid     = nxsched_getpid();
   priv->signo   = signo;
   priv->sigdata = sigdata;
 
@@ -546,7 +530,7 @@ int cxd56_iccnotify(int cpuid, int signo, FAR void *sigdata)
 
 int cxd56_iccinit(int protoid)
 {
-  FAR struct iccdev_s *priv;
+  struct iccdev_s *priv;
 
   if (protoid < 0 || protoid >= NPROTOCOLS)
     {
@@ -571,7 +555,7 @@ int cxd56_iccinit(int protoid)
 
 int cxd56_iccinitmsg(int cpuid)
 {
-  FAR struct iccdev_s *priv;
+  struct iccdev_s *priv;
 
   if (cpuid < 0 || cpuid >= NCPUS)
     {
@@ -596,7 +580,7 @@ int cxd56_iccinitmsg(int cpuid)
 
 void cxd56_iccuninit(int protoid)
 {
-  FAR struct iccdev_s *priv;
+  struct iccdev_s *priv;
   irqstate_t flags;
 
   if (protoid < 0 || protoid >= NPROTOCOLS)
@@ -617,7 +601,7 @@ void cxd56_iccuninit(int protoid)
 
 void cxd56_iccuninitmsg(int cpuid)
 {
-  FAR struct iccdev_s *priv;
+  struct iccdev_s *priv;
   irqstate_t flags;
 
   if (cpuid < 0 || cpuid >= NCPUS)

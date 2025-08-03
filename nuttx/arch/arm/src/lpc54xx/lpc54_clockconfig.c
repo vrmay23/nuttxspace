@@ -1,15 +1,12 @@
 /****************************************************************************
- * arch/arm/src/lpc54628/lpc54_clockconfig.c
+ * arch/arm/src/lpc54xx/lpc54_clockconfig.c
  *
- *   Copyright (C) 2017-2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * Parts of this file were adapted from sample code provided for the LPC54xx
- * family from NXP which has a compatible BSD license.
- *
- *   Copyright (c) 2016, Freescale Semiconductor, Inc.
- *   Copyright (c) 2016 - 2017 , NXP
- *   All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2017-2019 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2016 Freescale Semiconductor Inc.
+ * SPDX-FileCopyrightText: 2016 - 2017, NXP
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -52,9 +49,7 @@
 #include <nuttx/arch.h>
 #include <arch/board/board.h>
 
-#include "up_arch.h"
-#include "up_internal.h"
-
+#include "arm_internal.h"
 #include "hardware/lpc54_syscon.h"
 #include "lpc54_power.h"
 #include "lpc54_clockconfig.h"
@@ -172,9 +167,9 @@ static void lpc54_set_flash_waitstates(uint32_t freq)
  * Description:
  *   Configure the PLL.
  *
- *****************************************************************************/
+ ****************************************************************************/
 
-static void lpc54_configure_pll(FAR const struct pll_setup_s *pllsetup)
+static void lpc54_configure_pll(const struct pll_setup_s *pllsetup)
 {
   uint32_t regval;
 
@@ -216,7 +211,8 @@ static void lpc54_configure_pll(FAR const struct pll_setup_s *pllsetup)
 
   /* Flags for lock or power on */
 
-  if ((pllsetup->pllflags & (PLL_SETUPFLAG_POWERUP | PLL_SETUPFLAG_WAITLOCK)) != 0)
+  if ((pllsetup->pllflags &
+      (PLL_SETUPFLAG_POWERUP | PLL_SETUPFLAG_WAITLOCK)) != 0)
     {
       /* If turning the PLL back on, perform the following sequence to
        * accelerate PLL lock.
@@ -224,7 +220,8 @@ static void lpc54_configure_pll(FAR const struct pll_setup_s *pllsetup)
 
       volatile uint32_t delay;
       uint32_t maxcco = (1 << 18) | 0x5dd2; /* CCO = 1.6Ghz + MDEC enabled */
-      uint32_t ssctrl = getreg32(LPC54_SYSCON_SYSPLLMDEC) & ~SYSCON_SYSPLLMDEC_MREQ;
+      uint32_t ssctrl = getreg32(LPC54_SYSCON_SYSPLLMDEC) &
+                                 ~SYSCON_SYSPLLMDEC_MREQ;
 
       /* Initialize and power up PLL */
 
@@ -258,7 +255,8 @@ static void lpc54_configure_pll(FAR const struct pll_setup_s *pllsetup)
 
   if ((pllsetup->pllflags & PLL_SETUPFLAG_WAITLOCK) != 0)
     {
-      while ((getreg32(LPC54_SYSCON_SYSPLLSTAT) & SYSCON_SYSPLLSTAT_LOCK) == 0)
+      while ((getreg32(LPC54_SYSCON_SYSPLLSTAT) &
+                       SYSCON_SYSPLLSTAT_LOCK) == 0)
         {
         }
     }
@@ -277,9 +275,9 @@ static void lpc54_configure_pll(FAR const struct pll_setup_s *pllsetup)
  *   clocking using the settings in board.h.  This function also performs
  *   other low-level chip as necessary.
  *
- *****************************************************************************/
+ ****************************************************************************/
 
-void lpc54_clockconfig(FAR const struct pll_setup_s *pllsetup)
+void lpc54_clockconfig(const struct pll_setup_s *pllsetup)
 {
   uint32_t regval;
 

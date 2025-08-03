@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/netdev/netdev_ifconf.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,7 +28,9 @@
 
 #include <string.h>
 #include <assert.h>
+#include <debug.h>
 #include <errno.h>
+#include <stdio.h>
 
 #include <net/if.h>
 #include <nuttx/net/netdev.h>
@@ -137,7 +126,7 @@ static int ifconf_ipv4_callback(FAR struct net_driver_s *dev, FAR void *arg)
            * transferred is returned in ifc_len.
            */
 
-          strncpy(req->ifr_name, dev->d_ifname, IFNAMSIZ);
+          strlcpy(req->ifr_name, dev->d_ifname, IFNAMSIZ);
 
           inaddr->sin_family = AF_INET;
           inaddr->sin_port   = 0;
@@ -151,6 +140,80 @@ static int ifconf_ipv4_callback(FAR struct net_driver_s *dev, FAR void *arg)
     }
 
   return 0;
+}
+#endif
+
+/****************************************************************************
+ * Name: ifconf_ipv6_addr_callback
+ *
+ * Description:
+ *   Callback from netdev_ipv6_foreach() that does the real implementation of
+ *   netdev_ipv6_ifconf().
+ *
+ * Input Parameters:
+ *   dev  - The network device for this callback.
+ *   addr - The IPv6 address.
+ *   arg  - User callback argument
+ *
+ * Returned Value:
+ *   Zero is returned on success; a negated errno value is returned on any
+ *   failure.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NET_IPv6
+static int ifconf_ipv6_addr_callback(FAR struct net_driver_s *dev,
+                                     FAR struct netdev_ifaddr6_s *addr,
+                                     FAR void *arg)
+{
+  FAR struct ifconf_ipv6_info_s *info = (FAR struct ifconf_ipv6_info_s *)arg;
+  FAR struct lifconf *lifc = info->lifc;
+
+  if (lifc->lifc_len + sizeof(struct lifreq) <= info->bufsize)
+    {
+      FAR struct lifreq *req =
+        (FAR struct lifreq *)&lifc->lifc_buf[lifc->lifc_len];
+      FAR struct sockaddr_in6 *inaddr =
+        (FAR struct sockaddr_in6 *)&req->lifr_addr;
+#ifdef CONFIG_NETDEV_MULTIPLE_IPv6
+      int addr_idx = addr - dev->d_ipv6;
+      char ifname[IFNAMSIZ + 16];
+
+      /* There is space for information about another adapter.  Within
+       * each ifreq structure, lifr_name will receive the interface
+       * name and lifr_addr the address.  The actual number of bytes
+       * transferred is returned in lifc_len.
+       */
+
+      if (addr_idx > 0)
+        {
+          /* eth0:0 represents the second addr on eth0 */
+
+          if (snprintf(ifname, sizeof(ifname),
+                       "%s:%d", dev->d_ifname, addr_idx - 1) >= IFNAMSIZ)
+            {
+              nwarn("WARNING: ifname too long to print %s:%d\n",
+                    dev->d_ifname, addr_idx - 1);
+            }
+
+          strlcpy(req->lifr_name, ifname, IFNAMSIZ);
+        }
+      else
+#endif
+        {
+          strlcpy(req->lifr_name, dev->d_ifname, IFNAMSIZ);
+        }
+
+      inaddr->sin6_family = AF_INET6;
+      inaddr->sin6_port   = 0;
+      net_ipv6addr_copy(inaddr->sin6_addr.s6_addr16, addr->addr);
+    }
+
+  /* Increment the size of the buffer in any event */
+
+  lifc->lifc_len += sizeof(struct lifreq);
+
+  return OK;
 }
 #endif
 
@@ -175,17 +238,14 @@ static int ifconf_ipv4_callback(FAR struct net_driver_s *dev, FAR void *arg)
 static int ifconf_ipv6_callback(FAR struct net_driver_s *dev, FAR void *arg)
 {
   FAR struct ifconf_ipv6_info_s *info = (FAR struct ifconf_ipv6_info_s *)arg;
-  FAR struct lifconf *lifc;
 
   DEBUGASSERT(dev != NULL && info != NULL && info->lifc != NULL);
-  lifc = info->lifc;
 
   /* Check if this adapter has an IPv6 address assigned and is in the UP
    * state.
    */
 
-  if (!net_ipv6addr_cmp(dev->d_ipv6addr, g_ipv6_unspecaddr) &&
-      (dev->d_flags & IFF_UP) != 0)
+  if (NETDEV_HAS_V6ADDR(dev) && IFF_IS_UP(dev->d_flags))
     {
       /* Check if we would exceed the buffer space provided by the caller.
        * NOTE: A common usage model is:
@@ -202,29 +262,7 @@ static int ifconf_ipv6_callback(FAR struct net_driver_s *dev, FAR void *arg)
        * cases.
        */
 
-      if (lifc->lifc_len + sizeof(struct lifreq) <= info->bufsize)
-        {
-          FAR struct lifreq *req =
-            (FAR struct lifreq *)&lifc->lifc_buf[lifc->lifc_len];
-          FAR struct sockaddr_in6 *inaddr =
-            (FAR struct sockaddr_in6 *)&req->lifr_addr;
-
-          /* There is space for information about another adapter.  Within
-           * each ifreq structure, lifr_name will receive the interface
-           * name and lifr_addr the address.  The actual number of bytes
-           * transferred is returned in lifc_len.
-           */
-
-          strncpy(req->lifr_name, dev->d_ifname, IFNAMSIZ);
-
-          inaddr->sin6_family = AF_INET6;
-          inaddr->sin6_port   = 0;
-          net_ipv6addr_copy(inaddr->sin6_addr.s6_addr16, dev->d_ipv6addr);
-        }
-
-      /* Increment the size of the buffer in any event */
-
-      lifc->lifc_len += sizeof(struct lifreq);
+      return netdev_ipv6_foreach(dev, ifconf_ipv6_addr_callback, arg);
     }
 
   return 0;

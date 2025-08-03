@@ -1,35 +1,22 @@
 /****************************************************************************
  * sched/clock/clock.h
  *
- *   Copyright (C) 2007-2009, 2014, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,11 +33,14 @@
 
 #include <nuttx/clock.h>
 #include <nuttx/compiler.h>
+#include <nuttx/spinlock_type.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
 /* Configuration ************************************************************/
+
 /* If CONFIG_SYSTEM_TIME64 is selected and the CPU supports long long types,
  * then a 64-bit system time will be used.
  */
@@ -67,20 +57,17 @@
  * Public Data
  ****************************************************************************/
 
-#if !defined(CONFIG_SCHED_TICKLESS) && !defined(__HAVE_KERNEL_GLOBALS)
+#if !defined(__HAVE_KERNEL_GLOBALS)
   /* The system clock exists (CONFIG_SCHED_TICKLESS), but it not prototyped
    * globally in include/nuttx/clock.h.
    */
 
-#  ifdef CONFIG_SYSTEM_TIME64
-extern volatile uint64_t g_system_timer;
-#  else
-extern volatile uint32_t g_system_timer;
-#  endif
+extern volatile clock_t g_system_ticks;
 #endif
 
 #ifndef CONFIG_CLOCK_TIMEKEEPING
-extern struct timespec   g_basetime;
+extern struct timespec  g_basetime;
+extern spinlock_t g_basetime_lock;
 #endif
 
 /****************************************************************************
@@ -89,16 +76,22 @@ extern struct timespec   g_basetime;
 
 int  clock_basetime(FAR struct timespec *tp);
 
-void weak_function clock_initialize(void);
-#ifndef CONFIG_SCHED_TICKLESS
-void weak_function clock_timer(void);
+void clock_initialize(void);
+#if !defined(CONFIG_SCHED_TICKLESS) && \
+    !defined(CONFIG_ALARM_ARCH) && !defined(CONFIG_TIMER_ARCH)
+void clock_timer(void);
+#else
+#  define clock_timer()
 #endif
 
-int  clock_abstime2ticks(clockid_t clockid,
-                         FAR const struct timespec *abstime,
-                         FAR sclock_t *ticks);
-int  clock_time2ticks(FAR const struct timespec *reltime,
-                      FAR sclock_t *ticks);
-int  clock_ticks2time(sclock_t ticks, FAR struct timespec *reltime);
+/****************************************************************************
+ * perf_init
+ ****************************************************************************/
+
+void perf_init(void);
+
+#ifdef CONFIG_SCHED_CPULOAD_SYSCLK
+void cpuload_init(void);
+#endif
 
 #endif /* __SCHED_CLOCK_CLOCK_H */

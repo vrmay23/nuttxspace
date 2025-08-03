@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/mips/include/mips32/cp0.h
  *
- *   Copyright (C) 2011 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,6 +33,7 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
 /* CP0 Register Addresses ***************************************************/
 
 #ifdef __ASSEMBLY__
@@ -55,7 +43,7 @@
 #  define MIPS32_CP0_ENTRYLO11      $3,0   /* LS TLB entry for odd-numbered pages */
 #  define MIPS32_CP0_CONTEXT2       $4,0   /* Page table address */
 #  define MIPS32_CP0_PAGEMASK1      $5,0   /* Variable page sizes in TLB entries */
-#  define MIPS32_CP0_WIRED1         $6,0   /* umber of fixed (“wired”) TLB entries */
+#  define MIPS32_CP0_WIRED1         $6,0   /* Number of fixed ('wired') TLB entries */
 #  define MIPS32_CP0_BADVADDR       $8,0   /* Address of most recent exception */
 #  define MIPS32_CP0_COUNT          $9,0   /* Processor cycle count */
 #  define MIPS32_CP0_ENTRYHI1       $10,0  /* High-order portion of the TLB entry */
@@ -98,19 +86,22 @@
  * Function: Randomly generated index into the TLB array
  * Compliance Level: Required for TLB-based MMUs; Optional otherwise.
  *
- *   This is a 32-bit register containing a random TLB index.  The valid width is some fixed
- *   number, 'n', but the upper bits are padded so that no fields need be defined for this
- *   register.
+ *   This is a 32-bit register containing a random TLB index.
+ *   The valid width is some fixed number, 'n', but the upper bits are
+ *   padded so that no fields need be defined for this register.
  */
 
 /* Register Number: 2 Sel: 0 Name: EntryLo0
- * Function: Low-order portion of the TLB entry for even-numbered virtual pages
+ * Function: Low-order portion of the TLB entry for even-numbered virtual
+ *           pages
  * Compliance Level: EntryLo0 is Required for a TLB-based MMU; Optional
- *   otherwise.
+ *                   otherwise.
  *
  * Register Number: 3 Sel: 0 Name: EntryLo1
- * Function: Low-order portion of the TLB entry for odd-numbered virtual pages
- * Compliance Level: EntryLo1 is Required for a TLB-based MMU; Optional otherwise.
+ * Function: Low-order portion of the TLB entry for odd-numbered virtual
+ *           pages
+ * Compliance Level: EntryLo1 is Required for a TLB-based MMU; Optional
+ *                   otherwise.
  */
 
 #define CP0_ENTRYLO_G               (1 << 0)  /* Bit 0: Global bit */
@@ -151,28 +142,29 @@
 #  define CP0_PAGEMASK_256MB        (0xffff << CP0_PAGEMASK_SHIFT)
 
 /* Register Number: 6 Sel: 0 Name: Wired
- * Function: Controls the number of fixed (“wired”) TLB entries
+ * Function: Controls the number of fixed ('wired') TLB entries
  * Compliance Level: Required for TLB-based MMUs; Optional otherwise.
  *
- *   This is a 32-bit register containing the TLB wired boundary.  The valid width is some
- *   fixed number, 'n', but the upper bits are padded so that no fields need be defined for
- *   this register.
+ *   This is a 32-bit register containing the TLB wired boundary.
+ *   The valid width is some fixed number, 'n', but the upper bits are
+ *   padded so that no fields need be defined for this register.
  *
  * Register Number: 7 Sel: all (Reserved for future extensions)
  *
  * Register Number: 8 Sel: 0 Name: BadVAddr
- * Function: Reports the address for the most recent address-related exception
+ * Function: Reports the address for the most recent address-related
+ *           exception
  * Compliance Level: Required.
  *
- *   This register contains a 32-bit address value; No fields need be defined for this
- *   register.
+ *   This register contains a 32-bit address value; No fields need be
+ *   defined for this register.
  *
  * Register Number: 9 Sel: 0 Name: Count
  * Function: Processor cycle count
  * Compliance Level: Required.
  *
- *   This register contains a 32-bit count value; No fields need be defined for this
- *   register.
+ *   This register contains a 32-bit count value; No fields need be
+ *   defined for this register.
  *
  * Register Number: 9 Sel: 6-7 (Available for implementation dependent user)
  */
@@ -191,8 +183,8 @@
  * Function: Timer interrupt control
  * Compliance Level: Required.
  *
- *   This register contains a 32-bit compare value; No fields need be defined for this
- *   register.
+ *   This register contains a 32-bit compare value; No fields need be defined
+ *   for this register.
  *
  * Register Number: 11 Sel: 6-7 (Available for implementation dependent user)
  */
@@ -242,7 +234,7 @@
 #define CP0_STATUS_TS               (1 << 21) /* Bit 21: TLB detected match on multiple entries */
 #define CP0_STATUS_BEV              (1 << 22) /* Bit 22: Location of exception vectors 1->Bootstrap */
 #define CP0_STATUS_PX               (1 << 23) /* Bit 23: Enables 64-bit operations (Not MIPS32) */
-#define CP0_STATUS_MX               (1 << 24) /* Bit 24: Enables MDMX™ (Not MIPS32) */
+#define CP0_STATUS_MX               (1 << 24) /* Bit 24: Enables MDMXâ„¢ (Not MIPS32) */
 #define CP0_STATUS_RE               (1 << 25) /* Bit 25: Enable reverse-endian memory in user mode */
 #define CP0_STATUS_FR               (1 << 26) /* Bit 26: Controls the floating point register mode (Not MIPS32) */
 #define CP0_STATUS_RP               (1 << 27) /* Bit 27: Enables reduced power mode */
@@ -256,27 +248,28 @@
  * Compliance Level: Required.
  */
 
-#define CP0_CAUSE_EXCCODE_SHIFT     (2)       /* Bits 2-6: Exception code */
-#define CP0_CAUSE_EXCCODE_MASK      (31 << CP0_CAUSE_EXCCODE_SHIFT)
-# define CP0_CAUSE_EXCCODE_INT      (0 << CP0_CAUSE_EXCCODE_SHIFT)  /* Interrupt */
-# define CP0_CAUSE_EXCCODE_TLBL     (2 << CP0_CAUSE_EXCCODE_SHIFT)  /* TLB exception (load or instruction fetch) */
-# define CP0_CAUSE_EXCCODE_TLBS     (3 << CP0_CAUSE_EXCCODE_SHIFT)  /* TLB exception (store) */
-# define CP0_CAUSE_EXCCODE_ADEL     (4 << CP0_CAUSE_EXCCODE_SHIFT)  /* Address error exception (load or instruction fetch) */
-# define CP0_CAUSE_EXCCODE_ADES     (5 << CP0_CAUSE_EXCCODE_SHIFT)  /* Address error exception (store) */
-# define CP0_CAUSE_EXCCODE_IBE      (6 << CP0_CAUSE_EXCCODE_SHIFT)  /* Bus error exception (instruction fetch) */
-# define CP0_CAUSE_EXCCODE_DBE      (7 << CP0_CAUSE_EXCCODE_SHIFT)  /* Bus error exception (data reference: load or store) */
-# define CP0_CAUSE_EXCCODE_SYS      (8 << CP0_CAUSE_EXCCODE_SHIFT)  /* Syscall exception */
-# define CP0_CAUSE_EXCCODE_BP       (9 << CP0_CAUSE_EXCCODE_SHIFT)  /* Breakpoint exception */
-# define CP0_CAUSE_EXCCODE_RI       (10 << CP0_CAUSE_EXCCODE_SHIFT) /* Reserved instruction exception */
-# define CP0_CAUSE_EXCCODE_CPU      (11 << CP0_CAUSE_EXCCODE_SHIFT) /* Coprocessor Unusable exception */
-# define CP0_CAUSE_EXCCODE_OV       (12 << CP0_CAUSE_EXCCODE_SHIFT) /* Arithmetic Overflow exception */
-# define CP0_CAUSE_EXCCODE_TR       (13 << CP0_CAUSE_EXCCODE_SHIFT) /* Trap exception */
-# define CP0_CAUSE_EXCCODE_FPE      (15 << CP0_CAUSE_EXCCODE_SHIFT) /* Floating point exception */
-# define CP0_CAUSE_EXCCODE_C2E      (18 << CP0_CAUSE_EXCCODE_SHIFT) /* Precise Coprocessor 2 exceptions */
-# define CP0_CAUSE_EXCCODE_MDMX     (22 << CP0_CAUSE_EXCCODE_SHIFT) /* MDMX Unusable (MIPS64) */
-# define CP0_CAUSE_EXCCODE_WATCH    (23 << CP0_CAUSE_EXCCODE_SHIFT) /* WatchHi/WatchLo address */
-# define CP0_CAUSE_EXCCODE_MCHECK   (24 << CP0_CAUSE_EXCCODE_SHIFT) /* Machine check */
-# define CP0_CAUSE_EXCCODE_CACHEERR (30 << CP0_CAUSE_EXCCODE_SHIFT) /* Cache error */
+#define CP0_CAUSE_EXCCODE_SHIFT      (2)       /* Bits 2-6: Exception code */
+#define CP0_CAUSE_EXCCODE_MASK       (31 << CP0_CAUSE_EXCCODE_SHIFT)
+#  define CP0_CAUSE_EXCCODE_INT      (0 << CP0_CAUSE_EXCCODE_SHIFT)  /* Interrupt */
+#  define CP0_CAUSE_EXCCODE_TLBL     (2 << CP0_CAUSE_EXCCODE_SHIFT)  /* TLB exception (load or instruction fetch) */
+#  define CP0_CAUSE_EXCCODE_TLBS     (3 << CP0_CAUSE_EXCCODE_SHIFT)  /* TLB exception (store) */
+#  define CP0_CAUSE_EXCCODE_ADEL     (4 << CP0_CAUSE_EXCCODE_SHIFT)  /* Address error exception (load or instruction fetch) */
+#  define CP0_CAUSE_EXCCODE_ADES     (5 << CP0_CAUSE_EXCCODE_SHIFT)  /* Address error exception (store) */
+#  define CP0_CAUSE_EXCCODE_IBE      (6 << CP0_CAUSE_EXCCODE_SHIFT)  /* Bus error exception (instruction fetch) */
+#  define CP0_CAUSE_EXCCODE_DBE      (7 << CP0_CAUSE_EXCCODE_SHIFT)  /* Bus error exception (data reference: load or store) */
+#  define CP0_CAUSE_EXCCODE_SYS      (8 << CP0_CAUSE_EXCCODE_SHIFT)  /* Syscall exception */
+#  define CP0_CAUSE_EXCCODE_BP       (9 << CP0_CAUSE_EXCCODE_SHIFT)  /* Breakpoint exception */
+#  define CP0_CAUSE_EXCCODE_RI       (10 << CP0_CAUSE_EXCCODE_SHIFT) /* Reserved instruction exception */
+#  define CP0_CAUSE_EXCCODE_CPU      (11 << CP0_CAUSE_EXCCODE_SHIFT) /* Coprocessor Unusable exception */
+#  define CP0_CAUSE_EXCCODE_OV       (12 << CP0_CAUSE_EXCCODE_SHIFT) /* Arithmetic Overflow exception */
+#  define CP0_CAUSE_EXCCODE_TR       (13 << CP0_CAUSE_EXCCODE_SHIFT) /* Trap exception */
+#  define CP0_CAUSE_EXCCODE_FPE      (15 << CP0_CAUSE_EXCCODE_SHIFT) /* Floating point exception */
+#  define CP0_CAUSE_EXCCODE_C2E      (18 << CP0_CAUSE_EXCCODE_SHIFT) /* Precise Coprocessor 2 exceptions */
+#  define CP0_CAUSE_EXCCODE_MDMX     (22 << CP0_CAUSE_EXCCODE_SHIFT) /* MDMX Unusable (MIPS64) */
+#  define CP0_CAUSE_EXCCODE_WATCH    (23 << CP0_CAUSE_EXCCODE_SHIFT) /* WatchHi/WatchLo address */
+#  define CP0_CAUSE_EXCCODE_MCHECK   (24 << CP0_CAUSE_EXCCODE_SHIFT) /* Machine check */
+#  define CP0_CAUSE_EXCCODE_CACHEERR (30 << CP0_CAUSE_EXCCODE_SHIFT) /* Cache error */
+
 #define CP0_CAUSE_IP0               (1 << 8)  /* Bit 8: Controls request for software interrupt 0 */
 #define CP0_CAUSE_IP1               (1 << 9)  /* Bit 9: Controls request for software interrupt 1 */
 #define CP0_CAUSE_IP_SHIFT          (10)      /* Bits 10-15:  Pending external interrupts */
@@ -287,9 +280,10 @@
 #  define CP0_CAUSE_IP5             (0x13 << CP0_CAUSE_IP_SHIFT) /*  Hardware interrupt 3 */
 #  define CP0_CAUSE_IP6             (0x14 << CP0_CAUSE_IP_SHIFT) /*  Hardware interrupt 4 */
 #  define CP0_CAUSE_IP7             (0x15 << CP0_CAUSE_IP_SHIFT) /*  Hardware interrupt 5, timer or performance counter interrupt */
+
 #define CP0_CAUSE_WP                (1 << 22) /* Watch exception was deferred */
 #define CP0_CAUSE_IV                (1 << 23) /* Bit 23:  Interrupt exception uses special interrupt vector */
-#define CP0_CAUSE_CE_SHIFT          (28)      /* Bits 28-29: Coprocessor unit number fo Coprocessor Unusable exception */
+#define CP0_CAUSE_CE_SHIFT          (28)      /* Bits 28-29: Coprocessor unit number for Coprocessor Unusable exception */
 #define CP0_CAUSE_CE_MASK           (3 << CP0_CAUSE_CE_SHIFT)
 #define CP0_CAUSE_BD                (1 << 31) /* Bit 31:  Last exception occurred in a branch delay slot */
 
@@ -297,8 +291,8 @@
  * Function: Program counter at last exception
  * Compliance Level: Required.
  *
- *   This register contains a 32-bit address value; No fields need be defined for this
- *   register.
+ *   This register contains a 32-bit address value; No fields need be defined
+ *   for this register.
  */
 
 /* Register Number: 15 Sel: 0 Name: PRId
@@ -330,6 +324,7 @@
 #  define CP0_CONFIG_MT_TLB         (1 << CP0_CONFIG_MT_SHIFT) /* Standard TLB */
 #  define CP0_CONFIG_MT_BAT         (2 << CP0_CONFIG_MT_SHIFT) /* Standard BAT */
 #  define CP0_CONFIG_MT_FIXED       (3 << CP0_CONFIG_MT_SHIFT) /* Standard fixed mapping */
+
 #define CP0_CONFIG_AR_SHIFT         (10)     /* Bits 10-12: Architecture revision level */
 #define CP0_CONFIG_AR_MASK          (7 << CP0_CONFIG_AR_SHIFT)
 #  define CP0_CONFIG_AR_REV1        (0 << CP0_CONFIG_AR_SHIFT)
@@ -339,12 +334,13 @@
 #  define CP0_CONFIG_AT_MIPS32      (0 << CP0_CONFIG_AT_SHIFT) /* MIPS32 */
 #  define CP0_CONFIG_AT_MIPS64CMP   (0 << CP0_CONFIG_AT_SHIFT) /* MIPS64 with 32-bit compatibility segments */
 #  define CP0_CONFIG_AT_MIPS64      (1 << CP0_CONFIG_AT_SHIFT) /* MIPS64 with access to all address segments */
+
 #define CP0_CONFIG_BE               (1 << 15) /* Bit 15: Processor is running in big-endian mode */
 #define CP0_CONFIG_IMPL_SHIFT       (16)      /* Bits 16-30: Implementation dependent */
 #define CP0_CONFIG_IMPL_MASK        (0x7fff << CP0_CONFIG_IMPL_SHIFT)
-#define CP0_CONFIG_M_SHIFT         (31)
-#define CP0_CONFIG_M_MASK          (1 << CP0_CONFIG_M_SHIFT)
-#  define CP0_CONFIG_M             (1 << CP0_CONFIG_M_SHIFT) /* Bit 31: Indicates the presence of a Config1 register */
+#define CP0_CONFIG_M_SHIFT          (31)
+#define CP0_CONFIG_M_MASK           (1 << CP0_CONFIG_M_SHIFT)
+#  define CP0_CONFIG_M              (1 << CP0_CONFIG_M_SHIFT) /* Bit 31: Indicates the presence of a Config1 register */
 
 /* Register Number: 16 Sel: 1 Name: Config1
  * Function: Configuration register 1
@@ -368,6 +364,7 @@
 #  define CP0_CONFIG1_DA_6WAY       (5 << CP0_CONFIG1_DA_SHIFT) /* 6-way */
 #  define CP0_CONFIG1_DA_7WAY       (6 << CP0_CONFIG1_DA_SHIFT) /* 7-way */
 #  define CP0_CONFIG1_DA_8WAY       (7 << CP0_CONFIG1_DA_SHIFT) /* 8-way */
+
 #define CP0_CONFIG1_DL_SHIFT        (10)      /* Bits 10-12:  Dcache line size */
 #define CP0_CONFIG1_DL_MASK         (7 << CP0_CONFIG1_DL_SHIFT)
 #  define CP0_CONFIG1_DL_NONE       (0 << CP0_CONFIG1_DL_SHIFT) /* No Dcache present */
@@ -377,6 +374,7 @@
 #  define CP0_CONFIG1_DL_32BYTES    (4 << CP0_CONFIG1_DL_SHIFT) /* 32 bytes */
 #  define CP0_CONFIG1_DL_64BYTES    (5 << CP0_CONFIG1_DL_SHIFT) /* 64 bytes */
 #  define CP0_CONFIG1_DL_128BYTES   (6 << CP0_CONFIG1_DL_SHIFT) /* 128 bytes */
+
 #define CP0_CONFIG1_DS_SHIFT        (13)      /* Bits 13-15: Dcache sets per way */
 #define CP0_CONFIG1_DS_MASK         (7 << CP0_CONFIG1_DS_SHIFT)
 #  define CP0_CONFIG1_DS_64SETS     (0 << CP0_CONFIG1_DS_SHIFT)
@@ -396,6 +394,7 @@
 #  define CP0_CONFIG1_IA_6WAY       (5 << CP0_CONFIG1_IA_SHIFT) /* 6-way */
 #  define CP0_CONFIG1_IA_7WAY       (6 << CP0_CONFIG1_IA_SHIFT) /* 7-way */
 #  define CP0_CONFIG1_IA_8WAY       (7 << CP0_CONFIG1_IA_SHIFT) /* 8-way */
+
 #define CP0_CONFIG1_IL_SHIFT        (19)      /* Bits 19-21: Icache line size */
 #define CP0_CONFIG1_IL_MASK         (7 << CP0_CONFIG1_IL_SHIFT)
 #  define CP0_CONFIG1_IL_NONE       (0 << CP0_CONFIG1_IL_SHIFT) /* No Dcache present */
@@ -405,6 +404,7 @@
 #  define CP0_CONFIG1_IL_32BYTES    (4 << CP0_CONFIG1_IL_SHIFT) /* 32 bytes */
 #  define CP0_CONFIG1_IL_64BYTES    (5 << CP0_CONFIG1_IL_SHIFT) /* 64 bytes */
 #  define CP0_CONFIG1_IL_128BYTES   (6 << CP0_CONFIG1_IL_SHIFT) /* 128 bytes */
+
 #define CP0_CONFIG1_IS_SHIFT        (22)      /* Bits 22-24: Icache sets per way */
 #define CP0_CONFIG1_IS_MASK         (7 << CP0_CONFIG1_IS_SHIFT)
 #  define CP0_CONFIG1_IS_64SETS     (0 << CP0_CONFIG1_IS_SHIFT)
@@ -428,18 +428,18 @@
 #define CP0_CONFIG2_M               (1 << 31) /* Bit 31: Config3 register is present */
 
 /* Register Number: 16 Sel: 3 Name: Config3
- * Function: Configuration register 3 (Section 50: "CPU for Devices with MIPS32
- *            microAptive and M-Class Cores")
+ * Function: Configuration register 3 (Section 50: "CPU for Devices with
+ *            MIPS32 microAptive and M-Class Cores")
  * Compliance Level: Optional.
  */
 
 #define CP0_CONFIG3_TL              (1 << 0)  /* Bit 0:  Trace Logic implemented */
-#define CP0_CONFIG3_SM              (1 << 1)  /* Bit 1:  SmartMIPS™ ASE implemented */
+#define CP0_CONFIG3_SM              (1 << 1)  /* Bit 1:  SmartMIPSâ„¢ ASE implemented */
 #define CP0_CONFIG3_CDMM            (1 << 3)  /* Bit 3:  Common Device Memory Map */
 #define CP0_CONFIG3_SP              (1 << 4)  /* Bit 4:  Small page bit */
 #define CP0_CONFIG3_VINT            (1 << 5)  /* Bit 5:  Vector interrupt bit */
 #define CP0_CONFIG3_VEIC            (1 << 6)  /* Bit 6:  External interrupt controller supported */
-#define CP0_CONFIG3_ITL             (1 << 8)  /* Bit 8:  Flowtrace® Hardware bit */
+#define CP0_CONFIG3_ITL             (1 << 8)  /* Bit 8:  FlowtraceÂ® Hardware bit */
 #define CP0_CONFIG3_DSPP            (1 << 10) /* Bit 10: MIPS DSP ASE Presence bit */
 #define CP0_CONFIG3_DSP2            (1 << 11) /* Bit 11: MIPS DSP ASE Revision 2 Presence bit */
 #define CP0_CONFIG3_RXI             (1 << 12) /* Bit 12: RIE and XIE Implemented in PageGrain bit */
@@ -450,25 +450,30 @@
 #  define CP0_CONFIG3_ISA_MICROMIPS (1 << CP0_CONFIG3_ISA_SHIFT) /* Only microMIPS is implemented */
 #  define CP0_CONFIG3_ISA_BOTHMIP32 (2 << CP0_CONFIG3_ISA_SHIFT) /* Both supported, MIPS32 on reset */
 #  define CP0_CONFIG3_ISA_BOTHUMIPS (3 << CP0_CONFIG3_ISA_SHIFT) /* Both supported, microMIPS on reset */
+
 #define CP0_CONFIG3_ISAONEXC        (1 << 16) /* Bit 16: ISA on Exception bit */
 #define CP0_CONFIG3_MCU             (1 << 17) /* Bit 17: MIPS MCU ASE Implemented bit */
 #define CP0_CONFIG3_MMAR_SHIFT      (18)      /* Bits 18-20: microMIPS Architecture Revision level bits */
 #define CP0_CONFIG3_MMAR_MASK       (7 << CP0_CONFIG3_MMAR_SHIFT)
 #  define CP0_CONFIG3_MMAR_REL1     (0 << CP0_CONFIG3_MMAR_SHIFT) /* Release 1 */
+
 #define CP0_CONFIG3_IPLW_SHIFT      (21)      /* Bits 21-22: Width of the Status IPL and Cause RIPL bits */
 #define CP0_CONFIG3_IPLW_MASK       (3 << CP0_CONFIG3_IPLW_SHIFT)
 #  define CP0_CONFIG3_IPLW_6BITS    (0 << CP0_CONFIG3_IPLW_SHIFT) /* 6 bits */
 #  define CP0_CONFIG3_IPLW_8BITS    (1 << CP0_CONFIG3_IPLW_SHIFT) /* 8 bits */
+
 #define CP0_CONFIG3_M               (1 << 31) /* Bit 31: Config4 register is present */
 
-/* Register Number: 16 Sel: 6-7 (Available for implementation dependent use) */
+/* Register Number: 16 Sel: 6-7
+ * (Available for implementation dependent use)
+ */
 
 /* Register Number: 17 Sel: 0 Name: LLAddr
  * Function: Load linked address
  * Compliance Level: Optional.
  *
- *   This register contains a 32-bit address value; No fields need be defined for this
- *   register.
+ *   This register contains a 32-bit address value; No fields need be defined
+ *   for this register.
  */
 
 /* Register Number: 18 Sel: 0-n Name: WatchLo
@@ -509,8 +514,8 @@
  * Function: Program counter at last EJTAG debug exception
  * Compliance Level: Optional, part of the EJTAG specification.
  *
- *   This register contains a 32-bit address value; No fields need be defined for this
- *   register.
+ *   This register contains a 32-bit address value; No fields need be defined
+ *   for this register.
  */
 
 /* Register Number: 25 Sel: 0-n Name: PerfCnt
@@ -531,19 +536,22 @@
  * Function: Parity/ECC error control and status
  * Compliance Level: Optional.
  *
- *   The bit definitions within the ErrCtl register are implementation dependent.
+ *   The bit definitions within the ErrCtl register are implementation
+ *   dependent.
  *
  * Register Number: 27 Sel: 0-3 Name: CacheErr
  * Function: Cache parity error control and status
  * Compliance Level: Optional.
  *
- *   The bit definitions within the CacheErr register are implementation dependent.
+ *   The bit definitions within the CacheErr register are implementation
+ *   dependent.
  *
  * Register Number: 28 Sel: 0 Name: TagLo
  * Function: Low-order portion of cache tag interface
  * Compliance Level: Required if a cache is implemented; Optional otherwise.
  *
- *   The bit definitions within the TagLo register are implementation dependent.
+ *   The bit definitions within the TagLo register are implementation
+ *   dependent.
  *
  * Register Number: 28 Sel: 1, 3 Name: DataLo
  * Function: The DataLo and DataHi registers are read-only registers that
@@ -551,13 +559,15 @@
  *   diagnostic operation only.
  * Compliance Level: Optional.
  *
- *   The bit definitions within the DataLo register are implementation dependent.
+ *   The bit definitions within the DataLo register are implementation
+ *   dependent.
  *
  * Register Number: 29 Sel: 0 Name: TagHi
  * Function: High-order portion of cache tag interface
  * Compliance Level: Required if a cache is implemented; Optional otherwise.
  *
- *   The bit definitions within the TagHi register are implementation dependent.
+ *   The bit definitions within the TagHi register are implementation
+ *   dependent.
  *
  * Register Number: 29 Sel: 1, 3 Name: DataHi
  * Function: The DataLo and DataHi registers are read-only registers that
@@ -565,21 +575,22 @@
  *   diagnostic operation only.
  * Compliance Level: Optional.
  *
- *   The bit definitions within the DataHi register are implementation dependent.
+ *   The bit definitions within the DataHi register are implementation
+ *   dependent.
  *
  * Register Number: 30 Sel: 0 Name: ErrorEPC
  * Function: Program counter at last error
  * Compliance Level: Required.
  *
- *   This register contains a 32-bit address value; No fields need be defined for this
- *   register.
+ *   This register contains a 32-bit address value; No fields need be defined
+ *   for this register.
  *
  * Register Number: 31 Sel: 0 Name: DESAVE
  * Function: EJTAG debug exception save register
  * Compliance Level: Optional, part of the EJTAG specification.
  *
- *   This register contains a 32-bit address value; No fields need be defined for this
- *   register.
+ *   This register contains a 32-bit address value; No fields need be defined
+ *   for this register.
  */
 
 /****************************************************************************

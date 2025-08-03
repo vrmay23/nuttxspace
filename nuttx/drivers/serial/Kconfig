@@ -7,6 +7,15 @@ config ARCH_HAVE_SERIAL_TERMIOS
 	bool
 	default n
 
+config ARCH_HAVE_8BIT_SERIAL_BUFSIZE
+	bool
+	default n
+	---help---
+	This is set by ARCH_LDST_16BIT_NOT_ATOMIC if the architecture does
+	not support atomic 16-bit load/store instructions. Receive and transmit
+	buffer sizes are stored in uint8_t (instead of int16_t) variable
+	in such case.
+
 menuconfig SERIAL
 	bool "Serial Driver Support"
 	default y
@@ -41,13 +50,90 @@ config SERIAL_CONSOLE
 	bool
 	default n
 
+config SERIAL_GDBSTUB
+	bool "GDBSTUB Serial support"
+	depends on LIB_GDBSTUB
+	default n
+
+config SERIAL_GDBSTUB_PATH
+	string "GDBSTUB Serial path"
+	depends on SERIAL_GDBSTUB
+	default "/dev/ttyS1"
+	---help---
+		The path to the serial device that will be used for GDB stub.
+
+config SERIAL_GDBSTUB_AUTO_ATTACH
+	bool "GDBSTUB Serial Auto attach"
+	depends on SERIAL_GDBSTUB
+	default n
+	---help---
+		Attach the serial port to gdbstub by default.
+		Will cover the GDBSTUB_SERIAL_PATH, that port will only
+		be used for GDB stub.
+
+config SERIAL_GDBSTUB_PANIC_TIMEOUT
+	int "GDBSTUB Serial panic timeout"
+	depends on SERIAL_GDBSTUB
+	default 10
+	---help---
+		Delay the panic timeout for gdbstub to connect.
+		0 will disable the timeout.
+
+config UART_HOSTFS
+	bool "Use hostfs read/write on UART_HOSTFS_DEVPATH as uart console"
+	depends on FS_HOSTFS
+	default n
+	select SERIAL_RXDMA
+	select SERIAL_TXDMA
+
+config UART_HOSTFS_DEVPATH
+	string "The host device node that will be used by"
+	depends on UART_HOSTFS
+	default "/dev/tty"
+
+config UART_HOSTFS_RXBUFSIZE
+	int "Uart hostfs receive buffer size"
+	default 256
+	depends on UART_HOSTFS
+
+config UART_HOSTFS_TXBUFSIZE
+	int "Uart hostfs transmit buffer size"
+	default 256
+	depends on UART_HOSTFS
+
+config UART_HOSTFS_DELAY_USEC
+	int "Uart hostfs polling interval in microseconds"
+	default 1000
+	depends on UART_HOSTFS
+
+menuconfig UART_PL011
+	bool "PL011 Chip support"
+	default n
+
+if UART_PL011
+source "drivers/serial/Kconfig-pl011"
+endif
+
+menuconfig CMSDK_UART
+	bool "CMSDK UART Chip support"
+	select ARCH_HAVE_SERIAL_TERMIOS
+	default n
+
+if CMSDK_UART
+source "drivers/serial/Kconfig-cmsdk"
+endif # CMSDK_UART
+
 menuconfig 16550_UART
 	bool "16550 UART Chip support"
 	select ARCH_HAVE_SERIAL_TERMIOS
 	default n
 
 if 16550_UART
-source drivers/serial/Kconfig-16550
+source "drivers/serial/Kconfig-16550"
+endif
+
+if PCI
+source "drivers/serial/Kconfig-pci"
 endif
 
 #
@@ -64,19 +150,24 @@ config MCU_SERIAL
 	default n
 
 config RPMSG_UART
-	bool "UART rpmsg support"
+	bool "UART RPMSG support"
 	default n
-	depends on OPENAMP
+	depends on RPMSG
 	select ARCH_HAVE_SERIAL_TERMIOS
 	select SERIAL_RXDMA
 	select SERIAL_TXDMA
 	select SERIAL_REMOVABLE
 	select SERIAL_IFLOWCONTROL
 
-config RPMSG_SERIALINIT
-	bool "Add dummy up_serialinit for UART rpmsg"
-	default y if !16550_UART && !MCU_SERIAL
+config RPMSG_UART_CONSOLE
+	bool "UART RPMSG console support"
+	default n
 	depends on RPMSG_UART
+	---help---
+		Register the UART RPMSG device as /dev/console so that is will be used
+		as the console device.
+		NOTE: support for this option must be implemented in the board logic by
+		setting the \"isconsole\" argument in the uart_rpmsg_init() function to true.
 
 #
 # Standard serial driver configuration
@@ -84,18 +175,16 @@ config RPMSG_SERIALINIT
 
 config STANDARD_SERIAL
 	bool "Enable standard \"upper-half\" serial driver"
-	default y if MCU_SERIAL
-	default n if !MCU_SERIAL
+	default MCU_SERIAL
 	---help---
 		Enable the standard, upper-half serial driver used by most MCU serial peripherals.
 
 config SERIAL_NPOLLWAITERS
 	int "Number of poll threads"
-	default 2
-	depends on STANDARD_SERIAL
+	default 4
 	---help---
 		Maximum number of threads than can be waiting for POLL events.
-		Default: 2
+		Default: 4
 
 config SERIAL_IFLOWCONTROL
 	bool
@@ -154,6 +243,13 @@ config SERIAL_IFLOWCONTROL_UPPER_WATERMARK
 
 endif # SERIAL_IFLOWCONTROL_WATERMARKS
 
+config SERIAL_TIOCGICOUNT
+	bool "Support TIOCGICOUNT (U[S]ART Error Report)"
+	default n
+	---help---
+		The ioctl TIOCGICOUNT is used to collect errors from serial ports
+		such as frame error, overrun, parity, etc.
+
 config SERIAL_TIOCSERGSTRUCT
 	bool "Support TIOCSERGSTRUCT"
 	default n
@@ -170,15 +266,100 @@ config SERIAL_TERMIOS
 	depends on ARCH_HAVE_SERIAL_TERMIOS
 	default n
 	---help---
-		Serial driver supports termios.h interfaces (tcsetattr, tcflush, etc.).
-		If this is not defined, then the terminal settings (baud, parity, etc).
-		are not configurable at runtime; serial streams cannot be flushed, etc..
+		If this is not defined, then the terminal hardware settings
+		(baud, parity, flow control) are not configurable at runtime.
+		Note: other software settings (echo, \r\n<->\n, break, tcflush)
+		are always supported.
+
+config TTY_LAUNCH
+	bool "Enable feature TTY launch program"
+	depends on SCHED_HPWORK
+	default n
+	---help---
+		If select this, then user can launch a program with a special input.
+
+if TTY_LAUNCH
+
+config TTY_LAUNCH_CHAR
+	hex "TTY launch program characters"
+	default 0x12
+	---help---
+		Use Ctrl-R 0x12 inputs to determine whether launch a program
+
+config TTY_LAUNCH_ARGS
+	string "TTY launch argument list"
+	default INIT_ARGS
+	---help---
+		The argument list for user applications. e.g.:
+		  "\"arg1\",\"arg2\",\"arg3\""
+
+config TTY_LAUNCH_PRIORITY
+	int "TTY launch program priority"
+	default INIT_PRIORITY
+
+config TTY_LAUNCH_STACKSIZE
+	int "TTY launch program stack size"
+	default INIT_STACKSIZE
+
+choice
+	prompt "TTY launch method"
+	default TTY_LAUNCH_ENTRY
+
+config TTY_LAUNCH_ENTRY
+	bool "TTY launch program"
+
+config TTY_LAUNCH_FILE
+	bool "TTY launch file"
+	depends on !BINFMT_DISABLE
+
+endchoice
+
+config TTY_LAUNCH_ENTRYPOINT
+	string "TTY launch program entry"
+	depends on TTY_LAUNCH_ENTRY
+	default INIT_ENTRYPOINT
+
+config TTY_LAUNCH_ENTRYNAME
+	string "TTY launch program name"
+	depends on TTY_LAUNCH_ENTRY
+	default TTY_LAUNCH_ENTRYPOINT
+
+config TTY_LAUNCH_FILEPATH
+	string "TTY launch file path"
+	depends on TTY_LAUNCH_FILE
+	default INIT_FILEPATH
+	---help---
+		The name of the entry point for user applications.  For the example
+		applications this is of the form 'app_main' where 'app' is the application
+		name. If not defined, INIT_ENTRYPOINT defaults to "main".
+
+endif # TTY_LAUNCH
+
+config TTY_FORCE_PANIC
+	bool "Enable TTY force crash"
+	default n
+	depends on DEBUG_FEATURES
+	---help---
+		This is for debugging system busyloop or deadlock, when the shell can't run,
+		then use this force crash the system to see the dumplog.
+
+config TTY_FORCE_PANIC_CHAR
+	hex "TTY force crash characters"
+	default 0x1F
+	depends on TTY_FORCE_PANIC
+	---help---
+		Use Ctrl-? 0x1F inputs to determine whether panic system
+
+config TTY_FORCE_PANIC_REPEAT_COUNT
+	int "TTY force crash repeat count"
+	default 1
+	depends on TTY_FORCE_PANIC
+	---help---
+		Repeat how many times the panic char to determine whether panic system
 
 config TTY_SIGINT
 	bool "Support SIGINT"
 	default n
-	select SIG_SIGKILL_ACTION
-	depends on SERIAL_TERMIOS
 	---help---
 		Whether support Ctrl-c/x event.  Enabled automatically for console
 		devices.  May be enabled for other serial devices using the ISIG bit
@@ -192,15 +373,15 @@ config TTY_SIGINT
 		  INTR   SIGINT   Ctrl-C  ETX(0x03) Interrupt
 		  KILL   SIGKILL  Ctrl-U  NAK(0x15) Kill
 		  QUIT   SIGQUIT  Ctrl-\  FS (0x1c) Quit
-		  SUSP   SIGSTP   Ctrl-Z  SUB(0x1a) Suspend
-		  DSUSP  SIGSTP   Ctrl-Y  EM (0x19) Delayed suspend
+		  SUSP   SIGTSTP  Ctrl-Z  SUB(0x1a) Suspend
+		  DSUSP  SIGTSTP  Ctrl-Y  EM (0x19) Delayed suspend
 
 		Additional requirements:
 		  - SIGKILL cannot be caught or ignored.  Compared to SIGTERM which
 		    is like SIGKILL but can be caught or ignored.
 		  - SIGQUIT is like SIGINT but causes generation of a core dump
-		  - SIGSTOP cannot be caught or ignored.  SIGSTP is like SIGSTOP but
-		    can be caught or ignored ignored.
+		  - SIGSTOP cannot be caught or ignored.  SIGTSTP is like SIGSTOP but
+		    can be caught or ignored.
 		  - The delayed suspend (DSUSD) is like suspend (SUPD), except that
 		    the suspension is delayed until the next read operation
 
@@ -219,11 +400,9 @@ config TTY_SIGINT_CHAR
 		REVISIT:  Traditionally Ctrl-C would generate SIGINT.  Ctrl-D is the
 		End-of-File character that should close the stream.
 
-config TTY_SIGSTP
-	bool "Support SIGSTP"
+config TTY_SIGTSTP
+	bool "Support SIGTSTP"
 	default n
-	select CONFIG_SIG_SIGSTOP_ACTION
-	depends on SERIAL_TERMIOS
 	---help---
 		Whether support Ctrl-z event.  Enabled automatically for console
 		devices.  May be enabled for other serial devices using the ISIG bit
@@ -237,24 +416,24 @@ config TTY_SIGSTP
 		  INTR   SIGINT   Ctrl-C  ETX(0x03) Interrupt
 		  KILL   SIGKILL  Ctrl-U  NAK(0x15) Kill
 		  QUIT   SIGQUIT  Ctrl-\  FS (0x1c) Quit
-		  SUSP   SIGSTP   Ctrl-Z  SUB(0x1a) Suspend
-		  DSUSP  SIGSTP   Ctrl-Y  EM (0x19) Delayed suspend
+		  SUSP   SIGTSTP  Ctrl-Z  SUB(0x1a) Suspend
+		  DSUSP  SIGTSTP  Ctrl-Y  EM (0x19) Delayed suspend
 
 		Additional requirements:
 		  - SIGKILL cannot be caught or ignored.  Compared to SIGTERM which
 		    is like SIGKILL but can be caught or ignored.
 		  - SIGQUIT is like SIGINT but causes generation of a core dump
-		  - SIGSTOP cannot be caught or ignored.  SIGSTP is like SIGSTOP but
-		    can be caught or ignored ignored.
+		  - SIGSTOP cannot be caught or ignored.  SIGTSTP is like SIGSTOP but
+		    can be caught or ignored.
 		  - The delayed suspend (DSUSD) is like suspend (SUPD), except that
 		    the suspension is delayed until the next read operation
 
-config TTY_SIGSTP_CHAR
-	hex "Serial parse SIGSTP characters"
+config TTY_SIGTSTP_CHAR
+	hex "Serial parse SIGTSTP characters"
 	default 0x1a
-	depends on TTY_SIGSTP
+	depends on TTY_SIGTSTP
 	---help---
-		Use ASCII 0x1a (Ctrl-z) input to determine whether to send a SIGSTP
+		Use ASCII 0x1a (Ctrl-z) input to determine whether to send a SIGTSTP
 		event.  Other characters may also be selected.
 
 #
@@ -413,6 +592,41 @@ config LPUART8_SERIAL_CONSOLE
 	depends on LPUART8_SERIALDRIVER
 	select SERIAL_CONSOLE
 
+config LPUART9_SERIAL_CONSOLE
+	bool "LPUART9"
+	depends on LPUART9_SERIALDRIVER
+	select SERIAL_CONSOLE
+
+config LPUART10_SERIAL_CONSOLE
+	bool "LPUART10"
+	depends on LPUART10_SERIALDRIVER
+	select SERIAL_CONSOLE
+
+config LPUART11_SERIAL_CONSOLE
+	bool "LPUART11"
+	depends on LPUART11_SERIALDRIVER
+	select SERIAL_CONSOLE
+
+config LPUART12_SERIAL_CONSOLE
+	bool "LPUART12"
+	depends on LPUART12_SERIALDRIVER
+	select SERIAL_CONSOLE
+
+config LPUART13_SERIAL_CONSOLE
+	bool "LPUART13"
+	depends on LPUART13_SERIALDRIVER
+	select SERIAL_CONSOLE
+
+config LPUART14_SERIAL_CONSOLE
+	bool "LPUART14"
+	depends on LPUART14_SERIALDRIVER
+	select SERIAL_CONSOLE
+
+config LPUART15_SERIAL_CONSOLE
+	bool "LPUART15"
+	depends on LPUART15_SERIALDRIVER
+	select SERIAL_CONSOLE
+
 config SCI0_SERIAL_CONSOLE
 	bool "SCI0"
 	depends on SCI0_SERIALDRIVER
@@ -563,10 +777,79 @@ config UART_RXDMA
 
 endmenu
 
-source drivers/serial/Kconfig-uart
-source drivers/serial/Kconfig-lpuart
-source drivers/serial/Kconfig-usart
-source drivers/serial/Kconfig-sci
+source "drivers/serial/Kconfig-uart"
+source "drivers/serial/Kconfig-lpuart"
+source "drivers/serial/Kconfig-usart"
+source "drivers/serial/Kconfig-sci"
+
+config RAM_UART
+	bool "RAM uart driver"
+	select SERIAL_RXDMA
+	select SERIAL_TXDMA
+	default n
+	---help---
+		It uses the memory block in the kernel as a communication medium,
+		which can communicate between different processes or different CPUs
+
+if RAM_UART
+config RAM_UART_POLLING_INTERVAL
+	int "RAM uart buffer check interval"
+	default USEC_PER_TICK
+	---help---
+		Interval in milliseconds to check for new data on uart ram buffer
+
+config RAM_UART_BUFSIZE
+	int "RAM_UART buffer size"
+	default 1024
+	---help---
+		The size of the RAM_UART buffer in bytes
+
+config RAM_UART0
+	bool "RAM uart driver 0"
+	default n
+	---help---
+		RAM_UART device 0
+
+config RAM_UART0_SLAVE
+	bool "RAM_UART0 is slave"
+	depends on RAM_UART0
+	default n
+	---help---
+		The RAM uart0 is slave
+
+config RAM_UART1
+	bool "RAM uart driver 1"
+	default n
+	---help---
+		RAM uart device 1
+
+config RAM_UART1_SLAVE
+	bool "RAM uart1 is slave"
+	depends on RAM_UART1
+	default n
+	---help---
+		The RAM uart1 is slave
+
+config RAM_UART2
+	bool "RAM uart driver 2"
+	default n
+	---help---
+		RAM uart device 2
+
+config RAM_UART2_SLAVE
+	bool "RAM uart2 is slave"
+	depends on RAM_UART2
+	default n
+	---help---
+		The RAM uart2 is slave
+
+config RAM_UART_BUFFER_SECTION
+	string "RAM uart buffer section name"
+	depends on RAM_UART0 || RAM_UART1 || RAM_UART2
+	---help---
+		The name of the section in the kernel memory block
+
+endif # RAM_UART
 
 menuconfig PSEUDOTERM
 	bool "Pseudo-Terminal (PTY) support"
@@ -578,24 +861,9 @@ menuconfig PSEUDOTERM
 
 if PSEUDOTERM
 
-choice
-	prompt "PTY model"
-	default PSEUDOTERM_BSD if DISABLE_PSEUDOFS_OPERATIONS
-	default PSEUDOTERM_SUSV1 if !DISABLE_PSEUDOFS_OPERATIONS
-
-config PSEUDOTERM_BSD
-	bool "BSD style"
-	---help---
-		Deprecated BSD style PTYs.
-
-		Master: /dev/ptyN
-		Slave: /dev/ttypN
-
-		Where N is the minor number
-
 config PSEUDOTERM_SUSV1
 	bool "SUSv1 style"
-	depends on !DISABLE_PSEUDOFS_OPERATIONS
+	default y
 	---help---
 		PTYs as specified in the Single Unix Specification (SUSv1).
 
@@ -603,8 +871,6 @@ config PSEUDOTERM_SUSV1
 		Slave: /dev/pts/N
 
 		Where N is the minor number
-
-endchoice # PTY model
 
 config PSEUDOTERM_RXBUFSIZE
 	int "Pseudo-Terminal Rx buffer size"
@@ -619,5 +885,77 @@ config PSEUDOTERM_TXBUFSIZE
 		Slave-to-master pipe buffer size.  Default: 256
 
 endif # PSEUDOTERM
+
+menuconfig UART_BTH4
+	bool "BT H4 UART Pseudo Device"
+	default n
+	depends on DRIVERS_BLUETOOTH
+	---help---
+		Enable support for Bluetooth H4 UART Pseudo Device(eg. /dev/ttyHCI).
+		This instantiates a serial-like interface over an existing bluetooth
+		controller via HCI interface. Useful for external Bluetooth
+		stacks working this way instead of the socket based interface.
+
+if UART_BTH4
+
+config UART_BTH4_TXBUFSIZE
+	int "BT H4 UART TX Buffer Size"
+	default 2048
+	---help---
+		H4 UART TX Buffer Size.  Default: 2048
+
+config UART_BTH4_RXBUFSIZE
+	int "BT H4 UART RX Buffer Size"
+	default 8096
+	---help---
+		H4 UART RX Buffer Size.  Default: 8096
+
+config UART_BTH4_NPOLLWAITERS
+	int "Number Of Poll Threads"
+	default 2
+	---help---
+		Maximum number of threads than can be waiting for POLL events.
+		Default: 2
+
+endif # UART_BTH4
+
+menuconfig UART_BTH5
+	bool "BT H5 UART Pseudo Device"
+	default n
+	depends on DRIVERS_BLUETOOTH
+	---help---
+		Enable support for Bluetooth H5 UART Pseudo Device(eg. /dev/ttyHCI).
+		This instantiates a serial-like interface over an existing bluetooth
+		controller via HCI interface. Useful for external Bluetooth
+		stacks working this way instead of the socket based interface.
+
+if UART_BTH5
+
+config UART_BTH5_TXBUFSIZE
+	int "BT H5 UART TX Buffer Size"
+	default 2048
+	---help---
+		H5 UART TX Buffer Size.  Default: 2048
+
+config UART_BTH5_TXWIN
+	int "BT H5 Uart TX Window Size"
+	default 4
+	---help---
+		H5 UART TX Window Size.  Default: 4
+
+config UART_BTH5_RXBUFSIZE
+	int "BT H5 Uart RX Buffer Size"
+	default 8096
+	---help---
+		H5 UART RX Buffer Size.  Default: 8096
+
+config UART_BTH5_NPOLLWAITERS
+	int "Number Of Poll Threads"
+	default 2
+	---help---
+		Maximum number of threads than can be waiting for POLL events.
+		Default: 2
+
+endif # UART_BTH5
 
 endif # SERIAL

@@ -1,36 +1,22 @@
 /****************************************************************************
  * drivers/sensors/aht10.c
- * Driver for the ASAIR AHT10 temperature and humidity sensors
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *   Author: kyChu <kyChu@qq.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,10 +27,12 @@
 #include <nuttx/config.h>
 
 #include <stdio.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/kmalloc.h>
+#include <nuttx/mutex.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/sensors/aht10.h>
@@ -56,10 +44,6 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifndef CONFIG_AHT10_I2C_FREQUENCY
-#  define CONFIG_AHT10_I2C_FREQUENCY 400000
-#endif
-
 /* I2C command bytes */
 
 #define AHT10_SOFT_INIT              0xe1
@@ -68,7 +52,7 @@
 #define AHT10_NORMAL_CMD             0xa8
 
 /****************************************************************************
- * Private
+ * Private Types
  ****************************************************************************/
 
 struct aht10_dev_s
@@ -83,7 +67,7 @@ struct aht10_dev_s
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
   int16_t crefs;                /* Number of open references */
 #endif
-  sem_t devsem;
+  mutex_t devlock;
 };
 
 /****************************************************************************
@@ -130,7 +114,11 @@ static const struct file_operations g_aht10fops =
   aht10_write,    /* write */
   NULL,           /* seek */
   aht10_ioctl,    /* ioctl */
-  NULL            /* poll */
+  NULL,           /* mmap */
+  NULL,           /* truncate */
+  NULL,           /* poll */
+  NULL,           /* readv */
+  NULL            /* writev */
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
   , aht10_unlink /* unlink */
 #endif
@@ -320,11 +308,13 @@ static int aht10_read_values(FAR struct aht10_dev_s *priv, FAR int *temp,
 
   /* Humidity data (20bits). */
 
-  rh20 = ((buf[1] << 12) | (buf[2] << 4) | ((buf[3] & 0xf0) >> 4)) & 0x000fffff;
+  rh20 = ((buf[1] << 12) | (buf[2] << 4) |
+         ((buf[3] & 0xf0) >> 4)) & 0x000fffff;
 
   /* Temperature data (20bits). */
 
-  temp20 = (((buf[3] & 0x0f) << 16) | (buf[4] << 8) | buf[5]) & 0x000fffff;
+  temp20 = (((buf[3] & 0x0f) << 16) |
+             (buf[4] << 8) | buf[5]) & 0x000fffff;
 
   add_sensor_randomness((int)temp20 << 16 | rh20);
 
@@ -351,28 +341,17 @@ static int aht10_open(FAR struct file *filep)
 {
   FAR struct inode       *inode = filep->f_inode;
   FAR struct aht10_dev_s *priv  = inode->i_private;
-  int ret;
 
   /* Get exclusive access */
 
-  do
-    {
-      ret = nxsem_wait(&priv->devsem);
-
-      /* The only case that an error should occur here is if the wait was
-       * awakened by a signal.
-       */
-
-      DEBUGASSERT(ret == OK || ret == -EINTR);
-    }
-  while (ret == -EINTR);
+  nxmutex_lock(&priv->devlock);
 
   /* Increment the count of open references on the driver */
 
   priv->crefs++;
   DEBUGASSERT(priv->crefs > 0);
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return OK;
 }
 #endif
@@ -390,21 +369,10 @@ static int aht10_close(FAR struct file *filep)
 {
   FAR struct inode       *inode = filep->f_inode;
   FAR struct aht10_dev_s *priv  = inode->i_private;
-  int ret;
 
   /* Get exclusive access */
 
-  do
-    {
-      ret = nxsem_wait(&priv->devsem);
-
-      /* The only case that an error should occur here is if the wait was
-       * awakened by a signal.
-       */
-
-      DEBUGASSERT(ret == OK || ret == -EINTR);
-    }
-  while (ret == -EINTR);
+  nxmutex_lock(&priv->devlock);
 
   /* Decrement the count of open references on the driver */
 
@@ -417,12 +385,12 @@ static int aht10_close(FAR struct file *filep)
 
   if (priv->crefs <= 0 && priv->unlinked)
     {
-      nxsem_destroy(&priv->devsem);
+      nxmutex_destroy(&priv->devlock);
       kmm_free(priv);
       return OK;
     }
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return OK;
 }
 #endif
@@ -431,7 +399,8 @@ static int aht10_close(FAR struct file *filep)
  * Name: aht10_read
  ****************************************************************************/
 
-static ssize_t aht10_read(FAR struct file *filep, FAR char *buffer, size_t buflen)
+static ssize_t aht10_read(FAR struct file *filep,
+                          FAR char *buffer, size_t buflen)
 {
   FAR struct inode       *inode  = filep->f_inode;
   FAR struct aht10_dev_s *priv   = inode->i_private;
@@ -442,17 +411,7 @@ static ssize_t aht10_read(FAR struct file *filep, FAR char *buffer, size_t bufle
 
   /* Get exclusive access */
 
-  do
-    {
-      ret = nxsem_wait(&priv->devsem);
-
-      /* The only case that an error should occur here is if the wait was
-       * awakened by a signal.
-       */
-
-      DEBUGASSERT(ret == OK || ret == -EINTR);
-    }
-  while (ret == -EINTR);
+  nxmutex_lock(&priv->devlock);
 
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
   if (priv->unlinked)
@@ -461,7 +420,7 @@ static ssize_t aht10_read(FAR struct file *filep, FAR char *buffer, size_t bufle
        * sensor use on hot swappable I2C bus.
        */
 
-      nxsem_post(&priv->devsem);
+      nxmutex_unlock(&priv->devlock);
       return -ENODEV;
     }
 #endif
@@ -482,7 +441,7 @@ static ssize_t aht10_read(FAR struct file *filep, FAR char *buffer, size_t bufle
         }
     }
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return length;
 }
 
@@ -508,17 +467,7 @@ static int aht10_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Get exclusive access */
 
-  do
-    {
-      ret = nxsem_wait(&priv->devsem);
-
-      /* The only case that an error should occur here is if the wait was
-       * awakened by a signal.
-       */
-
-      DEBUGASSERT(ret == OK || ret == -EINTR);
-    }
-  while (ret == -EINTR);
+  nxmutex_lock(&priv->devlock);
 
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
   if (priv->unlinked)
@@ -527,7 +476,7 @@ static int aht10_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
        * sensor use on hot swappable I2C bus.
        */
 
-      nxsem_post(&priv->devsem);
+      nxmutex_unlock(&priv->devlock);
       return -ENODEV;
     }
 #endif
@@ -571,7 +520,7 @@ static int aht10_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         break;
     }
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return ret;
 }
 
@@ -585,28 +534,18 @@ static int aht10_unlink(FAR struct inode *inode)
   FAR struct aht10_dev_s *priv;
   int ret;
 
-  DEBUGASSERT(inode != NULL && inode->i_private != NULL);
-  priv = (FAR struct aht10_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private != NULL);
+  priv = inode->i_private;
 
   /* Get exclusive access */
 
-  do
-    {
-      ret = nxsem_wait(&priv->devsem);
-
-      /* The only case that an error should occur here is if the wait was
-       * awakened by a signal.
-       */
-
-      DEBUGASSERT(ret == OK || ret == -EINTR);
-    }
-  while (ret == -EINTR);
+  nxmutex_lock(&priv->devlock);
 
   /* Are there open references to the driver data structure? */
 
   if (priv->crefs <= 0)
     {
-      nxsem_destroy(&priv->devsem);
+      nxmutex_destroy(&priv->devlock);
       kmm_free(priv);
       return OK;
     }
@@ -616,7 +555,7 @@ static int aht10_unlink(FAR struct inode *inode)
    */
 
   priv->unlinked = true;
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return ret;
 }
 #endif
@@ -653,7 +592,7 @@ int aht10_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
 
   /* Initialize the device structure */
 
-  priv = (FAR struct aht10_dev_s *)kmm_zalloc(sizeof(struct aht10_dev_s));
+  priv = kmm_zalloc(sizeof(struct aht10_dev_s));
   if (priv == NULL)
     {
       snerr("ERROR: Failed to allocate instance\n");
@@ -663,12 +602,13 @@ int aht10_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   priv->i2c  = i2c;
   priv->addr = addr;
 
-  nxsem_init(&priv->devsem, 0, 1);
+  nxmutex_init(&priv->devlock);
 
   ret = aht10_initialize(priv);
   if (ret < 0)
     {
       snerr("ERROR: Failed to initialize AHT10: %d\n", ret);
+      nxmutex_destroy(&priv->devlock);
       kmm_free(priv);
       return ret;
     }
@@ -679,6 +619,7 @@ int aht10_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   if (ret < 0)
     {
       snerr("ERROR: Failed to register driver: %d\n", ret);
+      nxmutex_destroy(&priv->devlock);
       kmm_free(priv);
     }
 

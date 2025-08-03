@@ -1,35 +1,22 @@
 /****************************************************************************
- * net/procfs/fs_procfs_route.c
+ * net/procfs/net_procfs_route.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,7 +27,6 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <sys/statfs.h>
 #include <sys/stat.h>
 
 #include <stdint.h>
@@ -57,7 +43,6 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/fs/procfs.h>
-#include <nuttx/fs/dirent.h>
 
 #include "route/route.h"
 
@@ -108,10 +93,10 @@ enum route_node_e
 
 struct route_file_s
 {
-  struct procfs_file_s base;           /* Base open file structure */
+  struct procfs_file_s base;          /* Base open file structure */
   FAR const char *name;               /* Terminal node segment name */
   uint8_t node;                       /* Type of node (see enum route_node_e) */
-  char line[STATUS_LINELEN];           /* Pre-allocated buffer for formatted lines */
+  char line[STATUS_LINELEN];          /* Pre-allocated buffer for formatted lines */
 };
 
 /* This structure describes one open "directory" */
@@ -145,7 +130,7 @@ struct route_info_s
 /* Helpers */
 
 static void    route_sprintf(FAR struct route_info_s *info,
-                 FAR const char *fmt, ...);
+                 FAR const char *fmt, ...) printf_like(2, 3);
 #ifdef CONFIG_NET_IPv4
 static int     route_ipv4_entry(FAR struct net_route_ipv4_s *route,
                  FAR void *arg);
@@ -175,9 +160,10 @@ static int     route_dup(FAR const struct file *oldp,
                  FAR struct file *newp);
 
 static int     route_opendir(const char *relpath,
-                 FAR struct fs_dirent_s *dir);
+                 FAR struct fs_dirent_s **dir);
 static int     route_closedir(FAR struct fs_dirent_s *dir);
-static int     route_readdir(FAR struct fs_dirent_s *dir);
+static int     route_readdir(FAR struct fs_dirent_s *dir,
+                             FAR struct dirent *entry);
 static int     route_rewinddir(FAR struct fs_dirent_s *dir);
 
 static int     route_stat(FAR const char *relpath, FAR struct stat *buf);
@@ -191,12 +177,13 @@ static int     route_stat(FAR const char *relpath, FAR struct stat *buf);
  * with any compiler.
  */
 
-const struct procfs_operations net_procfs_routeoperations =
+const struct procfs_operations g_netroute_operations =
 {
   route_open,          /* open */
   route_close,         /* close */
   route_read,          /* read */
   NULL,                /* write */
+  NULL,                /* poll */
 
   route_dup,           /* dup */
 
@@ -288,7 +275,8 @@ static void route_sprintf(FAR struct route_info_s *info,
  ****************************************************************************/
 
 #ifdef CONFIG_NET_IPv4
-static int route_ipv4_entry(FAR struct net_route_ipv4_s *route, FAR void *arg)
+static int route_ipv4_entry(FAR struct net_route_ipv4_s *route,
+                            FAR void *arg)
 {
   FAR struct route_info_s *info = (FAR struct route_info_s *)arg;
   char target[INET_ADDRSTRLEN];
@@ -345,7 +333,8 @@ static int route_ipv4_entry(FAR struct net_route_ipv4_s *route, FAR void *arg)
  ****************************************************************************/
 
 #ifdef CONFIG_NET_IPv6
-static int route_ipv6_entry(FAR struct net_route_ipv6_s *route, FAR void *arg)
+static int route_ipv6_entry(FAR struct net_route_ipv6_s *route,
+                            FAR void *arg)
 {
   FAR struct route_info_s *info = (FAR struct route_info_s *)arg;
   char addr[INET6_ADDRSTRLEN];
@@ -391,7 +380,8 @@ static int route_ipv6_entry(FAR struct net_route_ipv6_s *route, FAR void *arg)
 
 #ifdef CONFIG_NET_IPv4
 static ssize_t route_ipv4_table(FAR struct route_file_s *procfile,
-                                FAR char *buffer, size_t buflen, off_t offset)
+                                FAR char *buffer, size_t buflen,
+                                off_t offset)
 {
   struct route_info_s info;
 
@@ -416,7 +406,8 @@ static ssize_t route_ipv4_table(FAR struct route_file_s *procfile,
 
 #ifdef CONFIG_NET_IPv6
 static ssize_t route_ipv6_table(FAR struct route_file_s *procfile,
-                                FAR char *buffer, size_t buflen, off_t offset)
+                                FAR char *buffer, size_t buflen,
+                                off_t offset)
 {
   struct route_info_s info;
 
@@ -621,12 +612,12 @@ static int route_dup(FAR const struct file *oldp, FAR struct file *newp)
  ****************************************************************************/
 
 static int route_opendir(FAR const char *relpath,
-                         FAR struct fs_dirent_s *dir)
+                         FAR struct fs_dirent_s **dir)
 {
   FAR struct route_dir_s *level2;
 
   finfo("relpath: \"%s\"\n", relpath ? relpath : "NULL");
-  DEBUGASSERT(relpath && dir && !dir->u.procfs);
+  DEBUGASSERT(relpath);
 
   /* Check the relative path */
 
@@ -663,7 +654,7 @@ static int route_opendir(FAR const char *relpath,
   level2->base.nentries    = 2;
   level2->name             = "";
   level2->node             = PROC_ROUTE;
-  dir->u.procfs            = (FAR void *)level2;
+  *dir                     = (FAR struct fs_dirent_s *)level2;
   return OK;
 }
 
@@ -676,17 +667,8 @@ static int route_opendir(FAR const char *relpath,
 
 static int route_closedir(FAR struct fs_dirent_s *dir)
 {
-  FAR struct route_dir_s *priv;
-
-  DEBUGASSERT(dir && dir->u.procfs);
-  priv = dir->u.procfs;
-
-  if (priv != NULL)
-    {
-      kmm_free(priv);
-    }
-
-  dir->u.procfs = NULL;
+  DEBUGASSERT(dir);
+  kmm_free(dir);
   return OK;
 }
 
@@ -697,14 +679,15 @@ static int route_closedir(FAR struct fs_dirent_s *dir)
  *
  ****************************************************************************/
 
-static int route_readdir(struct fs_dirent_s *dir)
+static int route_readdir(FAR struct fs_dirent_s *dir,
+                         FAR struct dirent *entry)
 {
   FAR struct route_dir_s *level2;
   FAR const char *dname;
   unsigned int index;
 
-  DEBUGASSERT(dir != NULL && dir->u.procfs != NULL);
-  level2 = dir->u.procfs;
+  DEBUGASSERT(dir != NULL);
+  level2 = (FAR struct route_dir_s *)dir;
 
   /* The index determines which entry to return */
 
@@ -734,8 +717,8 @@ static int route_readdir(struct fs_dirent_s *dir)
 
   /* Save the filename and file type */
 
-  dir->fd_dir.d_type = DTYPE_FILE;
-  strncpy(dir->fd_dir.d_name, dname, NAME_MAX + 1);
+  entry->d_type = DTYPE_FILE;
+  strlcpy(entry->d_name, dname, sizeof(entry->d_name));
 
   /* Set up the next directory entry offset.  NOTE that we could use the
    * standard f_pos instead of our own private index.
@@ -756,8 +739,8 @@ static int route_rewinddir(struct fs_dirent_s *dir)
 {
   FAR struct route_dir_s *priv;
 
-  DEBUGASSERT(dir && dir->u.procfs);
-  priv = dir->u.procfs;
+  DEBUGASSERT(dir);
+  priv = (FAR struct route_dir_s *)dir;
 
   priv->base.index = 0;
   return OK;

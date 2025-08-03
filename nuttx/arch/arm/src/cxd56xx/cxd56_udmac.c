@@ -1,37 +1,22 @@
 /****************************************************************************
  * arch/arm/src/cxd56xx/cxd56_udmac.c
  *
- *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Copyright 2018 Sony Semiconductor Solutions Corporation
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -45,24 +30,19 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <debug.h>
 #include <errno.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
+#include <nuttx/mutex.h>
+#include <nuttx/nuttx.h>
 #include <nuttx/semaphore.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "cxd56_clock.h"
 #include "hardware/cxd56_udmac.h"
 #include "cxd56_udmac.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#define ALIGN_MASK(s)    ((1 << s) - 1)
-#define ALIGN_DOWN(v, m) ((v) & ~m)
-#define ALIGN_UP(v, m)   (((v) + (m)) & ~m)
 
 /****************************************************************************
  * Private Types
@@ -83,8 +63,8 @@ struct dma_channel_s
 
 struct dma_controller_s
 {
-  sem_t exclsem; /* Protects channel table */
-  sem_t chansem; /* Count of free channels */
+  mutex_t lock;                 /* Protects channel table */
+  sem_t   chansem;              /* Count of free channels */
 };
 
 /****************************************************************************
@@ -93,7 +73,11 @@ struct dma_controller_s
 
 /* This is the overall state of the DMA controller */
 
-static struct dma_controller_s g_dmac;
+static struct dma_controller_s g_dmac =
+{
+  .lock = NXMUTEX_INITIALIZER,
+  .chansem = SEM_INITIALIZER(CXD56_DMA_NCHANNELS),
+};
 
 /* This is the array of all DMA channels */
 
@@ -130,7 +114,7 @@ static struct dma_channel_s g_dmach[CXD56_DMA_NCHANNELS];
 #endif
 
 static struct dma_descriptor_s g_descriptors[CXD56_DMA_NCHANNELS]
-  __attribute__((aligned(DESC_TABLE_ALIGN)));
+  aligned_data(DESC_TABLE_ALIGN);
 
 /****************************************************************************
  * Public Data
@@ -185,7 +169,7 @@ static inline struct dma_descriptor_s *cxd56_get_descriptor(
  *
  ****************************************************************************/
 
-static int cxd56_dmac_interrupt(int irq, void *context, FAR void *arg)
+static int cxd56_dmac_interrupt(int irq, void *context, void *arg)
 {
   struct dma_channel_s *dmach;
   unsigned int chndx;
@@ -254,9 +238,6 @@ void cxd56_udmainitialize(void)
 
   /* Initialize the channel list  */
 
-  nxsem_init(&g_dmac.exclsem, 0, 1);
-  nxsem_init(&g_dmac.chansem, 0, CXD56_DMA_NCHANNELS);
-
   for (i = 0; i < CXD56_DMA_NCHANNELS; i++)
     {
       g_dmach[i].chan = i;
@@ -271,7 +252,7 @@ void cxd56_udmainitialize(void)
    * will obtain the alternative descriptors.
    */
 
-  putreg32((uint32_t)g_descriptors, CXD56_DMA_CTRLBASE);
+  putreg32(CXD56_PHYSADDR(g_descriptors), CXD56_DMA_CTRLBASE);
 
   /* Enable the DMA controller */
 
@@ -322,7 +303,7 @@ DMA_HANDLE cxd56_udmachannel(void)
 
   /* Get exclusive access to the DMA channel list */
 
-  ret = nxsem_wait_uninterruptible(&g_dmac.exclsem);
+  ret = nxmutex_lock(&g_dmac.lock);
   if (ret < 0)
     {
       nxsem_post(&g_dmac.chansem);
@@ -348,7 +329,7 @@ DMA_HANDLE cxd56_udmachannel(void)
         }
     }
 
-  nxsem_post(&g_dmac.exclsem);
+  nxmutex_unlock(&g_dmac.lock);
 
   /* Attach DMA interrupt vector */
 
@@ -448,7 +429,7 @@ void cxd56_rxudmasetup(DMA_HANDLE handle, uintptr_t paddr, uintptr_t maddr,
    */
 
   xfersize = (1 << shift);
-  nbytes   = ALIGN_DOWN(nbytes, mask);
+  nbytes   = ALIGN_DOWN_MASK(nbytes, mask);
   DEBUGASSERT(nbytes > 0);
 
   /* Save the configuration (for cxd56_udmastart()). */
@@ -458,8 +439,8 @@ void cxd56_rxudmasetup(DMA_HANDLE handle, uintptr_t paddr, uintptr_t maddr,
   /* Configure the primary channel descriptor */
 
   desc         = cxd56_get_descriptor(dmach, false);
-  desc->srcend = (uint32_t *)paddr;
-  desc->dstend = (uint32_t *)(maddr + nbytes - xfersize);
+  desc->srcend = paddr;
+  desc->dstend = CXD56_PHYSADDR(maddr + nbytes - xfersize);
 
   /* No source increment, destination increments according to transfer size.
    * No privileges.  Arbitrate after each transfer. Default priority.
@@ -545,7 +526,7 @@ void cxd56_txudmasetup(DMA_HANDLE handle, uintptr_t paddr, uintptr_t maddr,
    */
 
   xfersize = (1 << shift);
-  nbytes   = ALIGN_DOWN(nbytes, mask);
+  nbytes   = ALIGN_DOWN_MASK(nbytes, mask);
   DEBUGASSERT(nbytes > 0);
 
   /* Save the configuration (for cxd56_udmastart()). */
@@ -555,8 +536,8 @@ void cxd56_txudmasetup(DMA_HANDLE handle, uintptr_t paddr, uintptr_t maddr,
   /* Configure the primary channel descriptor */
 
   desc         = cxd56_get_descriptor(dmach, false);
-  desc->srcend = (uint32_t *)(maddr + nbytes - xfersize);
-  desc->dstend = (uint32_t *)paddr;
+  desc->srcend = CXD56_PHYSADDR(maddr + nbytes - xfersize);
+  desc->dstend = paddr;
 
   /* No destination increment, source increments according to transfer size.
    * No privileges.  Arbitrate after each transfer. Default priority.

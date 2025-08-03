@@ -1,41 +1,29 @@
 /****************************************************************************
  * apps/system/zmodem/zm.h
  *
- *   Copyright (C) 2013, 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * References:
- *   "The ZMODEM Inter Application File Transfer Protocol", Chuck Forsberg,
- *    Omen Technology Inc., October 14, 1988
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
+
+/* References:
+ *   "The ZMODEM Inter Application File Transfer Protocol", Chuck Forsberg,
+ *    Omen Technology Inc., October 14, 1988
+ */
 
 #ifndef __APPS_SYSTEM_XMODEM_ZM_H
 #define __APPS_SYSTEM_XMODEM_ZM_H
@@ -59,8 +47,10 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
 /* ZModem *******************************************************************/
-/* Zmodem ZRINIT flags.  These bits describe the cababilities of the receiver.
+
+/* Zmodem ZRINIT flags. These bits describe the capabilities of the receiver.
  * Reference: Paragraph 11.2:
  */
 
@@ -79,6 +69,7 @@
 #define TESC8         (1 << 7)       /* Sender needs 8th bit escaped. */
 
 /* ZFILE transfer flags */
+
 /* F0 */
 
 #define ZCBIN         1              /* Binary transfer */
@@ -162,6 +153,7 @@
 #define ZRUB1         'm'           /* Translate to 0xff */
 
 /* Implementation ***********************************************************/
+
 /* Zmodem Events (same as frame type + data received and error events) */
 
 #define ZME_RQINIT    ZRQINIT        /* Request receive init */
@@ -234,18 +226,14 @@
 #  define zmdbg(format, ...)    syslog(LOG_INFO, EXTRA_FMT format EXTRA_ARG, ##__VA_ARGS__)
 #else
 #  undef CONFIG_SYSTEM_ZMODEM_DUMPBUFFER
-#  ifdef CONFIG_CPP_HAVE_VARARGS
-#     define zmprintf(x...)
-#     define zmdbg(x...)
-#  else
-#     define zmprintf           (void)
-#     define zmdbg              (void)
-#  endif
+#  define zmprintf(x...)
+#  define zmdbg(x...)
 #endif
 
 /****************************************************************************
  * Public Types
  ****************************************************************************/
+
 /* The state of the parser */
 
 enum parser_state_e
@@ -288,9 +276,9 @@ enum pdata_substate_e
 struct zm_state_s;
 typedef int (*action_t)(FAR struct zm_state_s *pzm);
 
-/* State transition table entry.  There is one row of the table per possible state.
- * Each row is a row of all reasonable events for this state and long the
- * appropriate state transition and transition action.
+/* State transition table entry.  There is one row of the table per possible
+ * state. Each row is a row of all reasonable events for this state and long
+ * the appropriate state transition and transition action.
  */
 
 struct zm_transition_s
@@ -567,7 +555,8 @@ ssize_t zm_remwrite(int fd, FAR const uint8_t *buffer, size_t buflen);
  *
  ****************************************************************************/
 
-int zm_writefile(int fd, FAR const uint8_t *buffer, size_t buflen, bool zcnl);
+int zm_writefile(int fd, FAR const uint8_t *buffer,
+                 size_t buflen, bool zcnl);
 
 /****************************************************************************
  * Name: zm_filecrc
@@ -590,9 +579,7 @@ uint32_t zm_filecrc(FAR struct zm_state_s *pzm, FAR const char *filename);
  *
  ****************************************************************************/
 
-#ifdef CONFIG_SERIAL_TERMIOS
 void zm_rawmode(int fd);
-#endif
 
 /****************************************************************************
  * Name: zm_flowc

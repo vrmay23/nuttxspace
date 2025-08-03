@@ -1,35 +1,22 @@
 /********************************************************************************************
  * apps/graphics/nxwm/src/cnxterm.cxx
  *
- *   Copyright (C) 2012. 2014, 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX, NxWidgets, nor the names of its contributors
- *    me be used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ********************************************************************************************/
 
@@ -41,7 +28,6 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <cunistd>
 #include <ctime>
 
 #include <sys/boardctl.h>
@@ -50,6 +36,7 @@
 #include <sched.h>
 #include <assert.h>
 #include <debug.h>
+#include <unistd.h>
 
 #include "nshlib/nshlib.h"
 
@@ -346,7 +333,7 @@ void CNxTerm::stop(void)
       // Construct the driver name using this minor number
 
       char devname[32];
-      snprintf(devname, 32, "/dev/nxterm%d", m_minor);
+      snprintf(devname, sizeof(devname), "/dev/nxterm%d", m_minor);
 
       unlink(devname);
       m_nxterm = 0;
@@ -475,7 +462,7 @@ int CNxTerm::nxterm(int argc, char *argv[])
   // Construct the driver name using this minor number
 
   char devname[32];
-  snprintf(devname, 32, "/dev/nxterm%d", g_nxtermvars.minor);
+  snprintf(devname, sizeof(devname), "/dev/nxterm%d", g_nxtermvars.minor);
 
   // Increment the minor number while it is protect by the semaphore
 
@@ -504,28 +491,16 @@ int CNxTerm::nxterm(int argc, char *argv[])
   std::fflush(stderr);
 
 #ifdef CONFIG_NXTERM_NXKBDIN
-  std::fclose(stdin);
+  dup2(fd, 0);
 #endif
-  std::fclose(stdout);
-  std::fclose(stderr);
-
-#ifdef CONFIG_NXTERM_NXKBDIN
-  std::dup2(fd, 0);
-#endif
-  std::dup2(fd, 1);
-  std::dup2(fd, 2);
-
-#ifdef CONFIG_NXTERM_NXKBDIN
-  std::fdopen(0, "r");
-#endif
-  std::fdopen(1, "w");
-  std::fdopen(2, "w");
+  dup2(fd, 1);
+  dup2(fd, 2);
 
   // And we can close our original driver file descriptor
 
   if (fd > 2)
     {
-      std::close(fd);
+      ::close(fd);
     }
 
   // Inform the parent thread that we successfully initialized
@@ -680,19 +655,5 @@ bool NxWM::nshlibInitialize(void)
   // Initialize the NSH library
 
   nsh_initialize();
-
-  // If the Telnet console is selected as a front-end, then start the
-  // Telnet daemon.
-
-#ifdef CONFIG_NSH_TELNET
-  int ret = nsh_telnetstart(AF_UNSPEC);
-  if (ret < 0)
-    {
-      // The daemon is NOT running!
-
-      return false;
-   }
-#endif
-
   return true;
 }

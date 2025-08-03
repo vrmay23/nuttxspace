@@ -1,26 +1,22 @@
 /****************************************************************************
  * arch/xtensa/src/esp32/hardware/esp32_dport.h
  *
- * Adapted from use in NuttX by:
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Derives from logic originally provided by Espressif Systems:
- *
- *   Copyright 2015-2016 Espressif Systems (Shanghai) PTE LTD
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -31,7 +27,7 @@
  * Included Files
  ****************************************************************************/
 
-#include "hardware/esp32_soc.h"
+#include "esp32_soc.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -111,6 +107,10 @@
 
 /* DPORT_PERI_CLK_EN : R/W ;bitpos:[31:0] ;default: 32'h0 ; */
 
+#define DPORT_PERI_CLK_EN_AES (1 << 0)
+#define DPORT_PERI_CLK_EN_SHA (1 << 1)
+#define DPORT_PERI_CLK_EN_RSA (1 << 2)
+
 #define DPORT_PERI_CLK_EN  0xFFFFFFFF
 #define DPORT_PERI_CLK_EN_M  ((DPORT_PERI_CLK_EN_V)<<(DPORT_PERI_CLK_EN_S))
 #define DPORT_PERI_CLK_EN_V  0xFFFFFFFF
@@ -119,6 +119,10 @@
 #define DPORT_PERI_RST_EN_REG          (DR_REG_DPORT_BASE + 0x020)
 
 /* DPORT_PERI_RST_EN : R/W ;bitpos:[31:0] ;default: 32'h0 ; */
+
+#define DPORT_PERI_RST_EN_AES (1 << 0)
+#define DPORT_PERI_RST_EN_SHA (1 << 1)
+#define DPORT_PERI_RST_EN_RSA (1 << 2)
 
 #define DPORT_PERI_RST_EN  0xFFFFFFFF
 #define DPORT_PERI_RST_EN_M  ((DPORT_PERI_RST_EN_V)<<(DPORT_PERI_RST_EN_S))
@@ -197,10 +201,13 @@
 
 /* DPORT_CPUPERIOD_SEL : R/W ;bitpos:[1:0] ;default: 2'b0 ; */
 
-#define DPORT_CPUPERIOD_SEL  0x00000003
-#define DPORT_CPUPERIOD_SEL_M  ((DPORT_CPUPERIOD_SEL_V)<<(DPORT_CPUPERIOD_SEL_S))
-#define DPORT_CPUPERIOD_SEL_V  0x3
-#define DPORT_CPUPERIOD_SEL_S  0
+#define DPORT_CPUPERIOD_SEL     0x00000003
+#define DPORT_CPUPERIOD_SEL_M   ((DPORT_CPUPERIOD_SEL_V)<<(DPORT_CPUPERIOD_SEL_S))
+#define DPORT_CPUPERIOD_SEL_V   0x3
+#define DPORT_CPUPERIOD_SEL_S   0
+#define DPORT_CPUPERIOD_SEL_80  0
+#define DPORT_CPUPERIOD_SEL_160 1
+#define DPORT_CPUPERIOD_SEL_240 2
 
 #define DPORT_PRO_CACHE_CTRL_REG          (DR_REG_DPORT_BASE + 0x040)
 
@@ -1094,7 +1101,8 @@
 #define DPORT_SPI_DMA_CLK_EN   (BIT(22))
 #define DPORT_I2S1_CLK_EN   (BIT(21))
 #define DPORT_PWM1_CLK_EN   (BIT(20))
-#define DPORT_CAN_CLK_EN   (BIT(19))
+#define DPORT_TWAI_CLK_EN  (BIT(19))
+#define DPORT_CAN_CLK_EN   DPORT_TWAI_CLK_EN
 #define DPORT_I2C_EXT1_CLK_EN   (BIT(18))
 #define DPORT_PWM0_CLK_EN   (BIT(17))
 #define DPORT_SPI_CLK_EN   (BIT(16))
@@ -1129,7 +1137,8 @@
 #define DPORT_SPI_DMA_RST   (BIT(22))
 #define DPORT_I2S1_RST   (BIT(21))
 #define DPORT_PWM1_RST   (BIT(20))
-#define DPORT_CAN_RST   (BIT(19))
+#define DPORT_TWAI_RST   (BIT(19))
+#define DPORT_CAN_RST    DPORT_CAN_RST
 #define DPORT_I2C_EXT1_RST   (BIT(18))
 #define DPORT_PWM0_RST   (BIT(17))
 #define DPORT_SPI_RST   (BIT(16))
@@ -1179,7 +1188,10 @@
 #define DPORT_SLAVE_SPI_MASK_PRO_V  0x1
 #define DPORT_SLAVE_SPI_MASK_PRO_S  0
 
-#define DPORT_WIFI_CLK_EN_REG          (DR_REG_DPORT_BASE + 0x0CC)
+#define DPORT_WIFI_CLK_EN_REG          (DR_REG_DPORT_BASE + 0x0cc)
+#define DPORT_CORE_RST_EN_REG          (DR_REG_DPORT_BASE + 0x0d0)
+
+#define DPORT_EMAC_CLK_EN              (BIT(14))
 
 /* DPORT_WIFI_CLK_EN : R/W ;bitpos:[31:0] ;default: 32'hfffce030 ; */
 
@@ -1188,9 +1200,37 @@
 #define DPORT_WIFI_CLK_EN_V  0xFFFFFFFF
 #define DPORT_WIFI_CLK_EN_S  0
 
+/* Mask for all Wifi clock bits - 1, 2, 10 */
+
+#define DPORT_WIFI_CLK_WIFI_EN  0x00000406
+#define DPORT_WIFI_CLK_WIFI_EN_M  ((DPORT_WIFI_CLK_WIFI_EN_V)<<(DPORT_WIFI_CLK_WIFI_EN_S))
+#define DPORT_WIFI_CLK_WIFI_EN_V  0x406
+#define DPORT_WIFI_CLK_WIFI_EN_S  0
+
+/* Mask for all Bluetooth clock bits - 11, 16, 17 */
+
+#define DPORT_WIFI_CLK_BT_EN  0x61
+#define DPORT_WIFI_CLK_BT_EN_M  ((DPORT_WIFI_CLK_BT_EN_V)<<(DPORT_WIFI_CLK_BT_EN_S))
+#define DPORT_WIFI_CLK_BT_EN_V  0x61
+#define DPORT_WIFI_CLK_BT_EN_S  11
+
+/* Mask for clock bits used by both WIFI and Bluetooth */
+
+#define DPORT_WIFI_CLK_WIFI_BT_COMMON_M 0x000003c9
+
+/* bluetooth baseband bit11 */
+
+#define DPORT_BT_BASEBAND_EN  BIT(11)
+
+/* bluetooth LC bit16 and bit17 */
+#define DPORT_BT_LC_EN  (BIT(16)|BIT(17))
+
 #define DPORT_WIFI_RST_EN_REG          (DR_REG_DPORT_BASE + 0x0D0)
 
 /* DPORT_WIFI_RST : R/W ;bitpos:[31:0] ;default: 32'h0 ; */
+
+#define DPORT_EMAC_RST_EN              (BIT(7))
+#define DPORT_MAC_RST_EN               (BIT(2))
 
 #define DPORT_WIFI_RST  0xFFFFFFFF
 #define DPORT_WIFI_RST_M  ((DPORT_WIFI_RST_V)<<(DPORT_WIFI_RST_S))
@@ -4354,5 +4394,19 @@
 #define DPORT_DATE_V  0xFFFFFFF
 #define DPORT_DATE_S  0
 #define DPORT_DPORT_DATE_VERSION 0x1605190
+
+/* SPI Flash MMU table register base address for PRO CPU */
+
+#define DPORT_PRO_FLASH_MMU_TABLE_REG       (DR_REG_DPORT_BASE + 0x10000)
+
+/* SPI Flash MMU table register base address for APP CPU */
+
+#define DPORT_APP_FLASH_MMU_TABLE_REG       (DR_REG_DPORT_BASE + 0x12000)
+
+#define DPORT_FLASH_MMU_TABLE_SIZE          0x100
+
+#define DPORT_FLASH_MMU_TABLE_INVALID_VAL   0x100
+
+#define DPORT_MMU_ADDRESS_MASK              0xff
 
 #endif /* __ARCH_XTENSA_SRC_ESP32_HARDWARE_ESP32_DPORT_H */

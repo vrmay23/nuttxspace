@@ -1,13 +1,11 @@
 /****************************************************************************
  * arch/arm/src/lpc2378/lpc23xx_irq.c
  *
- *   Copyright (C) 2010 Rommel Marcelo. All rights reserved.
- *   Author: Rommel Marcelo
- *
- * This file is part of the NuttX RTOS and based on the lpc2148 port:
- *
- *   Copyright (C) 2010 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2010 Rommel Marcelo. All rights reserved.
+ * SPDX-FileCopyrightText: 2010 Gregory Nutt. All rights reserved.
+ * SPDX-FileContributor: Rommel Marcelo
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -47,39 +45,13 @@
 #include <stdint.h>
 #include <errno.h>
 #include <debug.h>
-#include <nuttx/irq.h>
+#include <nuttx/arch.h>
 
 #include "arm.h"
 #include "chip.h"
-#include "up_internal.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "lpc2378.h"
 #include "lpc23xx_vic.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-/****************************************************************************
- * Public Data
- ****************************************************************************/
-
-/* g_current_regs[] holds a references to the current interrupt level
- * register storage structure.  If is non-NULL only during interrupt
- * processing.  Access to g_current_regs[] must be through the macro
- * CURRENT_REGS for portability.
- */
-
-volatile uint32_t *g_current_regs[1];
-
-/****************************************************************************
- * Private Data
- ****************************************************************************/
-
-/****************************************************************************
- * Private Functions
- ****************************************************************************/
 
 /****************************************************************************
  * Public Functions
@@ -93,8 +65,9 @@ void up_irqinitialize(void)
 {
   int reg;
 
-  /* Disable all interrupts.  We do this by writing ones to the IntClearEnable
-   * register.
+  /* Disable all interrupts.
+   * We do this by writing ones to the IntClearEnable register.
+   *
    */
 
   vic_putreg(0xffffffff, VIC_INTENCLEAR_OFFSET);
@@ -108,17 +81,13 @@ void up_irqinitialize(void)
   for (reg = 0; reg < NR_IRQS; reg++)
     {
       vic_putreg(0, VIC_VECTADDR0_OFFSET + (reg << 2));
-      vic_putreg(0x0F, VIC_VECTPRIORITY0_OFFSET + (reg << 2));
+      vic_putreg(0x0f, VIC_VECTPRIORITY0_OFFSET + (reg << 2));
     }
-
-  /* currents_regs is non-NULL only while processing an interrupt */
-
-  CURRENT_REGS = NULL;
 
   /* Enable global ARM interrupts */
 
 #ifndef CONFIG_SUPPRESS_INTERRUPTS
-  up_irq_restore(SVC_MODE | PSR_F_BIT);
+  up_irq_restore(PSR_MODE_SYS | PSR_F_BIT);
 #endif
 }
 
@@ -160,8 +129,8 @@ void up_disable_irq(int irq)
 
   if (irq < NR_IRQS)
     {
-      /* Disable the irq by setting the corresponding bit in the VIC Interrupt
-       * Enable Clear register.
+      /* Disable the irq by setting the corresponding bit in the VIC
+       * Interrupt Enable Clear register.
        */
 
       vic_putreg((1 << irq), VIC_INTENCLEAR_OFFSET);
@@ -197,21 +166,21 @@ void up_enable_irq(int irq)
 }
 
 /****************************************************************************
- * Name: up_ack_irq
+ * Name: arm_ack_irq
  *
  * Description:
  *   Acknowledge the interrupt
  *
  ****************************************************************************/
 
-void up_ack_irq(int irq)
+void arm_ack_irq(int irq)
 {
   uint32_t reg32;
 
   if ((unsigned)irq < NR_IRQS)
     {
-      /* Mask the IRQ by clearing the associated bit in Software Priority Mask
-       * register
+      /* Mask the IRQ by clearing the associated bit in Software Priority
+       * Mask register
        */
 
       reg32 = vic_getreg(VIC_PRIORITY_MASK_OFFSET);

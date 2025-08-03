@@ -1,5 +1,7 @@
 /****************************************************************************
- *  boards/arm/sama5/sama5d2-xult/src/sam_nandflash.c
+ * boards/arm/sama5/sama5d2-xult/src/sam_nandflash.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  *  Licensed to the Apache Software Foundation (ASF) under one or more
  *  contributor license agreements.  See the NOTICE file distributed with
@@ -24,16 +26,16 @@
 
 #include <nuttx/config.h>
 
-#include <sys/mount.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/mtd/mtd.h>
+#include <nuttx/fs/fs.h>
 #include <nuttx/fs/nxffs.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "sam_periphclks.h"
 #include "sam_pio.h"
 #include "sam_nand.h"
@@ -152,7 +154,7 @@ int board_nandflash_config(int cs)
 #ifdef HAVE_NAND
 int sam_nand_automount(int minor)
 {
-  FAR struct mtd_dev_s *mtd;
+  struct mtd_dev_s *mtd;
   static bool initialized = false;
   int ret;
 
@@ -171,12 +173,15 @@ int sam_nand_automount(int minor)
         }
 
 #if defined(CONFIG_SAMA5D3XPLAINED_NAND_FTL)
-      /* Use the FTL layer to wrap the MTD driver as a block driver */
+      /* Register the MTD driver */
 
-      ret = ftl_initialize(NAND_MINOR, mtd);
+      char path[32];
+      snprintf(path, sizeof(path), "/dev/mtdblock%d", NAND_MINOR);
+      ret = register_mtddriver(path, mtd, 0755, NULL);
       if (ret < 0)
         {
-          ferr("ERROR: Failed to initialize the FTL layer: %d\n", ret);
+          ferr("ERROR: Failed to register the MTD driver %s, ret %d\n",
+               path, ret);
           return ret;
         }
 
@@ -192,10 +197,10 @@ int sam_nand_automount(int minor)
 
       /* Mount the file system at /mnt/nand */
 
-      ret = mount(NULL, "/mnt/nand", "nxffs", 0, NULL);
+      ret = nx_mount(NULL, "/mnt/nand", "nxffs", 0, NULL);
       if (ret < 0)
         {
-          ferr("ERROR: Failed to mount the NXFFS volume: %d\n", errno);
+          ferr("ERROR: Failed to mount the NXFFS volume: %d\n", ret);
           return ret;
         }
 #endif

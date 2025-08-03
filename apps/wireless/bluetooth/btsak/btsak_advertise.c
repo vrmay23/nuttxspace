@@ -1,42 +1,29 @@
 /****************************************************************************
  * apps/wireless/bluetooth/btsak/btsak_advertise.c
- * Bluetooth Swiss Army Knife -- Advertise command
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author:  Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Based loosely on the i8sak IEEE 802.15.4 program by Anthony Merlino and
- * Sebastien Lorquet.  Commands inspired for btshell example in the
- * Intel/Zephyr Arduino 101 package (BSD license).
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
+
+/* Based loosely on the i8sak IEEE 802.15.4 program by Anthony Merlino and
+ * Sebastien Lorquet.  Commands inspired from btshell example in the
+ * Intel/Zephyr Arduino 101 package (BSD license).
+ */
 
 /****************************************************************************
  * Included Files
@@ -48,6 +35,7 @@
 #include <stdlib.h>
 #include <strings.h>
 #include <errno.h>
+#include <unistd.h>
 
 #include <nuttx/wireless/bluetooth/bt_core.h>
 #include <nuttx/wireless/bluetooth/bt_hci.h>
@@ -88,7 +76,8 @@ static void btsak_advertise_showusage(FAR const char *progname,
  *
  ****************************************************************************/
 
-static void btsak_cmd_advertisestart(FAR struct btsak_s *btsak, FAR char *cmd,
+static void btsak_cmd_advertisestart(FAR struct btsak_s *btsak,
+                                     FAR char *cmd,
                                      int argc, FAR char *argv[])
 {
   struct btreq_s btreq;
@@ -136,10 +125,10 @@ static void btsak_cmd_advertisestart(FAR struct btsak_s *btsak, FAR char *cmd,
   memset(&sd, 0, 2 * sizeof(struct bt_eir_s));
   sd[1].len         = sizeof("btsak");
   sd[1].type        = BT_EIR_NAME_COMPLETE;
-  strcpy((FAR char *)sd[1].data, "btsak");
+  strlcpy((FAR char *)sd[1].data, "btsak", sizeof(sd[1].data));
 
   memset(&btreq, 0, sizeof(struct btreq_s));
-  strncpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
+  strlcpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
   btreq.btr_advtype = BT_LE_ADV_IND;
   btreq.btr_advad   = ad;
   btreq.btr_advsd   = sd;
@@ -179,7 +168,7 @@ static void btsak_cmd_advertisestop(FAR struct btsak_s *btsak, FAR char *cmd,
   /* Perform the IOCTL to stop advertising */
 
   memset(&btreq, 0, sizeof(struct btreq_s));
-  strncpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
+  strlcpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
 
   sockfd = btsak_socket(btsak);
   if (sockfd >= 0)
@@ -208,7 +197,8 @@ static void btsak_cmd_advertisestop(FAR struct btsak_s *btsak, FAR char *cmd,
  *
  ****************************************************************************/
 
-void btsak_cmd_advertise(FAR struct btsak_s *btsak, int argc, FAR char *argv[])
+void btsak_cmd_advertise(FAR struct btsak_s *btsak,
+                         int argc, FAR char *argv[])
 {
   int argind;
 
@@ -237,7 +227,8 @@ void btsak_cmd_advertise(FAR struct btsak_s *btsak, int argc, FAR char *argv[])
     }
   else
     {
-      fprintf(stderr, "ERROR:  Unrecognized advertise command: %s\n", argv[argind]);
+      fprintf(stderr,
+              "ERROR:  Unrecognized advertise command: %s\n", argv[argind]);
       btsak_advertise_showusage(btsak->progname, argv[0], EXIT_FAILURE);
     }
 }

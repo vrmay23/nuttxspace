@@ -1,10 +1,11 @@
 /****************************************************************************
  * fs/nfs/nfs_mount.h
  *
- *   Copyright (C) 2012 Gregory Nutt. All rights reserved.
- *   Copyright (C) 2012 Jose Pablo Rojas Vargas. All rights reserved.
- *   Author: Jose Pablo Rojas Vargas <jrojas@nx-engineering.com>
- *           Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2012 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2012 Jose Pablo Rojas Vargas. All rights reserved.
+ * SPDX-FileContributor: Jose Pablo Rojas Vargas <jrojas@nx-engineering.com>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Leveraged from OpenBSD:
  *
@@ -49,7 +50,7 @@
  ****************************************************************************/
 
 #include <sys/socket.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 
 #include "rpc.h"
 
@@ -68,8 +69,8 @@
 struct nfsmount
 {
   FAR struct nfsnode       *nm_head;          /* A list of all files opened on this mountpoint */
-  sem_t                     nm_sem;           /* Used to assure thread-safe access */
-  nfsfh_t                  *nm_fh;            /* File handle of root dir */
+  mutex_t                   nm_lock;          /* Used to assure thread-safe access */
+  FAR nfsfh_t              *nm_fh;            /* File handle of root dir */
   char                      nm_path[90];      /* server's path of the directory being mounted */
   struct nfs_fattr          nm_fattr;         /* nfs file attribute cache */
   FAR struct rpcclnt       *nm_rpcclnt;       /* RPC state */
@@ -80,9 +81,9 @@ struct nfsmount
   uint16_t                  nm_readdirsize;   /* Size of a readdir RPC */
   uint16_t                  nm_buflen;        /* Size of I/O buffer */
 
-  /* Set aside memory on the stack to hold the largest call message.  NOTE
-   * that for the case of the write call message, it is the reply message that
-   * is in this union.
+  /* Set aside memory on the stack to hold the largest call message.
+   * NOTE that for the case of the write call message, it is the reply
+   * message that is in this union.
    */
 
   union
@@ -101,24 +102,26 @@ struct nfsmount
     struct rpc_reply_write  write;
   } nm_msgbuffer;
 
-  /* I/O buffer (must be a aligned to 32-bit boundaries).  This buffer used for all
-   * reply messages EXCEPT for the WRITE RPC. In that case it is used for the WRITE
-   * call message that contains the data to be written.  This buffer must be
-   * dynamically sized based on the characteristics of the server and upon the
-   * configuration of the NuttX network.  It must be sized to hold the largest
-   * possible WRITE call message or READ response message.
+  /* I/O buffer (must be a aligned to 32-bit boundaries).  This buffer used
+   * for all reply messages EXCEPT for the WRITE RPC. In that case it is used
+   * for the WRITE call message that contains the data to be written.  This
+   * buffer must be dynamically sized based on the characteristics of the
+   * server and upon the configuration of the NuttX network.  It must be
+   * sized to hold the largest possible WRITE call message or READ response
+   * message.
    */
 
   uint32_t                  nm_iobuffer[1];   /* Actual size is given by nm_buflen */
 };
 
-/* The size of the nfsmount structure will depend on the size of the allocated I/O
- * buffer.
+/* The size of the nfsmount structure will depend on the size of the
+ * allocated I/O buffer.
  */
 
 #define SIZEOF_nfsmount(n) (sizeof(struct nfsmount) + ((n + 3) & ~3) - sizeof(uint32_t))
 
-/* Mount parameters structure. This structure is use in nfs_decode_args function before one
+/* Mount parameters structure.
+ * This structure is use in nfs_decode_args function before one
  * mount structure is allocated in each NFS mount.
  */
 

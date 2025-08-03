@@ -1,37 +1,24 @@
-/************************************************************************************
+/****************************************************************************
  * arch/renesas/include/sh1/irq.h
  *
- *   Copyright (C) 2008-2009 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 /* This file should never be included directly but, rather,
  * only indirectly through nuttx/irq.h
@@ -40,16 +27,16 @@
 #ifndef __ARCH_RENESAS_INCLUDE_SH1_IRQ_H
 #define __ARCH_RENESAS_INCLUDE_SH1_IRQ_H
 
-/************************************************************************************
+/****************************************************************************
  * Included Files
- ************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 #include <stdint.h>
 
-/************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- ************************************************************************************/
+ ****************************************************************************/
 
 /* IRQ channels */
 
@@ -256,16 +243,17 @@
 #define SH1_SYSTIMER_IRQ   SH1_IMIA0_IRQ
 #endif
 
-/* Vector table offsets *************************************************************/
+/* Vector table offsets *****************************************************/
 
-/* The following provides the vector numbers for each IRQ.  The IRQ numbers (above)
- * form the densely packet number space used by the system to identify IRQs.  The
- * following are the (relatively) loosely spaced offsets that identify the location
- * of the corresponding vector in the vector table.
+/* The following provides the vector numbers for each IRQ.
+ * The IRQ numbers (above) form the densely packet number space used by the
+ * system to identify IRQs.  The following are the (relatively) loosely
+ * spaced offsets that identify the location of the corresponding vector
+ * in the vector table.
  *
- * These offsets are specified as a vector number (suitably for indexing an array
- * of uint32_t) but would have to by multiplied by 4 to get an addressable, byte
- * offset.
+ * These offsets are specified as a vector number (suitably for indexing
+ * an array of uint32_t) but would have to by multiplied by 4 to get
+ * an addressable, byte offset.
  */
 
 /* Resets */
@@ -289,6 +277,7 @@
 #define SH1_NMI_VNDX       (11)  /* 11: NMI */
 #define SH1_USRBRK_VNDX    (12)  /* 12: User break */
                                  /* 13-31: Reserved for system */
+
 /* Trap instruction */
 
 #define SH1_TRAP_VNDX      (32)  /* 32-63: TRAPA instruction (user break) */
@@ -358,6 +347,7 @@
 #define SH1_DMAC3_VNDX     (78)  /* 78-79: DMAC3 */
 #define SH1_DEI3_VNDX      (78)  /* 78: DMAC3 DEI3 */
                                  /* 79: Reserved */
+
 /* ITU */
 
 #define SH1_IMIA0_VNDX     (80)  /* 80: ITU0 IMIA0 */
@@ -380,6 +370,7 @@
 #define SH1_IMIB4_VNDX     (97)  /* 97:      IMIB4 */
 #define SH1_OVI4_VNDX      (98)  /* 98:      OVI4 */
                                  /* 99:      Reserved */
+
 /* SCI */
 
 #define SH1_ERI0_VNDX      (100) /* 100: SCI0 ERI0 */
@@ -398,14 +389,15 @@
 #define SH1_WDTITI_VNDX    (112) /* 112: WDT ITI */
 #define SH1_CMI_VNDX       (113) /* 113: REF CMI */
                                  /* 114-115: Reserved */
+
 /* 116-255 reserved */
 #endif
 
 #define SH1_LAST_VNDX      (255)
 #define SH1_NVECTORS       (256)
 
-/* IRQ Stack Frame Format.  The SH-1 has a push down stack.  The PC
- * and SR are pushed by hardware at the time an IRQ is taken.
+/* IRQ Stack Frame Format.  The SH-1 has a push down stack.
+ * The PC and SR are pushed by hardware at the time an IRQ is taken.
  */
 
 /* Saved to the stacked by up_vector */
@@ -450,21 +442,15 @@
 #define XCPTCONTEXT_REGS    (22)
 #define XCPTCONTEXT_SIZE    (4 * XCPTCONTEXT_REGS)
 
-/************************************************************************************
+/****************************************************************************
  * Public Types
- ************************************************************************************/
+ ****************************************************************************/
 
 /* This struct defines the way the registers are stored.  We need to save: */
 
 #ifndef __ASSEMBLY__
 struct xcptcontext
 {
-  /* The following function pointer is non-zero if there are pending signals
-   * to be processed.
-   */
-
-  void *sigdeliver; /* Actual type is sig_deliver_t */
-
   /* These are saved copies of LR and SR used during signal processing.
    *
    * REVISIT:  Because there is only one copy of these save areas,
@@ -482,9 +468,9 @@ struct xcptcontext
 };
 #endif
 
-/************************************************************************************
+/****************************************************************************
  * Public Data
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ASSEMBLY__
 #ifdef __cplusplus
@@ -495,15 +481,15 @@ extern "C"
 #define EXTERN extern
 #endif
 
-/************************************************************************************
+/****************************************************************************
  * Inline Functions
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ASSEMBLY__
 
 /* Get the current value of the SR */
 
-static inline irqstate_t __getsr(void)
+static inline_function irqstate_t __getsr(void)
 {
   irqstate_t flags;
 
@@ -513,14 +499,30 @@ static inline irqstate_t __getsr(void)
 
 /* Set the new value of the SR */
 
-static inline void __setsr(irqstate_t sr)
+static inline_function void __setsr(irqstate_t sr)
 {
   __asm__ __volatile__ ("ldc %0, sr" : : "r" (sr));
 }
 
+/* Return the current value of the stack pointer */
+
+static inline_function uint32_t up_getsp(void)
+{
+  uint32_t sp;
+
+  __asm__ __volatile__
+    (
+      "mov   r15, %0\n\t"
+      : "=&z" (sp)
+      :
+      : "memory"
+    );
+  return sp;
+}
+
 /* Return the current interrupt enable state and disable interrupts */
 
-static inline irqstate_t up_irq_save(void)
+static inline_function irqstate_t up_irq_save(void)
 {
   irqstate_t flags = __getsr();
   __setsr(flags | 0x000000f0);
@@ -529,7 +531,7 @@ static inline irqstate_t up_irq_save(void)
 
 /* Disable interrupts */
 
-static inline void up_irq_disable(void)
+static inline_function void up_irq_disable(void)
 {
   uint32_t flags = __getsr();
   __setsr(flags | 0x000000f0);
@@ -537,7 +539,7 @@ static inline void up_irq_disable(void)
 
 /* Enable interrupts */
 
-static inline void up_irq_enable(void)
+static inline_function void up_irq_enable(void)
 {
   uint32_t flags = __getsr();
   __setsr(flags & ~0x000000f0);
@@ -545,7 +547,7 @@ static inline void up_irq_enable(void)
 
 /* Restore saved interrupt state */
 
-static inline void up_irq_restore(irqstate_t flags)
+static inline_function void up_irq_restore(irqstate_t flags)
 {
   if ((flags & 0x000000f0) != 0x000000f0)
     {
@@ -558,9 +560,23 @@ static inline void up_irq_restore(irqstate_t flags)
 }
 #endif
 
-/************************************************************************************
- * Public Functions
- ************************************************************************************/
+/****************************************************************************
+ * Public Functions Prototypes
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: up_getusrpc
+ ****************************************************************************/
+
+#define up_getusrpc(regs) \
+    (((uint32_t *)((regs) ? (regs) : up_current_regs()))[REG_PC])
+
+/****************************************************************************
+ * Name: up_getusrsp
+ ****************************************************************************/
+
+#define up_getusrsp(regs) \
+    ((uintptr_t)((uint32_t *)(regs))[REG_SP])
 
 #undef EXTERN
 #ifdef __cplusplus

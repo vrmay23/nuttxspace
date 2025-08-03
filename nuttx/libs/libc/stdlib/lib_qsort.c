@@ -1,13 +1,12 @@
 /****************************************************************************
  * libs/libc/stdlib/lib_qsort.c
  *
- *   Copyright (C) 2007, 2009, 2011 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * Leveraged from:
- *
- *  Copyright (c) 1992, 1993
- *  The Regents of the University of California.  All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2007, 2009, 2011 Gregory Nutt.
+ * SPDX-FileCopyrightText: 1993 The Regents of the University of California.
+ * SPDX-FileCopyrightText: 1990 The Regents of the University of California.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -18,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by the University of
- *    California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,36 +42,35 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
+#include <sys/param.h>
 #include <stdlib.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define min(a, b)  (a) < (b) ? a : b
-
 #define swapcode(TYPE, parmi, parmj, n) \
   { \
-    long i = (n) / sizeof (TYPE); \
-    register TYPE *pi = (TYPE *)(parmi); \
-    register TYPE *pj = (TYPE *)(parmj); \
+    long i = (n) / sizeof(TYPE); \
+    register FAR TYPE *pi = (FAR TYPE *)(parmi); \
+    register FAR TYPE *pj = (FAR TYPE *)(parmj); \
     do { \
-      register TYPE  t = *pi; \
+      register TYPE t = *pi; \
       *pi++ = *pj; \
       *pj++ = t; \
     } while (--i > 0); \
   }
 
 #define SWAPINIT(a, width) \
-  swaptype = ((FAR char *)a - (FAR char *)0) % sizeof(long) || \
-  width % sizeof(long) ? 2 : width == sizeof(long)? 0 : 1;
+  swaptype = (uintptr_t)a % sizeof(long) || \
+  width % sizeof(long) ? 2 : width == sizeof(long) ? 0 : 1;
 
 #define swap(a, b) \
   if (swaptype == 0) \
     { \
-      long t = *(long *)(a); \
-      *(long *)(a) = *(long *)(b); \
-      *(long *)(b) = t; \
+      long t = *(FAR long *)(a); \
+      *(FAR long *)(a) = *(FAR long *)(b); \
+      *(FAR long *)(b) = t; \
     } \
   else \
     { \
@@ -196,7 +190,7 @@ loop:
         }
 
       return;
-  }
+    }
 
   pm = (FAR char *)base + (nel / 2) * width;
   if (nel > 7)
@@ -275,10 +269,10 @@ loop:
     }
 
   pn = (FAR char *)base + nel * width;
-  r  = min(pa - (FAR char *)base, pb - pa);
+  r  = MIN(pa - (FAR char *)base, pb - pa);
   vecswap(base, pb - r, r);
 
-  r  = min(pd - pc, pn - pd - width);
+  r  = MIN(pd - pc, pn - pd - width);
   vecswap(pb, pn - r, r);
 
   if ((r = pb - pa) > width)

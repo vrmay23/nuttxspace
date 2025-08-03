@@ -1,8 +1,8 @@
 /****************************************************************************
  * libs/libc/wchar/lib_wcslen.c
  *
- *   Copyright (c)1999 Citrus Project,
- *   All rights reserved.
+ * SPDX-License-Identifier: BSD-2-Clause
+ * SPDX-FileCopyrightText: 1999 Citrus Project, All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,19 +26,13 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	citrus Id: wcslen.c,v 1.1 1999/12/29 21:47:45 tshiozak Exp
- *
  ****************************************************************************/
 
 /****************************************************************************
  * Included Files
  ****************************************************************************/
 
-#include <nuttx/config.h>
-#include <string.h>
 #include <wchar.h>
-
-#ifdef CONFIG_LIBC_WCHAR
 
 /****************************************************************************
  * Public Functions
@@ -66,4 +60,3 @@ size_t wcslen(FAR const wchar_t *s)
 
   return p - s;
 }
-#endif

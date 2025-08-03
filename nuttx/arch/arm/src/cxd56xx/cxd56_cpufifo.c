@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/cxd56xx/cxd56_cpufifo.c
  *
- *   Copyright 2018 Sony Semiconductor Solutions Corporation
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
- *    the names of its contributors may be used to endorse or promote
- *    products derived from this software without specific prior written
- *    permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,12 +27,13 @@
 #include <nuttx/config.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <queue.h>
+#include <nuttx/queue.h>
+
+#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "chip.h"
 #include "hardware/cxd56_cpufifo.h"
 #include "cxd56_cpufifo.h"
@@ -68,7 +56,7 @@
 
 struct cfpushdata_s
 {
-  FAR sq_entry_t entry;
+  sq_entry_t entry;
   uint32_t data[2];
 };
 
@@ -76,8 +64,8 @@ struct cfpushdata_s
  * Private Function Prototypes
  ****************************************************************************/
 
-static int  cpufifo_txhandler(int irq, FAR void *context, FAR void *arg);
-static int  cpufifo_rxhandler(int irq, FAR void *context, FAR void *arg);
+static int  cpufifo_txhandler(int irq, void *context, void *arg);
+static int  cpufifo_rxhandler(int irq, void *context, void *arg);
 static int  cpufifo_trypush(uint32_t data[2]);
 static int  cpufifo_reserve(uint32_t data[2]);
 
@@ -96,11 +84,11 @@ static cpufifo_handler_t   g_cfrxhandler;
  * Private Functions
  ****************************************************************************/
 
-static int cpufifo_txhandler(int irq, FAR void *context, FAR void *arg)
+static int cpufifo_txhandler(int irq, void *context, void *arg)
 {
-  FAR struct cfpushdata_s *pd;
+  struct cfpushdata_s *pd;
 
-  pd = (FAR struct cfpushdata_s *)sq_remfirst(&g_pushqueue);
+  pd = (struct cfpushdata_s *)sq_remfirst(&g_pushqueue);
   if (pd)
     {
       /* Ignore error because always FIFO is not full at here */
@@ -117,7 +105,7 @@ static int cpufifo_txhandler(int irq, FAR void *context, FAR void *arg)
   return OK;
 }
 
-static int cpufifo_rxhandler(int irq, FAR void *context, FAR void *arg)
+static int cpufifo_rxhandler(int irq, void *context, void *arg)
 {
   uint32_t word[2] =
                      {
@@ -159,9 +147,9 @@ static int cpufifo_trypush(uint32_t data[2])
 
 static int cpufifo_reserve(uint32_t data[2])
 {
-  FAR struct cfpushdata_s *pd;
+  struct cfpushdata_s *pd;
 
-  pd = (FAR struct cfpushdata_s *)sq_remfirst(&g_emptyqueue);
+  pd = (struct cfpushdata_s *)sq_remfirst(&g_emptyqueue);
 
   /* This error indicates that need more sending buffer, it can be
    * configured by CONFIG_CXD56_CPUFIFO_ENTRIES.
@@ -267,7 +255,7 @@ int cxd56_cfinitialize(void)
 
   for (i = 0; i < NR_PUSHBUFENTRIES; i++)
     {
-      sq_addlast((FAR sq_entry_t *)&g_pushbuffer[i], &g_emptyqueue);
+      sq_addlast((sq_entry_t *)&g_pushbuffer[i], &g_emptyqueue);
     }
 
   /* Clear user defined receive handler. */

@@ -1,39 +1,22 @@
 /****************************************************************************
  * arch/arm/src/stm32/stm32_adc.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Copyright (C) 2015 Omni Hoverboards Inc. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *            Diego Sanchez <dsanchez@nx-engineering.com>
- *            Paul Alexander Patience <paul-a.patience@polymtl.ca>
- *            Mateusz Szafoni <raiden00@railab.me>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -45,6 +28,7 @@
 
 #include <stdio.h>
 #include <sys/types.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <unistd.h>
@@ -59,19 +43,18 @@
 #include <nuttx/arch.h>
 #include <nuttx/analog/adc.h>
 #include <nuttx/analog/ioctl.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 
-#include "up_internal.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "chip.h"
-#include "stm32.h"
+#include "stm32_rcc.h"
+#include "stm32_tim.h"
 #include "stm32_dma.h"
 #include "stm32_adc.h"
 
 /* The STM32 ADC lower-half driver functionality overview:
  *   - one lower-half driver for all STM32 ADC IP cores,
- *   - general lower-half logic for the Nuttx upper-half ADC driver,
+ *   - general lower-half logic for the NuttX upper-half ADC driver,
  *   - lower-half ADC driver can be used not only with the upper-half ADC
  *     driver, but also in the lower-half logic for special-case custom
  *     drivers (eg. power-control, custom sensors),
@@ -87,38 +70,19 @@
 
 #ifdef CONFIG_STM32_ADC
 
-/* Some ADC peripheral must be enabled */
-
-#if defined(CONFIG_STM32_ADC1) || defined(CONFIG_STM32_ADC2) || \
-    defined(CONFIG_STM32_ADC3) || defined(CONFIG_STM32_ADC4)
-
 /* This implementation is for the STM32 ADC IP version 1 and 2 */
 
 #if !defined(HAVE_IP_ADC_V1) && !defined(HAVE_IP_ADC_V2)
 #  error "STM32 ADC IP version not specified"
 #endif
 
-/* At this moment only support for the STM32 ADC IPv2 looks fully functional:
- *   - noDMA
- *   - DMA
- *   - TIM trg
- *   - TIM trg + DMA
+/* Supported ADC modes:
+ *   - SW triggering with/without DMA transfer
+ *   - TIM triggering with/without DMA transfer
+ *   - external triggering with/without DMA transfer
  *
- * Support for the STM32 ADC IPv1 works fine only for:
- *   - noDMA (but only with 1 sample)
- *   - TIM trg
- *   - TIM trg + DMA
- *
- * (tested with ADC example app from Nuttx apps repo).
+ * (tested with ADC example app from NuttX apps repo).
  */
-
-#ifdef HAVE_IP_ADC_V1
-#  if defined(ADC_HAVE_DMA) && !defined(ADC_HAVE_TIMER)
-#    warning "ADC DMA mode without hardware trigger may not work properly!"
-#  elif !defined(ADC_HAVE_DMA) && !defined(ADC_HAVE_TIMER)
-#    warning "ADC without hardware trigger and without DMA may not work properly!"
-#  endif
-#endif
 
 /* At the moment there is no proper implementation for timers external
  * trigger in STM32L15XX may be added later
@@ -154,71 +118,18 @@
 #    define RCC_RSTR_ADC123RST RCC_APB2RSTR_ADCRST
 #  endif
 #elif defined(HAVE_IP_ADC_V2)
-#  define STM32_RCC_RSTR       STM32_RCC_AHBRSTR
-#  define RCC_RSTR_ADC12RST    RCC_AHBRSTR_ADC12RST
-#  define RCC_RSTR_ADC34RST    RCC_AHBRSTR_ADC34RST
-#endif
-
-/* ADC interrupts ***********************************************************/
-
-#if defined(HAVE_IP_ADC_V1)
-#  define STM32_ADC_DMAREG_OFFSET      STM32_ADC_CR2_OFFSET
-#  define ADC_DMAREG_DMA               ADC_CR2_DMA
-#  define STM32_ADC_EXTREG_OFFSET      STM32_ADC_CR2_OFFSET
-#  define ADC_EXTREG_EXTSEL_MASK       ADC_CR2_EXTSEL_MASK
-#  define STM32_ADC_JEXTREG_OFFSET     STM32_ADC_CR2_OFFSET
-#  define ADC_JEXTREG_JEXTSEL_MASK     ADC_CR2_JEXTSEL_MASK
-#  define STM32_ADC_ISR_OFFSET         STM32_ADC_SR_OFFSET
-#  define STM32_ADC_IER_OFFSET         STM32_ADC_CR1_OFFSET
-#  ifdef HAVE_BASIC_ADC
-#    define ADC_EXTREG_EXTEN_MASK      ADC_CR2_EXTTRIG
-#    define ADC_EXTREG_EXTEN_NONE      0
-#    define ADC_EXTREG_EXTEN_DEFAULT   ADC_CR2_EXTTRIG
-#    define ADC_JEXTREG_JEXTEN_MASK    ADC_CR2_JEXTTRIG
-#    define ADC_JEXTREG_JEXTEN_NONE    0
-#    define ADC_JEXTREG_JEXTEN_DEFAULT ADC_CR2_JEXTTRIG
+#  ifdef STM32_RCC_AHB2RSTR_OFFSET
+#    define STM32_RCC_RSTR       STM32_RCC_AHB2RSTR
+#    define RCC_RSTR_ADC12RST    RCC_AHB2RSTR_ADC12RST
+#    define RCC_RSTR_ADC34RST    RCC_AHB2RSTR_ADC345RST
 #  else
-#    define ADC_EXTREG_EXTEN_MASK      ADC_CR2_EXTEN_MASK
-#    define ADC_EXTREG_EXTEN_NONE      ADC_CR2_EXTEN_NONE
-#    define ADC_EXTREG_EXTEN_DEFAULT   ADC_CR2_EXTEN_RISING
-#    define ADC_JEXTREG_JEXTEN_MASK    ADC_CR2_JEXTEN_MASK
-#    define ADC_JEXTREG_JEXTEN_NONE    ADC_CR2_JEXTEN_NONE
-#    define ADC_JEXTREG_JEXTEN_DEFAULT ADC_CR2_JEXTEN_RISING
+#    define STM32_RCC_RSTR       STM32_RCC_AHBRSTR
+#    define RCC_RSTR_ADC12RST    RCC_AHBRSTR_ADC12RST
+#    define RCC_RSTR_ADC34RST    RCC_AHBRSTR_ADC34RST
 #  endif
-#elif defined(HAVE_IP_ADC_V2)
-#  define STM32_ADC_DMAREG_OFFSET      STM32_ADC_CFGR1_OFFSET
-#  define ADC_DMAREG_DMA               ADC_CFGR1_DMAEN
-#  define STM32_ADC_EXTREG_OFFSET      STM32_ADC_CFGR1_OFFSET
-#  define ADC_EXTREG_EXTSEL_MASK       ADC_CFGR1_EXTSEL_MASK
-#  define ADC_EXTREG_EXTEN_MASK        ADC_CFGR1_EXTEN_MASK
-#  define ADC_EXTREG_EXTEN_DEFAULT     ADC_CFGR1_EXTEN_RISING
-#  define STM32_ADC_JEXTREG_OFFSET     STM32_ADC_JSQR_OFFSET
-#  define ADC_JEXTREG_JEXTSEL_MASK     ADC_JSQR_JEXTSEL_MASK
-#  define ADC_JEXTREG_JEXTEN_MASK      ADC_JSQR_JEXTEN_MASK
-#  define ADC_JEXTREG_JEXTEN_DEFAULT   ADC_JSQR_JEXTEN_RISING
 #endif
 
 /* ADC Channels/DMA *********************************************************/
-
-/* The maximum number of channels that can be sampled.  If DMA support is
- * not enabled, then only a single channel can be sampled.  Otherwise,
- * data overruns would occur.
- */
-
-#define ADC_MAX_CHANNELS_DMA   16
-#define ADC_MAX_CHANNELS_NODMA 1
-
-#ifdef ADC_HAVE_DMA
-#  define ADC_MAX_SAMPLES ADC_MAX_CHANNELS_DMA
-#else
-#  if defined(CONFIG_STM32_STM32F30XX) || defined(CONFIG_STM32_STM32F33XX)
-#    define ADC_MAX_SAMPLES ADC_MAX_CHANNELS_DMA /* Works without DMA should sampling frequency be reduced */
-#  elif defined(CONFIG_STM32_STM32L15XX)
-#    define ADC_MAX_SAMPLES ADC_MAX_CHANNELS_DMA /* Works without DMA as IO_START_CONV can switch channels on the fly */
-#  else
-#    define ADC_MAX_SAMPLES ADC_MAX_CHANNELS_NODMA
-#  endif
-#endif
 
 /* DMA values differs according to STM32 DMA IP core version */
 
@@ -262,12 +173,37 @@
                                (ADC_SMPR_DEFAULT << ADC_SMPR2_SMP8_SHIFT) | \
                                (ADC_SMPR_DEFAULT << ADC_SMPR2_SMP9_SHIFT))
 #elif defined(CONFIG_STM32_STM32F30XX) || defined(CONFIG_STM32_STM32F33XX)
-#  if defined(ADC_HAVE_DMA) || (ADC_MAX_SAMPLES == 1)
+#  if defined(ADC_HAVE_DMA) || (CONFIG_STM32_ADC_MAX_SAMPLES == 1)
 #    define ADC_SMPR_DEFAULT    ADC_SMPR_61p5
 #  else /* Slow down sampling frequency */
 #    define ADC_SMPR_DEFAULT    ADC_SMPR_601p5
 #  endif
 #  define ADC_SMPR1_DEFAULT   ((ADC_SMPR_DEFAULT << ADC_SMPR1_SMP1_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR1_SMP2_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR1_SMP3_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR1_SMP4_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR1_SMP5_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR1_SMP6_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR1_SMP7_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR1_SMP8_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR1_SMP9_SHIFT))
+#  define ADC_SMPR2_DEFAULT   ((ADC_SMPR_DEFAULT << ADC_SMPR2_SMP10_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR2_SMP11_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR2_SMP12_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR2_SMP13_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR2_SMP14_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR2_SMP15_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR2_SMP16_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR2_SMP17_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR2_SMP18_SHIFT))
+#elif defined(CONFIG_STM32_STM32G4XXX)
+#  if defined(ADC_HAVE_DMA) || (CONFIG_STM32_ADC_MAX_SAMPLES == 1)
+#    define ADC_SMPR_DEFAULT    ADC_SMPR_47p5
+#  else /* Slow down sampling frequency */
+#    define ADC_SMPR_DEFAULT    ADC_SMPR_640p5
+#  endif
+#  define ADC_SMPR1_DEFAULT   ((ADC_SMPR_DEFAULT << ADC_SMPR1_SMP0_SHIFT) | \
+                               (ADC_SMPR_DEFAULT << ADC_SMPR1_SMP1_SHIFT) | \
                                (ADC_SMPR_DEFAULT << ADC_SMPR1_SMP2_SHIFT) | \
                                (ADC_SMPR_DEFAULT << ADC_SMPR1_SMP3_SHIFT) | \
                                (ADC_SMPR_DEFAULT << ADC_SMPR1_SMP4_SHIFT) | \
@@ -361,7 +297,8 @@
 #if defined(CONFIG_STM32_STM32F10XX)
 #  define ADC_CHANNELS_NUMBER 18
 #elif defined(CONFIG_STM32_STM32F20XX) || defined(CONFIG_STM32_STM32F30XX) || \
-      defined(CONFIG_STM32_STM32F33XX) || defined(CONFIG_STM32_STM32F4XXX)
+      defined(CONFIG_STM32_STM32F33XX) || defined(CONFIG_STM32_STM32F4XXX) || \
+      defined(CONFIG_STM32_STM32G4XXX)
 #  define ADC_CHANNELS_NUMBER 19
 #elif defined(CONFIG_STM32_STM32L15XX)
 #  define ADC_CHANNELS_NUMBER 32
@@ -390,64 +327,6 @@
 #  undef HAVE_ADC_CMN_DATA
 #endif
 
-/* ADCx_EXTSEL_VALUE can be set by this driver (look at stm32_adc.h) or
- * by board specific logic in board.h file.
- */
-
-#ifdef ADC1_EXTSEL_VALUE
-#  define ADC1_HAVE_EXTCFG  1
-#  define ADC1_EXTCFG_VALUE (ADC1_EXTSEL_VALUE | ADC_EXTREG_EXTEN_DEFAULT)
-#else
-#  undef ADC1_HAVE_EXTCFG
-#endif
-#ifdef ADC2_EXTSEL_VALUE
-#  define ADC2_HAVE_EXTCFG  1
-#  define ADC2_EXTCFG_VALUE (ADC2_EXTSEL_VALUE | ADC_EXTREG_EXTEN_DEFAULT)
-#else
-#  undef ADC2_HAVE_EXTCFG
-#endif
-#ifdef ADC3_EXTSEL_VALUE
-#  define ADC3_HAVE_EXTCFG  1
-#  define ADC3_EXTCFG_VALUE (ADC3_EXTSEL_VALUE | ADC_EXTREG_EXTEN_DEFAULT)
-#else
-#  undef ADC3_HAVE_EXTCFG
-#endif
-#ifdef ADC4_EXTSEL_VALUE
-#  define ADC4_HAVE_EXTCFG  1
-#  define ADC4_EXTCFG_VALUE (ADC4_EXTSEL_VALUE | ADC_EXTREG_EXTEN_DEFAULT)
-#else
-#  undef ADC4_HAVE_EXTCFG
-#endif
-
-#if defined(ADC1_HAVE_EXTCFG) || defined(ADC2_HAVE_EXTCFG) || \
-    defined(ADC3_HAVE_EXTCFG) || defined(ADC3_HAVE_EXTCFG)
-#  define ADC_HAVE_EXTCFG
-#endif
-
-/* Injected channels external trigger support */
-
-#ifdef ADC1_JEXTSEL_VALUE
-#  define ADC1_HAVE_JEXTCFG  1
-#  define ADC1_JEXTCFG_VALUE (ADC1_JEXTSEL_VALUE | ADC_JEXTREG_JEXTEN_DEFAULT)
-#endif
-#ifdef ADC2_JEXTSEL_VALUE
-#  define ADC2_HAVE_JEXTCFG  1
-#  define ADC2_JEXTCFG_VALUE (ADC2_JEXTSEL_VALUE | ADC_JEXTREG_JEXTEN_DEFAULT)
-#endif
-#ifdef ADC3_JEXTSEL_VALUE
-#  define ADC3_HAVE_JEXTCFG  1
-#  define ADC3_JEXTCFG_VALUE (ADC3_JEXTSEL_VALUE | ADC_JEXTREG_JEXTEN_DEFAULT)
-#endif
-#ifdef ADC4_JEXTSEL_VALUE
-#  define ADC4_HAVE_JEXTCFG  1
-#  define ADC4_JEXTCFG_VALUE (ADC4_JEXTSEL_VALUE | ADC_JEXTREG_JEXTEN_DEFAULT)
-#endif
-
-#if defined(ADC1_HAVE_JEXTCFG) || defined(ADC2_HAVE_JEXTCFG) || \
-    defined(ADC3_HAVE_JEXTCFG) || defined(ADC4_HAVE_JEXTCFG)
-#  define ADC_HAVE_JEXTCFG
-#endif
-
 /* Max 4 injected channels */
 
 #define ADC_INJ_MAX_SAMPLES   4
@@ -460,6 +339,38 @@
 #  undef ADC_HAVE_DMACFG
 #endif
 
+/* ADC scan mode support - only for ADCv1 */
+
+#ifdef CONFIG_STM32_HAVE_IP_ADC_V1
+#  define ADC_HAVE_SCAN 1
+#  ifndef CONFIG_STM32_ADC1_SCAN
+#    define CONFIG_STM32_ADC1_SCAN 0
+#  endif
+#  ifndef CONFIG_STM32_ADC2_SCAN
+#    define CONFIG_STM32_ADC2_SCAN 0
+#  endif
+#  ifndef CONFIG_STM32_ADC3_SCAN
+#    define CONFIG_STM32_ADC3_SCAN 0
+#  endif
+#else
+#  undef ADC_HAVE_SCAN
+#endif
+
+/* We have to support ADC callbacks if default ADC interrupts or
+ * DMA transfer are enabled
+ */
+
+#if !defined(CONFIG_STM32_ADC_NOIRQ) || defined(ADC_HAVE_DMA)
+#  define ADC_HAVE_CB
+#else
+#  undef ADC_HAVE_CB
+#endif
+
+/* ADC software trigger configuration */
+
+#define ANIOC_TRIGGER_REGULAR  (1 << 0)
+#define ANIOC_TRIGGER_INJECTED (1 << 1)
+
 /****************************************************************************
  * Private Types
  ****************************************************************************/
@@ -469,8 +380,8 @@
 #ifdef HAVE_ADC_CMN_DATA
 struct adccmn_data_s
 {
-  uint8_t initialized; /* How many ADC instances are currently in use */
-  sem_t   lock;        /* Exclusive access to common ADC data */
+  uint8_t refcount; /* How many ADC instances are currently in use */
+  mutex_t lock;     /* Exclusive access to common ADC data */
 };
 #endif
 
@@ -481,10 +392,11 @@ struct adccmn_data_s
 struct stm32_dev_s
 {
 #ifdef CONFIG_STM32_ADC_LL_OPS
-  FAR const struct stm32_adc_ops_s *llops; /* Low-level ADC ops */
+  const struct stm32_adc_ops_s *llops; /* Low-level ADC ops */
+  struct adc_dev_s             *dev;   /* Upper-half ADC reference */
 #endif
-#ifndef CONFIG_STM32_ADC_NOIRQ
-  FAR const struct adc_callback_s *cb;
+#ifdef ADC_HAVE_CB
+  const struct adc_callback_s *cb;
   uint8_t irq;               /* Interrupt generated by this ADC block */
 #endif
 #ifdef HAVE_ADC_CMN_DATA
@@ -496,7 +408,9 @@ struct stm32_dev_s
   uint8_t cj_channels;       /* Number of configured injected channels */
 #endif
   uint8_t intf;              /* ADC interface number */
+  uint8_t initialized;       /* ADC interface initialization counter */
   uint8_t current;           /* Current ADC channel being converted */
+  uint8_t anioc_trg;         /* ANIOC_TRIGGER configuration */
 #ifdef HAVE_ADC_RESOLUTION
   uint8_t resolution;        /* ADC resolution (0-3) */
 #endif
@@ -506,6 +420,10 @@ struct stm32_dev_s
   uint8_t dmacfg;            /* DMA channel configuration, only for ADC IPv2 */
 #  endif
   bool    hasdma;            /* True: This channel supports DMA */
+  uint16_t dmabatch;         /* Number of conversions for DMA batch */
+#endif
+#ifdef ADC_HAVE_SCAN
+  bool    scan;              /* True: Scan mode */
 #endif
 #ifdef CONFIG_STM32_ADC_CHANGE_SAMPLETIME
   /* Sample time selection. These bits must be written only when ADON=0.
@@ -517,7 +435,8 @@ struct stm32_dev_s
 #endif
 #ifdef ADC_HAVE_TIMER
   uint8_t trigger;           /* Timer trigger channel: 0=CC1, 1=CC2, 2=CC3,
-                              * 3=CC4, 4=TRGO */
+                              * 3=CC4, 4=TRGO, 5=TRGO2
+                              */
 #endif
   xcpt_t   isr;              /* Interrupt handler for this ADC block */
   uint32_t base;             /* Base address of registers unique to this ADC
@@ -538,12 +457,12 @@ struct stm32_dev_s
 
   /* DMA transfer buffer */
 
-  uint16_t r_dmabuffer[ADC_MAX_SAMPLES];
+  uint16_t *r_dmabuffer;
 #endif
 
   /* List of selected ADC channels to sample */
 
-  uint8_t  r_chanlist[ADC_MAX_SAMPLES];
+  uint8_t  r_chanlist[CONFIG_STM32_ADC_MAX_SAMPLES];
 
 #ifdef ADC_HAVE_INJECTED
   /* List of selected ADC injected channels to sample */
@@ -562,152 +481,161 @@ struct stm32_dev_s
 static void stm32_modifyreg32(unsigned int addr, uint32_t clrbits,
                               uint32_t setbits);
 #endif
-static uint32_t adc_getreg(FAR struct stm32_dev_s *priv, int offset);
-static void adc_putreg(FAR struct stm32_dev_s *priv, int offset,
+static uint32_t adc_getreg(struct stm32_dev_s *priv, int offset);
+static void adc_putreg(struct stm32_dev_s *priv, int offset,
                        uint32_t value);
-static void adc_modifyreg(FAR struct stm32_dev_s *priv, int offset,
+static void adc_modifyreg(struct stm32_dev_s *priv, int offset,
                           uint32_t clrbits, uint32_t setbits);
 #ifdef HAVE_ADC_CMN_REGS
-static uint32_t adccmn_base_get(FAR struct stm32_dev_s *priv);
-static void adccmn_modifyreg(FAR struct stm32_dev_s *priv, uint32_t offset,
-                              uint32_t clrbits, uint32_t setbits);
-#  ifdef CONFIG_DEBUG_ANALOG_INFO
-static uint32_t adccmn_getreg(FAR struct stm32_dev_s *priv, uint32_t offset);
-#  endif
+static uint32_t adccmn_base_get(struct stm32_dev_s *priv);
+static void adccmn_modifyreg(struct stm32_dev_s *priv, uint32_t offset,
+                             uint32_t clrbits, uint32_t setbits);
+static uint32_t adccmn_getreg(struct stm32_dev_s *priv, uint32_t offset);
 #endif
 #ifdef ADC_HAVE_TIMER
-static uint16_t tim_getreg(FAR struct stm32_dev_s *priv, int offset);
-static void tim_putreg(FAR struct stm32_dev_s *priv, int offset,
+static uint16_t tim_getreg(struct stm32_dev_s *priv, int offset);
+static void tim_putreg(struct stm32_dev_s *priv, int offset,
                        uint16_t value);
-static void tim_modifyreg(FAR struct stm32_dev_s *priv, int offset,
+static void tim_modifyreg(struct stm32_dev_s *priv, int offset,
                           uint16_t clrbits, uint16_t setbits);
-static void tim_dumpregs(FAR struct stm32_dev_s *priv,
-                             FAR const char *msg);
+#ifdef HAVE_IP_TIMERS_V2
+static void tim_modifyreg32(struct stm32_dev_s *priv, int offset,
+                            uint32_t clrbits, uint32_t setbits);
+#endif
+static void tim_dumpregs(struct stm32_dev_s *priv, const char *msg);
 #endif
 
-#ifdef HAVE_ADC_CMN_DATA
-static int  adccmn_lock(FAR struct stm32_dev_s *priv, bool lock);
-#endif
-
-static void adc_rccreset(FAR struct stm32_dev_s *priv, bool reset);
+static void adc_rccreset(struct stm32_dev_s *priv, bool reset);
 
 /* ADC Interrupt Handler */
 
 #ifndef CONFIG_STM32_ADC_NOIRQ
-static int  adc_interrupt(FAR struct adc_dev_s *dev);
+static int  adc_interrupt(struct adc_dev_s *dev);
 #  if defined(STM32_IRQ_ADC1) && defined(CONFIG_STM32_ADC1)
-static int  adc1_interrupt(int irq, FAR void *context, FAR void *arg);
+static int  adc1_interrupt(int irq, void *context, void *arg);
 #  endif
 #  if defined(STM32_IRQ_ADC12) && (defined(CONFIG_STM32_ADC1) || \
                                  defined(CONFIG_STM32_ADC2))
-static int  adc12_interrupt(int irq, FAR void *context, FAR void *arg);
+static int  adc12_interrupt(int irq, void *context, void *arg);
 #  endif
 #  if (defined(STM32_IRQ_ADC3) && defined(CONFIG_STM32_ADC3))
-static int  adc3_interrupt(int irq, FAR void *context, FAR void *arg);
+static int  adc3_interrupt(int irq, void *context, void *arg);
 #  endif
 #  if defined(STM32_IRQ_ADC4) && defined(CONFIG_STM32_ADC4)
-static int  adc4_interrupt(int irq, FAR void *context, FAR void *arg);
+static int  adc4_interrupt(int irq, void *context, void *arg);
 #  endif
 #  if defined(STM32_IRQ_ADC)
-static int  adc123_interrupt(int irq, FAR void *context, FAR void *arg);
+static int  adc123_interrupt(int irq, void *context, void *arg);
 #  endif
 #endif /* CONFIG_STM32_ADC_NOIRQ */
 
 /* ADC Driver Methods */
 
-static int  adc_bind(FAR struct adc_dev_s *dev,
-                     FAR const struct adc_callback_s *callback);
-static void adc_reset(FAR struct adc_dev_s *dev);
-static int  adc_setup(FAR struct adc_dev_s *dev);
-static void adc_shutdown(FAR struct adc_dev_s *dev);
-static void adc_rxint(FAR struct adc_dev_s *dev, bool enable);
-static int  adc_ioctl(FAR struct adc_dev_s *dev, int cmd, unsigned long arg);
-static void adc_enable(FAR struct stm32_dev_s *priv, bool enable);
+static int  adc_bind(struct adc_dev_s *dev,
+                     const struct adc_callback_s *callback);
+static void adc_reset(struct adc_dev_s *dev);
+static int  adc_setup(struct adc_dev_s *dev);
+static void adc_shutdown(struct adc_dev_s *dev);
+static void adc_rxint(struct adc_dev_s *dev, bool enable);
+static int  adc_ioctl(struct adc_dev_s *dev, int cmd, unsigned long arg);
+static void adc_enable(struct stm32_dev_s *priv, bool enable);
 
-static uint32_t adc_sqrbits(FAR struct stm32_dev_s *priv, int first,
+static uint32_t adc_sqrbits(struct stm32_dev_s *priv, int first,
                             int last, int offset);
-static int  adc_set_ch(FAR struct adc_dev_s *dev, uint8_t ch);
+static int  adc_set_ch(struct adc_dev_s *dev, uint8_t ch);
 
-static int  adc_ioc_change_ints(FAR struct adc_dev_s *dev, int cmd,
+static int  adc_ioc_change_ints(struct adc_dev_s *dev, int cmd,
                                 bool arg);
 
 #ifdef HAVE_ADC_RESOLUTION
-static int  adc_resolution_set(FAR struct adc_dev_s *dev, uint8_t res);
+static int  adc_resolution_set(struct adc_dev_s *dev, uint8_t res);
 #endif
 #ifdef HAVE_ADC_VBAT
-static void adc_enable_vbat_channel(FAR struct adc_dev_s *dev, bool enable);
+static void adc_enable_vbat_channel(struct adc_dev_s *dev, bool enable);
 #endif
 #ifdef HAVE_ADC_POWERDOWN
-static int  adc_ioc_change_sleep_between_opers(FAR struct adc_dev_s *dev,
+static int  adc_ioc_change_sleep_between_opers(struct adc_dev_s *dev,
                                                int cmd, bool arg);
-static void adc_power_down_idle(FAR struct stm32_dev_s *priv,
+static void adc_power_down_idle(struct stm32_dev_s *priv,
                                 bool pdi_high);
-static void adc_power_down_delay(FAR struct stm32_dev_s *priv,
+static void adc_power_down_delay(struct stm32_dev_s *priv,
                                  bool pdd_high);
 #endif
 
 #ifdef CONFIG_STM32_STM32L15XX
-static void adc_dels_after_conversion(FAR struct stm32_dev_s *priv,
+static void adc_dels_after_conversion(struct stm32_dev_s *priv,
                                       uint32_t delay);
-static void adc_select_ch_bank(FAR struct stm32_dev_s *priv,
+static void adc_select_ch_bank(struct stm32_dev_s *priv,
                                bool chb_selected);
 #endif
 
 #ifdef HAVE_HSI_CONTROL
 static void adc_enable_hsi(bool enable);
-static void adc_reset_hsi_disable(FAR struct adc_dev_s *dev);
+static void adc_reset_hsi_disable(struct adc_dev_s *dev);
 #endif
 
 #ifdef ADC_HAVE_TIMER
-static void adc_timstart(FAR struct stm32_dev_s *priv, bool enable);
-static int  adc_timinit(FAR struct stm32_dev_s *priv);
+static void adc_timstart(struct stm32_dev_s *priv, bool enable);
+static int  adc_timinit(struct stm32_dev_s *priv);
 #endif
 
 #if defined(ADC_HAVE_DMA) && !defined(CONFIG_STM32_ADC_NOIRQ)
 static void adc_dmaconvcallback(DMA_HANDLE handle, uint8_t isr,
-                                FAR void *arg);
+                                void *arg);
 #endif
 
-static void adc_reg_startconv(FAR struct stm32_dev_s *priv, bool enable);
+static void adc_reg_startconv(struct stm32_dev_s *priv, bool enable);
 #ifdef ADC_HAVE_INJECTED
-static void adc_inj_startconv(FAR struct stm32_dev_s *priv, bool enable);
-static int adc_inj_set_ch(FAR struct adc_dev_s *dev, uint8_t ch);
+static void adc_inj_startconv(struct stm32_dev_s *priv, bool enable);
+static int adc_inj_set_ch(struct adc_dev_s *dev, uint8_t ch);
 #endif
 
 #ifdef ADC_HAVE_EXTCFG
-static int adc_extcfg_set(FAR struct adc_dev_s *dev, uint32_t extcfg);
+static int adc_extcfg_set(struct stm32_dev_s *priv, uint32_t extcfg);
 #endif
 #ifdef ADC_HAVE_JEXTCFG
-static int adc_jextcfg_set(FAR struct adc_dev_s *dev, uint32_t jextcfg);
+static int adc_jextcfg_set(struct stm32_dev_s *priv, uint32_t jextcfg);
 #endif
 
-static void adc_dumpregs(FAR struct stm32_dev_s *priv);
+static void adc_dumpregs(struct stm32_dev_s *priv);
 
 #ifdef CONFIG_STM32_ADC_LL_OPS
-static void adc_intack(FAR struct stm32_adc_dev_s *dev, uint32_t source);
-static void adc_inten(FAR struct stm32_adc_dev_s *dev, uint32_t source);
-static void adc_intdis(FAR struct stm32_adc_dev_s *dev, uint32_t source);
-static uint32_t adc_intget(FAR struct stm32_adc_dev_s *dev);
-static uint32_t adc_regget(FAR struct stm32_adc_dev_s *dev);
-static void adc_llops_reg_startconv(FAR struct stm32_adc_dev_s *dev,
+static int adc_llops_setup(struct stm32_adc_dev_s *dev);
+static void adc_llops_shutdown(struct stm32_adc_dev_s *dev);
+static void adc_intack(struct stm32_adc_dev_s *dev, uint32_t source);
+static void adc_inten(struct stm32_adc_dev_s *dev, uint32_t source);
+static void adc_intdis(struct stm32_adc_dev_s *dev, uint32_t source);
+static uint32_t adc_intget(struct stm32_adc_dev_s *dev);
+static uint32_t adc_regget(struct stm32_adc_dev_s *dev);
+static void adc_llops_reg_startconv(struct stm32_adc_dev_s *dev,
                                     bool enable);
-static int adc_offset_set(FAR struct stm32_adc_dev_s *dev, uint8_t ch,
+static int adc_offset_set(struct stm32_adc_dev_s *dev, uint8_t ch,
                           uint8_t i, uint16_t offset);
+#  ifdef ADC_HAVE_EXTCFG
+static void adc_llops_extcfg_set(struct stm32_adc_dev_s *dev,
+                                 uint32_t extcfg);
+#  endif
+#  ifdef ADC_HAVE_JEXTCFG
+static void adc_llops_jextcfg_set(struct stm32_adc_dev_s *dev,
+                                  uint32_t jextcfg);
+#  endif
 #  ifdef ADC_HAVE_DMA
-static int adc_regbufregister(FAR struct stm32_adc_dev_s *dev,
+static int adc_regbufregister(struct stm32_adc_dev_s *dev,
                               uint16_t *buffer, uint8_t len);
 #  endif
 #  ifdef ADC_HAVE_INJECTED
-static uint32_t adc_injget(FAR struct stm32_adc_dev_s *dev, uint8_t chan);
-static void adc_llops_inj_startconv(FAR struct stm32_adc_dev_s *dev,
+static uint32_t adc_injget(struct stm32_adc_dev_s *dev, uint8_t chan);
+static void adc_llops_inj_startconv(struct stm32_adc_dev_s *dev,
                                     bool enable);
 #  endif
 #  ifdef CONFIG_STM32_ADC_CHANGE_SAMPLETIME
-static void adc_sampletime_set(FAR struct stm32_adc_dev_s *dev,
-                               FAR struct adc_sample_time_s *time_samples);
-static void adc_sampletime_write(FAR struct stm32_adc_dev_s *dev);
+static void adc_sampletime_set(struct stm32_adc_dev_s *dev,
+                               struct adc_sample_time_s *time_samples);
+static void adc_sampletime_write(struct stm32_adc_dev_s *dev);
 #  endif
-static void adc_llops_dumpregs(FAR struct stm32_adc_dev_s *dev);
+static void adc_llops_dumpregs(struct stm32_adc_dev_s *dev);
+static int  adc_llops_multicfg(struct stm32_adc_dev_s *dev, uint8_t mode);
+static void adc_llops_enable(struct stm32_adc_dev_s *dev, bool enable);
 #endif
 
 /****************************************************************************
@@ -735,6 +663,8 @@ static const struct adc_ops_s g_adcops =
 #ifdef CONFIG_STM32_ADC_LL_OPS
 static const struct stm32_adc_ops_s g_adc_llops =
 {
+  .setup         = adc_llops_setup,
+  .shutdown      = adc_llops_shutdown,
   .int_ack       = adc_intack,
   .int_get       = adc_intget,
   .int_en        = adc_inten,
@@ -745,6 +675,12 @@ static const struct stm32_adc_ops_s g_adc_llops =
 #  ifdef ADC_HAVE_DMA
   .regbuf_reg    = adc_regbufregister,
 #  endif
+#  ifdef ADC_HAVE_EXTCFG
+  .extcfg_set    = adc_llops_extcfg_set,
+#  endif
+#  ifdef ADC_HAVE_JEXTCFG
+  .jextcfg_set   = adc_llops_jextcfg_set,
+#  endif
 #  ifdef ADC_HAVE_INJECTED
   .inj_get       = adc_injget,
   .inj_startconv = adc_llops_inj_startconv,
@@ -753,7 +689,9 @@ static const struct stm32_adc_ops_s g_adc_llops =
   .stime_set     = adc_sampletime_set,
   .stime_write   = adc_sampletime_write,
 #  endif
-  .dump_regs     = adc_llops_dumpregs
+  .dump_regs     = adc_llops_dumpregs,
+  .multi_cfg     = adc_llops_multicfg,
+  .enable        = adc_llops_enable
 };
 #endif
 
@@ -771,7 +709,8 @@ static const struct stm32_adc_ops_s g_adc_llops =
 
 struct adccmn_data_s g_adc123_cmn =
 {
-  .initialized = 0
+  .refcount = 0,
+  .lock = NXMUTEX_INITIALIZER,
 };
 
 #  elif defined(HAVE_IP_ADC_V2)
@@ -785,7 +724,8 @@ struct adccmn_data_s g_adc123_cmn =
 
 struct adccmn_data_s g_adc12_cmn =
 {
-  .initialized = 0
+  .refcount = 0,
+  .lock = NXMUTEX_INITIALIZER,
 };
 
 #    endif
@@ -795,7 +735,8 @@ struct adccmn_data_s g_adc12_cmn =
 
 struct adccmn_data_s g_adc34_cmn =
 {
-  .initialized = 0
+  .refcount = 0,
+  .lock = NXMUTEX_INITIALIZER,
 };
 
 #    endif
@@ -805,6 +746,12 @@ struct adccmn_data_s g_adc34_cmn =
 /* ADC1 state */
 
 #ifdef CONFIG_STM32_ADC1
+
+#ifdef ADC1_HAVE_DMA
+static uint16_t g_adc1_dmabuffer[CONFIG_STM32_ADC_MAX_SAMPLES *
+                                 CONFIG_STM32_ADC1_DMA_BATCH];
+#endif
+
 static struct stm32_dev_s g_adcpriv1 =
 {
 #ifdef CONFIG_STM32_ADC_LL_OPS
@@ -828,6 +775,8 @@ static struct stm32_dev_s g_adcpriv1 =
   .cmn         = &ADC1CMN_DATA,
 #endif
   .intf        = 1,
+  .initialized = 0,
+  .anioc_trg   = CONFIG_STM32_ADC1_ANIOC_TRIGGER,
 #ifdef HAVE_ADC_RESOLUTION
   .resolution  = CONFIG_STM32_ADC1_RESOLUTION,
 #endif
@@ -850,6 +799,11 @@ static struct stm32_dev_s g_adcpriv1 =
   .dmacfg      = CONFIG_STM32_ADC1_DMA_CFG,
 #  endif
   .hasdma      = true,
+  .r_dmabuffer = g_adc1_dmabuffer,
+  .dmabatch    = CONFIG_STM32_ADC1_DMA_BATCH,
+#endif
+#ifdef ADC_HAVE_SCAN
+  .scan        = CONFIG_STM32_ADC1_SCAN,
 #endif
 };
 
@@ -863,6 +817,12 @@ static struct adc_dev_s g_adcdev1 =
 /* ADC2 state */
 
 #ifdef CONFIG_STM32_ADC2
+
+#ifdef ADC2_HAVE_DMA
+static uint16_t g_adc2_dmabuffer[CONFIG_STM32_ADC_MAX_SAMPLES *
+                                 CONFIG_STM32_ADC2_DMA_BATCH];
+#endif
+
 static struct stm32_dev_s g_adcpriv2 =
 {
 #ifdef CONFIG_STM32_ADC_LL_OPS
@@ -883,6 +843,8 @@ static struct stm32_dev_s g_adcpriv2 =
   .cmn         = &ADC2CMN_DATA,
 #endif
   .intf        = 2,
+  .initialized = 0,
+  .anioc_trg   = CONFIG_STM32_ADC2_ANIOC_TRIGGER,
 #ifdef HAVE_ADC_RESOLUTION
   .resolution  = CONFIG_STM32_ADC2_RESOLUTION,
 #endif
@@ -905,6 +867,11 @@ static struct stm32_dev_s g_adcpriv2 =
   .dmacfg      = CONFIG_STM32_ADC2_DMA_CFG,
 #  endif
   .hasdma      = true,
+  .r_dmabuffer = g_adc2_dmabuffer,
+  .dmabatch    = CONFIG_STM32_ADC2_DMA_BATCH,
+#endif
+#ifdef ADC_HAVE_SCAN
+  .scan        = CONFIG_STM32_ADC2_SCAN,
 #endif
 };
 
@@ -918,6 +885,12 @@ static struct adc_dev_s g_adcdev2 =
 /* ADC3 state */
 
 #ifdef CONFIG_STM32_ADC3
+
+#ifdef ADC3_HAVE_DMA
+static uint16_t g_adc3_dmabuffer[CONFIG_STM32_ADC_MAX_SAMPLES *
+                                 CONFIG_STM32_ADC3_DMA_BATCH];
+#endif
+
 static struct stm32_dev_s g_adcpriv3 =
 {
 #ifdef CONFIG_STM32_ADC_LL_OPS
@@ -938,6 +911,8 @@ static struct stm32_dev_s g_adcpriv3 =
   .cmn         = &ADC3CMN_DATA,
 #endif
   .intf        = 3,
+  .initialized = 0,
+  .anioc_trg   = CONFIG_STM32_ADC3_ANIOC_TRIGGER,
 #ifdef HAVE_ADC_RESOLUTION
   .resolution  = CONFIG_STM32_ADC3_RESOLUTION,
 #endif
@@ -960,6 +935,11 @@ static struct stm32_dev_s g_adcpriv3 =
   .dmacfg      = CONFIG_STM32_ADC3_DMA_CFG,
 #  endif
   .hasdma      = true,
+  .r_dmabuffer = g_adc3_dmabuffer,
+  .dmabatch    = CONFIG_STM32_ADC3_DMA_BATCH,
+#endif
+#ifdef ADC_HAVE_SCAN
+  .scan        = CONFIG_STM32_ADC3_SCAN,
 #endif
 };
 
@@ -973,6 +953,12 @@ static struct adc_dev_s g_adcdev3 =
 /* ADC4 state */
 
 #ifdef CONFIG_STM32_ADC4
+
+#ifdef ADC4_HAVE_DMA
+static uint16_t g_adc4_dmabuffer[CONFIG_STM32_ADC_MAX_SAMPLES *
+                                 CONFIG_STM32_ADC4_DMA_BATCH];
+#endif
+
 static struct stm32_dev_s g_adcpriv4 =
 {
 #ifdef CONFIG_STM32_ADC_LL_OPS
@@ -986,6 +972,8 @@ static struct stm32_dev_s g_adcpriv4 =
   .cmn         = &ADC4CMN_DATA,
 #endif
   .intf        = 4,
+  .initialized = 0,
+  .anioc_trg   = CONFIG_STM32_ADC4_ANIOC_TRIGGER,
 #ifdef HAVE_ADC_RESOLUTION
   .resolution  = CONFIG_STM32_ADC4_RESOLUTION,
 #endif
@@ -1008,6 +996,8 @@ static struct stm32_dev_s g_adcpriv4 =
   .dmacfg      = CONFIG_STM32_ADC4_DMA_CFG,
 #  endif
   .hasdma      = true,
+  .r_dmabuffer = g_adc4_dmabuffer,
+  .dmabatch    = CONFIG_STM32_ADC4_DMA_BATCH
 #endif
 };
 
@@ -1061,7 +1051,7 @@ static void stm32_modifyreg32(unsigned int addr, uint32_t clrbits,
  *
  ****************************************************************************/
 
-static uint32_t adc_getreg(FAR struct stm32_dev_s *priv, int offset)
+static uint32_t adc_getreg(struct stm32_dev_s *priv, int offset)
 {
   return getreg32(priv->base + offset);
 }
@@ -1082,7 +1072,7 @@ static uint32_t adc_getreg(FAR struct stm32_dev_s *priv, int offset)
  *
  ****************************************************************************/
 
-static void adc_putreg(FAR struct stm32_dev_s *priv, int offset,
+static void adc_putreg(struct stm32_dev_s *priv, int offset,
                        uint32_t value)
 {
   putreg32(value, priv->base + offset);
@@ -1105,7 +1095,7 @@ static void adc_putreg(FAR struct stm32_dev_s *priv, int offset,
  *
  ****************************************************************************/
 
-static void adc_modifyreg(FAR struct stm32_dev_s *priv, int offset,
+static void adc_modifyreg(struct stm32_dev_s *priv, int offset,
                           uint32_t clrbits, uint32_t setbits)
 {
   adc_putreg(priv, offset, (adc_getreg(priv, offset) & ~clrbits) | setbits);
@@ -1117,7 +1107,7 @@ static void adc_modifyreg(FAR struct stm32_dev_s *priv, int offset,
  * Name: adccmn_base_get
  ****************************************************************************/
 
-static uint32_t adccmn_base_get(FAR struct stm32_dev_s *priv)
+static uint32_t adccmn_base_get(struct stm32_dev_s *priv)
 {
   uint32_t base = 0;
 
@@ -1145,8 +1135,8 @@ static uint32_t adccmn_base_get(FAR struct stm32_dev_s *priv)
  * Name: adccmn_modifyreg
  ****************************************************************************/
 
-static void adccmn_modifyreg(FAR struct stm32_dev_s *priv, uint32_t offset,
-                              uint32_t clrbits, uint32_t setbits)
+static void adccmn_modifyreg(struct stm32_dev_s *priv, uint32_t offset,
+                             uint32_t clrbits, uint32_t setbits)
 {
   uint32_t base = 0;
 
@@ -1163,8 +1153,7 @@ static void adccmn_modifyreg(FAR struct stm32_dev_s *priv, uint32_t offset,
  * Name: adccmn_getreg
  ****************************************************************************/
 
-#  ifdef CONFIG_DEBUG_ANALOG_INFO
-static uint32_t adccmn_getreg(FAR struct stm32_dev_s *priv, uint32_t offset)
+static uint32_t adccmn_getreg(struct stm32_dev_s *priv, uint32_t offset)
 {
   uint32_t base = 0;
 
@@ -1176,9 +1165,9 @@ static uint32_t adccmn_getreg(FAR struct stm32_dev_s *priv, uint32_t offset)
 
   return getreg32(base + offset);
 }
-#  endif
 #endif /* HAVE_ADC_CMN_REGS */
 
+#ifdef ADC_HAVE_TIMER
 /****************************************************************************
  * Name: tim_getreg
  *
@@ -1194,12 +1183,10 @@ static uint32_t adccmn_getreg(FAR struct stm32_dev_s *priv, uint32_t offset)
  *
  ****************************************************************************/
 
-#ifdef ADC_HAVE_TIMER
-static uint16_t tim_getreg(FAR struct stm32_dev_s *priv, int offset)
+static uint16_t tim_getreg(struct stm32_dev_s *priv, int offset)
 {
   return getreg16(priv->tbase + offset);
 }
-#endif
 
 /****************************************************************************
  * Name: tim_putreg
@@ -1217,13 +1204,11 @@ static uint16_t tim_getreg(FAR struct stm32_dev_s *priv, int offset)
  *
  ****************************************************************************/
 
-#ifdef ADC_HAVE_TIMER
-static void tim_putreg(FAR struct stm32_dev_s *priv, int offset,
+static void tim_putreg(struct stm32_dev_s *priv, int offset,
                        uint16_t value)
 {
   putreg16(value, priv->tbase + offset);
 }
-#endif
 
 /****************************************************************************
  * Name: tim_modifyreg
@@ -1242,11 +1227,35 @@ static void tim_putreg(FAR struct stm32_dev_s *priv, int offset,
  *
  ****************************************************************************/
 
-#ifdef ADC_HAVE_TIMER
-static void tim_modifyreg(FAR struct stm32_dev_s *priv, int offset,
+static void tim_modifyreg(struct stm32_dev_s *priv, int offset,
                           uint16_t clrbits, uint16_t setbits)
 {
   tim_putreg(priv, offset, (tim_getreg(priv, offset) & ~clrbits) | setbits);
+}
+
+#ifdef HAVE_IP_TIMERS_V2
+/****************************************************************************
+ * Name: tim_modifyreg32
+ *
+ * Description:
+ *   Modify the value of an ADC timer register (not atomic).
+ *
+ * Input Parameters:
+ *   priv    - A reference to the ADC block status
+ *   offset  - The offset to the register to modify
+ *   clrbits - The bits to clear
+ *   setbits - The bits to set
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static void tim_modifyreg32(struct stm32_dev_s *priv, int offset,
+                            uint32_t clrbits, uint32_t setbits)
+{
+  uint32_t addr = priv->tbase + offset;
+  putreg32((getreg32(addr) & ~clrbits) | setbits, addr);
 }
 #endif
 
@@ -1264,8 +1273,7 @@ static void tim_modifyreg(FAR struct stm32_dev_s *priv, int offset,
  *
  ****************************************************************************/
 
-#ifdef ADC_HAVE_TIMER
-static void tim_dumpregs(FAR struct stm32_dev_s *priv, FAR const char *msg)
+static void tim_dumpregs(struct stm32_dev_s *priv, const char *msg)
 {
   ainfo("%s:\n", msg);
   ainfo("  CR1: %04x CR2:  %04x SMCR:  %04x DIER:  %04x\n",
@@ -1308,7 +1316,6 @@ static void tim_dumpregs(FAR struct stm32_dev_s *priv, FAR const char *msg)
             tim_getreg(priv, STM32_GTIM_DMAR_OFFSET));
     }
 }
-#endif
 
 /****************************************************************************
  * Name: adc_timstart
@@ -1324,8 +1331,7 @@ static void tim_dumpregs(FAR struct stm32_dev_s *priv, FAR const char *msg)
  *
  ****************************************************************************/
 
-#ifdef ADC_HAVE_TIMER
-static void adc_timstart(FAR struct stm32_dev_s *priv, bool enable)
+static void adc_timstart(struct stm32_dev_s *priv, bool enable)
 {
   ainfo("enable: %d\n", enable ? 1 : 0);
 
@@ -1342,7 +1348,6 @@ static void adc_timstart(FAR struct stm32_dev_s *priv, bool enable)
       tim_modifyreg(priv, STM32_GTIM_CR1_OFFSET, GTIM_CR1_CEN, 0);
     }
 }
-#endif
 
 /****************************************************************************
  * Name: adc_timinit
@@ -1359,8 +1364,7 @@ static void adc_timstart(FAR struct stm32_dev_s *priv, bool enable)
  *
  ****************************************************************************/
 
-#ifdef ADC_HAVE_TIMER
-static int adc_timinit(FAR struct stm32_dev_s *priv)
+static int adc_timinit(struct stm32_dev_s *priv)
 {
   uint32_t prescaler;
   uint32_t reload;
@@ -1404,7 +1408,7 @@ static int adc_timinit(FAR struct stm32_dev_s *priv)
    *   0 <= prescaler  <= 65536
    *   1 <= reload <= 65535
    *
-   * So ( prescaler = pclck / 65535 / freq ) would be optimal.
+   * So (prescaler = pclck / 65535 / freq) would be optimal.
    */
 
   prescaler = (priv->pclck / priv->freq + 65534) / 65535;
@@ -1568,20 +1572,29 @@ static int adc_timinit(FAR struct stm32_dev_s *priv)
 
       case 4: /* TimerX TRGO event */
         {
-          /* TODO: TRGO support not yet implemented */
-
           /* Set the event TRGO */
 
           ccenable = 0;
           egr      = GTIM_EGR_TG;
 
-          /* Set the duty cycle by writing to the CCR register for this
-           * channel
-           */
-
-          tim_putreg(priv, STM32_GTIM_CCR4_OFFSET, (uint16_t)(reload >> 1));
+          tim_modifyreg(priv, STM32_GTIM_CR2_OFFSET, clrbits,
+                        GTIM_CR2_MMS_UPDATE);
         }
         break;
+
+#ifdef HAVE_IP_TIMERS_V2
+      case 5: /* TimerX TRGO2 event */
+        {
+          /* Set the event TRGO2 */
+
+          ccenable = 0;
+          egr      = GTIM_EGR_TG;
+
+          tim_modifyreg32(priv, STM32_ATIM_CR2_OFFSET, clrbits,
+                          ATIM_CR2_MMS2_UPDATE);
+        }
+        break;
+#endif
 
       default:
         aerr("ERROR: No such trigger: %d\n", priv->trigger);
@@ -1712,7 +1725,7 @@ static int adc_timinit(FAR struct stm32_dev_s *priv)
  ****************************************************************************/
 
 #if defined(HAVE_IP_ADC_V2)
-static void adc_reg_startconv(FAR struct stm32_dev_s *priv, bool enable)
+static void adc_reg_startconv(struct stm32_dev_s *priv, bool enable)
 {
   uint32_t regval;
 
@@ -1744,7 +1757,7 @@ static void adc_reg_startconv(FAR struct stm32_dev_s *priv, bool enable)
     }
 }
 #elif defined(HAVE_IP_ADC_V1) && !defined(HAVE_BASIC_ADC)
-static void adc_reg_startconv(FAR struct stm32_dev_s *priv, bool enable)
+static void adc_reg_startconv(struct stm32_dev_s *priv, bool enable)
 {
   ainfo("reg enable: %d\n", enable ? 1 : 0);
 
@@ -1762,7 +1775,7 @@ static void adc_reg_startconv(FAR struct stm32_dev_s *priv, bool enable)
     }
 }
 #else  /* ADV IPv1 BASIC */
-static void adc_reg_startconv(FAR struct stm32_dev_s *priv, bool enable)
+static void adc_reg_startconv(struct stm32_dev_s *priv, bool enable)
 {
   ainfo("reg enable: %d\n", enable ? 1 : 0);
 
@@ -1800,7 +1813,7 @@ static void adc_reg_startconv(FAR struct stm32_dev_s *priv, bool enable)
  ****************************************************************************/
 
 #if defined(HAVE_IP_ADC_V2)
-static void adc_inj_startconv(FAR struct stm32_dev_s *priv, bool enable)
+static void adc_inj_startconv(struct stm32_dev_s *priv, bool enable)
 {
   uint32_t regval;
 
@@ -1831,8 +1844,8 @@ static void adc_inj_startconv(FAR struct stm32_dev_s *priv, bool enable)
         }
     }
 }
-#elif defined(HAVE_IP_ADC_V1) && !defined(HAVE_BASIC_ADC)
-static void adc_inj_startconv(FAR struct stm32_dev_s *priv, bool enable)
+#elif defined(HAVE_IP_ADC_V1)
+static void adc_inj_startconv(struct stm32_dev_s *priv, bool enable)
 {
   ainfo("inj enable: %d\n", enable ? 1 : 0);
 
@@ -1849,33 +1862,9 @@ static void adc_inj_startconv(FAR struct stm32_dev_s *priv, bool enable)
       adc_modifyreg(priv, STM32_ADC_CR2_OFFSET, ADC_CR2_JSWSTART, 0);
     }
 }
-#else  /* ADV IPv1 BASIC */
-#  error TODO
 #endif
 
 #endif /* ADC_HAVE_INJECTED */
-
-/****************************************************************************
- * Name: adccmn_lock
- ****************************************************************************/
-
-#ifdef HAVE_ADC_CMN_DATA
-static int adccmn_lock(FAR struct stm32_dev_s *priv, bool lock)
-{
-  int ret;
-
-  if (lock)
-    {
-      ret = nxsem_wait_uninterruptible(&priv->cmn->lock);
-    }
-  else
-    {
-      ret = nxsem_post(&priv->cmn->lock);
-    }
-
-  return ret;
-}
-#endif
 
 /****************************************************************************
  * Name: adc_rccreset
@@ -1885,7 +1874,7 @@ static int adccmn_lock(FAR struct stm32_dev_s *priv, bool lock)
  *   reset values. It could set all the ADCs configured.
  *
  * Input Parameters:
- *   regaddr - The register to read
+ *   priv  - A reference to the ADC block status
  *   reset - Condition, set or reset
  *
  * Returned Value:
@@ -1893,7 +1882,7 @@ static int adccmn_lock(FAR struct stm32_dev_s *priv, bool lock)
  ****************************************************************************/
 
 #if defined(HAVE_IP_ADC_V1) && defined(HAVE_BASIC_ADC)
-static void adc_rccreset(FAR struct stm32_dev_s *priv, bool reset)
+static void adc_rccreset(struct stm32_dev_s *priv, bool reset)
 {
   uint32_t adcbit;
 
@@ -1958,7 +1947,7 @@ static void adc_rccreset(FAR struct stm32_dev_s *priv, bool reset)
     }
 }
 #elif defined(HAVE_IP_ADC_V1)
-static void adc_rccreset(FAR struct stm32_dev_s *priv, bool reset)
+static void adc_rccreset(struct stm32_dev_s *priv, bool reset)
 {
   uint32_t adcbit;
 
@@ -1998,7 +1987,7 @@ static void adc_rccreset(FAR struct stm32_dev_s *priv, bool reset)
     }
 }
 #elif defined(HAVE_IP_ADC_V2)
-static void adc_rccreset(FAR struct stm32_dev_s *priv, bool reset)
+static void adc_rccreset(struct stm32_dev_s *priv, bool reset)
 {
   uint32_t adcbit;
 
@@ -2068,7 +2057,7 @@ static void adc_rccreset(FAR struct stm32_dev_s *priv, bool reset)
  ****************************************************************************/
 
 #ifdef CONFIG_STM32_STM32L15XX
-static void adc_power_down_idle(FAR struct stm32_dev_s *priv, bool pdi_high)
+static void adc_power_down_idle(struct stm32_dev_s *priv, bool pdi_high)
 {
   uint32_t regval;
 
@@ -2110,7 +2099,7 @@ static void adc_power_down_idle(FAR struct stm32_dev_s *priv, bool pdi_high)
  ****************************************************************************/
 
 #ifdef CONFIG_STM32_STM32L15XX
-static void adc_power_down_delay(FAR struct stm32_dev_s *priv, bool pdd_high)
+static void adc_power_down_delay(struct stm32_dev_s *priv, bool pdd_high)
 {
   uint32_t regval;
 
@@ -2152,7 +2141,7 @@ static void adc_power_down_delay(FAR struct stm32_dev_s *priv, bool pdd_high)
  ****************************************************************************/
 
 #ifdef CONFIG_STM32_STM32L15XX
-static void adc_dels_after_conversion(FAR struct stm32_dev_s *priv,
+static void adc_dels_after_conversion(struct stm32_dev_s *priv,
                                       uint32_t delay)
 {
   ainfo("Delay selected: 0x%08x\n", delay);
@@ -2179,7 +2168,7 @@ static void adc_dels_after_conversion(FAR struct stm32_dev_s *priv,
  ****************************************************************************/
 
 #ifdef CONFIG_STM32_STM32L15XX
-static void adc_select_ch_bank(FAR struct stm32_dev_s *priv,
+static void adc_select_ch_bank(struct stm32_dev_s *priv,
                                bool chb_selected)
 {
   ainfo("Bank of channels selected: %c\n", chb_selected ? 'B' : 'A');
@@ -2212,7 +2201,7 @@ static void adc_select_ch_bank(FAR struct stm32_dev_s *priv,
  ****************************************************************************/
 
 #if defined(HAVE_IP_ADC_V2)
-static void adc_enable(FAR struct stm32_dev_s *priv, bool enable)
+static void adc_enable(struct stm32_dev_s *priv, bool enable)
 {
   uint32_t regval;
 
@@ -2246,7 +2235,7 @@ static void adc_enable(FAR struct stm32_dev_s *priv, bool enable)
     }
 }
 #else  /* HAVE_IP_ADC_V1 */
-static void adc_enable(FAR struct stm32_dev_s *priv, bool enable)
+static void adc_enable(struct stm32_dev_s *priv, bool enable)
 {
 #ifdef ADC_SR_ADONS
   bool enabled = (adc_getreg(priv, STM32_ADC_SR_OFFSET) & ADC_SR_ADONS) != 0;
@@ -2286,10 +2275,10 @@ static void adc_enable(FAR struct stm32_dev_s *priv, bool enable)
 
 #if defined(ADC_HAVE_DMA) && !defined(CONFIG_STM32_ADC_NOIRQ)
 static void adc_dmaconvcallback(DMA_HANDLE handle, uint8_t isr,
-                                FAR void *arg)
+                                void *arg)
 {
-  FAR struct adc_dev_s   *dev  = (FAR struct adc_dev_s *)arg;
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  struct adc_dev_s   *dev  = (struct adc_dev_s *)arg;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
   int i;
 
   /* Verify that the upper-half driver has bound its callback functions */
@@ -2298,10 +2287,10 @@ static void adc_dmaconvcallback(DMA_HANDLE handle, uint8_t isr,
     {
       DEBUGASSERT(priv->cb->au_receive != NULL);
 
-      for (i = 0; i < priv->rnchannels; i++)
+      for (i = 0; i < priv->rnchannels * priv->dmabatch; i++)
         {
           priv->cb->au_receive(dev, priv->r_chanlist[priv->current],
-                               priv->r_dmabuffer[priv->current]);
+                               priv->r_dmabuffer[i]);
           priv->current++;
           if (priv->current >= priv->rnchannels)
             {
@@ -2328,14 +2317,17 @@ static void adc_dmaconvcallback(DMA_HANDLE handle, uint8_t isr,
  *
  ****************************************************************************/
 
-static int adc_bind(FAR struct adc_dev_s *dev,
-                    FAR const struct adc_callback_s *callback)
+static int adc_bind(struct adc_dev_s *dev,
+                    const struct adc_callback_s *callback)
 {
-#ifndef CONFIG_STM32_ADC_NOIRQ
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+#ifdef ADC_HAVE_CB
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
 
   DEBUGASSERT(priv != NULL);
   priv->cb = callback;
+#else
+  UNUSED(dev);
+  UNUSED(callback);
 #endif
 
   return OK;
@@ -2346,7 +2338,7 @@ static int adc_bind(FAR struct adc_dev_s *dev,
  ****************************************************************************/
 
 #if defined(HAVE_IP_ADC_V2)
-static void adc_watchdog_cfg(FAR struct stm32_dev_s *priv)
+static void adc_watchdog_cfg(struct stm32_dev_s *priv)
 {
   uint32_t clrbits = 0;
   uint32_t setbits = 0;
@@ -2366,7 +2358,7 @@ static void adc_watchdog_cfg(FAR struct stm32_dev_s *priv)
   adc_modifyreg(priv, STM32_ADC_CFGR1_OFFSET, clrbits, setbits);
 }
 #else
-static void adc_watchdog_cfg(FAR struct stm32_dev_s *priv)
+static void adc_watchdog_cfg(struct stm32_dev_s *priv)
 {
   uint32_t clrbits = 0;
   uint32_t setbits = 0;
@@ -2393,7 +2385,7 @@ static void adc_watchdog_cfg(FAR struct stm32_dev_s *priv)
  ****************************************************************************/
 
 #if defined(HAVE_IP_ADC_V2)
-static void adc_calibrate(FAR struct stm32_dev_s *priv)
+static void adc_calibrate(struct stm32_dev_s *priv)
 {
 #if 0 /* Doesn't work */
   /* Calibrate the ADC */
@@ -2409,7 +2401,7 @@ static void adc_calibrate(FAR struct stm32_dev_s *priv)
 #endif
 }
 #elif defined(HAVE_IP_ADC_V1) && defined(HAVE_BASIC_ADC)
-static void adc_calibrate(FAR struct stm32_dev_s *priv)
+static void adc_calibrate(struct stm32_dev_s *priv)
 {
   /* Power on the ADC */
 
@@ -2448,7 +2440,7 @@ static void adc_calibrate(FAR struct stm32_dev_s *priv)
  ****************************************************************************/
 
 #ifdef HAVE_IP_ADC_V2
-static void adc_mode_cfg(FAR struct stm32_dev_s *priv)
+static void adc_mode_cfg(struct stm32_dev_s *priv)
 {
   uint32_t clrbits = 0;
   uint32_t setbits = 0;
@@ -2467,7 +2459,7 @@ static void adc_mode_cfg(FAR struct stm32_dev_s *priv)
   adc_modifyreg(priv, STM32_ADC_CFGR1_OFFSET, clrbits, setbits);
 }
 #else
-static void adc_mode_cfg(FAR struct stm32_dev_s *priv)
+static void adc_mode_cfg(struct stm32_dev_s *priv)
 {
   uint32_t clrbits = 0;
   uint32_t setbits = 0;
@@ -2479,8 +2471,8 @@ static void adc_mode_cfg(FAR struct stm32_dev_s *priv)
   setbits |= ADC_CR1_IND;
 #endif
 
-#ifdef ADC_HAVE_DMA
-  if (priv->hasdma)
+#ifdef ADC_HAVE_SCAN
+  if (priv->scan == true)
     {
       setbits |= ADC_CR1_SCAN;
     }
@@ -2540,7 +2532,7 @@ static void adc_mode_cfg(FAR struct stm32_dev_s *priv)
  ****************************************************************************/
 
 #if defined(HAVE_IP_ADC_V2)
-static void adc_voltreg_cfg(FAR struct stm32_dev_s *priv)
+static void adc_voltreg_cfg(struct stm32_dev_s *priv)
 {
   /* Set ADC voltage regulator to intermediate state */
 
@@ -2557,7 +2549,7 @@ static void adc_voltreg_cfg(FAR struct stm32_dev_s *priv)
   up_udelay(10);
 }
 #else
-static void adc_voltreg_cfg(FAR struct stm32_dev_s *priv)
+static void adc_voltreg_cfg(struct stm32_dev_s *priv)
 {
   /* Nothing to do here */
 
@@ -2566,19 +2558,19 @@ static void adc_voltreg_cfg(FAR struct stm32_dev_s *priv)
 #endif
 
 /****************************************************************************
- * Name: adc_voltreg_cfg
+ * Name: adc_sampletime_cfg
  ****************************************************************************/
 
-static void adc_sampletime_cfg(FAR struct adc_dev_s *dev)
+static void adc_sampletime_cfg(struct adc_dev_s *dev)
 {
   /* Initialize the same sample time for each ADC.
    * During sample cycles channel selection bits must remain unchanged.
    */
 
 #ifdef CONFIG_STM32_ADC_CHANGE_SAMPLETIME
-  adc_sampletime_write((FAR struct stm32_adc_dev_s *)dev);
+  adc_sampletime_write((struct stm32_adc_dev_s *)dev->ad_priv);
 #else
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
 
   adc_putreg(priv, STM32_ADC_SMPR1_OFFSET, ADC_SMPR1_DEFAULT);
   adc_putreg(priv, STM32_ADC_SMPR2_OFFSET, ADC_SMPR2_DEFAULT);
@@ -2596,7 +2588,7 @@ static void adc_sampletime_cfg(FAR struct adc_dev_s *dev)
  ****************************************************************************/
 
 #if defined(HAVE_IP_ADC_V2)
-static void adc_common_cfg(FAR struct stm32_dev_s *priv)
+static void adc_common_cfg(struct stm32_dev_s *priv)
 {
   uint32_t clrbits = 0;
   uint32_t setbits = 0;
@@ -2606,13 +2598,13 @@ static void adc_common_cfg(FAR struct stm32_dev_s *priv)
   clrbits = ADC_CCR_DUAL_MASK | ADC_CCR_DELAY_MASK | ADC_CCR_DMACFG |
             ADC_CCR_MDMA_MASK | ADC_CCR_CKMODE_MASK | ADC_CCR_VREFEN |
             ADC_CCR_TSEN | ADC_CCR_VBATEN;
-  setbits = ADC_CCR_DUAL_IND | ADC_CCR_DELAY(0) | ADC_CCR_MDMA_DISABLED |
+  setbits = ADC_CCR_DUAL_IND | ADC_CCR_DELAY(1) | ADC_CCR_MDMA_DISABLED |
             ADC_CCR_CKMODE_ASYNCH;
 
   adccmn_modifyreg(priv, STM32_ADC_CCR_OFFSET, clrbits, setbits);
 }
 #elif defined(HAVE_IP_ADC_V1) && !defined(HAVE_BASIC_ADC)
-static void adc_common_cfg(FAR struct stm32_dev_s *priv)
+static void adc_common_cfg(struct stm32_dev_s *priv)
 {
   uint32_t clrbits = 0;
   uint32_t setbits = 0;
@@ -2631,7 +2623,7 @@ static void adc_common_cfg(FAR struct stm32_dev_s *priv)
   adccmn_modifyreg(priv, STM32_ADC_CCR_OFFSET, clrbits, setbits);
 }
 #else
-static void adc_common_cfg(FAR struct stm32_dev_s *priv)
+static void adc_common_cfg(struct stm32_dev_s *priv)
 {
   /* Do nothing here */
 
@@ -2645,7 +2637,7 @@ static void adc_common_cfg(FAR struct stm32_dev_s *priv)
  ****************************************************************************/
 
 #ifdef HAVE_IP_ADC_V2
-static void adc_dma_cfg(FAR struct stm32_dev_s *priv)
+static void adc_dma_cfg(struct stm32_dev_s *priv)
 {
   uint32_t clrbits = 0;
   uint32_t setbits = 0;
@@ -2674,7 +2666,7 @@ static void adc_dma_cfg(FAR struct stm32_dev_s *priv)
   adc_modifyreg(priv, STM32_ADC_CFGR1_OFFSET, clrbits, setbits);
 }
 #else
-static void adc_dma_cfg(FAR struct stm32_dev_s *priv)
+static void adc_dma_cfg(struct stm32_dev_s *priv)
 {
   uint32_t clrbits = 0;
   uint32_t setbits = 0;
@@ -2710,9 +2702,9 @@ static void adc_dma_cfg(FAR struct stm32_dev_s *priv)
  * Name: adc_dma_start
  ****************************************************************************/
 
-static void adc_dma_start(FAR struct adc_dev_s *dev)
+static void adc_dma_start(struct adc_dev_s *dev)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
 
   /* Stop and free DMA if it was started before */
 
@@ -2725,10 +2717,12 @@ static void adc_dma_start(FAR struct adc_dev_s *dev)
   priv->dma = stm32_dmachannel(priv->dmachan);
 
 #ifndef CONFIG_STM32_ADC_NOIRQ
+  /* Start DMA only if standard ADC interrupts used */
+
   stm32_dmasetup(priv->dma,
                  priv->base + STM32_ADC_DR_OFFSET,
                  (uint32_t)priv->r_dmabuffer,
-                 priv->rnchannels,
+                 priv->rnchannels * priv->dmabatch,
                  ADC_DMA_CONTROL_WORD);
 
   stm32_dmastart(priv->dma, adc_dmaconvcallback, dev, false);
@@ -2740,9 +2734,9 @@ static void adc_dma_start(FAR struct adc_dev_s *dev)
  * Name: adc_configure
  ****************************************************************************/
 
-static void adc_configure(FAR struct adc_dev_s *dev)
+static void adc_configure(struct adc_dev_s *dev)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
 
   /* Turn off the ADC before configuration */
 
@@ -2812,7 +2806,7 @@ static void adc_configure(FAR struct adc_dev_s *dev)
 #ifdef ADC_HAVE_EXTCFG
   /* Configure external event for regular group */
 
-  adc_extcfg_set(dev, priv->extcfg);
+  adc_extcfg_set(priv, priv->extcfg);
 #endif
 
   /* Enable ADC */
@@ -2822,7 +2816,7 @@ static void adc_configure(FAR struct adc_dev_s *dev)
 #ifdef ADC_HAVE_JEXTCFG
   /* Configure external event for injected group when ADC enabled */
 
-  adc_jextcfg_set(dev, priv->jextcfg);
+  adc_jextcfg_set(priv, priv->jextcfg);
 
 #if defined(HAVE_IP_ADC_V2)
   /* For ADC IPv2 there is queue of context for injected conversion.
@@ -2853,13 +2847,20 @@ static void adc_configure(FAR struct adc_dev_s *dev)
  *
  ****************************************************************************/
 
-static void adc_reset(FAR struct adc_dev_s *dev)
+static void adc_reset(struct adc_dev_s *dev)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
   irqstate_t flags;
 
   ainfo("intf: %d\n", priv->intf);
   flags = enter_critical_section();
+
+  /* Do nothing if ADC instance is currently in use */
+
+  if (priv->initialized > 0)
+    {
+      goto out;
+    }
 
 #ifdef HAVE_HSI_CONTROL
   /* The STM32L15XX family uses HSI as an independent clock-source
@@ -2878,12 +2879,12 @@ static void adc_reset(FAR struct adc_dev_s *dev)
   /* Only if this is the first initialzied ADC instance in the ADC block */
 
 #ifdef HAVE_ADC_CMN_DATA
-  if (adccmn_lock(priv, true) < 0)
+  if (nxmutex_lock(&priv->cmn->lock) < 0)
     {
-      return;
+      goto out;
     }
 
-  if (priv->cmn->initialized == 0)
+  if (priv->cmn->refcount == 0)
 #endif
     {
       /* Enable ADC reset state */
@@ -2896,9 +2897,10 @@ static void adc_reset(FAR struct adc_dev_s *dev)
     }
 
 #ifdef HAVE_ADC_CMN_DATA
-  adccmn_lock(priv, false);
+  nxmutex_unlock(&priv->cmn->lock);
 #endif
 
+out:
   leave_critical_section(flags);
 }
 
@@ -2918,7 +2920,7 @@ static void adc_reset(FAR struct adc_dev_s *dev)
  ****************************************************************************/
 
 #ifdef HAVE_HSI_CONTROL
-static void adc_reset_hsi_disable(FAR struct adc_dev_s *dev)
+static void adc_reset_hsi_disable(struct adc_dev_s *dev)
 {
     adc_reset(dev);
     adc_shutdown(dev);
@@ -2940,24 +2942,18 @@ static void adc_reset_hsi_disable(FAR struct adc_dev_s *dev)
  *
  ****************************************************************************/
 
-static int adc_setup(FAR struct adc_dev_s *dev)
+static int adc_setup(struct adc_dev_s *dev)
 {
-#if !defined(CONFIG_STM32_ADC_NOIRQ) || defined(HAVE_ADC_CMN_DATA) ||   \
-     defined(ADC_HAVE_TIMER) || !defined(CONFIG_STM32_ADC_NO_STARTUP_CONV)
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
-#endif
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
   int ret = OK;
 
-  /* Attach the ADC interrupt */
+  /* Do nothing when the ADC device is already set up */
 
-#ifndef CONFIG_STM32_ADC_NOIRQ
-  ret = irq_attach(priv->irq, priv->isr, NULL);
-  if (ret < 0)
+  if (priv->initialized > 0)
     {
-      ainfo("irq_attach failed: %d\n", ret);
-      return ret;
+      priv->initialized += 1;
+      return OK;
     }
-#endif
 
   /* Make sure that the ADC device is in the powered up, reset state */
 
@@ -3000,25 +2996,43 @@ static int adc_setup(FAR struct adc_dev_s *dev)
 #  endif
 #endif
 
-  /* Enable the ADC interrupt */
-
-#ifndef CONFIG_STM32_ADC_NOIRQ
-  ainfo("Enable the ADC interrupt: irq=%d\n", priv->irq);
-  up_enable_irq(priv->irq);
-#endif
-
 #ifdef HAVE_ADC_CMN_DATA
   /* Increase instances counter */
 
-  ret = adccmn_lock(priv, true);
+  ret = nxmutex_lock(&priv->cmn->lock);
   if (ret < 0)
     {
       return ret;
     }
 
-  priv->cmn->initialized += 1;
-  adccmn_lock(priv, false);
+  if (priv->cmn->refcount == 0)
 #endif
+    {
+#ifndef CONFIG_STM32_ADC_NOIRQ
+      /* Attach the ADC interrupt */
+
+      ret = irq_attach(priv->irq, priv->isr, NULL);
+      if (ret < 0)
+        {
+          ainfo("irq_attach failed: %d\n", ret);
+          return ret;
+        }
+
+      /* Enable the ADC interrupt */
+
+      ainfo("Enable the ADC interrupt: irq=%d\n", priv->irq);
+      up_enable_irq(priv->irq);
+#endif
+    }
+
+#ifdef HAVE_ADC_CMN_DATA
+  priv->cmn->refcount += 1;
+  nxmutex_unlock(&priv->cmn->lock);
+#endif
+
+  /* The ADC device is ready */
+
+  priv->initialized += 1;
 
   return ret;
 }
@@ -3036,9 +3050,23 @@ static int adc_setup(FAR struct adc_dev_s *dev)
  *
  ****************************************************************************/
 
-static void adc_shutdown(FAR struct adc_dev_s *dev)
+static void adc_shutdown(struct adc_dev_s *dev)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
+
+  /* Decrement count only when ADC device is in use */
+
+  if (priv->initialized > 0)
+    {
+      priv->initialized -= 1;
+    }
+
+  /* Shutdown the ADC device only when not in use */
+
+  if (priv->initialized > 0)
+    {
+      return;
+    }
 
   /* Disable ADC */
 
@@ -3048,22 +3076,22 @@ static void adc_shutdown(FAR struct adc_dev_s *dev)
   adc_enable_hsi(false);
 #endif
 
-#ifndef CONFIG_STM32_ADC_NOIRQ
-  /* Disable ADC interrupts and detach the ADC interrupt handler */
-
-  up_disable_irq(priv->irq);
-  irq_detach(priv->irq);
-#endif
-
 #ifdef HAVE_ADC_CMN_DATA
-  if (adccmn_lock(priv, true) < 0)
+  if (nxmutex_lock(&priv->cmn->lock) < 0)
     {
       return;
     }
 
-  if (priv->cmn->initialized <= 1)
+  if (priv->cmn->refcount <= 1)
 #endif
     {
+#ifndef CONFIG_STM32_ADC_NOIRQ
+      /* Disable ADC interrupts and detach the ADC interrupt handler */
+
+      up_disable_irq(priv->irq);
+      irq_detach(priv->irq);
+#endif
+
       /* Disable and reset the ADC module.
        *
        * NOTE: The ADC block will be reset to its reset state only if all
@@ -3088,9 +3116,12 @@ static void adc_shutdown(FAR struct adc_dev_s *dev)
 #ifdef HAVE_ADC_CMN_DATA
   /* Decrease instances counter */
 
-  priv->cmn->initialized -= 1;
+  if (priv->cmn->refcount > 0)
+    {
+      priv->cmn->refcount -= 1;
+    }
 
-  adccmn_lock(priv, false);
+  nxmutex_unlock(&priv->cmn->lock);
 #endif
 }
 
@@ -3106,9 +3137,9 @@ static void adc_shutdown(FAR struct adc_dev_s *dev)
  *
  ****************************************************************************/
 
-static void adc_rxint(FAR struct adc_dev_s *dev, bool enable)
+static void adc_rxint(struct adc_dev_s *dev, bool enable)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
   uint32_t regval;
 
   ainfo("intf: %d enable: %d\n", priv->intf, enable ? 1 : 0);
@@ -3156,10 +3187,10 @@ static void adc_rxint(FAR struct adc_dev_s *dev, bool enable)
  ****************************************************************************/
 
 #if defined(HAVE_IP_ADC_V1)
-static void adc_ioc_enable_tvref_register(FAR struct adc_dev_s *dev,
+static void adc_ioc_enable_tvref_register(struct adc_dev_s *dev,
                                           bool enable)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
 
 #ifdef HAVE_BASIC_ADC
 #  if defined(CONFIG_STM32_ADC1)
@@ -3177,7 +3208,7 @@ static void adc_ioc_enable_tvref_register(FAR struct adc_dev_s *dev,
         }
     }
 
-  ainfo("STM32_ADC_CR2 value: 0x%08x\n",
+  ainfo("STM32_ADC_CR2 value: 0x%08" PRIx32 "\n",
         adc_getreg(priv, STM32_ADC_CR2_OFFSET));
 #  endif /* CONFIG_STM32_ADC1 */
 #else    /* !HAVE_BASIC_ADC */
@@ -3190,7 +3221,7 @@ static void adc_ioc_enable_tvref_register(FAR struct adc_dev_s *dev,
       adccmn_modifyreg(priv, STM32_ADC_CCR_OFFSET, ADC_CCR_TSVREFE, 0);
     }
 
-  ainfo("STM32_ADC_CCR value: 0x%08x\n",
+  ainfo("STM32_ADC_CCR value: 0x%08" PRIx32 "\n",
         adccmn_getreg(priv, STM32_ADC_CCR_OFFSET));
 #endif
 }
@@ -3201,9 +3232,9 @@ static void adc_ioc_enable_tvref_register(FAR struct adc_dev_s *dev,
  ****************************************************************************/
 
 #ifdef HAVE_ADC_RESOLUTION
-static int adc_resolution_set(FAR struct adc_dev_s *dev, uint8_t res)
+static int adc_resolution_set(struct adc_dev_s *dev, uint8_t res)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
   int ret = OK;
 
   /* Check input */
@@ -3230,13 +3261,12 @@ errout:
 #endif
 
 /****************************************************************************
- * Name: adc_extsel_set
+ * Name: adc_extcfg_set
  ****************************************************************************/
 
 #ifdef ADC_HAVE_EXTCFG
-static int adc_extcfg_set(FAR struct adc_dev_s *dev, uint32_t extcfg)
+static int adc_extcfg_set(struct stm32_dev_s *priv, uint32_t extcfg)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
   uint32_t exten  = 0;
   uint32_t extsel = 0;
   uint32_t setbits = 0;
@@ -3244,8 +3274,8 @@ static int adc_extcfg_set(FAR struct adc_dev_s *dev, uint32_t extcfg)
 
   /* Get EXTEN and EXTSEL from input */
 
-  exten = (extcfg & ADC_EXTREG_EXTEN_MASK);
-  extsel = (extcfg & ADC_EXTREG_EXTSEL_MASK);
+  exten = extcfg & ADC_EXTREG_EXTEN_MASK;
+  extsel = extcfg & ADC_EXTREG_EXTSEL_MASK;
 
   /* EXTSEL selection: These bits select the external event used
    * to trigger the start of conversion of a regular group.  NOTE:
@@ -3257,10 +3287,10 @@ static int adc_extcfg_set(FAR struct adc_dev_s *dev, uint32_t extcfg)
 
   if (exten > 0)
     {
-      setbits = (extsel | exten);
-      clrbits = (ADC_EXTREG_EXTEN_MASK | ADC_EXTREG_EXTSEL_MASK);
+      setbits = extsel | exten;
+      clrbits = ADC_EXTREG_EXTEN_MASK | ADC_EXTREG_EXTSEL_MASK;
 
-      ainfo("Initializing extsel = 0x%08x\n", extsel);
+      ainfo("Initializing extsel = 0x%08" PRIx32 "\n", extsel);
 
       /* Write register */
 
@@ -3272,13 +3302,12 @@ static int adc_extcfg_set(FAR struct adc_dev_s *dev, uint32_t extcfg)
 #endif
 
 /****************************************************************************
- * Name: adc_jextsel_set
+ * Name: adc_jextcfg_set
  ****************************************************************************/
 
 #ifdef ADC_HAVE_JEXTCFG
-static int adc_jextcfg_set(FAR struct adc_dev_s *dev, uint32_t jextcfg)
+static int adc_jextcfg_set(struct stm32_dev_s *priv, uint32_t jextcfg)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
   uint32_t jexten =  0;
   uint32_t jextsel = 0;
   uint32_t setbits = 0;
@@ -3286,8 +3315,8 @@ static int adc_jextcfg_set(FAR struct adc_dev_s *dev, uint32_t jextcfg)
 
   /* Get JEXTEN and JEXTSEL from input */
 
-  jexten = (jextcfg & ADC_JEXTREG_JEXTEN_MASK);
-  jextsel = (jextcfg & ADC_JEXTREG_JEXTSEL_MASK);
+  jexten = jextcfg & ADC_JEXTREG_JEXTEN_MASK;
+  jextsel = jextcfg & ADC_JEXTREG_JEXTSEL_MASK;
 
   /* JEXTSEL selection: These bits select the external event used
    * to trigger the start of conversion of a injected group.  NOTE:
@@ -3299,10 +3328,10 @@ static int adc_jextcfg_set(FAR struct adc_dev_s *dev, uint32_t jextcfg)
 
   if (jexten > 0)
     {
-      setbits = (jexten | jextsel);
-      clrbits = (ADC_JEXTREG_JEXTEN_MASK | ADC_JEXTREG_JEXTSEL_MASK);
+      setbits = jexten | jextsel;
+      clrbits = ADC_JEXTREG_JEXTEN_MASK | ADC_JEXTREG_JEXTSEL_MASK;
 
-      ainfo("Initializing jextsel = 0x%08x\n", jextsel);
+      ainfo("Initializing jextsel = 0x%08" PRIx32 "\n", jextsel);
 
       /* Write register */
 
@@ -3317,48 +3346,52 @@ static int adc_jextcfg_set(FAR struct adc_dev_s *dev, uint32_t jextcfg)
  * Name: adc_dumpregs
  ****************************************************************************/
 
-static void adc_dumpregs(FAR struct stm32_dev_s *priv)
+static void adc_dumpregs(struct stm32_dev_s *priv)
 {
   UNUSED(priv);
 
 #if defined(HAVE_IP_ADC_V2)
-  ainfo("ISR:  0x%08x IER:  0x%08x CR:   0x%08x CFGR1: 0x%08x\n",
+  ainfo("ISR:  0x%08" PRIx32 " IER:  0x%08" PRIx32
+        " CR:   0x%08" PRIx32 " CFGR1: 0x%08" PRIx32 "\n",
         adc_getreg(priv, STM32_ADC_ISR_OFFSET),
         adc_getreg(priv, STM32_ADC_IER_OFFSET),
         adc_getreg(priv, STM32_ADC_CR_OFFSET),
         adc_getreg(priv, STM32_ADC_CFGR1_OFFSET));
 #else
-  ainfo("SR:   0x%08x CR1:  0x%08x CR2:  0x%08x\n",
+  ainfo("SR:   0x%08" PRIx32 " CR1:  0x%08" PRIx32
+        " CR2:  0x%08" PRIx32 "\n",
         adc_getreg(priv, STM32_ADC_SR_OFFSET),
         adc_getreg(priv, STM32_ADC_CR1_OFFSET),
         adc_getreg(priv, STM32_ADC_CR2_OFFSET));
 #endif
 
-  ainfo("SQR1: 0x%08x SQR2: 0x%08x SQR3: 0x%08x\n",
+  ainfo("SQR1: 0x%08" PRIx32 " SQR2: 0x%08" PRIx32
+        " SQR3: 0x%08" PRIx32 "\n",
         adc_getreg(priv, STM32_ADC_SQR1_OFFSET),
         adc_getreg(priv, STM32_ADC_SQR2_OFFSET),
         adc_getreg(priv, STM32_ADC_SQR3_OFFSET));
 
-  ainfo("SMPR1: 0x%08x SMPR2: 0x%08x\n",
+  ainfo("SMPR1: 0x%08" PRIx32 " SMPR2: 0x%08" PRIx32 "\n",
         adc_getreg(priv, STM32_ADC_SMPR1_OFFSET),
         adc_getreg(priv, STM32_ADC_SMPR2_OFFSET));
 
 #if defined(STM32_ADC_SQR4_OFFSET)
-  ainfo("SQR4: 0x%08x\n",
-        adc_getreg(priv, STM32_ADC_SQR5_OFFSET));
-#endif
-
-#if defined(STM32_ADC_SQR5_OFFSET)
-  ainfo("SQR5: 0x%08x\n",
+  ainfo("SQR4: 0x%08" PRIx32 "\n",
         adc_getreg(priv, STM32_ADC_SQR4_OFFSET));
 #endif
 
+#if defined(STM32_ADC_SQR5_OFFSET)
+  ainfo("SQR5: 0x%08" PRIx32 "\n",
+        adc_getreg(priv, STM32_ADC_SQR5_OFFSET));
+#endif
+
 #ifdef ADC_HAVE_INJECTED
-  ainfo("JSQR: 0x%08x\n", adc_getreg(priv, STM32_ADC_JSQR_OFFSET));
+  ainfo("JSQR: 0x%08" PRIx32 "\n", adc_getreg(priv, STM32_ADC_JSQR_OFFSET));
 #endif
 
 #if defined(HAVE_IP_ADC_V2) || (defined(HAVE_IP_ADC_V1) && !defined(HAVE_BASIC_ADC))
-  ainfo("CCR:  0x%08x\n", adccmn_getreg(priv, STM32_ADC_CCR_OFFSET));
+  ainfo("CCR:  0x%08" PRIx32 "\n",
+        adccmn_getreg(priv, STM32_ADC_CCR_OFFSET));
 #endif
 }
 
@@ -3379,9 +3412,9 @@ static void adc_dumpregs(FAR struct stm32_dev_s *priv)
  ****************************************************************************/
 
 #ifdef HAVE_ADC_VBAT
-static void adc_enable_vbat_channel(FAR struct adc_dev_s *dev, bool enable)
+static void adc_enable_vbat_channel(struct adc_dev_s *dev, bool enable)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
 
   if (enable)
     {
@@ -3392,7 +3425,7 @@ static void adc_enable_vbat_channel(FAR struct adc_dev_s *dev, bool enable)
       adccmn_modifyreg(priv, STM32_ADC_CCR_OFFSET, ADC_CCR_VBATEN, 0);
     }
 
-  ainfo("STM32_ADC_CCR value: 0x%08x\n",
+  ainfo("STM32_ADC_CCR value: 0x%08" PRIx32 "\n",
         adccmn_getreg(priv, STM32_ADC_CCR_OFFSET));
 }
 #endif
@@ -3413,11 +3446,11 @@ static void adc_enable_vbat_channel(FAR struct adc_dev_s *dev, bool enable)
  ****************************************************************************/
 
 #ifdef HAVE_ADC_POWERDOWN
-static int adc_ioc_change_sleep_between_opers(FAR struct adc_dev_s *dev,
+static int adc_ioc_change_sleep_between_opers(struct adc_dev_s *dev,
                                               int cmd, bool arg)
 {
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
   int ret = OK;
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
 
   adc_enable(priv, false);
 
@@ -3462,7 +3495,7 @@ static int adc_ioc_change_sleep_between_opers(FAR struct adc_dev_s *dev,
  *
  ****************************************************************************/
 
-static void adc_ioc_enable_awd_int(FAR struct stm32_dev_s *priv, bool enable)
+static void adc_ioc_enable_awd_int(struct stm32_dev_s *priv, bool enable)
 {
   if (enable)
     {
@@ -3489,7 +3522,7 @@ static void adc_ioc_enable_awd_int(FAR struct stm32_dev_s *priv, bool enable)
  *
  ****************************************************************************/
 
-static void adc_ioc_enable_eoc_int(FAR struct stm32_dev_s *priv, bool enable)
+static void adc_ioc_enable_eoc_int(struct stm32_dev_s *priv, bool enable)
 {
   if (enable)
     {
@@ -3516,7 +3549,7 @@ static void adc_ioc_enable_eoc_int(FAR struct stm32_dev_s *priv, bool enable)
  *
  ****************************************************************************/
 
-static void adc_ioc_enable_jeoc_int(FAR struct stm32_dev_s *priv,
+static void adc_ioc_enable_jeoc_int(struct stm32_dev_s *priv,
                                     bool enable)
 {
   if (enable)
@@ -3544,7 +3577,7 @@ static void adc_ioc_enable_jeoc_int(FAR struct stm32_dev_s *priv,
  *
  ****************************************************************************/
 
-static void adc_ioc_enable_ovr_int(FAR struct stm32_dev_s *priv, bool enable)
+static void adc_ioc_enable_ovr_int(struct stm32_dev_s *priv, bool enable)
 {
   if (enable)
     {
@@ -3571,10 +3604,10 @@ static void adc_ioc_enable_ovr_int(FAR struct stm32_dev_s *priv, bool enable)
  *
  ****************************************************************************/
 
-static int adc_ioc_change_ints(FAR struct adc_dev_s *dev, int cmd, bool arg)
+static int adc_ioc_change_ints(struct adc_dev_s *dev, int cmd, bool arg)
 {
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
   int ret = OK;
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
 
   switch (cmd)
     {
@@ -3624,7 +3657,7 @@ static int adc_ioc_change_ints(FAR struct adc_dev_s *dev, int cmd, bool arg)
  ****************************************************************************/
 
 #ifdef CONFIG_STM32_STM32L15XX
-static int adc_ioc_wait_rcnr_zeroed(FAR struct stm32_dev_s *priv)
+static int adc_ioc_wait_rcnr_zeroed(struct stm32_dev_s *priv)
 {
   int i;
 
@@ -3677,7 +3710,7 @@ static void adc_enable_hsi(bool enable)
  * Name: adc_sqrbits
  ****************************************************************************/
 
-static uint32_t adc_sqrbits(FAR struct stm32_dev_s *priv, int first,
+static uint32_t adc_sqrbits(struct stm32_dev_s *priv, int first,
                             int last, int offset)
 {
   uint32_t bits = 0;
@@ -3694,69 +3727,6 @@ static uint32_t adc_sqrbits(FAR struct stm32_dev_s *priv, int first,
 }
 
 /****************************************************************************
- * Name: adc_offset_set
- ****************************************************************************/
-
-#ifdef CONFIG_STM32_ADC_LL_OPS
-#ifdef HAVE_IP_ADC_V2
-static int adc_offset_set(FAR struct stm32_adc_dev_s *dev, uint8_t ch,
-                          uint8_t i, uint16_t offset)
-{
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
-  uint32_t regval = 0;
-  uint32_t reg    = 0;
-  int      ret    = OK;
-
-  if (i >= 4)
-    {
-      /* There are only four offset registers. */
-
-      ret = -E2BIG;
-      goto errout;
-    }
-
-  reg = STM32_ADC_OFR1_OFFSET + i * 4;
-
-  regval = ADC_OFR_OFFSETY_EN;
-  adc_putreg(priv, reg, regval);
-
-  regval |= ADC_OFR_OFFSETY_CH(ch) | ADC_OFR_OFFSETY(offset);
-  adc_putreg(priv, reg, regval);
-
-errout:
-  return ret;
-}
-#else  /* HAVE_IP_ADC_V1 */
-static int adc_offset_set(FAR struct stm32_adc_dev_s *dev, uint8_t ch,
-                          uint8_t i, uint16_t offset)
-{
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
-  uint32_t reg = 0;
-  int      ret = OK;
-
-  /* WARNING: Offset only for injected channels! */
-
-  UNUSED(ch);
-
-  if (i >= 4)
-    {
-      /* There are only four offset registers. */
-
-      ret = -E2BIG;
-      goto errout;
-    }
-
-  reg = STM32_ADC_JOFR1_OFFSET + i * 4;
-
-  adc_putreg(priv, reg, offset);
-
-errout:
-  return ret;
-}
-#endif
-#endif /* CONFIG_STM32_ADC_LL_OPS */
-
-/****************************************************************************
  * Name: adc_set_ch
  *
  * Description:
@@ -3771,9 +3741,9 @@ errout:
  *
  ****************************************************************************/
 
-static int adc_set_ch(FAR struct adc_dev_s *dev, uint8_t ch)
+static int adc_set_ch(struct adc_dev_s *dev, uint8_t ch)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
   uint32_t bits;
   int i;
 
@@ -3792,7 +3762,7 @@ static int adc_set_ch(FAR struct adc_dev_s *dev, uint8_t ch)
           return -ENODEV;
         }
 
-      priv->current   = i;
+      priv->current    = i;
       priv->rnchannels = 1;
     }
 
@@ -3830,9 +3800,9 @@ static int adc_set_ch(FAR struct adc_dev_s *dev, uint8_t ch)
  * Name: adc_inj_set_ch
  ****************************************************************************/
 
-static int adc_inj_set_ch(FAR struct adc_dev_s *dev, uint8_t ch)
+static int adc_inj_set_ch(struct adc_dev_s *dev, uint8_t ch)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
   uint32_t clrbits;
   uint32_t setbits;
   int i;
@@ -3846,8 +3816,22 @@ static int adc_inj_set_ch(FAR struct adc_dev_s *dev, uint8_t ch)
 
   for (i = 0 ; i < priv->cj_channels; i += 1)
     {
+#if defined(HAVE_IP_ADC_V1)
+      /* Injected channels sequence for for ADC IPv1:
+       *
+       *           1      2     3      4
+       *   IL=1: JSQR4,
+       *   IL=2: JSQR3, JSQR4
+       *   IL=3: JSQR2, JSQR3, JSQR4
+       *   IL=4: JSQR1, JSQR2, JSQR3, JSQR4
+       */
+
+      setbits |= (priv->j_chanlist[priv->cj_channels - 1 - i] <<
+                  (ADC_JSQR_JSQ4_SHIFT - ADC_JSQR_JSQ_SHIFT * i));
+#else
       setbits |= priv->j_chanlist[i] << (ADC_JSQR_JSQ1_SHIFT +
-                                        ADC_JSQR_JSQ_SHIFT * i);
+                                         ADC_JSQR_JSQ_SHIFT * i);
+#endif
     }
 
   /* Write register */
@@ -3873,10 +3857,10 @@ static int adc_inj_set_ch(FAR struct adc_dev_s *dev, uint8_t ch)
  *
  ****************************************************************************/
 
-static int adc_ioctl(FAR struct adc_dev_s *dev, int cmd, unsigned long arg)
+static int adc_ioctl(struct adc_dev_s *dev, int cmd, unsigned long arg)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
-  int ret                      = OK;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
+  int ret                  = OK;
 
   switch (cmd)
     {
@@ -3884,22 +3868,36 @@ static int adc_ioctl(FAR struct adc_dev_s *dev, int cmd, unsigned long arg)
         {
           /* Start regular conversion if regular channels configured */
 
-          if (priv->cr_channels > 0)
+          if (priv->anioc_trg & ANIOC_TRIGGER_REGULAR)
             {
-              adc_reg_startconv(priv, true);
+              if (priv->cr_channels > 0)
+                {
+                  adc_reg_startconv(priv, true);
+                }
             }
 
 #ifdef ADC_HAVE_INJECTED
           /* Start injected conversion if injected channels configured */
 
-          if (priv->cj_channels > 0)
+          if (priv->anioc_trg & ANIOC_TRIGGER_INJECTED)
             {
-              adc_inj_startconv(priv, true);
+              if (priv->cj_channels > 0)
+                {
+                  adc_inj_startconv(priv, true);
+                }
             }
 #endif
 
           break;
         }
+
+      case ANIOC_GET_NCHANNELS:
+        {
+          /* Return the number of configured channels */
+
+          ret = priv->rnchannels;
+        }
+        break;
 
       case IO_TRIGGER_REG:
         {
@@ -4038,9 +4036,9 @@ static int adc_ioctl(FAR struct adc_dev_s *dev, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int adc_interrupt(FAR struct adc_dev_s *dev)
+static int adc_interrupt(struct adc_dev_s *dev)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev->ad_priv;
   uint32_t regval;
   uint32_t pending;
   int32_t  data;
@@ -4126,7 +4124,7 @@ static int adc_interrupt(FAR struct adc_dev_s *dev)
  ****************************************************************************/
 
 #if defined(STM32_IRQ_ADC1)
-static int adc1_interrupt(int irq, FAR void *context, FAR void *arg)
+static int adc1_interrupt(int irq, void *context, void *arg)
 {
   adc_interrupt(&g_adcdev1);
 
@@ -4148,7 +4146,7 @@ static int adc1_interrupt(int irq, FAR void *context, FAR void *arg)
 
 #if defined(STM32_IRQ_ADC12) && \
     (defined(CONFIG_STM32_ADC1) || defined(CONFIG_STM32_ADC2))
-static int adc12_interrupt(int irq, FAR void *context, FAR void *arg)
+static int adc12_interrupt(int irq, void *context, void *arg)
 {
 #ifdef CONFIG_STM32_ADC1
   adc_interrupt(&g_adcdev1);
@@ -4175,7 +4173,7 @@ static int adc12_interrupt(int irq, FAR void *context, FAR void *arg)
  ****************************************************************************/
 
 #if defined(STM32_IRQ_ADC3) && defined(CONFIG_STM32_ADC3)
-static int adc3_interrupt(int irq, FAR void *context, FAR void *arg)
+static int adc3_interrupt(int irq, void *context, void *arg)
 {
   adc_interrupt(&g_adcdev3);
 
@@ -4196,7 +4194,7 @@ static int adc3_interrupt(int irq, FAR void *context, FAR void *arg)
  ****************************************************************************/
 
 #if defined(STM32_IRQ_ADC4) && defined(CONFIG_STM32_ADC4)
-static int adc4_interrupt(int irq, FAR void *context, FAR void *arg)
+static int adc4_interrupt(int irq, void *context, void *arg)
 {
   adc_interrupt(&g_adcdev4);
 
@@ -4217,7 +4215,7 @@ static int adc4_interrupt(int irq, FAR void *context, FAR void *arg)
  ****************************************************************************/
 
 #if defined(STM32_IRQ_ADC)
-static int adc123_interrupt(int irq, FAR void *context, FAR void *arg)
+static int adc123_interrupt(int irq, void *context, void *arg)
 {
 #ifdef CONFIG_STM32_ADC1
   adc_interrupt(&g_adcdev1);
@@ -4239,12 +4237,34 @@ static int adc123_interrupt(int irq, FAR void *context, FAR void *arg)
 #ifdef CONFIG_STM32_ADC_LL_OPS
 
 /****************************************************************************
+ * Name: adc_llops_setup
+ ****************************************************************************/
+
+static int adc_llops_setup(struct stm32_adc_dev_s *dev)
+{
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+
+  return adc_setup(priv->dev);
+}
+
+/****************************************************************************
+ * Name: adc_llops_shutdown
+ ****************************************************************************/
+
+static void adc_llops_shutdown(struct stm32_adc_dev_s *dev)
+{
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+
+  adc_shutdown(priv->dev);
+}
+
+/****************************************************************************
  * Name: adc_intack
  ****************************************************************************/
 
-static void adc_intack(FAR struct stm32_adc_dev_s *dev, uint32_t source)
+static void adc_intack(struct stm32_adc_dev_s *dev, uint32_t source)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 
   /* Clear pending interrupts */
 
@@ -4263,9 +4283,9 @@ static void adc_intack(FAR struct stm32_adc_dev_s *dev, uint32_t source)
  * Name: adc_inten
  ****************************************************************************/
 
-static void adc_inten(FAR struct stm32_adc_dev_s *dev, uint32_t source)
+static void adc_inten(struct stm32_adc_dev_s *dev, uint32_t source)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 
   /* Enable interrupts */
 
@@ -4276,9 +4296,9 @@ static void adc_inten(FAR struct stm32_adc_dev_s *dev, uint32_t source)
  * Name: adc_intdis
  ****************************************************************************/
 
-static void adc_intdis(FAR struct stm32_adc_dev_s *dev, uint32_t source)
+static void adc_intdis(struct stm32_adc_dev_s *dev, uint32_t source)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 
   /* Disable interrupts */
 
@@ -4289,9 +4309,9 @@ static void adc_intdis(FAR struct stm32_adc_dev_s *dev, uint32_t source)
  * Name: adc_ackget
  ****************************************************************************/
 
-static uint32_t adc_intget(FAR struct stm32_adc_dev_s *dev)
+static uint32_t adc_intget(struct stm32_adc_dev_s *dev)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
   uint32_t regval;
   uint32_t pending;
 
@@ -4305,9 +4325,9 @@ static uint32_t adc_intget(FAR struct stm32_adc_dev_s *dev)
  * Name: adc_regget
  ****************************************************************************/
 
-static uint32_t adc_regget(FAR struct stm32_adc_dev_s *dev)
+static uint32_t adc_regget(struct stm32_adc_dev_s *dev)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 
   return adc_getreg(priv, STM32_ADC_DR_OFFSET) & ADC_DR_RDATA_MASK;
 }
@@ -4316,23 +4336,112 @@ static uint32_t adc_regget(FAR struct stm32_adc_dev_s *dev)
  * Name: adc_llops_reg_startconv
  ****************************************************************************/
 
-static void adc_llops_reg_startconv(FAR struct stm32_adc_dev_s *dev,
+static void adc_llops_reg_startconv(struct stm32_adc_dev_s *dev,
                                     bool enable)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 
   adc_reg_startconv(priv, enable);
 }
+
+/****************************************************************************
+ * Name: adc_offset_set
+ ****************************************************************************/
+
+#ifdef HAVE_IP_ADC_V2
+static int adc_offset_set(struct stm32_adc_dev_s *dev, uint8_t ch,
+                          uint8_t i, uint16_t offset)
+{
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+  uint32_t regval = 0;
+  uint32_t reg    = 0;
+  int      ret    = OK;
+
+  if (i >= 4)
+    {
+      /* There are only four offset registers. */
+
+      ret = -E2BIG;
+      goto errout;
+    }
+
+  reg = STM32_ADC_OFR1_OFFSET + i * 4;
+
+  regval = ADC_OFR_OFFSETY_EN;
+  adc_putreg(priv, reg, regval);
+
+  regval |= ADC_OFR_OFFSETY_CH(ch) | ADC_OFR_OFFSETY(offset);
+  adc_putreg(priv, reg, regval);
+
+errout:
+  return ret;
+}
+#else  /* HAVE_IP_ADC_V1 */
+static int adc_offset_set(struct stm32_adc_dev_s *dev, uint8_t ch,
+                          uint8_t i, uint16_t offset)
+{
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+  uint32_t reg = 0;
+  int      ret = OK;
+
+  /* WARNING: Offset only for injected channels! */
+
+  UNUSED(ch);
+
+  if (i >= 4)
+    {
+      /* There are only four offset registers. */
+
+      ret = -E2BIG;
+      goto errout;
+    }
+
+  reg = STM32_ADC_JOFR1_OFFSET + i * 4;
+
+  adc_putreg(priv, reg, offset);
+
+errout:
+  return ret;
+}
+#endif
+
+/****************************************************************************
+ * Name: adc_llops_extcfg_set
+ ****************************************************************************/
+
+#ifdef ADC_HAVE_EXTCFG
+static void adc_llops_extcfg_set(struct stm32_adc_dev_s *dev,
+                                 uint32_t extcfg)
+{
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+
+  adc_extcfg_set(priv, extcfg);
+}
+#endif
+
+/****************************************************************************
+ * Name: adc_llops_jextcfg_set
+ ****************************************************************************/
+
+#ifdef ADC_HAVE_JEXTCFG
+static void  adc_llops_jextcfg_set(struct stm32_adc_dev_s *dev,
+                                   uint32_t jextcfg)
+{
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+
+  adc_jextcfg_set(priv, jextcfg);
+}
+#endif
 
 /****************************************************************************
  * Name: adc_regbufregister
  ****************************************************************************/
 
 #ifdef ADC_HAVE_DMA
-static int adc_regbufregister(FAR struct stm32_adc_dev_s *dev,
+static int adc_regbufregister(struct stm32_adc_dev_s *dev,
                               uint16_t *buffer, uint8_t len)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 
   stm32_dmasetup(priv->dma,
                  priv->base + STM32_ADC_DR_OFFSET,
@@ -4349,13 +4458,13 @@ static int adc_regbufregister(FAR struct stm32_adc_dev_s *dev,
 #endif /* ADC_HAVE_DMA */
 
 /****************************************************************************
- * Name: adc_inj_get
+ * Name: adc_injget
  ****************************************************************************/
 
 #ifdef ADC_HAVE_INJECTED
-static uint32_t adc_injget(FAR struct stm32_adc_dev_s *dev, uint8_t chan)
+static uint32_t adc_injget(struct stm32_adc_dev_s *dev, uint8_t chan)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
   uint32_t regval = 0;
 
   if (chan > (priv->cj_channels - 1))
@@ -4376,10 +4485,10 @@ errout:
  * Name: adc_llops_inj_startconv
  ****************************************************************************/
 
-static void adc_llops_inj_startconv(FAR struct stm32_adc_dev_s *dev,
+static void adc_llops_inj_startconv(struct stm32_adc_dev_s *dev,
                                     bool enable)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 
   adc_inj_startconv(priv, enable);
 }
@@ -4399,9 +4508,9 @@ static void adc_llops_inj_startconv(FAR struct stm32_adc_dev_s *dev,
  ****************************************************************************/
 
 #ifdef CONFIG_STM32_ADC_CHANGE_SAMPLETIME
-static void adc_sampletime_write(FAR struct stm32_adc_dev_s *dev)
+static void adc_sampletime_write(struct stm32_adc_dev_s *dev)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
   uint32_t value = 0;
   uint8_t i;
   uint8_t shift;
@@ -4478,7 +4587,7 @@ static void adc_sampletime_write(FAR struct stm32_adc_dev_s *dev)
 }
 
 /****************************************************************************
- * Name: adc_change_sample_time
+ * Name: adc_sampletime_set
  *
  * Description:
  *   Changes sample times for specified channels. This method
@@ -4489,19 +4598,18 @@ static void adc_sampletime_write(FAR struct stm32_adc_dev_s *dev)
  *   either for every channels or for only some predefined by user channel(s)
  *
  * Input Parameters:
- *   priv     - pointer to the adc device structure
- *   pdi_high - true:  The ADC is powered down when waiting for a start event
- *              false: The ADC is powered up when waiting for a start event
+ *   dev          - pointer to the adc device structure
+ *   time_samples - pointe to the adc sample time configuration data
  *
  * Returned Value:
  *   None
  *
  ****************************************************************************/
 
-void adc_sampletime_set(FAR struct stm32_adc_dev_s *dev,
-                        FAR struct adc_sample_time_s *time_samples)
+void adc_sampletime_set(struct stm32_adc_dev_s *dev,
+                        struct adc_sample_time_s *time_samples)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
   uint8_t ch_index;
   uint8_t i;
 
@@ -4534,11 +4642,167 @@ void adc_sampletime_set(FAR struct stm32_adc_dev_s *dev,
  * Name: adc_llops_dumpregs
  ****************************************************************************/
 
-static void adc_llops_dumpregs(FAR struct stm32_adc_dev_s *dev)
+static void adc_llops_dumpregs(struct stm32_adc_dev_s *dev)
 {
-  FAR struct stm32_dev_s *priv = (FAR struct stm32_dev_s *)dev;
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 
   adc_dumpregs(priv);
+}
+
+/****************************************************************************
+ * Name: adc_llops_multicfg
+ *
+ * IMPORTANT: this interface is allowed only when the ADCs are disabled!
+ *
+ ****************************************************************************/
+
+static int adc_llops_multicfg(struct stm32_adc_dev_s *dev, uint8_t mode)
+#if defined(HAVE_IP_ADC_V2)
+{
+  struct stm32_dev_s *priv    = (struct stm32_dev_s *)dev;
+  int                 ret     = OK;
+  uint32_t            setbits = 0;
+  uint32_t            clrbits = 0;
+
+  switch (mode)
+    {
+      case ADC_MULTIMODE_INDEP:
+        setbits = ADC_CCR_DUAL_IND;
+        break;
+
+      case ADC_MULTIMODE_RSISM2:
+        setbits = ADC_CCR_DUAL_SIMALT;
+        break;
+
+      case ADC_MULTIMODE_RSATM2:
+        setbits = ADC_CCR_DUAL_SIMALT;
+        break;
+
+      case ADC_MULTIMODE_IMIS2:
+        setbits = ADC_CCR_DUAL_INTINJ;
+        break;
+
+      case ADC_MULTIMODE_ISM2:
+        setbits = ADC_CCR_DUAL_INJECTED;
+        break;
+
+      case ADC_MULTIMODE_RSM2:
+        setbits = ADC_CCR_DUAL_SIM;
+        break;
+
+      case ADC_MULTIMODE_IM2:
+        setbits = ADC_CCR_DUAL_INTERLEAVE;
+        break;
+
+      case ADC_MULTIMODE_ATM2:
+        setbits = ADC_CCR_DUAL_ALT;
+        break;
+
+      default:
+        ret = -EINVAL;
+        goto errout;
+    }
+
+  clrbits = ADC_CCR_DUAL_MASK;
+  adccmn_modifyreg(priv, STM32_ADC_CCR_OFFSET, clrbits, setbits);
+
+errout:
+  return ret;
+}
+#elif defined(HAVE_IP_ADC_V1) && !defined(HAVE_BASIC_ADC)
+{
+  struct stm32_dev_s *priv    = (struct stm32_dev_s *)dev;
+  int                 ret     = OK;
+  uint32_t            setbits = 0;
+  uint32_t            clrbits = 0;
+
+  switch (mode)
+    {
+      case ADC_MULTIMODE_INDEP:
+        setbits = ADC_CCR_MULTI_NONE;
+        break;
+
+      case ADC_MULTIMODE_RSISM2:
+        setbits = ADC_CCR_MULTI_RSISM2;
+        break;
+
+      case ADC_MULTIMODE_RSATM2:
+        setbits = ADC_CCR_MULTI_RSATM2;
+        break;
+
+      case ADC_MULTIMODE_ISM2:
+        setbits = ADC_CCR_MULTI_ISM2;
+        break;
+
+      case ADC_MULTIMODE_RSM2:
+        setbits = ADC_CCR_MULTI_ISM2;
+        break;
+
+      case ADC_MULTIMODE_IM2:
+        setbits = ADC_CCR_MULTI_IM2;
+        break;
+
+      case ADC_MULTIMODE_ATM2:
+        setbits = ADC_CCR_MULTI_ATM2;
+        break;
+
+      case ADC_MULTIMODE_RSISM3:
+        setbits = ADC_CCR_MULTI_RSISM3;
+        break;
+
+      case ADC_MULTIMODE_RSATM3:
+        setbits = ADC_CCR_MULTI_RSATM3;
+        break;
+
+      case ADC_MULTIMODE_ISM3:
+        setbits = ADC_CCR_MULTI_ISM3;
+        break;
+
+      case ADC_MULTIMODE_RSM3:
+        setbits = ADC_CCR_MULTI_ISM3;
+        break;
+
+      case ADC_MULTIMODE_IM3:
+        setbits = ADC_CCR_MULTI_IM3;
+        break;
+
+      case ADC_MULTIMODE_ATM3:
+        setbits = ADC_CCR_MULTI_ATM3;
+        break;
+
+      case ADC_MULTIMODE_IMIS2:
+      case ADC_MULTIMODE_IMIS3:
+      default:
+        ret = -EINVAL;
+        goto errout;
+    }
+
+  clrbits = ADC_CCR_MULTI_MASK;
+  adccmn_modifyreg(priv, STM32_ADC_CCR_OFFSET, clrbits, setbits);
+
+errout:
+  return ret;
+}
+#else  /* ADV IPv1 BASIC */
+{
+  if (mode != ADC_MULTIMODE_INDEP)
+    {
+      return -EINVAL;
+    }
+
+  return OK;
+}
+#endif
+
+/****************************************************************************
+ * Name: adc_llops_enable
+ ****************************************************************************/
+
+static void adc_llops_enable(struct stm32_adc_dev_s *dev, bool enable)
+{
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+
+  adc_enable(priv, enable);
 }
 
 #endif /* CONFIG_STM32_ADC_LL_OPS */
@@ -4595,15 +4859,15 @@ static void adc_llops_dumpregs(FAR struct stm32_adc_dev_s *dev)
  *
  ****************************************************************************/
 
-struct adc_dev_s *stm32_adcinitialize(int intf, FAR const uint8_t *chanlist,
+struct adc_dev_s *stm32_adcinitialize(int intf, const uint8_t *chanlist,
                                       int channels)
 {
-  FAR struct adc_dev_s   *dev;
-  FAR struct stm32_dev_s *priv;
+  struct adc_dev_s   *dev;
+  struct stm32_dev_s *priv;
   uint8_t     cr_channels = 0;
   uint8_t     cj_channels = 0;
 #ifdef ADC_HAVE_INJECTED
-  FAR uint8_t *j_chanlist = NULL;
+  uint8_t *j_chanlist = NULL;
 #endif
 
   switch (intf)
@@ -4618,7 +4882,7 @@ struct adc_dev_s *stm32_adcinitialize(int intf, FAR const uint8_t *chanlist,
 #  ifdef ADC_HAVE_INJECTED
           if (cj_channels > 0)
             {
-              j_chanlist  = (FAR uint8_t *)chanlist + cr_channels;
+              j_chanlist  = (uint8_t *)chanlist + cr_channels;
             }
 #  endif
           break;
@@ -4635,7 +4899,7 @@ struct adc_dev_s *stm32_adcinitialize(int intf, FAR const uint8_t *chanlist,
 #  ifdef ADC_HAVE_INJECTED
           if (cj_channels > 0)
             {
-              j_chanlist  = (FAR uint8_t *)chanlist + cr_channels;
+              j_chanlist  = (uint8_t *)chanlist + cr_channels;
             }
 #  endif
           break;
@@ -4652,7 +4916,7 @@ struct adc_dev_s *stm32_adcinitialize(int intf, FAR const uint8_t *chanlist,
 #  ifdef ADC_HAVE_INJECTED
           if (cj_channels > 0)
             {
-              j_chanlist  = (FAR uint8_t *)chanlist + cr_channels;
+              j_chanlist  = (uint8_t *)chanlist + cr_channels;
             }
 #  endif
           break;
@@ -4669,7 +4933,7 @@ struct adc_dev_s *stm32_adcinitialize(int intf, FAR const uint8_t *chanlist,
 #  ifdef ADC_HAVE_INJECTED
           if (cj_channels > 0)
             {
-              j_chanlist  = (FAR uint8_t *)chanlist + cr_channels;
+              j_chanlist  = (uint8_t *)chanlist + cr_channels;
             }
 #  endif
           break;
@@ -4685,11 +4949,15 @@ struct adc_dev_s *stm32_adcinitialize(int intf, FAR const uint8_t *chanlist,
 
   /* Configure the selected ADC */
 
-  priv = (FAR struct stm32_dev_s *)dev->ad_priv;
+  priv = (struct stm32_dev_s *)dev->ad_priv;
 
   /* Configure regular channels */
 
-  DEBUGASSERT(cr_channels <= ADC_MAX_SAMPLES);
+  DEBUGASSERT(cr_channels <= CONFIG_STM32_ADC_MAX_SAMPLES);
+  if (cr_channels > CONFIG_STM32_ADC_MAX_SAMPLES)
+    {
+      cr_channels = CONFIG_STM32_ADC_MAX_SAMPLES;
+    }
 
   priv->cr_channels = cr_channels;
   memcpy(priv->r_chanlist, chanlist, cr_channels);
@@ -4698,6 +4966,10 @@ struct adc_dev_s *stm32_adcinitialize(int intf, FAR const uint8_t *chanlist,
   /* Configure injected channels */
 
   DEBUGASSERT(cj_channels <= ADC_INJ_MAX_SAMPLES);
+  if (cj_channels > ADC_INJ_MAX_SAMPLES)
+    {
+      cj_channels = ADC_INJ_MAX_SAMPLES;
+    }
 
   priv->cj_channels = cj_channels;
   memcpy(priv->j_chanlist, j_chanlist, cj_channels);
@@ -4710,8 +4982,10 @@ struct adc_dev_s *stm32_adcinitialize(int intf, FAR const uint8_t *chanlist,
   priv->adc_channels = ADC_CHANNELS_NUMBER;
 #endif
 
-#ifndef CONFIG_STM32_ADC_NOIRQ
-  priv->cb        = NULL;
+#ifdef CONFIG_STM32_ADC_LL_OPS
+  /* Store reference to the upper-half ADC device */
+
+  priv->dev = dev;
 #endif
 
 #ifdef ADC_HAVE_INJECTED
@@ -4721,20 +4995,7 @@ struct adc_dev_s *stm32_adcinitialize(int intf, FAR const uint8_t *chanlist,
   ainfo("intf: %d cr_channels: %d\n", intf, priv->cr_channels);
 #endif
 
-#ifdef HAVE_ADC_CMN_DATA
-  /* Initialize the ADC common data semaphore.
-   *
-   * REVISIT: This will be done several times for each initialzied ADC in
-   *          the ADC block.
-   */
-
-  nxsem_init(&priv->cmn->lock, 0, 1);
-#endif
-
   return dev;
 }
 
-#endif /* CONFIG_STM32_ADC1 || CONFIG_STM32_ADC2 ||
-        * CONFIG_STM32_ADC3 || CONFIG_STM32_ADC4
-        */
 #endif /* CONFIG_STM32_ADC */

@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/sama5/sam_dbgu.c
  *
- *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,6 +31,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -54,9 +42,7 @@
 
 #include <arch/board/board.h>
 
-#include "up_arch.h"
-#include "up_internal.h"
-
+#include "arm_internal.h"
 #include "chip.h"
 #include "hardware/sam_dbgu.h"
 #include "hardware/sam_pinmap.h"
@@ -90,9 +76,9 @@ static int  dbgu_setup(struct uart_dev_s *dev);
 static void dbgu_shutdown(struct uart_dev_s *dev);
 static int  dbgu_attach(struct uart_dev_s *dev);
 static void dbgu_detach(struct uart_dev_s *dev);
-static int  dbgu_interrupt(int irq, void *context, FAR void *arg);
+static int  dbgu_interrupt(int irq, void *context, void *arg);
 static int  dbgu_ioctl(struct file *filep, int cmd, unsigned long arg);
-static int  dbgu_receive(struct uart_dev_s *dev, uint32_t *status);
+static int  dbgu_receive(struct uart_dev_s *dev, unsigned int *status);
 static void dbgu_rxint(struct uart_dev_s *dev, bool enable);
 static bool dbgu_rxavailable(struct uart_dev_s *dev);
 static void dbgu_send(struct uart_dev_s *dev, int ch);
@@ -269,14 +255,15 @@ static void dbgu_shutdown(struct uart_dev_s *dev)
  * Name: dbgu_attach
  *
  * Description:
- *   Configure the DBGU to operation in interrupt driven mode.  This method is
- *   called when the serial port is opened.  Normally, this is just after the
+ *   Configure the DBGU to operation in interrupt driven mode.  This method
+ *   is called when the serial port is opened.  Normally, this is just after
  *   the setup() method is called, however, the serial console may operate in
  *   a non-interrupt driven mode during the boot phase.
  *
- *   RX and TX interrupts are not enabled when by the attach method (unless the
- *   hardware supports multiple levels of interrupt enabling).  The RX and TX
- *   interrupts are not enabled until the txint() and rxint() methods are called.
+ *   RX and TX interrupts are not enabled when by the attach method (unless
+ *   the hardware supports multiple levels of interrupt enabling).  The RX
+ *   and TX interrupts are not enabled until the txint() and rxint() methods
+ *   are called.
  *
  ****************************************************************************/
 
@@ -304,8 +291,8 @@ static int dbgu_attach(struct uart_dev_s *dev)
  *
  * Description:
  *   Detach DBGU interrupts.  This method is called when the serial port is
- *   closed normally just before the shutdown method is called.  The exception
- *   is the serial console which is never shutdown.
+ *   closed normally just before the shutdown method is called.  The
+ *   exception is the serial console which is never shutdown.
  *
  ****************************************************************************/
 
@@ -320,14 +307,14 @@ static void dbgu_detach(struct uart_dev_s *dev)
  *
  * Description:
  *   This is the DBGU interrupt handler.  It will be invoked when an
- *   interrupt received on the 'irq'  It should call uart_transmitchars or
- *   uart_receivechar to perform the appropriate data transfers.  The
- *   interrupt handling logic must be able to map the 'irq' number into the
+ *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
+ *   uart_recvchars to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'arg' to the
  *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
 
-static int dbgu_interrupt(int irq, void *context, FAR void *arg)
+static int dbgu_interrupt(int irq, void *context, void *arg)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
   struct dbgu_dev_s *priv;
@@ -348,14 +335,16 @@ static int dbgu_interrupt(int irq, void *context, FAR void *arg)
     {
       handled = false;
 
-      /* Get the DBGU/DBGU status (we are only interested in the unmasked interrupts). */
+      /* Get the DBGU/DBGU status (we are only interested in the unmasked
+       * interrupts).
+       */
 
       priv->sr = getreg32(SAM_DBGU_SR);  /* Save for error reporting */
       imr      = getreg32(SAM_DBGU_IMR); /* Interrupt mask */
       pending  = priv->sr & imr;         /* Mask out disabled interrupt sources */
 
-      /* Handle an incoming, receive byte.  RXRDY: At least one complete character
-       * has been received and US_RHR has not yet been read.
+      /* Handle an incoming, receive byte.  RXRDY: At least one complete
+       * character has been received and US_RHR has not yet been read.
        */
 
       if ((pending & DBGU_INT_RXRDY) != 0)
@@ -434,7 +423,7 @@ static int dbgu_ioctl(struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int dbgu_receive(struct uart_dev_s *dev, uint32_t *status)
+static int dbgu_receive(struct uart_dev_s *dev, unsigned int *status)
 {
   struct dbgu_dev_s *priv = (struct dbgu_dev_s *)dev->priv;
 
@@ -460,8 +449,8 @@ static void dbgu_rxint(struct uart_dev_s *dev, bool enable)
 {
   if (enable)
     {
-      /* Receive an interrupt when their is anything in the Rx data register (or an Rx
-       * timeout occurs).
+      /* Receive an interrupt when their is anything in the Rx data register
+       * (or an Rx timeout occurs).
        */
 
 #ifndef CONFIG_SUPPRESS_SERIAL_INTS
@@ -570,7 +559,7 @@ static bool dbgu_txempty(struct uart_dev_s *dev)
  *
  * Description:
  *   Performs the low level DBGU initialization early in debug so that the
- *   DBGU console will be available during bootup.  This must be called
+ *   DBGU console will be available during boot up.  This must be called
  *   before getreg32it.
  *
  ****************************************************************************/
@@ -622,7 +611,7 @@ void sam_dbgu_register(void)
  *
  * Description:
  *   Performs the low level DBGU initialization early in debug so that the
- *   DBGU console will be available during bootup.  This must be called
+ *   DBGU console will be available during boot up.  This must be called
  *   before getreg32it.
  *
  ****************************************************************************/

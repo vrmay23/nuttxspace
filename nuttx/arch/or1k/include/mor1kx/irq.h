@@ -1,8 +1,9 @@
 /****************************************************************************
  * arch/or1k/include/mor1kx/irq.h
  *
- *   Copyright (C) 2018 Extent3D. All rights reserved.
- *   Author: Matt Thompson <matt@extent3d.com>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2018 Extent3D. All rights reserved.
+ * SPDX-FileCopyrightText: Matt Thompson <matt@extent3d.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,7 +49,6 @@
 #include <nuttx/irq.h>
 #ifndef __ASSEMBLY__
 #  include <stdint.h>
-#  include <debug.h>
 #endif
 
 #include <arch/spr.h>
@@ -171,12 +171,6 @@ struct xcptcontext
 
   uint32_t regs[XCPTCONTEXT_REGS];
 
-  /* The following function pointer is non-zero if there
-   * are pending signals to be processed.
-   */
-
-  void *sigdeliver; /* Actual type is sig_deliver_t */
-
   /* These are saved copies of LR and CPSR used during
    * signal processing.
    *
@@ -208,13 +202,14 @@ struct xcptcontext
 
 /* Save the current interrupt enable state & disable IRQs. */
 
-static inline irqstate_t up_irq_save(void)
+static inline_function irqstate_t up_irq_save(void)
 {
   irqstate_t flags;
   irqstate_t x;
   mfspr(SPR_SYS_SR, flags);
 
   /* Disable IRQs */
+
   x = flags & ~(SPR_SR_IEE | SPR_SR_TEE);
   mtspr(SPR_SYS_SR, x);
 
@@ -223,7 +218,7 @@ static inline irqstate_t up_irq_save(void)
 
 /* Restore saved state */
 
-static inline void up_irq_restore(irqstate_t flags)
+static inline_function void up_irq_restore(irqstate_t flags)
 {
   uint32_t x;
   mfspr(SPR_SYS_SR, x);
@@ -233,8 +228,7 @@ static inline void up_irq_restore(irqstate_t flags)
 
 /* Enable IRQs */
 
-static inline void up_irq_enable(void) inline_function;
-static inline void up_irq_enable(void)
+static always_inline_function void up_irq_enable(void)
 {
   irqstate_t flags;
   mfspr(SPR_SYS_SR, flags);

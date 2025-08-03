@@ -1,52 +1,40 @@
-/************************************************************************************
+/****************************************************************************
  * arch/arm/src/lpc43xx/hardware/lpc43_qei.h
  *
- *   Copyright (C) 2010 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
-#ifndef __ARCH_ARM_SRC_LPC43XX_HARDWARE_LPC43QEI_H
-#define __ARCH_ARM_SRC_LPC43XX_HARDWARE_LPC43QEI_H
+#ifndef __ARCH_ARM_SRC_LPC43XX_HARDWARE_LPC43_QEI_H
+#define __ARCH_ARM_SRC_LPC43XX_HARDWARE_LPC43_QEI_H
 
-/************************************************************************************
+/****************************************************************************
  * Included Files
- ************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 
-/************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- ************************************************************************************/
+ ****************************************************************************/
 
-/* Register offsets *****************************************************************/
+/* Register offsets *********************************************************/
+
 /* Control registers */
 
 #define LPC43_QEI_CON_OFFSET     0x0000 /* Control register */
@@ -83,7 +71,8 @@
 #define LPC43_QEI_CLR_OFFSET     0x0fe8 /* Interrupt status clear register */
 #define LPC43_QEI_SET_OFFSET     0x0fec /* Interrupt status set register */
 
-/* Register addresses ***************************************************************/
+/* Register addresses *******************************************************/
+
 /* Control registers */
 
 #define LPC43_QEI_CON            (LPC43_QEI_BASE+LPC43_QEI_CON_OFFSET)
@@ -120,9 +109,10 @@
 #define LPC43_QEI_CLR            (LPC43_QEI_BASE+LPC43_QEI_CLR_OFFSET)
 #define LPC43_QEI_SET            (LPC43_QEI_BASE+LPC43_QEI_SET_OFFSET)
 
-/* Register bit definitions *********************************************************/
-/* The following registers hold 32-bit integer values and have no bit fields defined
- * in this section:
+/* Register bit definitions *************************************************/
+
+/* The following registers hold 32-bit integer values and have no bit fields
+ * defined in this section:
  *
  *   Position register (POS)
  *   Maximum position register (MAXPOS)
@@ -144,6 +134,7 @@
  */
 
 /* Control registers */
+
 /* Control register */
 
 #define QEI_CON_RESP             (1 << 0)  /* Bit 0:  Reset position counter */
@@ -151,10 +142,12 @@
 #define QEI_CON_RESV             (1 << 2)  /* Bit 2:  Reset velocity */
 #define QEI_CON_RESI             (1 << 3)  /* Bit 3:  Reset index counter */
                                            /* Bits 4-31: reserved */
+
 /* Encoder status register */
 
 #define QEI_STAT_DIR             (1 << 0)  /* Bit 0:  Direction bit */
                                            /* Bits 1-31: reserved */
+
 /* Configuration register */
 
 #define QEI_CONF_DIRINV          (1 << 0)  /* Bit 0:  Direction invert */
@@ -169,12 +162,17 @@
 #  define QEI_CONF_INXGATE_A1B1  (2 << QEI_CONF_INXGATE_SHIFT) /* Pass index on Pha=1 Phb=1 */
 #  define QEI_CONF_INXGATE_A0B1  (4 << QEI_CONF_INXGATE_SHIFT) /* Pass index on Pha=0 Phb=1 */
 #  define QEI_CONF_INXGATE_A0B0  (8 << QEI_CONF_INXGATE_SHIFT) /* Pass index on Pha=0 Phb=0 */
+
                                            /* Bits 4-31: reserved */
 
 /* Interrupt registers */
-/* Interrupt enable clear register (IEC), Interrupt enable set register (IES),
- * Interrupt status register (INTSTAT), Interrupt enable register (IE), Interrupt
- * status clear register (CLR), and Interrupt status set register (SET) common
+
+/* Interrupt enable clear register (IEC),
+ * Interrupt enable set register (IES),
+ * Interrupt status register (INTSTAT),
+ * Interrupt enable register (IE), Interrupt
+ * status clear register (CLR),
+ * and Interrupt status set register (SET) common
  * bit definitions.
  */
 
@@ -196,16 +194,16 @@
 #define QEI_INT_MAXPOS           (1 << 15) /* Bit 15: Current position count goes through MAXPOS */
                                            /* Bits 16-31: reserved */
 
-/************************************************************************************
+/****************************************************************************
  * Public Types
- ************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************
+/****************************************************************************
  * Public Data
- ************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************
- * Public Functions
- ************************************************************************************/
+/****************************************************************************
+ * Public Functions Prototypes
+ ****************************************************************************/
 
-#endif /* __ARCH_ARM_SRC_LPC43XX_HARDWARE_LPC43QEI_H */
+#endif /* __ARCH_ARM_SRC_LPC43XX_HARDWARE_LPC43_QEI_H */

@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/wireless/gs2200m.c
  *
- *   Copyright 2019 Sony Home Entertainment & Sound Products Inc.
- *   Author: Masayuki Ishikawa <Masayuki.Ishikawa@jp.sony.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -48,11 +35,14 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <poll.h>
@@ -62,8 +52,9 @@
 #include <nuttx/spi/spi.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/wqueue.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 #include <nuttx/signal.h>
+#include <nuttx/wireless/wireless.h>
 #include <nuttx/wireless/gs2200m.h>
 #include <nuttx/net/netdev.h>
 
@@ -75,17 +66,16 @@
 #  error "Worker thread support is required (CONFIG_SCHED_WORKQUEUE)"
 #endif
 
-#ifndef MIN
-#  define MIN(a,b)  (((a) < (b)) ? (a) : (b))
-#endif
-
 #define GS2200MWORK LPWORK
 
 #define SPI_MAXFREQ  CONFIG_WL_GS2200M_SPI_FREQUENCY
-#define NRESPMSG     8
+#define NRESPMSG     (16 + 2)
+
+#define BULK_CMD_HDR_SIZE_WITH_GUARD 36
 
 #define MAX_PKT_LEN  1500
-#define MAX_NOTIF_Q  16
+#define MAX_PAYLOAD  (MAX_PKT_LEN - BULK_CMD_HDR_SIZE_WITH_GUARD)
+#define MAX_NOTIF_Q  18 /* for 16 sockets and disasso event + dummy */
 
 #define WR_REQ       0x01
 #define RD_REQ       0x02
@@ -97,6 +87,16 @@
 #define RD_RESP_NOK  0x14
 
 #define LED_GPIO     30
+#define HAL_TIMEOUT  5000000  /* in us */
+#define WR_MAX_RETRY 100
+
+#define PORT_START   50000
+#define PORT_END     59999
+
+#define SEC_MODE_WEP     2
+#define SEC_MODE_WPA2PSK 8
+
+#define BULK_THRESHOLD (1024 * 8)
 
 /****************************************************************************
  * Private Data Types
@@ -130,7 +130,8 @@ enum pkt_type_e
   TYPE_FAIL = 7,
   TYPE_TIMEOUT = 8,
   TYPE_SPI_ERROR = 9,
-  TYPE_UNMATCH = 10,
+  TYPE_DISASSOCIATE = 10,
+  TYPE_UNMATCH = 11,
 };
 
 struct evt_code_s
@@ -167,7 +168,7 @@ struct notif_q_s
   uint8_t  rpos;
   uint8_t  wpos;
   uint8_t  count;
-  uint16_t inuse;
+  uint32_t inuse;
   char     cids[MAX_NOTIF_Q];
 };
 
@@ -178,15 +179,19 @@ struct gs2200m_dev_s
   struct notif_q_s     notif_q;
   FAR struct spi_dev_s *spi;
   struct work_s        irq_work;
-  sem_t                dev_sem;
+  mutex_t              dev_lock;
+  bool                 int_enabled;
   dq_queue_t           pkt_q[16];
-  uint8_t              pkt_q_cnt[16];
-  uint16_t             valid_cid_bits;
-  uint16_t             aip_cid_bits;
+  uint16_t             pkt_q_cnt[16];
+  uint32_t             valid_cid_bits;
+  uint32_t             aip_cid_bits;
+  uint32_t             total_bulk;
   uint8_t              tx_buff[MAX_PKT_LEN];
   struct net_driver_s  net_dev;
   uint8_t              op_mode;
   FAR const struct gs2200m_lower_s *lower;
+  bool                 disassociate_flag;
+  struct gs2200m_assoc_msg reconnect_msg;
 };
 
 /****************************************************************************
@@ -195,8 +200,6 @@ struct gs2200m_dev_s
 
 /* Character driver methods */
 
-static int     gs2200m_open(FAR struct file *filep);
-static int     gs2200m_close(FAR struct file *filep);
 static ssize_t gs2200m_read(FAR struct file *filep, FAR char *buff,
                             size_t len);
 static ssize_t gs2200m_write(FAR struct file *filep, FAR const char *buff,
@@ -211,6 +214,8 @@ static int     gs2200m_poll(FAR struct file *filep, FAR struct pollfd *fds,
 static int     gs2200m_irq(int irq, FAR void *context, FAR void *arg);
 static void    gs2200m_irq_worker(FAR void *arg);
 
+static void _remove_all_pkt(FAR struct gs2200m_dev_s *dev, uint8_t c);
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
@@ -219,22 +224,24 @@ static void    gs2200m_irq_worker(FAR void *arg);
 
 static const struct file_operations g_gs2200m_fops =
 {
-  gs2200m_open,  /* open */
-  gs2200m_close, /* close */
+  NULL,          /* open */
+  NULL,          /* close */
   gs2200m_read,  /* read */
   gs2200m_write, /* write */
   NULL,          /* seek */
   gs2200m_ioctl, /* ioctl */
-  gs2200m_poll,  /* poll */
-  NULL           /* unlink */
+  NULL,          /* mmap */
+  NULL,          /* truncate */
+  gs2200m_poll   /* poll */
 };
 
 static struct evt_code_s _evt_table[] =
 {
   {"OK", TYPE_OK},
+  {"Disassociation Event", TYPE_DISASSOCIATE},
   {"ERROR", TYPE_ERROR},
   {"DISCONNECT", TYPE_DISCONNECT},
-  {"CONNECT", TYPE_CONNECT},
+  {"CONNECT ", TYPE_CONNECT},
   {"Serial2WiFi APP", TYPE_BOOT_MSG}
 };
 
@@ -265,7 +272,9 @@ static enum pkt_type_e _spi_err_to_pkt_type(enum spi_status_e s)
         break;
 
       default:
-        ASSERT(false);
+        r = TYPE_UNMATCH;
+        PANIC();
+        break;
     }
 
   return r;
@@ -287,9 +296,14 @@ static uint8_t _cid_to_uint8(char c)
     {
       ret = (c - 'a') + 10;
     }
+  else if (c == DISASSOCIATION_CID)
+    {
+      ret = 16;
+    }
   else
     {
-      ASSERT(false);
+      ret = 0xff;
+      PANIC();
     }
 
   return ret;
@@ -302,7 +316,7 @@ static uint8_t _cid_to_uint8(char c)
 static void _to_ascii_char(uint16_t num, char *str)
 {
   DEBUGASSERT(num <= 2032); /* See Table 20 */
-  snprintf(str, 5, "%04d", num);
+  snprintf(str, 6, "%04d", num);
 }
 
 /****************************************************************************
@@ -314,7 +328,7 @@ static uint16_t _to_uint16(char *str)
   uint16_t ret = 0;
   int n;
 
-  n = sscanf(str, "%04d", &ret);
+  n = sscanf(str, "%04hu", &ret);
   ASSERT(1 == n);
   return ret;
 }
@@ -323,9 +337,9 @@ static uint16_t _to_uint16(char *str)
  * Name: _enable_cid
  ****************************************************************************/
 
-static bool _enable_cid(uint16_t *cid_bits, char cid, bool on)
+static bool _enable_cid(uint32_t *cid_bits, char cid, bool on)
 {
-  uint16_t mask = 1 << _cid_to_uint8(cid);
+  uint32_t mask = 1 << _cid_to_uint8(cid);
   bool     ret  = true;
 
   if (on)
@@ -358,9 +372,9 @@ static bool _enable_cid(uint16_t *cid_bits, char cid, bool on)
  * Name: _cid_is_set
  ****************************************************************************/
 
-static bool _cid_is_set(uint16_t *cid_bits, char cid)
+static bool _cid_is_set(uint32_t *cid_bits, char cid)
 {
-  uint16_t mask = 1 << _cid_to_uint8(cid);
+  uint32_t mask = 1 << _cid_to_uint8(cid);
 
   if (*cid_bits & mask)
     {
@@ -404,7 +418,14 @@ static void _notif_q_push(FAR struct gs2200m_dev_s *dev, char cid)
   dev->notif_q.wpos++;
   dev->notif_q.count++;
 
-  wlinfo("+++ pushed %c count=%d \n", cid, dev->notif_q.count);
+  if (dev->pfd)
+    {
+      /* If poll() waits and cid has been pushed to the queue, notify  */
+
+      poll_notify(&dev->pfd, 1, POLLIN);
+    }
+
+  wlinfo("+++ pushed %c count=%d\n", cid, dev->notif_q.count);
 }
 
 /****************************************************************************
@@ -444,7 +465,8 @@ static void _push_data_to_pkt(struct pkt_dat_s *pkt, uint8_t data)
  * Name: _release_pkt_dat
  ****************************************************************************/
 
-static void _release_pkt_dat(struct pkt_dat_s *pkt_dat)
+static void _release_pkt_dat(FAR struct gs2200m_dev_s *dev,
+                             FAR struct pkt_dat_s *pkt_dat)
 {
   int i;
 
@@ -456,6 +478,15 @@ static void _release_pkt_dat(struct pkt_dat_s *pkt_dat)
   if (pkt_dat->len)
     {
       kmm_free(pkt_dat->data);
+
+      if (pkt_dat->type == TYPE_BULK_DATA_TCP ||
+          pkt_dat->type == TYPE_BULK_DATA_UDP)
+        {
+          /* Update total bulk data size */
+
+          ASSERT(dev->total_bulk >= pkt_dat->len);
+          dev->total_bulk -= pkt_dat->len;
+        }
     }
 
   pkt_dat->n   = 0;
@@ -474,7 +505,7 @@ static void _check_pkt_q_cnt(FAR struct gs2200m_dev_s *dev, char cid)
 
   if (0 != cnt)
     {
-      wlinfo("--- _pkt_p_cnt[%c]=%d \n", cid, cnt);
+      wlinfo("--- _pkt_p_cnt[%c]=%d\n", cid, cnt);
     }
 }
 
@@ -493,12 +524,21 @@ static void _check_pkt_q_empty(FAR struct gs2200m_dev_s *dev, char cid)
 
       while (pkt_dat)
         {
-          wlerr("=== error: found (type=%d msg[0]=%s|) \n",
-                pkt_dat->type, pkt_dat->msg[0]);
+          wlerr("=== error: found (cid=%c type=%d msg[0]=%s|)\n",
+                cid, pkt_dat->type, pkt_dat->msg[0]);
           pkt_dat = (FAR struct pkt_dat_s *)pkt_dat->dq.flink;
+
+          if (_cid_is_set(&dev->valid_cid_bits, cid))
+            {
+              wlerr("+++ error: cid=%c is still active !!!\n", cid);
+            }
+
+          /* NOTE: force to disable the cid to remove */
+
+          _enable_cid(&dev->valid_cid_bits, cid, false);
         }
 
-      ASSERT(false);
+      _remove_all_pkt(dev, c);
     }
 }
 
@@ -506,51 +546,27 @@ static void _check_pkt_q_empty(FAR struct gs2200m_dev_s *dev, char cid)
  * Name: _control_pkt_q
  ****************************************************************************/
 
-static void _control_pkt_q(FAR struct gs2200m_dev_s *dev)
+static bool _control_pkt_q(FAR struct gs2200m_dev_s *dev)
 {
-  uint8_t c;
-  uint16_t mask;
-  bool over = false;
+  bool over = BULK_THRESHOLD < dev->total_bulk ? true : false;
 
-  static bool enabled = true;
+  /* TODO: should enable again if disabled for long time */
 
-  /* TODO: should enable again if disabled for long time
-   * Or, should use flow control commands for gs2200m
-   */
-
-  /* For all cid(c) */
-
-  for (c = 0; c < 16; c++)
+  if (dev->int_enabled && over)
     {
-      mask = 1 << c;
-
-      if (!(dev->valid_cid_bits & mask))
-        {
-          continue;
-        }
-
-      /* Check the pkt_q_cnt */
-
-      if (4 <= dev->pkt_q_cnt[c])
-        {
-          over = true;
-          break;
-        }
-    }
-
-  if (enabled && over)
-    {
-      wlinfo("--- pkt_q[%d] exceeds, disable irq \n", c);
-      enabled = false;
+      wlinfo("--- disable irq\n");
+      dev->int_enabled = false;
       dev->lower->disable();
     }
 
-  if (!enabled && !over)
+  if (!dev->int_enabled && !over)
     {
-      wlinfo("--- enable irq again \n");
+      wlinfo("--- enable irq again\n");
       dev->lower->enable();
-      enabled = true;
+      dev->int_enabled = true;
     }
+
+  return over;
 }
 
 /****************************************************************************
@@ -573,7 +589,7 @@ static void _remove_and_free_pkt(FAR struct gs2200m_dev_s *dev, uint8_t c)
 
   /* Release the packet */
 
-  _release_pkt_dat(pkt_dat);
+  _release_pkt_dat(dev, pkt_dat);
   kmm_free(pkt_dat);
 }
 
@@ -584,7 +600,7 @@ static void _remove_and_free_pkt(FAR struct gs2200m_dev_s *dev, uint8_t c)
 static void _remove_all_pkt(FAR struct gs2200m_dev_s *dev, uint8_t c)
 {
   FAR struct pkt_dat_s *pkt_dat;
-  uint16_t mask;
+  uint32_t mask;
 
   mask = 1 << c;
   ASSERT(0 == (dev->valid_cid_bits & mask));
@@ -623,7 +639,7 @@ static bool _copy_data_from_pkt(FAR struct gs2200m_dev_s *dev,
   pkt_dat = (FAR struct pkt_dat_s *)dq_peek(&dev->pkt_q[c]);
   ASSERT(pkt_dat);
 
-  wlinfo("+++ msg(req=%d:len=%d) pkt_data(t=%d:remain=%d) \n",
+  wlinfo("+++ msg(req=%d:len=%d) pkt_data(t=%d:remain=%d)\n",
          msg->reqlen, msg->len, pkt_dat->type, pkt_dat->remain);
 
   if (msg->len && TYPE_DISCONNECT == pkt_dat->type)
@@ -648,18 +664,23 @@ static bool _copy_data_from_pkt(FAR struct gs2200m_dev_s *dev,
 
   pkt_dat->remain -= len;
 
-  if (0 == pkt_dat->remain)
+  if (0 == pkt_dat->remain || TYPE_BULK_DATA_UDP == pkt_dat->type)
     {
       _remove_and_free_pkt(dev, c);
     }
 
 errout:
-
   if (!msg->is_tcp)
     {
       /* Copy the source address and port */
 
       memcpy(&msg->addr, &pkt_dat->addr, sizeof(pkt_dat->addr));
+
+      /* Set the address family
+       * NOTE: gs2200m only supports IPv4
+       */
+
+      msg->addr.sin_family = AF_INET;
 
       /* In udp case, treat the packet separately */
 
@@ -667,42 +688,6 @@ errout:
     }
 
   return ret;
-}
-
-/****************************************************************************
- * Name: gs2200m_lock
- ****************************************************************************/
-
-static int gs2200m_lock(FAR struct gs2200m_dev_s *dev)
-{
-  return nxsem_wait_uninterruptible(&dev->dev_sem);
-}
-
-/****************************************************************************
- * Name: gs2200m_unlock
- ****************************************************************************/
-
-static void gs2200m_unlock(FAR struct gs2200m_dev_s *dev)
-{
-  nxsem_post(&dev->dev_sem);
-}
-
-/****************************************************************************
- * Name: gs2200m_open
- ****************************************************************************/
-
-static int gs2200m_open(FAR struct file *filep)
-{
-  return OK;
-}
-
-/****************************************************************************
- * Name: gs2200m_close
- ****************************************************************************/
-
-static int gs2200m_close(FAR struct file *filep)
-{
-  return OK;
 }
 
 /****************************************************************************
@@ -716,15 +701,14 @@ static ssize_t gs2200m_read(FAR struct file *filep, FAR char *buffer,
   FAR struct gs2200m_dev_s *dev;
   int ret;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  dev = (FAR struct gs2200m_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  dev = inode->i_private;
 
   ASSERT(1 == len);
 
-  ret = nxsem_wait(&dev->dev_sem);
+  ret = nxmutex_lock(&dev->dev_lock);
   if (ret < 0)
     {
       /* Return if a signal is received or if the the task was canceled
@@ -737,13 +721,13 @@ static ssize_t gs2200m_read(FAR struct file *filep, FAR char *buffer,
   ASSERT(0 < _notif_q_count(dev));
   char cid = _notif_q_pop(dev);
 
-  wlinfo("---- cid=%c (notif_q_cnt=%d) \n", cid, _notif_q_count(dev));
+  wlinfo("---- cid=%c (notif_q_cnt=%d)\n", cid, _notif_q_count(dev));
 
   /* Copy the cid to the buffer */
 
   memcpy(buffer, &cid, sizeof(cid));
 
-  gs2200m_unlock(dev);
+  nxmutex_unlock(&dev->dev_lock);
   return 1;
 }
 
@@ -819,39 +803,24 @@ static void _write_data(FAR struct gs2200m_dev_s *dev,
                         FAR uint8_t *buf,
                         FAR uint16_t len)
 {
-  int i;
-
   SPI_SELECT(dev->spi, SPIDEV_WIRELESS(0), true);
-
-  for (i = 0; i < len; i++, buf++)
-    {
-      SPI_SEND(dev->spi, *buf);
-    }
-
+  SPI_SNDBLOCK(dev->spi, buf, len);
   SPI_SELECT(dev->spi, SPIDEV_WIRELESS(0), false);
 }
 
 /****************************************************************************
  * Name: _read_data
- * NOTE: See 3.2.2.1 SPI Byte Stuffing for the idle character
+ * NOTE: See 3.2.2.2 SPI Command Response (SPI-DMA)
  ****************************************************************************/
 
 static void _read_data(FAR struct gs2200m_dev_s *dev,
-                       FAR uint8_t  *buff,
+                       FAR uint8_t *buff,
                        FAR uint16_t len)
 {
-  int i;
-  uint8_t req = 0xf5; /* idle character */
-
   memset(buff, 0, len);
 
   SPI_SELECT(dev->spi, SPIDEV_WIRELESS(0), true);
-
-  for (i = 0; i < len; i++, buff++)
-    {
-      SPI_EXCHANGE(dev->spi, &req, buff, 1);
-    }
-
+  SPI_RECVBLOCK(dev->spi, buff, len);
   SPI_SELECT(dev->spi, SPIDEV_WIRELESS(0), false);
 }
 
@@ -861,8 +830,8 @@ static void _read_data(FAR struct gs2200m_dev_s *dev,
 
 static uint16_t _read_data_len(FAR struct gs2200m_dev_s *dev)
 {
-  uint8_t  hdr[8];
-  uint8_t  res[8];
+  uint8_t hdr[8];
+  uint8_t res[8];
   uint16_t len = 0;
   int n = 0;
 
@@ -881,15 +850,13 @@ retry:
   while (!dev->lower->dready(NULL))
     {
       /* TODO: timeout */
-
-      nxsig_usleep(10);
     }
 
-  /* NOTE: wait 100us
-   * workaround to avoid really receiving an invalid frame response
+  /* NOTE: busy wait 50us
+   * workaround to avoid an invalid frame response
    */
 
-  nxsig_usleep(100);
+  up_udelay(50);
 
   /* Read frame response */
 
@@ -899,7 +866,7 @@ retry:
 
   if (RD_RESP_NOK == res[1])
     {
-      wlwarn("*** warning: RD_RESP_NOK received.. retrying. (n=%d) \n", n);
+      wlwarn("*** warning: RD_RESP_NOK received.. retrying. (n=%d)\n", n);
       nxsig_usleep(100 * 1000);
       n++;
       goto retry;
@@ -920,10 +887,10 @@ retry:
  ****************************************************************************/
 
 enum spi_status_e gs2200m_hal_write(FAR struct gs2200m_dev_s *dev,
-                                    const void *data,
+                                    FAR const void *data,
                                     uint16_t txlen)
 {
-  uint8_t *tx = (uint8_t *)data;
+  FAR uint8_t *tx = (FAR uint8_t *)data;
   uint8_t  hdr[8];
   uint8_t  res[8];
   int n = 0;
@@ -946,11 +913,11 @@ retry:
 
   if (dev->lower->dready(NULL))
     {
-      wlwarn("*** warning: gs2200m is busy.. retrying. (n=%d) \n", n);
+      wlwarn("*** warning: gs2200m is busy.. retrying. (n=%d)\n", n);
 
       if (!work_available(&dev->irq_work))
         {
-          wlwarn("*** warning: there is still pending work **** \n");
+          wlwarn("*** warning: there is still pending work ****\n");
         }
       else
         {
@@ -984,14 +951,15 @@ retry:
 
   _read_data(dev, res, sizeof(res));
 
-  /* In case of NOK, retry */
+  /* In case of NOK or 0x0, retry */
 
-  if (WR_RESP_NOK == res[1])
+  if (WR_RESP_NOK == res[1] || 0x0 == res[1])
     {
-      wlwarn("*** warning: WR_RESP_NOK received.. retrying. (n=%d) \n", n);
+      wlwarn("*** warning: 0x%x received.. retrying. (n=%d)\n",
+             res[1], n);
       nxsig_usleep(10 * 1000);
 
-      if (9 < n)
+      if (WR_MAX_RETRY < n)
         {
           return SPI_TIMEOUT;
         }
@@ -1025,27 +993,27 @@ enum spi_status_e gs2200m_hal_read(FAR struct gs2200m_dev_s *dev,
                                    FAR uint8_t *data,
                                    FAR uint16_t *len)
 {
-  enum spi_status_e r = SPI_OK;
   uint8_t hdr[8];
   int i;
 
   /* NOTE: need to wait for data ready even if we use irq */
 
-  for (i = 0; i < 500; i++)
+  for (i = 0; i < HAL_TIMEOUT; i++)
     {
       if (dev->lower->dready(NULL))
         {
           break;
         }
 
-      nxsig_usleep(10 * 1000);
+      /* Busy wait 1us */
+
+      up_udelay(1);
     }
 
-  if (500 == i)
+  if (HAL_TIMEOUT == i)
     {
-      wlerr("***** error: timeout! \n");
-      r = SPI_TIMEOUT;
-      goto errout;
+      wlerr("***** error: timeout!\n");
+      return SPI_TIMEOUT;
     }
 
   /* Send READ_REQUEST then receive READ_RESPONSE
@@ -1054,7 +1022,7 @@ enum spi_status_e gs2200m_hal_read(FAR struct gs2200m_dev_s *dev,
 
   *len = _read_data_len(dev);
 
-  wlinfo("+++++ (len=%d) \n", *len);
+  wlinfo("+++++ (len=%d)\n", *len);
 
   /* Check the length */
 
@@ -1067,9 +1035,7 @@ enum spi_status_e gs2200m_hal_read(FAR struct gs2200m_dev_s *dev,
   /* Read the actual data */
 
   _read_data(dev, data, *len);
-
-errout:
-  return r;
+  return SPI_OK;
 }
 
 /****************************************************************************
@@ -1088,7 +1054,7 @@ enum pkt_type_e _check_evt(FAR const char *buff)
         }
     }
 
-  wlinfo("+++++ %s +++++ \n", buff);
+  wlinfo("+++++ %s +++++\n", buff);
   return TYPE_UNMATCH;
 }
 
@@ -1123,6 +1089,7 @@ static void _parse_pkt_in_s0(FAR struct pkt_ctx_s *pkt_ctx,
 static void _parse_pkt_in_s1(FAR struct pkt_ctx_s *pkt_ctx,
                              FAR struct pkt_dat_s *pkt_dat)
 {
+  FAR char *msg;
   int msize;
   int n;
 
@@ -1134,7 +1101,7 @@ static void _parse_pkt_in_s1(FAR struct pkt_ctx_s *pkt_ctx,
   ASSERT(pkt_ctx->ptr > pkt_ctx->head);
   msize = pkt_ctx->ptr - pkt_ctx->head;
 
-  char *msg = (char *)kmm_calloc(msize + 1, 1);
+  msg = kmm_calloc(msize + 1, 1);
   ASSERT(msg);
 
   memcpy(msg, pkt_ctx->head, msize);
@@ -1148,7 +1115,7 @@ static void _parse_pkt_in_s1(FAR struct pkt_ctx_s *pkt_ctx,
       n = sscanf(msg, "DISCONNECT %c", &(pkt_dat->cid));
       ASSERT(1 == n);
 
-      wlinfo("+++++ msg=%s| cid=%c \n", msg, pkt_dat->cid);
+      wlinfo("+++++ msg=%s| cid=%c\n", msg, pkt_dat->cid);
     }
   else if (pkt_ctx->type == TYPE_CONNECT)
     {
@@ -1159,20 +1126,20 @@ static void _parse_pkt_in_s1(FAR struct pkt_ctx_s *pkt_ctx,
       n = sscanf(msg, "CONNECT %c", &(pkt_dat->cid));
       DEBUGASSERT(1 == n);
 
-      wlinfo("+++++ msg=%s| \n", msg);
+      wlinfo("+++++ msg=%s|\n", msg);
     }
 
   if (pkt_dat)
     {
       /* If specified, store the msg pointer to pkt_dat */
 
-      wlinfo("+++++ %d:(msize=%d, msg=%s|) \n", pkt_dat->n, msize, msg);
+      wlinfo("+++++ %d:(msize=%d, msg=%s|)\n", pkt_dat->n, msize, msg);
       ASSERT(pkt_dat->n < NRESPMSG);
       pkt_dat->msg[pkt_dat->n++] = msg;
     }
   else
     {
-      wlinfo("+++++ (msize=%d, msg=%s|) \n", msize, msg);
+      wlinfo("+++++ (msize=%d, msg=%s|)\n", msize, msg);
       kmm_free(msg);
     }
 
@@ -1197,7 +1164,7 @@ static void _parse_pkt_in_s2(FAR struct pkt_ctx_s *pkt_ctx,
 
   if ('Z' == c)
     {
-      wlinfo("** <ESC>Z \n");
+      wlinfo("** <ESC>Z\n");
 
       /* NOTE: See 7.5.3.2 Bulk Data Handling */
 
@@ -1205,7 +1172,7 @@ static void _parse_pkt_in_s2(FAR struct pkt_ctx_s *pkt_ctx,
     }
   else if ('y' == c)
     {
-      wlinfo("** <ESC>y \n");
+      wlinfo("** <ESC>y\n");
 
       /* NOTE: See 7.5.3.2 Bulk Data Handling */
 
@@ -1213,7 +1180,7 @@ static void _parse_pkt_in_s2(FAR struct pkt_ctx_s *pkt_ctx,
     }
   else if ('F' == c)
     {
-      wlwarn("** <ESC>F \n");
+      wlwarn("** <ESC>F\n");
 
       /* NOTE: See Table 6 Data Handling Responses at Completion */
 
@@ -1222,8 +1189,8 @@ static void _parse_pkt_in_s2(FAR struct pkt_ctx_s *pkt_ctx,
     }
   else
     {
-      wlerr("** <ESC>%c not supported \n", c);
-      ASSERT(false);
+      wlerr("** <ESC>%c not supported\n", c);
+      PANIC();
     }
 }
 
@@ -1251,10 +1218,10 @@ static void _parse_pkt_in_s3(FAR struct pkt_ctx_s *pkt_ctx,
 
       /* Read data length */
 
-      pkt_ctx->dlen = _to_uint16((char *)pkt_ctx->ptr);
+      pkt_ctx->dlen = _to_uint16((FAR char *)pkt_ctx->ptr);
       pkt_ctx->ptr += 3;
 
-      wlinfo("dlen=%d \n", pkt_ctx->dlen);
+      wlinfo("dlen=%d\n", pkt_ctx->dlen);
 
       /* Allocate memory for the packet */
 
@@ -1303,13 +1270,13 @@ static void _parse_pkt_in_s4(FAR struct pkt_ctx_s *pkt_ctx,
 
       memset(addr, 0, sizeof(addr));
       memset(port, 0, sizeof(port));
-      n = sscanf((char *)pkt_ctx->ptr, "%s %s\t", addr, port);
+      n = sscanf((FAR const char *)pkt_ctx->ptr, "%s %s\t", addr, port);
       ASSERT(2 == n);
 
-      wlinfo("from (%s:%s) \n", addr, port);
+      wlinfo("from (%s:%s)\n", addr, port);
 
       inet_aton(addr, &pkt_dat->addr.sin_addr);
-      pkt_dat->addr.sin_port = htons((uint16_t)atoi(port));
+      pkt_dat->addr.sin_port = HTONS((uint16_t)atoi(port));
 
       /* Skip until data length */
 
@@ -1318,10 +1285,10 @@ static void _parse_pkt_in_s4(FAR struct pkt_ctx_s *pkt_ctx,
 
       /* Read data length */
 
-      pkt_ctx->dlen = _to_uint16((char *)pkt_ctx->ptr);
+      pkt_ctx->dlen = _to_uint16((FAR char *)pkt_ctx->ptr);
       pkt_ctx->ptr += 3;
 
-      wlinfo("dlen=%d \n", pkt_ctx->dlen);
+      wlinfo("dlen=%d\n", pkt_ctx->dlen);
 
       /* Allocate memory for the packet */
 
@@ -1384,12 +1351,61 @@ static enum pkt_type_e _parse_pkt(FAR uint8_t *p, uint16_t len,
           break;
 
         default:
-          ASSERT(false);
+          PANIC();
           break;
         }
     }
 
   return pkt_ctx.type;
+}
+
+/****************************************************************************
+ * Name: _dup_pkt_dat_and_notify
+ ****************************************************************************/
+
+static void _dup_pkt_dat_and_notify(FAR struct gs2200m_dev_s *dev,
+                                    FAR struct pkt_dat_s *pkt_dat0)
+{
+  FAR struct pkt_dat_s *pkt_dat;
+  uint8_t c;
+
+  /* Only bulk data */
+
+  ASSERT(pkt_dat0->data && (0 == pkt_dat0->n));
+
+  /* Allocate a new pkt_dat */
+
+  pkt_dat = kmm_malloc(sizeof(struct pkt_dat_s));
+  ASSERT(pkt_dat);
+
+  /* Copy pkt_dat0 to pkt_dat */
+
+  memcpy(pkt_dat, pkt_dat0, sizeof(struct pkt_dat_s));
+
+  /* Allocate bulk data and copy */
+
+  pkt_dat->data = kmm_malloc(pkt_dat0->len);
+  ASSERT(pkt_dat->data);
+  memcpy(pkt_dat->data, pkt_dat0->data, pkt_dat0->len);
+
+  /* Convert cid to c */
+
+  c = _cid_to_uint8(pkt_dat->cid);
+
+  /* Add the pkt_dat to the pkt_q */
+
+  dq_addlast((FAR dq_entry_t *)pkt_dat, &dev->pkt_q[c]);
+  dev->pkt_q_cnt[c]++;
+
+  /* NOTE: total_bulk must be updated
+   * Usually, total_bulk is updated in gs2200m_recv_pkt()
+   * However, the pkt_dat was duplicated from pkt_dat0
+   * So it needs to be updated, otherwise it will cause ASSERT
+   */
+
+  dev->total_bulk += pkt_dat->len;
+
+  _notif_q_push(dev, pkt_dat->cid);
 }
 
 /****************************************************************************
@@ -1402,9 +1418,9 @@ static enum pkt_type_e gs2200m_recv_pkt(FAR struct gs2200m_dev_s *dev,
   enum pkt_type_e   t = TYPE_ERROR;
   enum spi_status_e s;
   uint16_t len;
-  uint8_t *p;
+  FAR uint8_t *p;
 
-  p = (uint8_t *)kmm_calloc(MAX_PKT_LEN, 1);
+  p = kmm_calloc(MAX_PKT_LEN, 1);
   ASSERT(p);
 
   s = gs2200m_hal_read(dev, p, &len);
@@ -1415,7 +1431,7 @@ static enum pkt_type_e gs2200m_recv_pkt(FAR struct gs2200m_dev_s *dev,
       goto errout;
     }
 
-  wlinfo("+++ len=%d pkt_dat=%p \n", len, pkt_dat);
+  wlinfo("+++ len=%d pkt_dat=%p\n", len, pkt_dat);
 
   /* Parse the received packet */
 
@@ -1426,9 +1442,22 @@ static enum pkt_type_e gs2200m_recv_pkt(FAR struct gs2200m_dev_s *dev,
       _check_pkt_q_cnt(dev, pkt_dat->cid);
     }
 
+  if (t == TYPE_DISASSOCIATE)
+    {
+      dev->disassociate_flag = true;
+    }
+
   if (pkt_dat)
     {
       pkt_dat->type = t;
+
+      if (t == TYPE_BULK_DATA_TCP ||
+          t == TYPE_BULK_DATA_UDP)
+        {
+          /* Update total bulk data size */
+
+          dev->total_bulk += pkt_dat->len;
+        }
     }
 
 errout:
@@ -1446,6 +1475,8 @@ static enum pkt_type_e gs2200m_send_cmd(FAR struct gs2200m_dev_s *dev,
 {
   enum spi_status_e s;
   enum pkt_type_e r = TYPE_SPI_ERROR;
+  bool bulk = false;
+  int n = 1;
 
   /* Disable gs2200m irq to poll dready */
 
@@ -1453,6 +1484,7 @@ static enum pkt_type_e gs2200m_send_cmd(FAR struct gs2200m_dev_s *dev,
 
   wlinfo("+++ cmd=%s", cmd);
 
+retry:
   s = gs2200m_hal_write(dev, cmd, strlen(cmd));
   r = _spi_err_to_pkt_type(s);
 
@@ -1461,14 +1493,74 @@ static enum pkt_type_e gs2200m_send_cmd(FAR struct gs2200m_dev_s *dev,
       goto errout;
     }
 
+retry_recv:
   r = gs2200m_recv_pkt(dev, pkt_dat);
 
+  if ((TYPE_BULK_DATA_TCP == r || TYPE_BULK_DATA_UDP == r) && pkt_dat)
+    {
+      wlwarn("*** Found bulk data\n");
+
+      /* Bulk data found in the response,
+       * duplicate the packet and notify
+       */
+
+      _dup_pkt_dat_and_notify(dev, pkt_dat);
+
+      /* release & initialize pkt_dat before retry */
+
+      _release_pkt_dat(dev, pkt_dat);
+      memset(pkt_dat, 0, sizeof(*pkt_dat));
+
+      bulk = true;
+      goto retry_recv;
+    }
+
+  /* NOTE: retry in case of errors */
+
+  if ((TYPE_OK != r) && (0 <= --n))
+    {
+      if (pkt_dat)
+        {
+          /* release & initialize pkt_dat before retry */
+
+          _release_pkt_dat(dev, pkt_dat);
+          memset(pkt_dat, 0, sizeof(*pkt_dat));
+        }
+
+      wlwarn("*** retry cmd=%s (n=%d)\n", cmd, n);
+      goto retry;
+    }
+
 errout:
+  if (bulk)
+    {
+      wlwarn("*** Normal response r=%d\n", r);
+    }
 
   /* Enable gs2200m irq again */
 
   dev->lower->enable();
+  return r;
+}
 
+/****************************************************************************
+ * Name: gs2200m_send_cmd2
+ ****************************************************************************/
+
+static enum pkt_type_e gs2200m_send_cmd2(FAR struct gs2200m_dev_s *dev,
+                                         FAR char *cmd)
+{
+  struct pkt_dat_s pkt_dat;
+  enum pkt_type_e  r;
+
+  /* Initialize pkt_dat and send */
+
+  memset(&pkt_dat, 0, sizeof(pkt_dat));
+  r = gs2200m_send_cmd(dev, cmd, &pkt_dat);
+
+  /* Release the pkt_dat */
+
+  _release_pkt_dat(dev, &pkt_dat);
   return r;
 }
 
@@ -1484,7 +1576,7 @@ static enum pkt_type_e gs2200m_set_opmode(FAR struct gs2200m_dev_s *dev,
   char cmd[20];
 
   snprintf(cmd, sizeof(cmd), "AT+WM=%d\r\n", mode);
-  t = gs2200m_send_cmd(dev, cmd, NULL);
+  t = gs2200m_send_cmd2(dev, cmd);
 
   if (TYPE_OK == t)
     {
@@ -1502,7 +1594,7 @@ static enum pkt_type_e gs2200m_set_opmode(FAR struct gs2200m_dev_s *dev,
 static enum pkt_type_e gs2200m_get_mac(FAR struct gs2200m_dev_s *dev)
 {
   struct pkt_dat_s pkt_dat;
-  enum pkt_type_e   r;
+  enum pkt_type_e  r;
   uint32_t mac[6];
   char cmd[16];
   int n;
@@ -1518,8 +1610,9 @@ static enum pkt_type_e gs2200m_get_mac(FAR struct gs2200m_dev_s *dev)
       goto errout;
     }
 
-  n = sscanf(pkt_dat.msg[0], "%2x:%2x:%2x:%2x:%2x:%2x",
-                &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
+  n = sscanf(pkt_dat.msg[0], "%2" PRIx32 ":%2" PRIx32 ":%2" PRIx32
+                             ":%2" PRIx32 ":%2" PRIx32 ":%2" PRIx32,
+             &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
   DEBUGASSERT(n == 6);
 
   for (n = 0; n < 6; n++)
@@ -1528,7 +1621,7 @@ static enum pkt_type_e gs2200m_get_mac(FAR struct gs2200m_dev_s *dev)
     }
 
 errout:
-  _release_pkt_dat(&pkt_dat);
+  _release_pkt_dat(dev, &pkt_dat);
   return r;
 }
 
@@ -1539,7 +1632,7 @@ errout:
 
 static enum pkt_type_e gs2200m_disassociate(FAR struct gs2200m_dev_s *dev)
 {
-  return gs2200m_send_cmd(dev, (char *)"AT+WD\r\n", NULL);
+  return gs2200m_send_cmd2(dev, "AT+WD\r\n");
 }
 
 /****************************************************************************
@@ -1553,7 +1646,7 @@ static enum pkt_type_e gs2200m_enable_dhcpc(FAR struct gs2200m_dev_s *dev,
   char cmd[16];
 
   snprintf(cmd, sizeof(cmd), "AT+NDHCP=%d\r\n", on);
-  return gs2200m_send_cmd(dev, cmd, NULL);
+  return gs2200m_send_cmd2(dev, cmd);
 }
 
 /****************************************************************************
@@ -1567,7 +1660,7 @@ static enum pkt_type_e gs2200m_calc_key(FAR struct gs2200m_dev_s *dev,
   char cmd[80];
 
   snprintf(cmd, sizeof(cmd), "AT+WPAPSK=%s,%s\r\n", ssid, psk);
-  return gs2200m_send_cmd(dev, cmd, NULL);
+  return gs2200m_send_cmd2(dev, cmd);
 }
 
 /****************************************************************************
@@ -1581,7 +1674,7 @@ static enum pkt_type_e gs2200m_set_security(FAR struct gs2200m_dev_s *dev,
   char cmd[16];
 
   snprintf(cmd, sizeof(cmd), "AT+WSEC=%d\r\n", mode);
-  return gs2200m_send_cmd(dev, cmd, NULL);
+  return gs2200m_send_cmd2(dev, cmd);
 }
 
 /****************************************************************************
@@ -1593,7 +1686,7 @@ static enum pkt_type_e gs2200m_join_network(FAR struct gs2200m_dev_s *dev,
                                             FAR char *ssid, uint8_t ch)
 {
   struct pkt_dat_s pkt_dat;
-  enum pkt_type_e   r;
+  enum pkt_type_e  r;
   char cmd[64];
   char addr[3][17];
   int n;
@@ -1634,7 +1727,7 @@ static enum pkt_type_e gs2200m_join_network(FAR struct gs2200m_dev_s *dev,
   inet_aton(addr[2], (struct in_addr *)&dev->net_dev.d_draddr);
 
 errout:
-  _release_pkt_dat(&pkt_dat);
+  _release_pkt_dat(dev, &pkt_dat);
   return r;
 }
 
@@ -1652,7 +1745,8 @@ static enum pkt_type_e gs2200m_set_addresses(FAR struct gs2200m_dev_s *dev,
 
   snprintf(cmd, sizeof(cmd), "AT+NSET=%s,%s,%s\r\n",
            address, netmask, gateway);
-  return gs2200m_send_cmd(dev, cmd, NULL);
+
+  return gs2200m_send_cmd2(dev, cmd);
 }
 
 /****************************************************************************
@@ -1666,7 +1760,7 @@ static enum pkt_type_e gs2200m_enable_dhcps(FAR struct gs2200m_dev_s *dev,
   char cmd[20];
 
   snprintf(cmd, sizeof(cmd), "AT+DHCPSRVR=%d\r\n", on);
-  return gs2200m_send_cmd(dev, cmd, NULL);
+  return gs2200m_send_cmd2(dev, cmd);
 }
 
 /****************************************************************************
@@ -1680,12 +1774,14 @@ static enum pkt_type_e gs2200m_set_auth(FAR struct gs2200m_dev_s *dev,
   char cmd[16];
 
   snprintf(cmd, sizeof(cmd), "AT+WAUTH=%d\r\n", mode);
-  return gs2200m_send_cmd(dev, cmd, NULL);
+  return gs2200m_send_cmd2(dev, cmd);
 }
+
+#ifdef CONFIG_WL_GS2200M_ENABLE_WEP
 
 /****************************************************************************
  * Name: gs2200m_set_wepkey
- * NOTE: See xxxx
+ * NOTE: See 5.3.3.2
  ****************************************************************************/
 
 static enum pkt_type_e gs2200m_set_wepkey(FAR struct gs2200m_dev_s *dev,
@@ -1694,8 +1790,26 @@ static enum pkt_type_e gs2200m_set_wepkey(FAR struct gs2200m_dev_s *dev,
   char cmd[32];
 
   snprintf(cmd, sizeof(cmd), "AT+WWEP1=%s\r\n", key);
-  return gs2200m_send_cmd(dev, cmd, NULL);
+  return gs2200m_send_cmd2(dev, cmd);
 }
+
+#else
+
+/****************************************************************************
+ * Name: gs2200m_set_wpa2pf
+ * NOTE: See 5.3.3.4
+ ****************************************************************************/
+
+static enum pkt_type_e gs2200m_set_wpa2pf(FAR struct gs2200m_dev_s *dev,
+                                          FAR char *key)
+{
+  char cmd[64];
+
+  snprintf(cmd, sizeof(cmd), "AT+WWPA=%s\r\n", key);
+  return gs2200m_send_cmd2(dev, cmd);
+}
+
+#endif /* CONFIG_WL_GS2200M_ENABLE_WEP */
 
 /****************************************************************************
  * Name: gs2200m_get_wstatus
@@ -1705,13 +1819,13 @@ static enum pkt_type_e gs2200m_set_wepkey(FAR struct gs2200m_dev_s *dev,
 enum pkt_type_e gs2200m_get_wstatus(FAR struct gs2200m_dev_s *dev)
 {
   struct pkt_dat_s pkt_dat;
-  enum pkt_type_e   r;
+  enum pkt_type_e  r;
   int i;
 
   /* Initialize pkt_dat and send command */
 
   memset(&pkt_dat, 0, sizeof(pkt_dat));
-  r = gs2200m_send_cmd(dev, (char *)"AT+WSTATUS\r\n", &pkt_dat);
+  r = gs2200m_send_cmd(dev, "AT+WSTATUS\r\n", &pkt_dat);
 
   if (r != TYPE_OK)
     {
@@ -1724,7 +1838,7 @@ enum pkt_type_e gs2200m_get_wstatus(FAR struct gs2200m_dev_s *dev)
     }
 
 errout:
-  _release_pkt_dat(&pkt_dat);
+  _release_pkt_dat(dev, &pkt_dat);
   return r;
 }
 
@@ -1733,29 +1847,41 @@ errout:
  * NOTE: See 7.5.1.1 Create TCP Clients and 7.5.1.2 Create UDP Client
  ****************************************************************************/
 
-static enum pkt_type_e gs2200m_create_clnt(FAR struct gs2200m_dev_s *dev,
-                                           FAR char *address, FAR char *port,
-                                           int type, FAR char *cid)
+static enum pkt_type_e
+gs2200m_create_clnt(FAR struct gs2200m_dev_s *dev,
+                    FAR struct gs2200m_connect_msg *msg,
+                    FAR char *cid)
 {
-  enum pkt_type_e  r;
   struct pkt_dat_s pkt_dat;
+  enum pkt_type_e  r;
   char cmd[40];
   char *p;
   int   n;
 
   *cid = 'z'; /* Invalidate cid */
 
-  if (SOCK_STREAM == type)
+  if (SOCK_STREAM == msg->type)
     {
-      snprintf(cmd, sizeof(cmd), "AT+NCTCP=%s,%s\r\n", address, port);
+      snprintf(cmd, sizeof(cmd), "AT+NCTCP=%s,%s\r\n",
+               msg->addr, msg->port);
     }
-  else if (SOCK_DGRAM == type)
+  else if (SOCK_DGRAM == msg->type)
     {
-      snprintf(cmd, sizeof(cmd), "AT+NCUDP=%s,%s\r\n", address, port);
+      if (0 == msg->lport)
+        {
+          snprintf(cmd, sizeof(cmd), "AT+NCUDP=%s,%s\r\n",
+                   msg->addr, msg->port);
+        }
+
+      else
+        {
+          snprintf(cmd, sizeof(cmd), "AT+NCUDP=%s,%s,%d\r\n",
+                   msg->addr, msg->port, msg->lport);
+        }
     }
   else
     {
-      ASSERT(false);
+      PANIC();
     }
 
   /* Initialize pkt_dat and send  */
@@ -1765,20 +1891,20 @@ static enum pkt_type_e gs2200m_create_clnt(FAR struct gs2200m_dev_s *dev,
 
   if (r != TYPE_OK || pkt_dat.n == 0)
     {
-      wlinfo("+++ error: r=%d pkt_dat.msg[0]=%s \n",
-             r, pkt_dat.msg[0]);
+      wlerr("+++ error: r=%d pkt_dat.msg[0]=%s\n",
+            r, pkt_dat.msg[0]);
       goto errout;
     }
 
-  if (NULL != (p = strstr(pkt_dat.msg[0], "CONNECT")))
+  if (NULL != (p = strstr(pkt_dat.msg[0], "CONNECT ")))
     {
       n = sscanf(p, "CONNECT %c", cid);
       ASSERT(1 == n);
-      wlinfo("+++ OK: p=%s| (n=%d) \n", p, n);
+      wlinfo("+++ OK: p=%s| (n=%d)\n", p, n);
     }
 
 errout:
-  _release_pkt_dat(&pkt_dat);
+  _release_pkt_dat(dev, &pkt_dat);
   return r;
 }
 
@@ -1791,8 +1917,8 @@ static enum pkt_type_e gs2200m_start_server(FAR struct gs2200m_dev_s *dev,
                                             FAR char *port, bool is_tcp,
                                             FAR char *cid)
 {
-  enum pkt_type_e   r;
   struct pkt_dat_s pkt_dat;
+  enum pkt_type_e  r;
   char cmd[40];
   char *p;
   int   n;
@@ -1813,27 +1939,20 @@ static enum pkt_type_e gs2200m_start_server(FAR struct gs2200m_dev_s *dev,
   memset(&pkt_dat, 0, sizeof(pkt_dat));
   r = gs2200m_send_cmd(dev, cmd, &pkt_dat);
 
-  /* REVISIT:
-   * TYPE_BULK for other sockets might be received here,
-   * if the sockets have heavy bulk traffic.
-   * In this case, the packet should be queued and
-   * wait for a response to the NSTCP command.
-   */
-
   if (r != TYPE_OK || pkt_dat.n == 0)
     {
       goto errout;
     }
 
-  if (NULL != (p = strstr(pkt_dat.msg[0], "CONNECT")))
+  if (NULL != (p = strstr(pkt_dat.msg[0], "CONNECT ")))
     {
       n = sscanf(p, "CONNECT %c", cid);
       ASSERT(1 == n);
-      wlinfo("+++ OK: p=%s| (n=%d) \n", p, n);
+      wlinfo("+++ OK: p=%s| (n=%d)\n", p, n);
     }
 
 errout:
-  _release_pkt_dat(&pkt_dat);
+  _release_pkt_dat(dev, &pkt_dat);
   return r;
 }
 
@@ -1845,19 +1964,24 @@ errout:
 static enum pkt_type_e gs2200m_send_bulk(FAR struct gs2200m_dev_s *dev,
                                          FAR struct gs2200m_send_msg *msg)
 {
-  enum pkt_type_e   r;
   enum spi_status_e s;
+  enum pkt_type_e   r;
   int  bulk_hdr_size;
-  char digits[5];
+  char digits[6];
   char cmd[32];
 
   memset(cmd, 0, sizeof(cmd));
+
+  if (MAX_PAYLOAD <= msg->len)
+    {
+      msg->len = MAX_PAYLOAD;
+    }
 
   /* Convert the data length to 4 ascii char */
 
   _to_ascii_char(msg->len, digits);
 
-  wlinfo("** cid=%c len=%d digits=%s \n", msg->cid, msg->len, digits);
+  wlinfo("** cid=%c len=%d digits=%s\n", msg->cid, msg->len, digits);
 
   if (msg->is_tcp)
     {
@@ -1869,8 +1993,11 @@ static enum pkt_type_e gs2200m_send_bulk(FAR struct gs2200m_dev_s *dev,
     }
   else
     {
-      wlinfo("** addr=%s port=%d \n", inet_ntoa(msg->addr.sin_addr),
-             ntohs(msg->addr.sin_port));
+      char inetaddr[INET_ADDRSTRLEN];
+
+      wlinfo("** addr=%s port=%d\n",
+             inet_ntoa_r(msg->addr.sin_addr, inetaddr, sizeof(inetaddr)),
+             NTOHS(msg->addr.sin_port));
 
       /* NOTE: See 7.5.3.2 Bulk Data Handling for UDP
        * <ESC>Y<CID><IP address>:<port>:<Data Length xxxx 4 ascii char><data>
@@ -1878,18 +2005,19 @@ static enum pkt_type_e gs2200m_send_bulk(FAR struct gs2200m_dev_s *dev,
 
       snprintf(cmd, sizeof(cmd), "%cY%c%s:%d:%s",
                ASCII_ESC, msg->cid,
-               inet_ntoa(msg->addr.sin_addr), ntohs(msg->addr.sin_port),
+               inet_ntoa_r(msg->addr.sin_addr, inetaddr, sizeof(inetaddr)),
+               NTOHS(msg->addr.sin_port),
                digits);
     }
 
   bulk_hdr_size = strlen(cmd);
-  memset(dev->tx_buff, 0, sizeof(dev->tx_buff));
   memcpy(dev->tx_buff, cmd, bulk_hdr_size);
   memcpy(dev->tx_buff + bulk_hdr_size, msg->buf, msg->len);
 
   /* Send the bulk data */
 
-  s = gs2200m_hal_write(dev, (char *)dev->tx_buff, msg->len + bulk_hdr_size);
+  s = gs2200m_hal_write(dev, (FAR char *)dev->tx_buff,
+                        msg->len + bulk_hdr_size);
 
   if (s == SPI_TIMEOUT)
     {
@@ -1912,21 +2040,10 @@ static enum pkt_type_e gs2200m_send_bulk(FAR struct gs2200m_dev_s *dev,
 static enum pkt_type_e gs2200m_close_conn(FAR struct gs2200m_dev_s *dev,
                                           char cid)
 {
-  struct pkt_dat_s pkt_dat;
-  enum pkt_type_e   r;
   char cmd[15];
 
-  /* Prepare cmd */
-
   snprintf(cmd, sizeof(cmd), "AT+NCLOSE=%c\r\n", cid);
-
-  /* Initialize pkt_dat and send */
-
-  memset(&pkt_dat, 0, sizeof(pkt_dat));
-  r = gs2200m_send_cmd(dev, cmd, &pkt_dat);
-
-  _release_pkt_dat(&pkt_dat);
-  return r;
+  return gs2200m_send_cmd2(dev, cmd);
 }
 
 /****************************************************************************
@@ -1940,7 +2057,7 @@ static enum pkt_type_e gs2200m_enable_bulk(FAR struct gs2200m_dev_s *dev,
   char cmd[20];
 
   snprintf(cmd, sizeof(cmd), "AT+BDATA=%d\r\n", on);
-  return gs2200m_send_cmd(dev, cmd, NULL);
+  return gs2200m_send_cmd2(dev, cmd);
 }
 
 /****************************************************************************
@@ -1951,10 +2068,10 @@ static enum pkt_type_e gs2200m_enable_bulk(FAR struct gs2200m_dev_s *dev,
 static enum pkt_type_e gs2200m_enable_echo(FAR struct gs2200m_dev_s *dev,
                                            uint8_t on)
 {
-  char cmd[8];
+  char cmd[9];
 
   snprintf(cmd, sizeof(cmd), "ATE%d\r\n", on);
-  return gs2200m_send_cmd(dev, cmd, NULL);
+  return gs2200m_send_cmd2(dev, cmd);
 }
 
 /****************************************************************************
@@ -1968,7 +2085,35 @@ static enum pkt_type_e gs2200m_activate_wrx(FAR struct gs2200m_dev_s *dev,
   char cmd[30];
 
   snprintf(cmd, sizeof(cmd), "AT+WRXACTIVE=%d\r\n", on);
-  return gs2200m_send_cmd(dev, cmd, NULL);
+  return gs2200m_send_cmd2(dev, cmd);
+}
+
+/****************************************************************************
+ * Name: gs2200m_powersave_wrx
+ * NOTE: See 9.1.1 Active Radio Receive
+ ****************************************************************************/
+
+static enum pkt_type_e gs2200m_powersave_wrx(FAR struct gs2200m_dev_s *dev,
+                                             uint8_t on)
+{
+  char cmd[30];
+
+  snprintf(cmd, sizeof(cmd), "AT+WRXPS=%d\r\n", on);
+  return gs2200m_send_cmd2(dev, cmd);
+}
+
+/****************************************************************************
+ * Name: gs2200m_syncloss
+ * NOTE: See 5.1.4 Sync loss interval
+ ****************************************************************************/
+
+static enum pkt_type_e gs2200m_syncloss(FAR struct gs2200m_dev_s *dev,
+                                            int val)
+{
+  char cmd[30];
+
+  snprintf(cmd, sizeof(cmd), "AT+WSYNCINTRL=%d\r\n", val);
+  return gs2200m_send_cmd2(dev, cmd);
 }
 
 /****************************************************************************
@@ -1983,7 +2128,7 @@ static enum pkt_type_e gs2200m_set_gpio(FAR struct gs2200m_dev_s *dev,
   char cmd[24];
 
   snprintf(cmd, sizeof(cmd), "AT+DGPIO=%d,%d\r\n", n, val);
-  return gs2200m_send_cmd(dev, cmd, NULL);
+  return gs2200m_send_cmd2(dev, cmd);
 }
 #endif
 
@@ -1999,9 +2144,19 @@ static enum pkt_type_e gs2200m_set_loglevel(FAR struct gs2200m_dev_s *dev,
   char cmd[16];
 
   snprintf(cmd, sizeof(cmd), "AT+LOGLVL=%d\r\n", level);
-  return gs2200m_send_cmd(dev, cmd, NULL);
+  return gs2200m_send_cmd2(dev, cmd);
 }
 #endif
+
+/****************************************************************************
+ * Name: gs2200m_closeallsock
+ * NOTE: See 7.1.5 Closing All Connections
+ ****************************************************************************/
+
+static void gs2200m_closeallsock(FAR struct gs2200m_dev_s *dev)
+{
+  gs2200m_send_cmd2(dev, "AT+NCLOSEALL\r\n");
+}
 
 /****************************************************************************
  * Name: gs2200m_get_version
@@ -2013,9 +2168,89 @@ static enum pkt_type_e gs2200m_get_version(FAR struct gs2200m_dev_s *dev)
   char cmd[16];
 
   snprintf(cmd, sizeof(cmd), "AT+VER=??\r\n");
-  return gs2200m_send_cmd(dev, cmd, NULL);
+  return gs2200m_send_cmd2(dev, cmd);
 }
 #endif
+
+/****************************************************************************
+ * Name: gs2200m_get_cstatus
+ ****************************************************************************/
+
+static enum pkt_type_e gs2200m_get_cstatus(FAR struct gs2200m_dev_s *dev,
+                                           FAR struct gs2200m_name_msg *msg)
+{
+  struct pkt_dat_s pkt_dat;
+  enum pkt_type_e  r;
+  char cmd[16];
+  int i;
+
+  snprintf(cmd, sizeof(cmd), "AT+CID=?\r\n");
+
+  /* Initialize pkt_dat and send */
+
+  memset(&pkt_dat, 0, sizeof(pkt_dat));
+  r = gs2200m_send_cmd(dev, cmd, &pkt_dat);
+
+  if (r != TYPE_OK || pkt_dat.n <= 2)
+    {
+      wlerr("+++ error: r=%d pkt_dat.msg[0]=%s\n",
+            r, pkt_dat.msg[0]);
+
+      goto errout;
+    }
+
+  /* Find cid in the connection status */
+
+  for (i = 1; i < pkt_dat.n - 2; i++)
+    {
+      int  n;
+      char c;
+      int  a[4];
+      int  p[2];
+      char type[8];
+      char mode[8];
+      memset(type, 0, sizeof(type));
+      memset(mode, 0, sizeof(mode));
+      n = sscanf(pkt_dat.msg[i], "%c %7s %6s %d %d %d.%d.%d.%d",
+                 &c, type, mode, &p[0], &p[1],
+                 &a[0], &a[1], &a[2], &a[3]);
+      ASSERT(9 == n);
+
+      wlinfo("[%d]: %c %s %s %d %d %d.%d.%d.%d\n",
+             i, c, type, mode, p[0], p[1],
+             a[0], a[1], a[2], a[3]);
+
+      if (c == msg->cid)
+        {
+          /* Set family,  port and address (remote only) */
+
+          msg->addr.sin_family = AF_INET;
+
+          if (msg->local)
+            {
+              msg->addr.sin_port = HTONS(p[0]);
+            }
+          else
+            {
+              char addr[20];
+              msg->addr.sin_port = HTONS(p[1]);
+              snprintf(addr, sizeof(addr),
+                       "%d.%d.%d.%d", a[0], a[1], a[2], a[3]);
+              inet_aton(addr, &msg->addr.sin_addr);
+            }
+
+          goto errout;
+        }
+    }
+
+  /* Not found */
+
+  r = TYPE_UNMATCH;
+
+errout:
+  _release_pkt_dat(dev, &pkt_dat);
+  return r;
+}
 
 /****************************************************************************
  * Name: gs2200m_ioctl_bind
@@ -2025,17 +2260,37 @@ static int gs2200m_ioctl_bind(FAR struct gs2200m_dev_s *dev,
                               FAR struct gs2200m_bind_msg *msg)
 {
   enum pkt_type_e type = TYPE_OK;
+  bool auto_assign = false;
+  char port_str[6];
+  uint16_t port;
   char cid = 'z';
   int ret = OK;
 
-  wlinfo("+++ start: (cid=%c, port=%s) \n", msg->cid, msg->port);
+  wlinfo("+++ start: (cid=%c, port=%s)\n", msg->cid, msg->port);
+
+  port = (uint16_t)strtol(msg->port, NULL, 10);
+
+  if (0 == port)
+    {
+      auto_assign = true;
+      port = PORT_START;
+    }
+
+retry:
+  snprintf(port_str, sizeof(port_str), "%d", port);
 
   /* Start TCP/UDP server and retrieve cid */
 
-  type = gs2200m_start_server(dev, msg->port, msg->is_tcp, &cid);
+  type = gs2200m_start_server(dev, port_str, msg->is_tcp, &cid);
 
   if (type != TYPE_OK)
     {
+      if (auto_assign && (port < PORT_END))
+        {
+          port++;
+          goto retry;
+        }
+
       ret = -EINVAL;
       goto errout;
     }
@@ -2046,12 +2301,10 @@ static int gs2200m_ioctl_bind(FAR struct gs2200m_dev_s *dev,
   _check_pkt_q_empty(dev, cid);
 
 errout:
-
   msg->type = type;
   msg->cid  = cid;
 
-  wlinfo("+++ end: type=%d (cid=%c) \n", type, cid);
-
+  wlinfo("+++ end: type=%d (cid=%c)\n", type, cid);
   return ret;
 }
 
@@ -2066,11 +2319,11 @@ static int gs2200m_ioctl_connect(FAR struct gs2200m_dev_s *dev,
   char cid = 'z';
   int ret = OK;
 
-  wlinfo("++ start: addr=%s port=%s \n", msg->addr, msg->port);
+  wlinfo("++ start: addr=%s port=%s\n", msg->addr, msg->port);
 
   /* Create TCP or UDP connection */
 
-  type = gs2200m_create_clnt(dev, msg->addr, msg->port, msg->type, &cid);
+  type = gs2200m_create_clnt(dev, msg, &cid);
 
   msg->type = type;
 
@@ -2097,19 +2350,13 @@ static int gs2200m_ioctl_connect(FAR struct gs2200m_dev_s *dev,
         break;
 
       default:
-        /* REVISIT:
-         * TYPE_BULK for other sockets might be received here,
-         * if the sockets have heavy bulk traffic.
-         * In this case, the packet should be queued and
-         * wait for a response to the NCTCP command.
-         */
-
-        wlerr("+++ error: type=%d \n", type);
-        ASSERT(false);
+        wlerr("+++ error: type=%d\n", type);
+        PANIC();
         ret = -EINVAL;
+        break;
     }
 
-  wlinfo("++ end: cid=%c (type=%d,ret=%d) \n", cid, type, ret);
+  wlinfo("++ end: cid=%c (type=%d,ret=%d)\n", cid, type, ret);
 
   return ret;
 }
@@ -2123,11 +2370,9 @@ static int gs2200m_ioctl_send(FAR struct gs2200m_dev_s *dev,
 {
   FAR struct gs2200m_bind_msg bmsg;
   enum pkt_type_e type;
-  bool assigned = false;
-  uint16_t s_port;
   int ret = OK;
 
-  wlinfo("+++ start: (cid=%c) \n", msg->cid);
+  wlinfo("+++ start: (cid=%c)\n", msg->cid);
 
 #ifdef USE_LED
   gs2200m_set_gpio(dev, LED_GPIO, 1);
@@ -2137,28 +2382,21 @@ static int gs2200m_ioctl_send(FAR struct gs2200m_dev_s *dev,
 
   if (!msg->is_tcp && 'z' == msg->cid)
     {
+      /* NOTE: need to assign port automatically */
+
       memset(&bmsg, 0, sizeof(bmsg));
+      ret = gs2200m_ioctl_bind(dev, &bmsg);
+      ASSERT(0 == ret);
 
-      for (s_port = 50000; s_port < 60000; s_port++)
-        {
-          snprintf(bmsg.port, sizeof(bmsg.port), "%d", s_port);
-
-          if (0 == gs2200m_ioctl_bind(dev, &bmsg))
-            {
-              assigned = true;
-              break;
-            }
-        }
-
-      ASSERT(assigned);
-      wlinfo("+++ cid is assigned for udp (cid=%c) \n", bmsg.cid);
+      wlinfo("+++ cid is assigned for udp (cid=%c)\n", bmsg.cid);
       msg->cid = bmsg.cid;
     }
 
   if (!_cid_is_set(&dev->valid_cid_bits, msg->cid))
     {
-      wlinfo("+++ already closed \n");
+      wlinfo("+++ already closed\n");
       type = TYPE_DISCONNECT;
+      ret = -ENOTCONN;
       goto errout;
     }
 
@@ -2167,8 +2405,7 @@ static int gs2200m_ioctl_send(FAR struct gs2200m_dev_s *dev,
   msg->type = type;
 
 errout:
-
-  if (type != TYPE_OK)
+  if (type != TYPE_OK && type != TYPE_DISCONNECT)
     {
       ret = -EINVAL;
     }
@@ -2177,9 +2414,8 @@ errout:
   gs2200m_set_gpio(dev, LED_GPIO, 0);
 #endif
 
-  wlinfo("+++ end: cid=%c len=%d type=%d \n",
+  wlinfo("+++ end: cid=%c len=%d type=%d\n",
          msg->cid, msg->len, type);
-
   return ret;
 }
 
@@ -2194,7 +2430,7 @@ static int gs2200m_ioctl_recv(FAR struct gs2200m_dev_s *dev,
   int      ret  = OK;
   uint8_t  c    = _cid_to_uint8(msg->cid);
 
-  wlinfo("+++ start: cid=%c \n", msg->cid);
+  wlinfo("+++ start: cid=%c\n", msg->cid);
 
 #ifdef USE_LED
   gs2200m_set_gpio(dev, LED_GPIO, 1);
@@ -2204,7 +2440,7 @@ static int gs2200m_ioctl_recv(FAR struct gs2200m_dev_s *dev,
     {
       /* REVISIT */
 
-      wlwarn("**** no packet for cid=%c \n", msg->cid);
+      wlwarn("**** no packet for cid=%c\n", msg->cid);
       ret = -EAGAIN;
       goto errout;
     }
@@ -2223,7 +2459,7 @@ static int gs2200m_ioctl_recv(FAR struct gs2200m_dev_s *dev,
       cont = _copy_data_from_pkt(dev, msg);
     }
 
-  wlinfo("+++ pkt_q_cnt[%c]=%d \n", msg->cid, dev->pkt_q_cnt[c]);
+  wlinfo("+++ pkt_q_cnt[%c]=%d\n", msg->cid, dev->pkt_q_cnt[c]);
 
   if (dev->pkt_q_cnt[c])
     {
@@ -2235,14 +2471,12 @@ static int gs2200m_ioctl_recv(FAR struct gs2200m_dev_s *dev,
   _control_pkt_q(dev);
 
 errout:
-
 #ifdef USE_LED
   gs2200m_set_gpio(dev, LED_GPIO, 0);
 #endif
 
-  wlinfo("+++ end: cid=%c len=%d type=%d ret=%d \n",
+  wlinfo("+++ end: cid=%c len=%d type=%d ret=%d\n",
          msg->cid, msg->len, msg->type, ret);
-
   return ret;
 }
 
@@ -2256,11 +2490,11 @@ static int gs2200m_ioctl_close(FAR struct gs2200m_dev_s *dev,
   enum pkt_type_e type = TYPE_OK;
   int ret = OK;
 
-  wlinfo("++ start: (cid=%c) \n", msg->cid);
+  wlinfo("++ start: (cid=%c)\n", msg->cid);
 
   if (!_cid_is_set(&dev->valid_cid_bits, msg->cid))
     {
-      wlinfo("+++ already closed \n");
+      wlinfo("+++ already closed\n");
       goto errout;
     }
 
@@ -2281,8 +2515,11 @@ errout:
 
   _remove_all_pkt(dev, _cid_to_uint8(msg->cid));
 
-  wlinfo("++ end: cid=%c type=%d \n", msg->cid, type);
+  /* Do packet flow control */
 
+  _control_pkt_q(dev);
+
+  wlinfo("++ end: cid=%c type=%d\n", msg->cid, type);
   return ret;
 }
 
@@ -2294,21 +2531,30 @@ static int gs2200m_ioctl_accept(FAR struct gs2200m_dev_s *dev,
                                 FAR struct gs2200m_accept_msg *msg)
 {
   FAR struct pkt_dat_s *pkt_dat;
+  struct gs2200m_name_msg nmsg;
+  enum pkt_type_e r;
   uint8_t c;
   char s_cid;
   char c_cid;
+  int ret = OK;
   int n;
 
-  wlinfo("+++ start: cid=%c \n", msg->cid);
+  wlinfo("+++ start: cid=%c\n", msg->cid);
 
   c = _cid_to_uint8(msg->cid);
   pkt_dat = (FAR struct pkt_dat_s *)dq_peek(&dev->pkt_q[c]);
-  ASSERT(pkt_dat);
+
+  if (NULL == pkt_dat)
+    {
+      wlerr("*** error: cid=%c not found\n", msg->cid);
+      ret = -EINVAL;
+      goto errout;
+    }
 
   n = sscanf(pkt_dat->msg[0], "CONNECT %c %c", &s_cid, &c_cid);
   ASSERT(2 == n);
 
-  wlinfo("+++ s_cid=%c c_cid=%c \n", s_cid, c_cid);
+  wlinfo("+++ s_cid=%c c_cid=%c\n", s_cid, c_cid);
 
   /* Remove the accept packet (actually CONNECT) from the queue */
 
@@ -2330,9 +2576,24 @@ static int gs2200m_ioctl_accept(FAR struct gs2200m_dev_s *dev,
       _notif_q_push(dev, c_cid);
     }
 
-  wlinfo("+++ end: type=%d (msg->cid=%c) \n", msg->type, msg->cid);
+  /* Obtain remote address info */
 
-  return OK;
+  nmsg.local = 0;
+  nmsg.cid = msg->cid;
+  r = gs2200m_get_cstatus(dev, &nmsg);
+
+  if (TYPE_OK != r)
+    {
+      wlerr("*** error: cid=%c not found\n", msg->cid);
+      ret = -EINVAL;
+      goto errout;
+    }
+
+  msg->addr = nmsg.addr;
+
+errout:
+  wlinfo("+++ end: type=%d (msg->cid=%c)\n", msg->type, msg->cid);
+  return ret;
 }
 
 /****************************************************************************
@@ -2343,6 +2604,10 @@ static int gs2200m_ioctl_assoc_sta(FAR struct gs2200m_dev_s *dev,
                                    FAR struct gs2200m_assoc_msg *msg)
 {
   enum pkt_type_e t;
+
+  /* Remember assoc request msg for reconnection */
+
+  memcpy(&dev->reconnect_msg, msg, sizeof(struct gs2200m_assoc_msg));
 
   /* Disassociate */
 
@@ -2384,7 +2649,7 @@ static int gs2200m_ioctl_assoc_sta(FAR struct gs2200m_dev_s *dev,
 
   if (TYPE_OK != gs2200m_calc_key(dev, msg->ssid, msg->key))
     {
-      wlerr("*** error: invalid wpa2 key (key:%s) \n", msg->key);
+      wlerr("*** error: invalid wpa2 key (key:%s)\n", msg->key);
       return -1;
     }
 
@@ -2392,9 +2657,16 @@ static int gs2200m_ioctl_assoc_sta(FAR struct gs2200m_dev_s *dev,
 
   if (TYPE_OK != gs2200m_join_network(dev, msg->ssid, 0))
     {
-      wlerr("*** error: failed to join (ssid:%s) \n", msg->ssid);
+      wlerr("*** error: failed to join (ssid:%s)\n", msg->ssid);
       return -1;
     }
+
+  dev->disassociate_flag = false;
+
+  /* Sync lost time interval */
+
+  t = gs2200m_syncloss(dev, CONFIG_WL_GS2200M_SYNC_INTERVAL);
+  ASSERT(TYPE_OK == t);
 
   return OK;
 }
@@ -2437,18 +2709,33 @@ static int gs2200m_ioctl_assoc_ap(FAR struct gs2200m_dev_s *dev,
   t = gs2200m_set_auth(dev, 2);
   ASSERT(TYPE_OK == t);
 
-  /* Set security mode */
+#ifdef CONFIG_WL_GS2200M_ENABLE_WEP
+  /* Set security mode (WEP) */
 
-  t = gs2200m_set_security(dev, 2);
+  t = gs2200m_set_security(dev, SEC_MODE_WEP);
   ASSERT(TYPE_OK == t);
 
   /* Set WEP key */
 
   if (TYPE_OK != gs2200m_set_wepkey(dev, msg->key))
     {
-      wlerr("*** error: invalid wepkey: %s \n", msg->key);
+      wlerr("*** error: invalid wepkey: %s\n", msg->key);
       return -1;
     }
+#else
+  /* Set security mode (WPA2-PSK) */
+
+  t = gs2200m_set_security(dev, SEC_MODE_WPA2PSK);
+  ASSERT(TYPE_OK == t);
+
+  /* Set WPA-PSK and WPA2-PSK Passphrase */
+
+  if (TYPE_OK != gs2200m_set_wpa2pf(dev, msg->key))
+    {
+      wlerr("*** error: invalid passphrase: %s\n", msg->key);
+      return -1;
+    }
+#endif
 
   /* Start DHCP server */
 
@@ -2459,9 +2746,96 @@ static int gs2200m_ioctl_assoc_ap(FAR struct gs2200m_dev_s *dev,
 
   if (TYPE_OK != gs2200m_join_network(dev, msg->ssid, msg->ch))
     {
-      wlerr("*** error: failed to join (ssid:%s, ch:%d) \n",
+      wlerr("*** error: failed to join (ssid:%s, ch:%d)\n",
             msg->ssid, msg->ch);
       return -1;
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: gs2200m_gs2200m_ioctl_iwreq
+ ****************************************************************************/
+
+static int gs2200m_ioctl_iwreq(FAR struct gs2200m_dev_s *dev,
+                               FAR struct gs2200m_ifreq_msg *msg)
+{
+  struct iwreq *res = (struct iwreq *)&msg->ifr;
+  struct pkt_dat_s pkt_dat;
+  enum pkt_type_e  r;
+  char cmd[64];
+  char cmd2[64];
+  int  n = 0;
+
+  snprintf(cmd, sizeof(cmd), "AT+NSTAT=?\r\n");
+
+  /* Initialize pkt_dat and send */
+
+  memset(&pkt_dat, 0, sizeof(pkt_dat));
+  r = gs2200m_send_cmd(dev, cmd, &pkt_dat);
+
+  if (r != TYPE_OK || pkt_dat.n <= 7)
+    {
+      wlerr("+++ error: r=%d pkt_dat.msg[0]=%s\n",
+            r, pkt_dat.msg[0]);
+
+      goto errout;
+    }
+
+  /* Find cid in the connection status */
+
+  if (msg->cmd == SIOCGIWNWID)
+    {
+      if (strstr(pkt_dat.msg[2], "BSSID=") == NULL)
+        {
+          wlerr("+++ error: pkt_dat.msg[2]=%s\n", pkt_dat.msg[2]);
+          goto errout;
+        }
+
+      n = sscanf(pkt_dat.msg[2], "BSSID=%c:%c:%c:%c:%c:%c %s",
+                 &res->u.ap_addr.sa_data[0], &res->u.ap_addr.sa_data[1],
+                 &res->u.ap_addr.sa_data[2], &res->u.ap_addr.sa_data[3],
+                 &res->u.ap_addr.sa_data[4], &res->u.ap_addr.sa_data[5],
+                 cmd);
+      ASSERT(7 == n);
+      wlinfo("BSSID:%02X:%02X:%02X:%02X:%02X:%02X\n",
+             res->u.ap_addr.sa_data[0], res->u.ap_addr.sa_data[1],
+             res->u.ap_addr.sa_data[2], res->u.ap_addr.sa_data[3],
+             res->u.ap_addr.sa_data[4], res->u.ap_addr.sa_data[5]);
+    }
+  else if (msg->cmd == SIOCGIWFREQ)
+    {
+      if (strstr(pkt_dat.msg[2], "CHANNEL=") == NULL)
+        {
+          wlerr("+++ error: pkt_dat.msg[2]=%s\n", pkt_dat.msg[2]);
+          goto errout;
+        }
+
+      n = sscanf(pkt_dat.msg[2], "%s CHANNEL=%" SCNd32 " %s",
+                 cmd, &res->u.freq.m, cmd2);
+      ASSERT(3 == n);
+      wlinfo("CHANNEL:%" PRId32 "\n", res->u.freq.m);
+    }
+  else if (msg->cmd == SIOCGIWSENS)
+    {
+      if (strstr(pkt_dat.msg[3], "RSSI=") == NULL)
+        {
+          wlerr("+++ error: pkt_dat.msg[3]=%s\n", pkt_dat.msg[3]);
+          goto errout;
+        }
+
+      n = sscanf(pkt_dat.msg[3], "RSSI=%" SCNd8, &res->u.qual.level);
+      ASSERT(1 == n);
+      wlinfo("RSSI:%d\n", res->u.qual.level);
+    }
+
+errout:
+  _release_pkt_dat(dev, &pkt_dat);
+
+  if (n == 0)
+    {
+      return -EINVAL;
     }
 
   return OK;
@@ -2480,19 +2854,32 @@ static int gs2200m_ioctl_ifreq(FAR struct gs2200m_dev_s *dev,
   bool getreq = false;
   int ret = OK;
 
-  wlinfo("+++ start: cmd=%x \n", msg->cmd);
+  wlinfo("+++ start: cmd=%" PRIx32 "\n", msg->cmd);
 
   inaddr = (FAR struct sockaddr_in *)&msg->ifr.ifr_addr;
 
   switch (msg->cmd)
     {
+      case SIOCGIFFLAGS:
+        getreq = true;
+        msg->ifr.ifr_flags = dev->net_dev.d_flags;
+        break;
+
       case SIOCGIFHWADDR:
         getreq = true;
         memcpy(&msg->ifr.ifr_hwaddr.sa_data,
                dev->net_dev.d_mac.ether.ether_addr_octet, 6);
         break;
 
-      case SIOCSIFADDR:
+      case SIOCGIFADDR:
+        getreq = true;
+        memcpy(&inaddr->sin_addr,
+               &dev->net_dev.d_ipaddr,
+               sizeof(dev->net_dev.d_ipaddr)
+               );
+        break;
+
+    case SIOCSIFADDR:
         memcpy(&dev->net_dev.d_ipaddr,
                &inaddr->sin_addr, sizeof(inaddr->sin_addr)
                );
@@ -2510,6 +2897,12 @@ static int gs2200m_ioctl_ifreq(FAR struct gs2200m_dev_s *dev,
                );
         break;
 
+      case SIOCGIWNWID:
+      case SIOCGIWFREQ:
+      case SIOCGIWSENS:
+        ret = gs2200m_ioctl_iwreq(dev, msg);
+        break;
+
       default:
         ret = -EINVAL;
         break;
@@ -2517,18 +2910,52 @@ static int gs2200m_ioctl_ifreq(FAR struct gs2200m_dev_s *dev,
 
   if (false == getreq && OK == ret)
     {
+      char inetaddr[INET_ADDRSTRLEN];
       memcpy(&in[0], &dev->net_dev.d_ipaddr, sizeof(in[0]));
       memcpy(&in[1], &dev->net_dev.d_netmask, sizeof(in[1]));
       memcpy(&in[2], &dev->net_dev.d_draddr, sizeof(in[2]));
-      strncpy(addr[0], inet_ntoa(in[0]), sizeof(addr[0]));
-      strncpy(addr[1], inet_ntoa(in[1]), sizeof(addr[1]));
-      strncpy(addr[2], inet_ntoa(in[2]), sizeof(addr[2]));
+      strlcpy(addr[0], inet_ntoa_r(in[0], inetaddr, sizeof(inetaddr)),
+              sizeof(addr[0]));
+      strlcpy(addr[1], inet_ntoa_r(in[1], inetaddr, sizeof(inetaddr)),
+              sizeof(addr[1]));
+      strlcpy(addr[2], inet_ntoa_r(in[2], inetaddr, sizeof(inetaddr)),
+              sizeof(addr[2]));
 
       gs2200m_set_addresses(dev, addr[0], addr[1], addr[2]);
     }
 
-  wlinfo("+++ end: \n");
+  wlinfo("+++ end:\n");
   return ret;
+}
+
+/****************************************************************************
+ * Name: gs2200m_ioctl_name
+ ****************************************************************************/
+
+static int gs2200m_ioctl_name(FAR struct gs2200m_dev_s *dev,
+                              FAR struct gs2200m_name_msg *msg)
+{
+  enum pkt_type_e r;
+
+  /* Obtain connection status */
+
+  r = gs2200m_get_cstatus(dev, msg);
+  if (r != TYPE_OK)
+    {
+      return -EINVAL;
+    }
+
+  if (msg->local)
+    {
+      /* Copy local address from net_dev */
+
+      memcpy(&msg->addr.sin_addr,
+             &dev->net_dev.d_ipaddr,
+             sizeof(msg->addr.sin_addr)
+             );
+    }
+
+  return 0;
 }
 
 /****************************************************************************
@@ -2541,15 +2968,14 @@ static int gs2200m_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   FAR struct gs2200m_dev_s *dev;
   int ret = -EINVAL;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  dev = (FAR struct gs2200m_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  dev = inode->i_private;
 
   /* Lock the device */
 
-  ret = gs2200m_lock(dev);
+  ret = nxmutex_lock(&dev->dev_lock);
   if (ret < 0)
     {
       /* Return only if the task was canceled */
@@ -2643,6 +3069,15 @@ static int gs2200m_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
           break;
         }
 
+      case GS2200M_IOC_NAME:
+        {
+          struct gs2200m_name_msg *msg =
+            (struct gs2200m_name_msg *)arg;
+
+          ret = gs2200m_ioctl_name(dev, msg);
+          break;
+        }
+
       default:
         DEBUGPANIC();
         break;
@@ -2654,7 +3089,7 @@ static int gs2200m_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Unlock the device */
 
-  gs2200m_unlock(dev);
+  nxmutex_unlock(&dev->dev_lock);
   return ret;
 }
 
@@ -2670,13 +3105,13 @@ static int gs2200m_poll(FAR struct file *filep, FAR struct pollfd *fds,
   int ret = OK;
 
   wlinfo("== setup:%d\n", (int)setup);
-  DEBUGASSERT(filep && fds);
+  DEBUGASSERT(fds);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  dev = (FAR struct gs2200m_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  dev = inode->i_private;
 
-  ret = gs2200m_lock(dev);
+  ret = nxmutex_lock(&dev->dev_lock);
   if (ret < 0)
     {
       /* Return if the task was canceled */
@@ -2710,9 +3145,7 @@ static int gs2200m_poll(FAR struct file *filep, FAR struct pollfd *fds,
 
       if (0 < n)
         {
-          dev->pfd->revents |= POLLIN;
-          nxsem_post(dev->pfd->sem);
-          wlinfo("==== _notif_q_count=%d \n", n);
+          poll_notify(&fds, 1, POLLIN);
         }
     }
   else
@@ -2721,7 +3154,7 @@ static int gs2200m_poll(FAR struct file *filep, FAR struct pollfd *fds,
     }
 
 errout:
-  gs2200m_unlock(dev);
+  nxmutex_unlock(&dev->dev_lock);
   return ret;
 }
 
@@ -2735,7 +3168,7 @@ static void gs2200m_irq_worker(FAR void *arg)
   enum pkt_type_e t = TYPE_ERROR;
   struct pkt_dat_s *pkt_dat;
   bool ignored = false;
-  bool pushed  = false;
+  bool over;
   uint8_t c;
   char s_cid;
   char c_cid;
@@ -2748,7 +3181,7 @@ static void gs2200m_irq_worker(FAR void *arg)
 
   do
     {
-      ret = gs2200m_lock(dev);
+      ret = nxmutex_lock(&dev->dev_lock);
 
       /* The only failure would be if the worker thread were canceled.  That
        * is very unlikely, however.
@@ -2758,12 +3191,13 @@ static void gs2200m_irq_worker(FAR void *arg)
     }
   while (ret < 0);
 
+repeat:
   n = dev->lower->dready(&ec);
-  wlinfo("== start (dready=%d, ec=%d) \n", n, ec);
+  wlinfo("== start (dready=%d, ec=%d)\n", n, ec);
 
   /* Allocate a new pkt_dat and initialize it */
 
-  pkt_dat = (FAR struct pkt_dat_s *)kmm_malloc(sizeof(struct pkt_dat_s));
+  pkt_dat = kmm_malloc(sizeof(struct pkt_dat_s));
   ASSERT(NULL != pkt_dat);
 
   memset(pkt_dat, 0, sizeof(struct pkt_dat_s));
@@ -2773,12 +3207,39 @@ static void gs2200m_irq_worker(FAR void *arg)
 
   t = gs2200m_recv_pkt(dev, pkt_dat);
 
+  if (true == dev->disassociate_flag)
+    {
+      /* Disassociate recovery */
+
+      wlwarn("=== receive DISASSOCIATE\n");
+      dev->valid_cid_bits = 0;
+
+      do
+        {
+          /* Discard incoming packets until timeout happens */
+
+          while (gs2200m_recv_pkt(dev, NULL) != TYPE_TIMEOUT)
+            {
+              nxsig_usleep(100 * 1000);
+            }
+        }
+      while (gs2200m_ioctl_assoc_sta(dev, &dev->reconnect_msg) != OK);
+
+      wlwarn("=== recover DISASSOCIATE\n");
+      dev->disassociate_flag = false;
+
+      gs2200m_closeallsock(dev);
+      _notif_q_push(dev, DISASSOCIATION_CID);
+
+      goto errout;
+    }
+
   if (TYPE_ERROR == t || 'z' == pkt_dat->cid)
     {
       /* An error event? */
 
-      wlinfo("=== ignore (type=%d msg[0]=%s|) \n",
-             pkt_dat->type, pkt_dat->msg[0]);
+      wlerr("=== ignore (type=%d msg[0]=%s|)\n",
+            pkt_dat->type, pkt_dat->msg[0]);
 
       ignored = true;
       goto errout;
@@ -2788,7 +3249,7 @@ static void gs2200m_irq_worker(FAR void *arg)
 
   if (!_cid_is_set(&dev->valid_cid_bits, pkt_dat->cid))
     {
-      wlinfo("=== already closed (type=%d msg[0]=%s|) \n",
+      wlinfo("=== already closed (type=%d msg[0]=%s|)\n",
              pkt_dat->type, pkt_dat->msg[0]);
 
       ignored = true;
@@ -2802,13 +3263,13 @@ static void gs2200m_irq_worker(FAR void *arg)
   dq_addlast((FAR dq_entry_t *)pkt_dat, &dev->pkt_q[c]);
   dev->pkt_q_cnt[c]++;
 
-  wlinfo("=== added to qkt_q[%d] t=%d \n", c, t);
+  wlinfo("=== added to qkt_q[%d] t=%d\n", c, t);
 
   /* When a DISCONNECT packet received, disable the cid */
 
   if (TYPE_DISCONNECT == t)
     {
-      wlinfo("=== received DISCONNECT for cid=%c \n", pkt_dat->cid);
+      wlinfo("=== received DISCONNECT for cid=%c\n", pkt_dat->cid);
       _enable_cid(&dev->valid_cid_bits, pkt_dat->cid, false);
     }
 
@@ -2821,7 +3282,6 @@ static void gs2200m_irq_worker(FAR void *arg)
   if (!_cid_is_set(&dev->aip_cid_bits, pkt_dat->cid))
     {
       _notif_q_push(dev, pkt_dat->cid);
-      pushed = true;
     }
 
   /* Check if the packet is CONNECT event from client */
@@ -2831,7 +3291,7 @@ static void gs2200m_irq_worker(FAR void *arg)
       n = sscanf(pkt_dat->msg[0], "CONNECT %c %c", &s_cid, &c_cid);
       ASSERT(2 == n);
 
-      wlinfo("==== CONNECT requested (%c:%c) pfd=%p \n",
+      wlinfo("==== CONNECT requested (%c:%c) pfd=%p\n",
              s_cid, c_cid, dev->pfd);
 
       /* Check pkt_q for the new client is empty */
@@ -2847,32 +3307,32 @@ static void gs2200m_irq_worker(FAR void *arg)
       _enable_cid(&dev->aip_cid_bits, c_cid, true);
     }
 
-  if (dev->pfd && pushed)
-    {
-      /* If poll() waits and cid has been pushed to the queue, notify  */
+  /* Do packet flow control */
 
-      dev->pfd->revents |= POLLIN;
-      nxsem_post(dev->pfd->sem);
-    }
+  over = _control_pkt_q(dev);
 
 errout:
+  if (ignored)
+    {
+      _release_pkt_dat(dev, pkt_dat);
+      kmm_free(pkt_dat);
+      ignored = false;
+    }
+
+  n = dev->lower->dready(&ec);
+
+  wlinfo("== end: cid=%c (dready=%d, ec=%d) type=%d\n",
+         pkt_dat->cid, n, ec, t);
+
+  if (1 == n && !over)
+    {
+      goto repeat;
+    }
 
   /* NOTE: Enable gs2200m irq which was disabled in gs2200m_irq() */
 
   dev->lower->enable();
-
-  n = dev->lower->dready(&ec);
-
-  wlinfo("== end: cid=%c (dready=%d, ec=%d) type=%d \n",
-         pkt_dat->cid, n, ec, t);
-
-  if (ignored)
-    {
-      _release_pkt_dat(pkt_dat);
-      kmm_free(pkt_dat);
-    }
-
-  gs2200m_unlock(dev);
+  nxmutex_unlock(&dev->dev_lock);
 }
 
 /****************************************************************************
@@ -2882,25 +3342,21 @@ errout:
 static int gs2200m_irq(int irq, FAR void *context, FAR void *arg)
 {
   FAR struct gs2200m_dev_s *dev;
-  int ec = 0;
 
   DEBUGASSERT(arg != NULL);
   dev = (FAR struct gs2200m_dev_s *)arg;
 
-  dev->lower->dready(&ec);
-  ASSERT(0 < ec);
+  wlinfo(">>>>\n");
 
-  wlinfo(">>>> \n");
+  if (!work_available(&dev->irq_work))
+    {
+      wlwarn("*** warning: there is still pending work ****\n");
+      return 0;
+    }
 
   /* NOTE: Disable gs2200m irq during processing */
 
   dev->lower->disable();
-
-  if (!work_available(&dev->irq_work))
-    {
-      wlwarn("*** warning: there is still pending work **** \n");
-      return 0;
-    }
 
   return work_queue(GS2200MWORK, &dev->irq_work, gs2200m_irq_worker,
                     (FAR void *)dev, 0);
@@ -2918,7 +3374,7 @@ static int gs2200m_start(FAR struct gs2200m_dev_s *dev)
 
   /* Check boot msg */
 
-  wlinfo("*** wait for boot msg \n");
+  wlinfo("*** wait for boot msg\n");
 
   while (dev->lower->dready(NULL))
     {
@@ -2952,6 +3408,11 @@ static int gs2200m_start(FAR struct gs2200m_dev_s *dev)
   /* Activate RX */
 
   t = gs2200m_activate_wrx(dev, 1);
+  ASSERT(TYPE_OK == t);
+
+  /* Power save disable */
+
+  t = gs2200m_powersave_wrx(dev, 0);
   ASSERT(TYPE_OK == t);
 
   /* Set Bulk Data mode */
@@ -3003,6 +3464,7 @@ static int gs2200m_initialize(FAR struct gs2200m_dev_s *dev,
   /* Attach interrupt handler */
 
   lower->attach(gs2200m_irq, dev);
+  dev->int_enabled = true;
 
   /* Start gs2200m by sending commands */
 
@@ -3028,8 +3490,7 @@ FAR void *gs2200m_register(FAR const char *devpath,
   int size;
 
   size = sizeof(struct gs2200m_dev_s);
-  dev = (FAR struct gs2200m_dev_s *)kmm_malloc(size);
-
+  dev = kmm_malloc(size);
   if (!dev)
     {
       wlerr("Failed to allocate instance.\n");
@@ -3041,13 +3502,17 @@ FAR void *gs2200m_register(FAR const char *devpath,
   dev->spi   = spi;
   dev->path  = strdup(devpath);
   dev->lower = lower;
-
-  nxsem_init(&dev->dev_sem, 0, 1);
-
   dev->pfd   = NULL;
 
-  ret = gs2200m_initialize(dev, lower);
+  nxmutex_init(&dev->dev_lock);
 
+  if (!dev->path)
+    {
+      wlerr("Failed to allocate driver path.\n");
+      goto errout;
+    }
+
+  ret = gs2200m_initialize(dev, lower);
   if (ret < 0)
     {
       wlerr("Failed to initialize driver: %d\n", ret);
@@ -3055,18 +3520,29 @@ FAR void *gs2200m_register(FAR const char *devpath,
     }
 
   ret = register_driver(devpath, &g_gs2200m_fops, 0666, dev);
-
   if (ret < 0)
     {
       wlerr("Failed to register driver: %d\n", ret);
       goto errout;
     }
 
-  ret = netdev_register(&dev->net_dev, NET_LL_ETHERNET);
+  ret = netdev_register(&dev->net_dev, NET_LL_IEEE80211);
+  if (ret < 0)
+    {
+      unregister_driver(devpath);
+      goto errout;
+    }
 
-  return (FAR void *)dev;
+  /* Set d_pktsize and d_llhdrlen to show mtu info correctly */
+
+  dev->net_dev.d_pktsize  = MAX_PKT_LEN;
+  dev->net_dev.d_llhdrlen = 0;
+
+  return dev;
 
 errout:
+  nxmutex_destroy(&dev->dev_lock);
+  lib_free(dev->path);
   kmm_free(dev);
   return NULL;
 }

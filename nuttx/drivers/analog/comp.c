@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/analog/comp.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Mateusz Szafoni <raiden00@railab.me>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,6 +30,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <poll.h>
@@ -71,7 +59,7 @@ static int     comp_notify(FAR struct comp_dev_s *dev, uint8_t val);
  * Private Data
  ****************************************************************************/
 
-static const struct file_operations comp_fops =
+static const struct file_operations g_comp_fops =
 {
   comp_open,                    /* open */
   comp_close,                   /* close */
@@ -79,10 +67,9 @@ static const struct file_operations comp_fops =
   NULL,                         /* write */
   NULL,                         /* seek */
   comp_ioctl,                   /* ioctl */
+  NULL,                         /* mmap */
+  NULL,                         /* truncate */
   comp_poll                     /* poll */
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL                        /* unlink */
-#endif
 };
 
 static const struct comp_callback_s g_comp_callback =
@@ -95,73 +82,22 @@ static const struct comp_callback_s g_comp_callback =
  ****************************************************************************/
 
 /****************************************************************************
- * Name: comp_pollnotify
- *
- * Description:
- *   This function is called to notificy any waiters of poll-reated events.
- *
- ****************************************************************************/
-
-static void comp_pollnotify(FAR struct comp_dev_s *dev,
-                            pollevent_t eventset)
-{
-  int i;
-
-  if (eventset & POLLERR)
-    {
-      eventset &= ~(POLLOUT | POLLIN);
-    }
-
-  for (i = 0; i < CONFIG_DEV_COMP_NPOLLWAITERS; i++)
-    {
-      FAR struct pollfd *fds = dev->d_fds[i];
-
-      if (fds)
-        {
-          fds->revents |= eventset & (fds->events | POLLERR | POLLHUP);
-
-          if ((fds->revents & (POLLOUT | POLLHUP)) == (POLLOUT | POLLHUP))
-            {
-              /* POLLOUT and POLLHUP are mutually exclusive. */
-
-              fds->revents &= ~POLLOUT;
-            }
-
-          if (fds->revents != 0)
-            {
-              ainfo("Report events: %02x\n", fds->revents);
-              nxsem_post(fds->sem);
-            }
-        }
-    }
-}
-
-/****************************************************************************
- * Name: comp_semtake
- ****************************************************************************/
-
-static int comp_semtake(FAR sem_t *sem)
-{
-  return nxsem_wait_uninterruptible(sem);
-}
-
-/****************************************************************************
  * Name: comp_poll
  ****************************************************************************/
 
 static int comp_poll(FAR struct file *filep, FAR struct pollfd *fds,
                      bool setup)
 {
-  FAR struct inode      *inode    = filep->f_inode;
-  FAR struct comp_dev_s *dev      = inode->i_private;
-  int                    ret      = OK;
+  FAR struct inode      *inode = filep->f_inode;
+  FAR struct comp_dev_s *dev   = inode->i_private;
+  int                    ret   = OK;
   int                    i;
 
   DEBUGASSERT(dev && fds);
 
   /* Are we setting up the poll?  Or tearing it down? */
 
-  ret = comp_semtake(&dev->ad_sem);
+  ret = nxmutex_lock(&dev->ad_lock);
   if (ret < 0)
     {
       return ret;
@@ -189,8 +125,8 @@ static int comp_poll(FAR struct file *filep, FAR struct pollfd *fds,
 
       if (i >= CONFIG_DEV_COMP_NPOLLWAITERS)
         {
-          fds->priv   = NULL;
-          ret          = -EBUSY;
+          fds->priv = NULL;
+          ret       = -EBUSY;
           goto errout;
         }
     }
@@ -203,19 +139,19 @@ static int comp_poll(FAR struct file *filep, FAR struct pollfd *fds,
 #ifdef CONFIG_DEBUG_FEATURES
       if (!slot)
         {
-          ret              = -EIO;
+          ret = -EIO;
           goto errout;
         }
 #endif
 
       /* Remove all memory of the poll setup */
 
-      *slot                = NULL;
-      fds->priv            = NULL;
+      *slot     = NULL;
+      fds->priv = NULL;
     }
 
 errout:
-  nxsem_post(&dev->ad_sem);
+  nxmutex_unlock(&dev->ad_lock);
   return ret;
 }
 
@@ -223,8 +159,8 @@ errout:
  * Name: comp_notify
  *
  * Description:
- *   This function is called from the lower half driver to notify
- *   the change of the comparator output.
+ *   This function is called from the lower half driver to notify the change
+ *   of the comparator output.
  *
  ****************************************************************************/
 
@@ -234,7 +170,7 @@ static int comp_notify(FAR struct comp_dev_s *dev, uint8_t val)
 
   dev->val = val;
 
-  comp_pollnotify(dev, POLLIN);
+  poll_notify(dev->d_fds, CONFIG_DEV_COMP_NPOLLWAITERS, POLLIN);
   nxsem_post(&dev->ad_readsem);
 
   return 0;
@@ -255,13 +191,15 @@ static int comp_open(FAR struct file *filep)
   uint8_t                tmp;
   int                    ret;
 
-  /* If the port is the middle of closing, wait until the close is finished */
+  /* If the port is the middle of closing, wait until the close is
+   * finished.
+   */
 
-  ret = nxsem_wait(&dev->ad_sem);
+  ret = nxmutex_lock(&dev->ad_lock);
   if (ret >= 0)
     {
-      /* Increment the count of references to the device.  If this the first
-       * time that the driver has been opened for this device, then
+      /* Increment the count of references to the device.  If this is the
+       * first time that the driver has been opened for this device, then
        * initialize the device.
        */
 
@@ -274,7 +212,9 @@ static int comp_open(FAR struct file *filep)
         }
       else
         {
-          /* Check if this is the first time that the driver has been opened. */
+          /* Check if this is the first time that the driver has been
+           * opened.
+           */
 
           if (tmp == 1)
             {
@@ -293,7 +233,7 @@ static int comp_open(FAR struct file *filep)
             }
         }
 
-      nxsem_post(&dev->ad_sem);
+      nxmutex_unlock(&dev->ad_lock);
     }
 
   return ret;
@@ -310,12 +250,12 @@ static int comp_open(FAR struct file *filep)
 
 static int comp_close(FAR struct file *filep)
 {
-  FAR struct inode     *inode = filep->f_inode;
+  FAR struct inode      *inode = filep->f_inode;
   FAR struct comp_dev_s *dev   = inode->i_private;
   irqstate_t            flags;
   int                   ret;
 
-  ret = nxsem_wait(&dev->ad_sem);
+  ret = nxmutex_lock(&dev->ad_lock);
   if (ret >= 0)
     {
       /* Decrement the references to the driver.  If the reference count will
@@ -325,7 +265,7 @@ static int comp_close(FAR struct file *filep)
       if (dev->ad_ocount > 1)
         {
           dev->ad_ocount--;
-          nxsem_post(&dev->ad_sem);
+          nxmutex_unlock(&dev->ad_lock);
         }
       else
         {
@@ -339,7 +279,7 @@ static int comp_close(FAR struct file *filep)
           dev->ad_ops->ao_shutdown(dev);          /* Disable the COMP */
           leave_critical_section(flags);
 
-          nxsem_post(&dev->ad_sem);
+          nxmutex_unlock(&dev->ad_lock);
         }
     }
 
@@ -408,13 +348,11 @@ int comp_register(FAR const char *path, FAR struct comp_dev_s *dev)
 
   dev->ad_ocount = 0;
 
-  /* Initialize semaphores */
+  /* Initialize mutex */
 
-  nxsem_init(&dev->ad_sem, 0, 1);
-  nxsem_setprotocol(&dev->ad_sem, SEM_PRIO_NONE);
+  nxmutex_init(&dev->ad_lock);
 
   nxsem_init(&dev->ad_readsem, 0, 0);
-  nxsem_setprotocol(&dev->ad_readsem, SEM_PRIO_NONE);
 
   /* Bind the upper-half callbacks to the lower half COMP driver */
 
@@ -426,16 +364,19 @@ int comp_register(FAR const char *path, FAR struct comp_dev_s *dev)
       if (ret < 0)
         {
           aerr("ERROR: Failed to bind callbacks: %d\n", ret);
+          nxmutex_destroy(&dev->ad_lock);
+          nxsem_destroy(&dev->ad_readsem);
           return ret;
         }
     }
 
   /* Register the COMP character driver */
 
-  ret =  register_driver(path, &comp_fops, 0444, dev);
+  ret = register_driver(path, &g_comp_fops, 0444, dev);
   if (ret < 0)
     {
-      nxsem_destroy(&dev->ad_sem);
+      nxmutex_destroy(&dev->ad_lock);
+      nxsem_destroy(&dev->ad_readsem);
     }
 
   return ret;

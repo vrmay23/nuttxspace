@@ -1,35 +1,22 @@
 /****************************************************************************
- * arch/arm/src/max326xx/max32660_lowputc.c
+ * arch/arm/src/max326xx/max32660/max32660_lowputc.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,10 +28,11 @@
 
 #include <stdbool.h>
 #include <fixedmath.h>
+#include <assert.h>
 
-#include "up_arch.h"
-#include "up_internal.h"
+#include <nuttx/spinlock.h>
 
+#include "arm_internal.h"
 #include "hardware/max326_memorymap.h"
 #include "hardware/max326_pinmux.h"
 #include "hardware/max326_uart.h"
@@ -100,6 +88,8 @@
  ****************************************************************************/
 
 #ifdef HAVE_UART_CONSOLE
+static spinlock_t g_max32660_lowputc_lock = SP_UNLOCKED;
+
 /* UART console configuration */
 
 static const struct uart_config_s g_console_config =
@@ -159,7 +149,7 @@ static const struct uart_config_s g_console_config =
 
 #ifdef HAVE_UART_DEVICE
 static void max326_setbaud(uintptr_t base,
-                           FAR const struct uart_config_s *config)
+                           const struct uart_config_s *config)
 {
   ub32_t div;
   ub32_t pclk;
@@ -216,20 +206,20 @@ static void max326_setbaud(uintptr_t base,
 }
 #endif
 
-/************************************************************************************
+/****************************************************************************
  * Public Functions
- ************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************
+/****************************************************************************
  * Name: max326_lowsetup
  *
  * Description:
- *   Called at the very beginning of _start.  Performs low level initialization
- *   including setup of the console UART.  This UART initialization is done
- *   early so that the serial console is available for debugging very early in
- *   the boot sequence.
+ *   Called at the very beginning of _start.
+ *   Performs low level initialization including setup of the console UART.
+ *   This UART initialization is done early so that the serial console
+ *   is available for debugging very early in the boot sequence.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 void max326_lowsetup(void)
 {
@@ -260,7 +250,7 @@ void max326_lowsetup(void)
 
   max326_uart1_enableclk();
 
-   /* Configure UART1 pins */
+  /* Configure UART1 pins */
 
   max326_gpio_config(GPIO_UART1_RX);
   max326_gpio_config(GPIO_UART1_TX);
@@ -291,7 +281,7 @@ void max326_lowsetup(void)
 
 #ifdef HAVE_UART_DEVICE
 void max326_uart_configure(uintptr_t base,
-                           FAR const struct uart_config_s *config)
+                           const struct uart_config_s *config)
 {
   uint32_t regval;
   uint32_t ctrl0;
@@ -304,8 +294,9 @@ void max326_uart_configure(uintptr_t base,
 
   max326_setbaud(CONSOLE_BASE, config);
 
-  /* Configure RX and TX FIFOs */
-  /* Flush FIFOs */
+  /* Configure RX and TX FIFOs
+   * Flush FIFOs
+   */
 
   ctrl0  = getreg32(base + MAX326_UART_CTRL0_OFFSET);
   ctrl0 |= (UART_CTRL0_TXFLUSH | UART_CTRL0_RXFLUSH);
@@ -428,43 +419,34 @@ void max326_uart_disable(uintptr_t base)
 #endif
 
 /****************************************************************************
- * Name: up_lowputc
+ * Name: arm_lowputc
  *
  * Description:
  *   Output one byte on the serial console
  *
  ****************************************************************************/
 
-void up_lowputc(char ch)
+void arm_lowputc(char ch)
 {
 #ifdef HAVE_UART_CONSOLE
   irqstate_t flags;
 
-  for (; ; )
-    {
-      /* Wait for the transmit FIFO to be not full */
+  /* Disable interrupts so that the test and the transmission are
+   * atomic.
+   */
 
-      while ((getreg32(CONSOLE_BASE + MAX326_UART_STAT_OFFSET) &
-             UART_STAT_TXFULL) != 0)
-        {
-        }
+  flags = spin_lock_irqsave(&g_max32660_lowputc_lock);
 
-      /* Disable interrupts so that the test and the transmission are
-       * atomic.
-       */
+  /* Wait for the transmit FIFO to be not full */
 
-      flags = spin_lock_irqsave();
-      if ((getreg32(CONSOLE_BASE + MAX326_UART_STAT_OFFSET) &
-           UART_STAT_TXFULL) == 0)
-        {
-          /* Send the character */
+  while ((getreg32(CONSOLE_BASE + MAX326_UART_STAT_OFFSET) &
+          UART_STAT_TXFULL) != 0);
 
-          putreg32((uint32_t)ch, CONSOLE_BASE + MAX326_UART_FIFO_OFFSET);
-          spin_unlock_irqrestore(flags);
-          return;
-        }
+  /* Send the character */
 
-      spin_unlock_irqrestore(flags);
-    }
+  putreg32((uint32_t)ch, CONSOLE_BASE + MAX326_UART_FIFO_OFFSET);
+
+  spin_unlock_irqrestore(&g_max32660_lowputc_lock, flags);
+
 #endif
 }

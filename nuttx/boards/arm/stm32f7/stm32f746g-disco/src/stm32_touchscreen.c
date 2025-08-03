@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/stm32f7/stm32f746g-disco/src/stm32_touchscreen.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,6 +26,7 @@
 
 #include <nuttx/config.h>
 
+#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
@@ -53,7 +41,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define FT5x06_FREQUENCY 100000  /* For now, will boost later */
+#define FT5X06_FREQUENCY 100000  /* For now, will boost later */
 
 #ifdef CONFIG_INPUT_FT5X06
 #ifndef CONFIG_INPUT
@@ -82,8 +70,8 @@
 
 struct stm32_ft5x06_config_s
 {
-  xcpt_t          handler;  /* The FT5x06 interrupt handler */
-  FAR void       *arg;      /* Interrupt handler argument */
+  xcpt_t  handler;  /* The FT5x06 interrupt handler */
+  void   *arg;      /* Interrupt handler argument */
 };
 
 /****************************************************************************
@@ -91,14 +79,14 @@ struct stm32_ft5x06_config_s
  ****************************************************************************/
 
 #ifndef CONFIG_FT5X06_POLLMODE
-static int  stm32_ft5x06_attach(FAR const struct ft5x06_config_s *config,
-                                xcpt_t isr, FAR void *arg);
-static void stm32_ft5x06_enable(FAR const struct ft5x06_config_s *config,
+static int  stm32_ft5x06_attach(const struct ft5x06_config_s *config,
+                                xcpt_t isr, void *arg);
+static void stm32_ft5x06_enable(const struct ft5x06_config_s *config,
                                 bool enable);
-static void stm32_ft5x06_clear(FAR const struct ft5x06_config_s *config);
+static void stm32_ft5x06_clear(const struct ft5x06_config_s *config);
 #endif
-static void stm32_ft5x06_wakeup(FAR const struct ft5x06_config_s *config);
-static void stm32_ft5x06_nreset(FAR const struct ft5x06_config_s *config,
+static void stm32_ft5x06_wakeup(const struct ft5x06_config_s *config);
+static void stm32_ft5x06_nreset(const struct ft5x06_config_s *config,
                                 bool state);
 
 /****************************************************************************
@@ -107,15 +95,21 @@ static void stm32_ft5x06_nreset(FAR const struct ft5x06_config_s *config,
 
 static const struct ft5x06_config_s g_ft5x06_config =
 {
-  .address   = FT5x06_I2C_ADDRESS,
-  .frequency = FT5x06_FREQUENCY,
+  .address   = FT5X06_I2C_ADDRESS,
+  .frequency = FT5X06_FREQUENCY,
 #ifndef CONFIG_FT5X06_POLLMODE
   .attach    = stm32_ft5x06_attach,
   .enable    = stm32_ft5x06_enable,
   .clear     = stm32_ft5x06_clear,
 #endif
   .wakeup    = stm32_ft5x06_wakeup,
-  .nreset    = stm32_ft5x06_nreset
+  .nreset    = stm32_ft5x06_nreset,
+  .lower     =
+    {
+#ifdef CONFIG_STM32F746GDISCO_TOUCHSCREEN_SWAPXY
+      .flags = TOUCH_FLAG_SWAPXY,
+#endif
+    },
 };
 
 static struct stm32_ft5x06_config_s g_priv_config =
@@ -137,8 +131,8 @@ static struct stm32_ft5x06_config_s g_priv_config =
  ****************************************************************************/
 
 #ifndef CONFIG_FT5X06_POLLMODE
-static int  stm32_ft5x06_attach(FAR const struct ft5x06_config_s *config,
-                                xcpt_t isr, FAR void *arg)
+static int  stm32_ft5x06_attach(const struct ft5x06_config_s *config,
+                                xcpt_t isr, void *arg)
 {
   iinfo("Saving handler %p\n", isr);
 
@@ -175,7 +169,7 @@ static int  stm32_ft5x06_attach(FAR const struct ft5x06_config_s *config,
  ****************************************************************************/
 
 #ifndef CONFIG_FT5X06_POLLMODE
-static void stm32_ft5x06_enable(FAR const struct ft5x06_config_s *config,
+static void stm32_ft5x06_enable(const struct ft5x06_config_s *config,
                                 bool enable)
 {
   irqstate_t flags;
@@ -214,7 +208,7 @@ static void stm32_ft5x06_enable(FAR const struct ft5x06_config_s *config,
  ****************************************************************************/
 
 #ifndef CONFIG_FT5X06_POLLMODE
-static void stm32_ft5x06_clear(FAR const struct ft5x06_config_s *config)
+static void stm32_ft5x06_clear(const struct ft5x06_config_s *config)
 {
   /* Does nothing */
 }
@@ -229,7 +223,7 @@ static void stm32_ft5x06_clear(FAR const struct ft5x06_config_s *config)
  *
  ****************************************************************************/
 
-static void stm32_ft5x06_wakeup(FAR const struct ft5x06_config_s *config)
+static void stm32_ft5x06_wakeup(const struct ft5x06_config_s *config)
 {
   /* We do not have access to the WAKE pin in the implementation */
 }
@@ -242,7 +236,7 @@ static void stm32_ft5x06_wakeup(FAR const struct ft5x06_config_s *config)
  *
  ****************************************************************************/
 
-static void stm32_ft5x06_nreset(FAR const struct ft5x06_config_s *config,
+static void stm32_ft5x06_nreset(const struct ft5x06_config_s *config,
                                 bool nstate)
 {
   /* We do not have access to the RESET pin in the implementation */
@@ -271,7 +265,7 @@ static void stm32_ft5x06_nreset(FAR const struct ft5x06_config_s *config,
 
 int stm32_tsc_setup(int minor)
 {
-  FAR struct i2c_master_s *dev;
+  struct i2c_master_s *dev;
   int ret;
 
   iinfo("minor %d\n", minor);

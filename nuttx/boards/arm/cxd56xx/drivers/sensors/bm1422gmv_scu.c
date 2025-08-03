@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/cxd56xx/drivers/sensors/bm1422gmv_scu.c
  *
- *   Copyright 2018 Sony Semiconductor Solutions Corporation
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
- *    the names of its contributors may be used to endorse or promote
- *    products derived from this software without specific prior written
- *    permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,6 +29,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <fixedmath.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <arch/types.h>
@@ -58,7 +46,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifdef CONFIG_CXD56_DECI_BM1422GMV
+#ifdef CONFIG_SENSORS_BM1422GMV_SCU_DECI
 #  define BM1422GMV_SEQ_TYPE SEQ_TYPE_DECI
 #else
 #  define BM1422GMV_SEQ_TYPE SEQ_TYPE_NORMAL
@@ -114,18 +102,18 @@
 #endif
 
 /****************************************************************************
- * Private Type Definitions
+ * Private Types
  ****************************************************************************/
 
 /* Structure for bm1422gmv device */
 
 struct bm1422gmv_dev_s
 {
-  FAR struct i2c_master_s *i2c; /* I2C interface */
-  uint8_t addr;                 /* I2C address */
-  int port;                     /* I2C port */
-  struct seq_s *seq;            /* Sequencer instance */
-  int minor;                    /* Minor device number */
+  struct i2c_master_s *i2c; /* I2C interface */
+  uint8_t addr;             /* I2C address */
+  int port;                 /* I2C port */
+  struct seq_s *seq;        /* Sequencer instance */
+  int minor;                /* Minor device number */
 };
 
 /****************************************************************************
@@ -134,13 +122,14 @@ struct bm1422gmv_dev_s
 
 /* Character driver methods */
 
-static int bm1422gmv_open(FAR struct file *filep);
-static int bm1422gmv_close(FAR struct file *filep);
-static ssize_t bm1422gmv_read(FAR struct file *filep, FAR char *buffer,
+static int bm1422gmv_open(struct file *filep);
+static int bm1422gmv_close(struct file *filep);
+static ssize_t bm1422gmv_read(struct file *filep, char *buffer,
                               size_t buflen);
-static ssize_t bm1422gmv_write(FAR struct file *filep, FAR const char *buffer,
-                               size_t buflen);
-static int bm1422gmv_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
+static ssize_t bm1422gmv_write(struct file *filep,
+                               const char *buffer, size_t buflen);
+static int bm1422gmv_ioctl(struct file *filep, int cmd,
+                           unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -152,12 +141,8 @@ static const struct file_operations g_bm1422gmvfops =
   bm1422gmv_close,             /* close */
   bm1422gmv_read,              /* read */
   bm1422gmv_write,             /* write */
-  0,                           /* seek */
+  NULL,                        /* seek */
   bm1422gmv_ioctl,             /* ioctl */
-#ifndef CONFIG_DISABLE_POLL
-  0,                           /* poll */
-#endif
-  0                            /* unlink */
 };
 
 /* Take XYZ data. */
@@ -188,7 +173,7 @@ static struct seq_s *g_seq = NULL;
  *
  ****************************************************************************/
 
-static uint8_t bm1422gmv_getreg8(FAR struct bm1422gmv_dev_s *priv,
+static uint8_t bm1422gmv_getreg8(struct bm1422gmv_dev_s *priv,
                                  uint8_t regaddr)
 {
   uint8_t regval = 0;
@@ -212,7 +197,7 @@ static uint8_t bm1422gmv_getreg8(FAR struct bm1422gmv_dev_s *priv,
  *
  ****************************************************************************/
 
-static void bm1422gmv_putreg8(FAR struct bm1422gmv_dev_s *priv,
+static void bm1422gmv_putreg8(struct bm1422gmv_dev_s *priv,
                               uint8_t regaddr, uint8_t regval)
 {
   uint16_t inst[2];
@@ -233,7 +218,7 @@ static void bm1422gmv_putreg8(FAR struct bm1422gmv_dev_s *priv,
  *
  ****************************************************************************/
 
-static void bm1422gmv_putreg16(FAR struct bm1422gmv_dev_s *priv,
+static void bm1422gmv_putreg16(struct bm1422gmv_dev_s *priv,
                                uint8_t regaddr, uint16_t regval)
 {
   uint16_t inst[3];
@@ -255,7 +240,7 @@ static void bm1422gmv_putreg16(FAR struct bm1422gmv_dev_s *priv,
  *
  ****************************************************************************/
 
-static int bm1422gmv_checkid(FAR struct bm1422gmv_dev_s *priv)
+static int bm1422gmv_checkid(struct bm1422gmv_dev_s *priv)
 {
   uint8_t devid;
 
@@ -282,7 +267,7 @@ static int bm1422gmv_checkid(FAR struct bm1422gmv_dev_s *priv)
  *
  ****************************************************************************/
 
-static int bm1422gmv_seqinit(FAR struct bm1422gmv_dev_s *priv)
+static int bm1422gmv_seqinit(struct bm1422gmv_dev_s *priv)
 {
   DEBUGASSERT(g_seq == NULL);
 
@@ -301,8 +286,8 @@ static int bm1422gmv_seqinit(FAR struct bm1422gmv_dev_s *priv)
   /* Set instruction and sample data information to sequencer */
 
   seq_setinstruction(priv->seq, g_bm1422gmvinst, itemsof(g_bm1422gmvinst));
-  seq_setsample(priv->seq, BM1422GMV_BYTESPERSAMPLE, 0, BM1422GMV_ELEMENTSIZE,
-                false);
+  seq_setsample(priv->seq, BM1422GMV_BYTESPERSAMPLE, 0,
+                BM1422GMV_ELEMENTSIZE, false);
 
   return OK;
 }
@@ -315,10 +300,10 @@ static int bm1422gmv_seqinit(FAR struct bm1422gmv_dev_s *priv)
  *
  ****************************************************************************/
 
-static int bm1422gmv_open(FAR struct file *filep)
+static int bm1422gmv_open(struct file *filep)
 {
-  FAR struct inode *inode = filep->f_inode;
-  FAR struct bm1422gmv_dev_s *priv = inode->i_private;
+  struct inode *inode = filep->f_inode;
+  struct bm1422gmv_dev_s *priv = inode->i_private;
   uint8_t val;
 
   if (g_refcnt == 0)
@@ -366,10 +351,10 @@ static int bm1422gmv_open(FAR struct file *filep)
  *
  ****************************************************************************/
 
-static int bm1422gmv_close(FAR struct file *filep)
+static int bm1422gmv_close(struct file *filep)
 {
-  FAR struct inode *inode = filep->f_inode;
-  FAR struct bm1422gmv_dev_s *priv = inode->i_private;
+  struct inode *inode = filep->f_inode;
+  struct bm1422gmv_dev_s *priv = inode->i_private;
 
   g_refcnt--;
 
@@ -397,11 +382,11 @@ static int bm1422gmv_close(FAR struct file *filep)
  * Name: bm1422gmv_read
  ****************************************************************************/
 
-static ssize_t bm1422gmv_read(FAR struct file *filep, FAR char *buffer,
+static ssize_t bm1422gmv_read(struct file *filep, char *buffer,
                               size_t len)
 {
-  FAR struct inode *inode = filep->f_inode;
-  FAR struct bm1422gmv_dev_s *priv = inode->i_private;
+  struct inode *inode = filep->f_inode;
+  struct bm1422gmv_dev_s *priv = inode->i_private;
 
   len = len / BM1422GMV_BYTESPERSAMPLE * BM1422GMV_BYTESPERSAMPLE;
   len = seq_read(priv->seq, priv->minor, buffer, len);
@@ -413,8 +398,8 @@ static ssize_t bm1422gmv_read(FAR struct file *filep, FAR char *buffer,
  * Name: bm1422gmv_write
  ****************************************************************************/
 
-static ssize_t bm1422gmv_write(FAR struct file *filep, FAR const char *buffer,
-                               size_t buflen)
+static ssize_t bm1422gmv_write(struct file *filep,
+                               const char *buffer, size_t buflen)
 {
   return -ENOSYS;
 }
@@ -423,10 +408,11 @@ static ssize_t bm1422gmv_write(FAR struct file *filep, FAR const char *buffer,
  * Name: bm1422gmv_ioctl
  ****************************************************************************/
 
-static int bm1422gmv_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
+static int bm1422gmv_ioctl(struct file *filep, int cmd,
+                           unsigned long arg)
 {
-  FAR struct inode *inode = filep->f_inode;
-  FAR struct bm1422gmv_dev_s *priv = inode->i_private;
+  struct inode *inode = filep->f_inode;
+  struct bm1422gmv_dev_s *priv = inode->i_private;
   int ret = OK;
 
   switch (cmd)
@@ -471,10 +457,10 @@ static int bm1422gmv_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-int bm1422gmv_init(FAR struct i2c_master_s *i2c, int port)
+int bm1422gmv_init(struct i2c_master_s *i2c, int port)
 {
-  FAR struct bm1422gmv_dev_s tmp;
-  FAR struct bm1422gmv_dev_s *priv = &tmp;
+  struct bm1422gmv_dev_s tmp;
+  struct bm1422gmv_dev_s *priv = &tmp;
   int ret;
 
   /* Setup temporary device structure for initialization */
@@ -513,16 +499,16 @@ int bm1422gmv_init(FAR struct i2c_master_s *i2c, int port)
  *
  ****************************************************************************/
 
-int bm1422gmv_register(FAR const char *devpath, int minor,
-                       FAR struct i2c_master_s *i2c, int port)
+int bm1422gmv_register(const char *devpath, int minor,
+                       struct i2c_master_s *i2c, int port)
 {
-  FAR struct bm1422gmv_dev_s *priv;
+  struct bm1422gmv_dev_s *priv;
   char path[16];
   int ret;
 
   /* Initialize the BM1422GMV device structure */
 
-  priv = (FAR struct bm1422gmv_dev_s *)
+  priv = (struct bm1422gmv_dev_s *)
     kmm_malloc(sizeof(struct bm1422gmv_dev_s));
   if (!priv)
     {

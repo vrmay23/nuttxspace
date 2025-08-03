@@ -1,14 +1,10 @@
 /****************************************************************************
  * arch/arm/src/tms570/tms570_clockconfig.c
  *
- *   Copyright (C) 2015, 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * Some logic in this file was inspired/leveraged from TI's Project0 which
- * has a compatible BSD license:
- *
- *   Copyright (c) 2012, Texas Instruments Incorporated
- *   All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2015,2018 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2012 Texas Instruments Incorporated
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,8 +44,7 @@
 #include <stdint.h>
 #include <assert.h>
 
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "hardware/tms570_esm.h"
 #include "hardware/tms570_sys.h"
 #include "hardware/tms570_sys2.h"
@@ -204,7 +199,7 @@ static uint32_t check_frequency(uint32_t cnt1_clksrc)
 
 uint32_t _errata_sswf021_45_both_plls(uint32_t count)
 {
-  uint32_t failcode;
+  uint32_t failcode = 0u;
   uint32_t retries;
   uint32_t clkcntrlsave;
   uint32_t regval;
@@ -344,7 +339,7 @@ static void tms570_pll_setup(void)
    *  NR = REFCLKDIV+1
    *  Fintclk = Fclkin / NR
    *
-   * PLLMUL controls multipler on divided input clock (Fintclk):
+   * PLLMUL controls multiplier on divided input clock (Fintclk):
    *
    *  Non-modulated:
    *    NF = (PLLMUL + 256) / 256
@@ -518,7 +513,7 @@ static void tms570_peripheral_initialize(void)
  *
  ****************************************************************************/
 
-static void tms570_pin_multiplex(FAR const struct tms570_pinmux_s *pinmux)
+static void tms570_pin_multiplex(const struct tms570_pinmux_s *pinmux)
 {
   uintptr_t regaddr;
   uint32_t  regval;

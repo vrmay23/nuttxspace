@@ -1,6 +1,30 @@
+/****************************************************************************
+ * arch/arm/src/imxrt/hardware/rt106x/imxrt106x_xbar.h
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
 /* XBAR Defines for IMXRT1060 */
 
-/* XBARA1 Mux inputs (I values) ***************************************************************************************************************************************/
+#define IMXRT_XBAR_SEL_MASKS {0x7f, 0x3f, 0x3f}  /* The select masks A, B2, B3 */
+
+/* XBARA1 Mux inputs (I values) *********************************************/
 
 #define IMXRT_XBARA1_IN_LOGIC_LOW                        IMXRT_XBARA1(XBAR_INPUT, 0)    /* LOGIC_LOW output assigned to XBARA1_IN0 input. */
 #define IMXRT_XBARA1_IN_LOGIC_HIGH                       IMXRT_XBARA1(XBAR_INPUT, 1)    /* LOGIC_HIGH output assigned to XBARA1_IN1 input. */
@@ -91,7 +115,7 @@
 #define IMXRT_XBARA1_IN_ADC_ETC_XBAR1_COCO2              IMXRT_XBARA1(XBAR_INPUT, 86)   /* ADC_ETC_XBAR1_COCO2 output assigned to XBARA1_IN86 input. */
 #define IMXRT_XBARA1_IN_ADC_ETC_XBAR1_COCO3              IMXRT_XBARA1(XBAR_INPUT, 87)   /* ADC_ETC_XBAR1_COCO3 output assigned to XBARA1_IN87 input. */
 
-/* XBARA1 Mux Output  (M Muxes) ***************************************************************************************************************/
+/* XBARA1 Mux Output  (M Muxes) *********************************************/
 
 #define IMXRT_XBARA1_OUT_DMA_CH_MUX_REQ30_SEL_OFFSET     IMXRT_XBARA1(XBAR_OUTPUT, 0)    /* XBARA1_OUT0 output assigned to DMA_CH_MUX_REQ30 */
 #define IMXRT_XBARA1_OUT_DMA_CH_MUX_REQ31_SEL_OFFSET     IMXRT_XBARA1(XBAR_OUTPUT, 1)    /* XBARA1_OUT1 output assigned to DMA_CH_MUX_REQ31 */
@@ -225,7 +249,7 @@
 #define IMXRT_XBARA1_OUT_FLEXIO2_TRIGGER_IN0_SEL_OFFSET  IMXRT_XBARA1(XBAR_OUTPUT, 129)  /* XBARA1_OUT129 output assigned to FLEXIO2_TRIGGER_IN0 */
 #define IMXRT_XBARA1_OUT_FLEXIO2_TRIGGER_IN1_SEL_OFFSET  IMXRT_XBARA1(XBAR_OUTPUT, 130)  /* XBARA1_OUT130 output assigned to FLEXIO2_TRIGGER_IN1 */
 
-/* XBARB2 Mux inputs (I values) *******************************************************************************************************************/
+/* XBARB2 Mux inputs (I values) *********************************************/
 
 #define IMXRT_XBARB2_IN_LOGIC_LOW                        IMXRT_XBARB2(XBAR_INPUT, 0)    /* LOGIC_LOW output assigned to XBARB2_IN0 input. */
 #define IMXRT_XBARB2_IN_LOGIC_HIGH                       IMXRT_XBARB2(XBAR_INPUT, 1)    /* LOGIC_HIGH output assigned to XBARB2_IN1 input. */
@@ -286,7 +310,7 @@
 #define IMXRT_XBARB2_IN_DMA_DONE6                        IMXRT_XBARB2(XBAR_INPUT, 56)   /* DMA_DONE6 output assigned to XBARB2_IN56 input. */
 #define IMXRT_XBARB2_IN_DMA_DONE7                        IMXRT_XBARB2(XBAR_INPUT, 57)   /* DMA_DONE7 output assigned to XBARB2_IN57 input. */
 
-/* XBARB2 Mux Output  (M Muxes) ********************************************************************************************************************/
+/* XBARB2 Mux Output  (M Muxes) *********************************************/
 
 #define IMXRT_XBARB2_OUT_AOI1_IN00_SEL_OFFSET            IMXRT_XBARB2(XBAR_OUTPUT, 0)    /* XBARB2_OUT0 output assigned to AOI1_IN00 */
 #define IMXRT_XBARB2_OUT_AOI1_IN01_SEL_OFFSET            IMXRT_XBARB2(XBAR_OUTPUT, 1)    /* XBARB2_OUT1 output assigned to AOI1_IN01 */
@@ -305,7 +329,7 @@
 #define IMXRT_XBARB2_OUT_AOI1_IN14_SEL_OFFSET            IMXRT_XBARB2(XBAR_OUTPUT, 14)   /* XBARB2_OUT14 output assigned to AOI1_IN14 */
 #define IMXRT_XBARB2_OUT_AOI1_IN15_SEL_OFFSET            IMXRT_XBARB2(XBAR_OUTPUT, 15)   /* XBARB2_OUT15 output assigned to AOI1_IN15 */
 
-/* XBARB3 Mux inputs (I values) *******************************************************************************************************************/
+/* XBARB3 Mux inputs (I values) *********************************************/
 
 #define IMXRT_XBARB3_IN_LOGIC_LOW                        IMXRT_XBARB3(XBAR_INPUT, 0)    /* LOGIC_LOW output assigned to XBARB3_IN0 input. */
 #define IMXRT_XBARB3_IN_LOGIC_HIGH                       IMXRT_XBARB3(XBAR_INPUT, 1)    /* LOGIC_HIGH output assigned to XBARB3_IN1 input. */
@@ -366,7 +390,7 @@
 #define IMXRT_XBARB3_IN_DMA_DONE6                        IMXRT_XBARB3(XBAR_INPUT, 56)   /* DMA_DONE6 output assigned to XBARB3_IN56 input. */
 #define IMXRT_XBARB3_IN_DMA_DONE7                        IMXRT_XBARB3(XBAR_INPUT, 57)   /* DMA_DONE7 output assigned to XBARB3_IN57 input. */
 
-/* XBARB3 Mux Output  (M Muxes) ********************************************************************************************************************/
+/* XBARB3 Mux Output  (M Muxes) *********************************************/
 
 #define IMXRT_XBARB3_OUT_AOI2_IN00_SEL_OFFSET            IMXRT_XBARB3(XBAR_OUTPUT, 0)    /* XBARB3_OUT0 output assigned to AOI2_IN00 */
 #define IMXRT_XBARB3_OUT_AOI2_IN01_SEL_OFFSET            IMXRT_XBARB3(XBAR_OUTPUT, 1)    /* XBARB3_OUT1 output assigned to AOI2_IN01 */

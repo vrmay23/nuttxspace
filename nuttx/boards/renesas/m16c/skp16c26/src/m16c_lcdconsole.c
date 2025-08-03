@@ -1,35 +1,22 @@
 /****************************************************************************
- * boards/renesas/m16c/scp16c26/src/m16c_lcdconsole.c
+ * boards/renesas/m16c/skp16c26/src/m16c_lcdconsole.c
  *
- *   Copyright (C) 2009, 2012 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name Gregory Nutt nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,7 +28,7 @@
 
 #include <nuttx/arch.h>
 
-#include "up_internal.h"
+#include "renesas_internal.h"
 #include "skp16c26.h"
 
 /* Only use the LCD as a console if there are is no serial console */
@@ -80,7 +67,7 @@
  *
  * Description:
  *   Performs the low level UART initialization early in  debug so that the
- *   serial console will be available during bootup.
+ *   serial console will be available during boot up.
  *   This must be called before up_consoleinit.
  *
  ****************************************************************************/
@@ -111,14 +98,14 @@ void up_consoleinit(void)
 #endif
 
 /****************************************************************************
- * Name: up_lowputc
+ * Name: renesas_lowputc
  *
  * Description:
  *   Output one character on the console
  *
  ****************************************************************************/
 
-void up_lowputc(char ch)
+void renesas_lowputc(char ch)
 {
   up_lcdputc(ch);
 }
@@ -131,10 +118,9 @@ void up_lowputc(char ch)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
   up_lcdputc(ch);
-  return ch;
 }
 
 #endif /* !HAVE_SERIALCONSOLE && CONFIG_SLCD && CONFIG_SLCD_CONSOLE */

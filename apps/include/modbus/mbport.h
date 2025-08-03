@@ -1,9 +1,8 @@
 /****************************************************************************
  * apps/include/modbus/mbport.h
  *
- * FreeModbus Library: A portable Modbus implementation for Modbus ASCII/RTU.
- * Copyright (c) 2006 Christian Walter <wolti@sil.at>
- * All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2006 Christian Walter <wolti@sil.at>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,6 +37,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <termios.h>
 
 /****************************************************************************
  * Public Types
@@ -125,7 +125,7 @@ bool xMBPortEventGet(eMBEventType *eEvent);
 
 bool xMBMasterPortEventInit(void);
 bool xMBMasterPortEventPost(eMBMasterEventType eEvent);
-bool xMBMasterPortEventGet(eMBMasterEventType * eEvent);
+bool xMBMasterPortEventGet(eMBMasterEventType *eEvent);
 void vMBMasterOsResInit(void);
 bool xMBMasterRunResTake(int32_t time);
 void vMBMasterRunResRelease(void);
@@ -137,7 +137,7 @@ bool xMBPortSerialInit(uint8_t ucPort, speed_t ulBaudRate,
 void vMBPortClose(void);
 void xMBPortSerialClose(void);
 void vMBPortSerialEnable(bool xRxEnable, bool xTxEnable);
-bool xMBPortSerialGetByte(int8_t * pucByte);
+bool xMBPortSerialGetByte(int8_t *pucByte);
 bool xMBPortSerialPutByte(int8_t ucByte);
 
 bool xMBMasterPortSerialInit(uint8_t ucPort, speed_t ulBaudRate,
@@ -145,7 +145,7 @@ bool xMBMasterPortSerialInit(uint8_t ucPort, speed_t ulBaudRate,
 void vMBMasterPortClose(void);
 void xMBMasterPortSerialClose(void);
 void vMBMasterPortSerialEnable(bool xRxEnable, bool xTxEnable);
-bool xMBMasterPortSerialGetByte(int8_t * pucByte);
+bool xMBMasterPortSerialGetByte(int8_t *pucByte);
 bool xMBMasterPortSerialPutByte(int8_t ucByte);
 
 /* Timers functions */

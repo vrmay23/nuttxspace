@@ -1,6 +1,8 @@
 /****************************************************************************
  * fs/inode/inode.h
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -18,8 +20,8 @@
  *
  ****************************************************************************/
 
-#ifndef __FS_INODE_H
-#define __FS_INODE_H
+#ifndef __FS_INODE_INODE_H
+#define __FS_INODE_INODE_H
 
 /****************************************************************************
  * Included Files
@@ -32,52 +34,59 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <dirent.h>
+#include <sched.h>
 
 #include <nuttx/kmalloc.h>
+#include <nuttx/sched.h>
 #include <nuttx/fs/fs.h>
+#include <nuttx/lib/lib.h>
+
+#include "fs_heap.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifdef CONFIG_PSEUDOFS_SOFTLINKS
+#define SETUP_SEARCH(d,p,n) \
+  do \
+    { \
+      (d)->path     = (p); \
+      (d)->node     = NULL; \
+      (d)->peer     = NULL; \
+      (d)->parent   = NULL; \
+      (d)->relpath  = NULL; \
+      (d)->buffer   = NULL; \
+      (d)->nofollow = (n); \
+    } \
+  while (0)
 
-#  define SETUP_SEARCH(d,p,n) \
-    do \
-      { \
-        (d)->path     = (p); \
-        (d)->node     = NULL; \
-        (d)->peer     = NULL; \
-        (d)->parent   = NULL; \
-        (d)->relpath  = NULL; \
-        (d)->linktgt  = NULL; \
-        (d)->buffer   = NULL; \
-        (d)->nofollow = (n); \
-      } \
-    while (0)
+#define RELEASE_SEARCH(d) \
+  do \
+    { \
+      if ((d)->buffer != NULL) \
+        { \
+          fs_heap_free((d)->buffer); \
+          (d)->buffer  = NULL; \
+        } \
+    } \
+  while (0)
 
-#  define RELEASE_SEARCH(d) \
-     if ((d)->buffer != NULL) \
+#if CONFIG_FS_BACKTRACE > 0
+#  define FS_ADD_BACKTRACE(fd) \
+     do \
        { \
-         kmm_free((d)->buffer); \
-         (d)->buffer  = NULL; \
-       }
-
+          int n = sched_backtrace(_SCHED_GETTID(), \
+                                  (fd)->f_backtrace, \
+                                  CONFIG_FS_BACKTRACE, \
+                                  CONFIG_FS_BACKTRACE_SKIP); \
+          if (n < CONFIG_FS_BACKTRACE) \
+            { \
+              (fd)->f_backtrace[n] = NULL; \
+            } \
+       } \
+     while (0)
 #else
-
-#  define SETUP_SEARCH(d,p,n) \
-    do \
-      { \
-        (d)->path     = (p); \
-        (d)->node     = NULL; \
-        (d)->peer     = NULL; \
-        (d)->parent   = NULL; \
-        (d)->relpath  = NULL; \
-      } \
-    while (0)
-
-#  define RELEASE_SEARCH(d)
-
+#  define FS_ADD_BACKTRACE(fd)
 #endif
 
 /****************************************************************************
@@ -97,8 +106,7 @@
  *  relpath  - INPUT:  (not used)
  *             OUTPUT: If the returned inode is a mountpoint, this is the
  *                     relative path from the mountpoint.
- *  linktgt  - INPUT:  (not used)
- *             OUTPUT: If a symobolic link into a mounted file system is
+ *             OUTPUT: If a symbolic link into a mounted file system is
  *                     detected while traversing the path, then the link
  *                     will be converted to a mountpoint inode if the
  *                     mountpoint link is in an intermediate node of the
@@ -121,18 +129,15 @@ struct inode_search_s
   FAR struct inode *peer;    /* Node to the "left" for the found inode */
   FAR struct inode *parent;  /* Node "above" the found inode */
   FAR const char *relpath;   /* Relative path into the mountpoint */
-#ifdef CONFIG_PSEUDOFS_SOFTLINKS
-  FAR const char *linktgt;   /* Target of symbolic link if linked to a directory */
   FAR char *buffer;          /* Path expansion buffer */
   bool nofollow;             /* true: Don't follow terminal soft link */
-#endif
 };
 
 /* Callback used by foreach_inode to traverse all inodes in the pseudo-
  * file system.
  */
 
-typedef int (*foreach_inode_t)(FAR struct inode *node,
+typedef int (*foreach_inode_t)(FAR struct inode *inode,
                                FAR char dirpath[PATH_MAX],
                                FAR void *arg);
 
@@ -167,24 +172,44 @@ EXTERN FAR struct inode *g_root_inode;
 void inode_initialize(void);
 
 /****************************************************************************
- * Name: inode_semtake
+ * Name: inode_lock
  *
  * Description:
- *   Get exclusive access to the in-memory inode tree (tree_sem).
+ *   Get writeable exclusive access to the in-memory inode tree.
  *
  ****************************************************************************/
 
-int inode_semtake(void);
+void inode_lock(void);
 
 /****************************************************************************
- * Name: inode_semgive
+ * Name: inode_rlock
  *
  * Description:
- *   Relinquish exclusive access to the in-memory inode tree (tree_sem).
+ *   Get readable exclusive access to the in-memory inode tree.
  *
  ****************************************************************************/
 
-void inode_semgive(void);
+void inode_rlock(void);
+
+/****************************************************************************
+ * Name: inode_unlock
+ *
+ * Description:
+ *   Relinquish writeable exclusive access to the in-memory inode tree.
+ *
+ ****************************************************************************/
+
+void inode_unlock(void);
+
+/****************************************************************************
+ * Name: inode_runlock
+ *
+ * Description:
+ *   Relinquish read exclusive access to the in-memory inode tree.
+ *
+ ****************************************************************************/
+
+void inode_runlock(void);
 
 /****************************************************************************
  * Name: inode_search
@@ -238,9 +263,13 @@ int inode_find(FAR struct inode_search_s *desc);
  *   <sys/stat.h>, into which information is placed concerning the file.
  *
  * Input Parameters:
- *   inode - The indoe of interest
- *   buf   - The caller provide location in which to return information about
- *           the inode.
+ *   inode   - The inode of interest
+ *   buf     - The caller-provided location in which to return information
+ *             about the inode.
+ *   resolve - Whether to resolve the symbolic link:
+ *               0: Don't resolve the symbolic line
+ *               1: Resolve the symbolic link
+ *             >=2: The recursive count in the resolving process
  *
  * Returned Value:
  *   Zero (OK) returned on success.  Otherwise, a negated errno value is
@@ -248,8 +277,43 @@ int inode_find(FAR struct inode_search_s *desc);
  *
  ****************************************************************************/
 
-struct stat;  /* Forward reference */
-int inode_stat(FAR struct inode *inode, FAR struct stat *buf);
+int inode_stat(FAR struct inode *inode, FAR struct stat *buf, int resolve);
+
+/****************************************************************************
+ * Name: inode_chstat
+ *
+ * Description:
+ *   The inode_chstat() function will change information about an 'inode'
+ *   in the pseudo file system according the area pointed to by 'buf'.
+ *
+ *   The 'buf' argument is a pointer to a stat structure, as defined in
+ *   <sys/stat.h>, which information is placed concerning the file.
+ *
+ * Input Parameters:
+ *   inode   - The inode of interest
+ *   buf     - The caller provide location in which to apply information
+ *             about the inode.
+ *   flags   - The valid field in buf
+ *   resolve - Whether to resolve the symbolic link
+ *
+ * Returned Value:
+ *   Zero (OK) returned on success.  Otherwise, a negated errno value is
+ *   returned to indicate the nature of the failure.
+ *
+ ****************************************************************************/
+
+int inode_chstat(FAR struct inode *inode,
+                 FAR const struct stat *buf, int flags, int resolve);
+
+/****************************************************************************
+ * Name: inode_getpath
+ *
+ * Description:
+ *   Given the full path from inode.
+ *
+ ****************************************************************************/
+
+int inode_getpath(FAR struct inode *inode, FAR char *path, size_t len);
 
 /****************************************************************************
  * Name: inode_free
@@ -259,7 +323,7 @@ int inode_stat(FAR struct inode *inode, FAR struct stat *buf);
  *
  ****************************************************************************/
 
-void inode_free(FAR struct inode *node);
+void inode_free(FAR struct inode *inode);
 
 /****************************************************************************
  * Name: inode_nextname
@@ -273,6 +337,16 @@ void inode_free(FAR struct inode *node);
 const char *inode_nextname(FAR const char *name);
 
 /****************************************************************************
+ * Name: inode_root_reserve
+ *
+ * Description:
+ *   Reserve the root node for the pseudo file system.
+ *
+ ****************************************************************************/
+
+void inode_root_reserve(void);
+
+/****************************************************************************
  * Name: inode_reserve
  *
  * Description:
@@ -282,6 +356,7 @@ const char *inode_nextname(FAR const char *name);
  *
  * Input Parameters:
  *   path - The path to the inode to create
+ *   mode - inmode privileges
  *   inode - The location to return the inode pointer
  *
  * Returned Value:
@@ -294,22 +369,8 @@ const char *inode_nextname(FAR const char *name);
  *
  ****************************************************************************/
 
-int inode_reserve(FAR const char *path, FAR struct inode **inode);
-
-/****************************************************************************
- * Name: inode_unlink
- *
- * Description:
- *   Given a path, remove a the node from the in-memory, inode tree that the
- *   path refers to.  This is normally done in preparation to removing or
- *   moving an inode.
- *
- * Assumptions/Limitations:
- *   The caller must hold the inode semaphore
- *
- ****************************************************************************/
-
-FAR struct inode *inode_unlink(FAR const char *path);
+int inode_reserve(FAR const char *path,
+                  mode_t mode, FAR struct inode **inode);
 
 /****************************************************************************
  * Name: inode_remove
@@ -336,7 +397,7 @@ int inode_remove(FAR const char *path);
  *
  ****************************************************************************/
 
-int inode_addref(FAR struct inode *inode);
+void inode_addref(FAR struct inode *inode);
 
 /****************************************************************************
  * Name: inode_release
@@ -367,55 +428,44 @@ void inode_release(FAR struct inode *inode);
 int foreach_inode(foreach_inode_t handler, FAR void *arg);
 
 /****************************************************************************
- * Name: files_initialize
+ * Name: dir_allocate
  *
  * Description:
- *   This is called from the FS initialization logic to configure the files.
+ *   Allocate a directory instance and bind it to f_priv of filep.
  *
  ****************************************************************************/
 
-void weak_function files_initialize(void);
+int dir_allocate(FAR struct file *filep, FAR const char *relpath);
 
 /****************************************************************************
- * Name: files_allocate
+ * Name: pseudofile_create
  *
  * Description:
- *   Allocate a struct files instance and associate it with an inode
- *   instance.  Returns the file descriptor == index into the files array.
+ *   Create the pseudo-file with specified path and mode, and alloc inode
+ *   of this pseudo-file.
  *
  ****************************************************************************/
 
-int files_allocate(FAR struct inode *inode, int oflags, off_t pos,
-                   int minfd);
+#ifdef CONFIG_PSEUDOFS_FILE
+int pseudofile_create(FAR struct inode **node, FAR const char *path,
+                      mode_t mode);
+#endif
 
 /****************************************************************************
- * Name: files_close
+ * Name: inode_is_pseudofile
  *
  * Description:
- *   Close an inode (if open)
- *
- * Assumptions:
- *   Caller holds the list semaphore because the file descriptor will be
- *   freed.
+ *    Check inode whether is a pseudo file.
  *
  ****************************************************************************/
 
-int files_close(int fd);
-
-/****************************************************************************
- * Name: files_release
- *
- * Assumptions:
- *   Similar to files_close().  Called only from open() logic on error
- *   conditions.
- *
- ****************************************************************************/
-
-void files_release(int fd);
+#ifdef CONFIG_PSEUDOFS_FILE
+bool inode_is_pseudofile(FAR struct inode *inode);
+#endif
 
 #undef EXTERN
 #if defined(__cplusplus)
 }
 #endif
 
-#endif /* __FS_INODE_H */
+#endif /* __FS_INODE_INODE_H */

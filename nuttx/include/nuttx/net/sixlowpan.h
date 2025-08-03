@@ -1,20 +1,17 @@
 /****************************************************************************
  * include/nuttx/net/sixlowpan.h
- * Header file for the 6lowpan implementation (RFC4944 and
- * draft-hui-6lowpan-hc-01)
  *
- *   Copyright (C) 2017, Gregory Nutt, all rights reserved
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2017, Gregory Nutt, all rights reserved
+ * SPDX-FileCopyrightText: Copyright (c) 2008, Swedish Institute of Computer Science.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-FileContributor: Adam Dunkels <adam@sics.se>
+ * SPDX-FileContributor: Nicolas Tsiftes <nvt@sics.se>
+ * SPDX-FileContributor: Niclas Finne <nfi@sics.se>
+ * SPDX-FileContributor: Mathilde Durvy <mdurvy@cisco.com>
+ * SPDX-FileContributor: Julien Abeille <jabeille@cisco.com>
  *
- * Derives from Contiki:
- *
- *   Copyright (c) 2008, Swedish Institute of Computer Science.
  *   All rights reserved.
- *   Authors: Adam Dunkels <adam@sics.se>
- *            Nicolas Tsiftes <nvt@sics.se>
- *            Niclas Finne <nfi@sics.se>
- *            Mathilde Durvy <mdurvy@cisco.com>
- *            Julien Abeille <jabeille@cisco.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -65,6 +62,7 @@
  ****************************************************************************/
 
 /* Frame format definitions *************************************************/
+
 /* Fragment header.
  *
  * The fragment header is used when the payload is too large to fit in a
@@ -164,7 +162,9 @@
  * Values of fields within the IPHC encoding first byte
  * (Using MS-to-LS bit numbering of the draft RFC)
  */
+
                                                 /* Bits 0-2: 011 */
+
 #define SIXLOWPAN_IPHC_TC_MASK            0x18  /* Bits 3-4: Traffic Class, Flow Label */
 #  define SIXLOWPAN_IPHC_TC_00            0x00  /*   ECN+DSCP+4-bit Pad+Flow Label (4 bytes) */
 #  define SIXLOWPAN_IPHC_TC_01            0x08  /*   ECN+2-bit Pad+ Flow Label (3 bytes), DSCP is elided. */
@@ -467,11 +467,12 @@ struct sixlowpan_reassbuf_s
  *   - The io_flink field points to the next frame in the list (if enable)
  *   - The last frame in the list will have io_flink == NULL.
  *
- *   An non-NULL d_buf of size CONFIG_NET_6LOWPAN_PKTSIZE + CONFIG_NET_GUARDSIZE
- *   must also be provided.  The frame will be decompressed and placed in
- *   the d_buf. Fragmented packets will also be reassembled in the d_buf as
+ *   An non-NULL d_buf of size CONFIG_NET_6LOWPAN_PKTSIZE +
+ *   CONFIG_NET_GUARDSIZE must also be provided.
+ *   The frame will be decompressed and placed in the d_buf.
+ *   Fragmented packets will also be reassembled in the d_buf as
  *   they are received (meaning for the driver, that two packet buffers are
- *   required:  One for reassembly of RX packets and one used for TX polling).
+ *   required: One for reassembly of RX packets and one used for TX polling).
  *
  *   After each frame is processed into d_buf, the IOB is deallocated.  If
  *   reassembly is incomplete, the partially reassembled packet must be
@@ -504,7 +505,7 @@ struct sixlowpan_reassbuf_s
  *               radio, or (2) struct pktradio_metadata_s for a non-standard
  *               packet radio.
  *
- *               If there are multilple frames in the list, this metadata
+ *               If there are multiple frames in the list, this metadata
  *               must apply to all of the frames in the list.
  *
  * Returned Value:

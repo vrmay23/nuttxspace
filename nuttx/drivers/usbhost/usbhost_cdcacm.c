@@ -1,6 +1,8 @@
 /****************************************************************************
  * drivers/usbhost/usbhost_cdcacm.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -26,6 +28,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 #include <assert.h>
@@ -38,7 +41,7 @@
 #include <nuttx/wqueue.h>
 #include <nuttx/clock.h>
 #include <nuttx/fs/ioctl.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 #include <nuttx/serial/serial.h>
 
 #include <nuttx/usb/usb.h>
@@ -252,7 +255,7 @@ struct usbhost_cdcacm_s
   uint16_t       rxndx;          /* Index to the next byte in the RX packet buffer */
   int16_t        crefs;          /* Reference count on the driver instance */
   int16_t        nbytes;         /* The number of bytes actually transferred */
-  sem_t          exclsem;        /* Used to maintain mutual exclusive access */
+  mutex_t        lock;           /* Used to maintain mutual exclusive access */
   struct work_s  ntwork;         /* For asynchronous notification work */
   struct work_s  rxwork;         /* For RX packet work */
   struct work_s  txwork;         /* For TX packet work */
@@ -285,12 +288,6 @@ struct usbhost_freestate_s
  * Private Function Prototypes
  ****************************************************************************/
 
-/* Semaphores */
-
-static int usbhost_takesem(FAR sem_t *sem);
-static void usbhost_forcetake(FAR sem_t *sem);
-#define usbhost_givesem(s) nxsem_post(s);
-
 /* Memory allocation services */
 
 static FAR struct usbhost_cdcacm_s *usbhost_allocclass(void);
@@ -301,7 +298,7 @@ static void usbhost_freeclass(FAR struct usbhost_cdcacm_s *usbclass);
 static int  usbhost_devno_alloc(FAR struct usbhost_cdcacm_s *priv);
 static void usbhost_devno_free(FAR struct usbhost_cdcacm_s *priv);
 static inline void usbhost_mkdevname(FAR struct usbhost_cdcacm_s *priv,
-              FAR char *devname);
+                                     FAR char *devname);
 
 /* CDC/ACM request helpers */
 
@@ -330,7 +327,6 @@ static int  usbhost_cfgdesc(FAR struct usbhost_cdcacm_s *priv,
 /* (Little Endian) Data helpers */
 
 static inline uint16_t usbhost_getle16(FAR const uint8_t *val);
-static inline uint16_t usbhost_getbe16(FAR const uint8_t *val);
 static inline void usbhost_putle16(FAR uint8_t *dest, uint16_t val);
 #ifdef HAVE_CTRL_INTERFACE
 static void usbhost_putle32(FAR uint8_t *dest, uint32_t val);
@@ -380,11 +376,18 @@ static bool usbhost_txempty(FAR struct uart_dev_s *uartdev);
  * device.
  */
 
-static const struct usbhost_id_s g_id[4] =
+static const struct usbhost_id_s g_id[5] =
 {
   {
     USB_CLASS_CDC,          /* base     */
     CDC_SUBCLASS_NONE,      /* subclass */
+    CDC_PROTO_NONE,         /* proto    */
+    0,                      /* vid      */
+    0                       /* pid      */
+  },
+  {
+    USB_CLASS_CDC,          /* base     */
+    CDC_SUBCLASS_ACM,       /* subclass */
     CDC_PROTO_NONE,         /* proto    */
     0,                      /* vid      */
     0                       /* pid      */
@@ -418,7 +421,7 @@ static struct usbhost_registry_s g_cdcacm =
 {
   NULL,                   /* flink    */
   usbhost_create,         /* create   */
-  4,                      /* nids     */
+  5,                      /* nids     */
   &g_id[0]                /* id[]     */
 };
 
@@ -431,11 +434,21 @@ static const struct uart_ops_s g_uart_ops =
   usbhost_attach,        /* attach */
   usbhost_detach,        /* detach */
   usbhost_ioctl,         /* ioctl */
-  NULL           ,       /* receive */
+  NULL,                  /* receive */
   usbhost_rxint,         /* rxinit */
   usbhost_rxavailable,   /* rxavailable */
 #ifdef CONFIG_SERIAL_IFLOWCONTROL
   usbhost_rxflowcontrol, /* rxflowcontrol */
+#endif
+#ifdef CONFIG_SERIAL_TXDMA
+  NULL,                  /* dmasend */
+#endif
+#ifdef CONFIG_SERIAL_RXDMA
+  NULL,                  /* dmareceive */
+  NULL,                  /* dmarxfree */
+#endif
+#ifdef CONFIG_SERIAL_TXDMA
+  NULL,                  /* dmatxavail */
 #endif
   NULL,                  /* send */
   usbhost_txint,         /* txinit */
@@ -464,48 +477,6 @@ static uint32_t g_devinuse;
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: usbhost_takesem
- *
- * Description:
- *   This is just a wrapper to handle the annoying behavior of semaphore
- *   waits that return due to the receipt of a signal.
- *
- ****************************************************************************/
-
-static int usbhost_takesem(FAR sem_t *sem)
-{
-  return nxsem_wait_uninterruptible(sem);
-}
-
-/****************************************************************************
- * Name: usbhost_forcetake
- *
- * Description:
- *   This is just another wrapper but this one continues even if the thread
- *   is canceled.  This must be done in certain conditions where were must
- *   continue in order to clean-up resources.
- *
- ****************************************************************************/
-
-static void usbhost_forcetake(FAR sem_t *sem)
-{
-  int ret;
-
-  do
-    {
-      ret = nxsem_wait_uninterruptible(sem);
-
-      /* The only expected error would -ECANCELED meaning that the
-       * parent thread has been canceled.  We have to continue and
-       * terminate the poll in this case.
-       */
-
-      DEBUGASSERT(ret == OK || ret == -ECANCELED);
-    }
-  while (ret < 0);
-}
 
 /****************************************************************************
  * Name: usbhost_allocclass
@@ -895,7 +866,7 @@ static void usbhost_notification_callback(FAR void *arg, ssize_t nbytes)
       if (work_available(&priv->ntwork))
         {
           work_queue(HPWORK, &priv->ntwork,
-                     (worker_t)usbhost_notification_work,
+                     usbhost_notification_work,
                      priv, delay);
         }
     }
@@ -1271,7 +1242,7 @@ static void usbhost_destroy(FAR void *arg)
   /* Unregister the serial lower half driver */
 
   usbhost_mkdevname(priv, devname);
-#warning Missing logic
+  unregister_driver(devname);
 
   /* Release the device name used by this connection */
 
@@ -1300,9 +1271,9 @@ static void usbhost_destroy(FAR void *arg)
 
   usbhost_free_buffers(priv);
 
-  /* Destroy the semaphores */
+  /* Destroy the mutex */
 
-  nxsem_destroy(&priv->exclsem);
+  nxmutex_destroy(&priv->lock);
 
   /* Disconnect the USB host device */
 
@@ -1563,19 +1534,19 @@ static int usbhost_cfgdesc(FAR struct usbhost_cdcacm_s *priv,
 
                     found |= (USBHOST_CTRLIF_FOUND | USBHOST_INTIN_FOUND);
 
-                    /* Save the bulk OUT endpoint information */
+                    /* Save the interrupt IN endpoint information */
 
                     iindesc.hport        = hport;
                     iindesc.addr         = epdesc->addr &
                                            USB_EP_ADDR_NUMBER_MASK;
-                    iindesc.in           = false;
+                    iindesc.in           = true;
                     iindesc.xfrtype      = USB_EP_ATTR_XFER_INT;
                     iindesc.interval     = epdesc->interval;
                     iindesc.mxpacketsize =
                       usbhost_getle16(epdesc->mxpacketsize);
 
                     uinfo("Interrupt IN EP addr:%d mxpacketsize:%d\n",
-                          boutdesc.addr, boutdesc.mxpacketsize);
+                          iindesc.addr, iindesc.mxpacketsize);
 #else
                     found |= USBHOST_CTRLIF_FOUND;
 #endif
@@ -1675,25 +1646,6 @@ static inline uint16_t usbhost_getle16(FAR const uint8_t *val)
 }
 
 /****************************************************************************
- * Name: usbhost_getbe16
- *
- * Description:
- *   Get a (possibly unaligned) 16-bit big endian value.
- *
- * Input Parameters:
- *   val - A pointer to the first byte of the big endian value.
- *
- * Returned Value:
- *   A uint16_t representing the whole 16-bit integer value
- *
- ****************************************************************************/
-
-static inline uint16_t usbhost_getbe16(FAR const uint8_t *val)
-{
-  return (uint16_t)val[0] << 8 | (uint16_t)val[1];
-}
-
-/****************************************************************************
  * Name: usbhost_putle16
  *
  * Description:
@@ -1781,7 +1733,7 @@ static int usbhost_alloc_buffers(FAR struct usbhost_cdcacm_s *priv)
                      sizeof(struct cdc_linecoding_s));
   if (ret < 0)
     {
-      uerr("ERROR: DRVR_IOALLOC of line coding failed: %d (%d bytes)\n",
+      uerr("ERROR: DRVR_IOALLOC of line coding failed: %d (%zu bytes)\n",
            ret, sizeof(struct cdc_linecoding_s));
       goto errout;
     }
@@ -1948,11 +1900,11 @@ usbhost_create(FAR struct usbhost_hubport_s *hport,
 
           priv->crefs = 1;
 
-          /* Initialize semaphores
+          /* Initialize mutex
            * (this works okay in the interrupt context)
            */
 
-          nxsem_init(&priv->exclsem, 0, 1);
+          nxmutex_init(&priv->lock);
 
           /* Set up the serial lower-half interface */
 
@@ -2048,7 +2000,7 @@ static int usbhost_connect(FAR struct usbhost_class_s *usbclass,
 
   /* Get exclusive access to the device structure */
 
-  ret = usbhost_takesem(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -2139,7 +2091,7 @@ errout:
    * ready to handle it!
    */
 
-  usbhost_givesem(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -2208,7 +2160,7 @@ static int usbhost_disconnected(FAR struct usbhost_class_s *usbclass)
 
   if (priv->intin)
     {
-      int ret = DRVR_CANCEL(hport->drvr, priv->intin);
+      ret = DRVR_CANCEL(hport->drvr, priv->intin);
       if (ret < 0)
         {
          uerr("ERROR: Interrupt IN DRVR_CANCEL failed: %d\n", ret);
@@ -2278,7 +2230,7 @@ static int usbhost_setup(FAR struct uart_dev_s *uartdev)
   /* Make sure that we have exclusive access to the private data structure */
 
   DEBUGASSERT(priv->crefs > 0 && priv->crefs < USBHOST_MAX_CREFS);
-  ret = usbhost_takesem(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -2308,7 +2260,7 @@ static int usbhost_setup(FAR struct uart_dev_s *uartdev)
     }
 
   leave_critical_section(flags);
-  usbhost_givesem(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -2333,7 +2285,7 @@ static void usbhost_shutdown(FAR struct uart_dev_s *uartdev)
   /* Decrement the reference count on the block driver */
 
   DEBUGASSERT(priv->crefs > 1);
-  usbhost_forcetake(&priv->exclsem);
+  nxmutex_lock(&priv->lock);
   priv->crefs--;
 
   /* Release the semaphore.  The following operations when crefs == 1 are
@@ -2341,7 +2293,7 @@ static void usbhost_shutdown(FAR struct uart_dev_s *uartdev)
    * the block driver.
    */
 
-  usbhost_givesem(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
 
   /* We need to disable interrupts momentarily to assure that there are
    * no asynchronous disconnect events.
@@ -2417,14 +2369,13 @@ static int usbhost_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   int ret = 0;
 
   uinfo("Entry\n");
-  DEBUGASSERT(filep && filep->f_inode);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  uartdev = (FAR struct uart_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  uartdev = inode->i_private;
 
   DEBUGASSERT(uartdev && uartdev->priv);
-  priv  = (FAR struct usbhost_cdcacm_s *)uartdev->priv;
+  priv = (FAR struct usbhost_cdcacm_s *)uartdev->priv;
 
   /* Check if the CDC/ACM device is still connected */
 
@@ -2440,7 +2391,7 @@ static int usbhost_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
     {
       /* Process the IOCTL by command */
 
-      ret = usbhost_takesem(&priv->exclsem);
+      ret = nxmutex_lock(&priv->lock);
       if (ret < 0)
         {
           return ret;
@@ -2608,7 +2559,7 @@ static int usbhost_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
           break;
         }
 
-      usbhost_givesem(&priv->exclsem);
+      nxmutex_unlock(&priv->lock);
     }
 
   return ret;
@@ -2709,11 +2660,10 @@ static bool usbhost_rxflowcontrol(FAR struct uart_dev_s *uartdev,
                                   unsigned int nbuffered, bool upper)
 {
   FAR struct usbhost_cdcacm_s *priv;
-  bool newrts;
   int ret;
 
   DEBUGASSERT(uartdev && uartdev->priv);
-  priv = (FAR struct usbhost_cdcacm_s *)uartdev->priv
+  priv = (FAR struct usbhost_cdcacm_s *)uartdev->priv;
 
   /* Is RX flow control enabled? */
 
@@ -2761,9 +2711,9 @@ static bool usbhost_rxflowcontrol(FAR struct uart_dev_s *uartdev,
           DEBUGASSERT(ret >= 0);
           UNUSED(ret);
         }
-
-      return false;
     }
+
+  return false;
 }
 #endif
 

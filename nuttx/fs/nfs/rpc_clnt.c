@@ -1,10 +1,11 @@
 /****************************************************************************
  * fs/nfs/rpc_clnt.c
  *
- *   Copyright (C) 2012-2013, 2018 Gregory Nutt. All rights reserved.
- *   Copyright (C) 2012 Jose Pablo Rojas Vargas. All rights reserved.
- *   Author: Jose Pablo Rojas Vargas <jrojas@nx-engineering.com>
- *           Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2012-2018 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2012 Jose Pablo Rojas Vargas. All rights reserved.
+ * SPDX-FileContributor: Jose Pablo Rojas Vargas <jrojas@nx-engineering.com>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Leveraged from OpenBSD:
  *
@@ -43,8 +44,8 @@
  *   Copyright (c) 1989, 1991, 1993, 1995 The Regents of the University of
  *   California.  All rights reserved.
  *
- * This code is derived from software contributed to Berkeley by Rick Macklem at
- * The University of Guelph.
+ * This code is derived from software contributed to Berkeley by Rick Macklem
+ * at The University of Guelph.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -60,11 +61,11 @@
  * endorse or promote products derived from this software without specific
  * prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
  * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
  * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
@@ -80,10 +81,10 @@
 
 #include <sys/socket.h>
 #include <sys/time.h>
-#include <queue.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <string.h>
 #include <debug.h>
 
@@ -131,7 +132,9 @@ static uint32_t rpc_vers;
 static uint32_t rpc_auth_null;
 static uint32_t rpc_auth_unix;
 
-/* Global statics for all client instances.  Cleared by NuttX on boot-up. */
+/* Global statistics for all client instances.
+ * Cleared by NuttX on boot-up.
+ */
 
 #ifdef CONFIG_NFS_STATISTICS
 static struct rpcstats rpcstats;
@@ -184,8 +187,8 @@ static int rpcclnt_socket(FAR struct rpcclnt *rpc, in_port_t rport)
 
   memcpy(&raddr, rpc->rc_name, sizeof(raddr));
 
+  memset(&laddr, 0, sizeof(laddr));
   laddr.ss_family = raddr.ss_family;
-  memset(laddr.ss_data, 0, sizeof(laddr.ss_data));
 
   if (raddr.ss_family == AF_INET6)
     {
@@ -195,7 +198,7 @@ static int rpcclnt_socket(FAR struct rpcclnt *rpc, in_port_t rport)
       if (rport != 0)
         {
           sin = (FAR struct sockaddr_in6 *)&raddr;
-          sin->sin6_port = htons(rport);
+          sin->sin6_port = HTONS(rport);
         }
 
       sin = (FAR struct sockaddr_in6 *)&laddr;
@@ -209,7 +212,7 @@ static int rpcclnt_socket(FAR struct rpcclnt *rpc, in_port_t rport)
       if (rport != 0)
         {
           sin = (FAR struct sockaddr_in *)&raddr;
-          sin->sin_port = htons(rport);
+          sin->sin_port = HTONS(rport);
         }
 
       sin = (FAR struct sockaddr_in *)&laddr;
@@ -240,6 +243,13 @@ static int rpcclnt_socket(FAR struct rpcclnt *rpc, in_port_t rport)
       goto bad;
     }
 
+#ifdef CONFIG_NFS_DONT_BIND_TCP_SOCKET
+  if (rpc->rc_sotype == SOCK_STREAM)
+    {
+      goto connect;
+    }
+#endif
+
   /* Some servers require that the client port be a reserved port
    * number. We always allocate a reserved port, as this prevents
    * filehandle disclosure through UDP port capture.
@@ -248,7 +258,8 @@ static int rpcclnt_socket(FAR struct rpcclnt *rpc, in_port_t rport)
   do
     {
       *lport = htons(--port);
-      error = psock_bind(&rpc->rc_so, (FAR struct sockaddr *)&laddr, addrlen);
+      error = psock_bind(&rpc->rc_so, (FAR struct sockaddr *)&laddr,
+                         addrlen);
       if (error < 0)
         {
           ferr("ERROR: psock_bind failed: %d\n", error);
@@ -261,6 +272,10 @@ static int rpcclnt_socket(FAR struct rpcclnt *rpc, in_port_t rport)
       ferr("ERROR: psock_bind failed: %d\n", error);
       goto bad;
     }
+
+#ifdef CONFIG_NFS_DONT_BIND_TCP_SOCKET
+connect:
+#endif
 
   /* Protocols that do not require connections could be optionally left
    * unconnected.  That would allow servers to reply from a port other than
@@ -295,32 +310,49 @@ bad:
 static int rpcclnt_send(FAR struct rpcclnt *rpc,
                         FAR void *call, int reqlen)
 {
+  struct iovec  iov[2];
+  struct msghdr msg;
   uint32_t mark;
   int ret = OK;
 
-  /* Send the record marking(RM) for stream only */
-
   if (rpc->rc_sotype == SOCK_STREAM)
     {
-      mark = txdr_unsigned(0x80000000 | reqlen);
-      ret = psock_send(&rpc->rc_so, &mark, sizeof(mark), 0);
-      if (ret < 0)
-        {
-          ferr("ERROR: psock_send mark failed: %d\n", ret);
-          return ret;
-        }
+      /* Prepare the record marking(RM) and compose an RPC request
+       * NOTE: Sending a separate packet does not work with Linux host
+       */
+
+      mark = txdr_unsigned(0x80000000 | (reqlen));
+
+      iov[0].iov_base = (FAR void *)&mark;
+      iov[0].iov_len = sizeof(mark);
+      iov[1].iov_base = (FAR void *)call;
+      iov[1].iov_len = reqlen;
+
+      msg.msg_name = NULL;
+      msg.msg_namelen = 0;
+      msg.msg_iov = iov;
+      msg.msg_iovlen = 2;
+      msg.msg_control = NULL;
+      msg.msg_controllen = 0;
+      msg.msg_flags = 0;
+
+      ret = psock_sendmsg(&rpc->rc_so, &msg, 0);
+      ferr("ERROR: psock_sendmsg request failed: %d\n", ret);
+    }
+  else
+    {
+      /* Send the call message
+       *
+       * On success, psock_send returns the number of bytes sent;
+       * On failure, it returns a negated errno value.
+       */
+
+      ret = psock_send(&rpc->rc_so, call, reqlen, 0);
+      ferr("ERROR: psock_send request failed: %d\n", ret);
     }
 
-  /* Send the call message
-   *
-   * On success, psock_send returns the number of bytes sent;
-   * On failure, it returns a negated errno value.
-   */
-
-  ret = psock_send(&rpc->rc_so, call, reqlen, 0);
   if (ret < 0)
     {
-      ferr("ERROR: psock_send request failed: %d\n", ret);
       return ret;
     }
 
@@ -340,6 +372,7 @@ static int rpcclnt_receive(FAR struct rpcclnt *rpc,
 {
   uint32_t mark;
   int error = 0;
+  int offset = 0;
 
   /* Receive the record marking(RM) for stream only */
 
@@ -369,12 +402,20 @@ static int rpcclnt_receive(FAR struct rpcclnt *rpc,
       resplen = mark;
     }
 
-  error = psock_recv(&rpc->rc_so, reply, resplen, 0);
-  if (error < 0)
+  do
     {
-      ferr("ERROR: psock_recv response failed: %d\n", error);
-      return error;
+      error = psock_recv(&rpc->rc_so, reply + offset, resplen, 0);
+
+      if (error < 0)
+        {
+          ferr("ERROR: psock_recv response failed: %d\n", error);
+          return error;
+        }
+
+      resplen -= error;
+      offset  += error;
     }
+  while (rpc->rc_sotype == SOCK_STREAM && resplen != 0);
 
   return OK;
 }
@@ -393,6 +434,7 @@ static int rpcclnt_reply(FAR struct rpcclnt *rpc, uint32_t xid,
   int error;
 
 retry:
+
   /* Get the next RPC reply from the socket */
 
   error = rpcclnt_receive(rpc, reply, resplen);
@@ -536,15 +578,18 @@ int rpcclnt_connect(FAR struct rpcclnt *rpc)
   request.sdata.pmap.port = 0;
 
   error = rpcclnt_request(rpc, PMAPPROC_GETPORT, PMAPPROG, PMAPVERS,
-                          (FAR void *)&request.sdata, sizeof(struct call_args_pmap),
-                          (FAR void *)&response.rdata, sizeof(struct rpc_reply_pmap));
+                          (FAR void *)&request.sdata,
+                          sizeof(struct call_args_pmap),
+                          (FAR void *)&response.rdata,
+                          sizeof(struct rpc_reply_pmap));
   if (error != 0)
     {
       ferr("ERROR: rpcclnt_request failed: %d\n", error);
       goto bad;
     }
 
-  error = rpcclnt_socket(rpc, fxdr_unsigned(uint32_t, response.rdata.pmap.port));
+  error = rpcclnt_socket(rpc,
+                         fxdr_unsigned(uint32_t, response.rdata.pmap.port));
   if (error < 0)
     {
       ferr("ERROR: rpcclnt_socket MOUNTD port failed: %d\n", error);
@@ -553,8 +598,10 @@ int rpcclnt_connect(FAR struct rpcclnt *rpc)
 
   /* Do RPC to mountd. */
 
-  strncpy(request.mountd.mount.rpath, rpc->rc_path, 90);
-  request.mountd.mount.len = txdr_unsigned(sizeof(request.mountd.mount.rpath));
+  strlcpy(request.mountd.mount.rpath, rpc->rc_path,
+          sizeof(request.mountd.mount.rpath));
+  request.mountd.mount.len =
+    txdr_unsigned(sizeof(request.mountd.mount.rpath));
 
   error = rpcclnt_request(rpc, RPCMNT_MOUNT, RPCPROG_MNT, RPCMNT_VER3,
                           (FAR void *)&request.mountd,
@@ -574,7 +621,8 @@ int rpcclnt_connect(FAR struct rpcclnt *rpc)
       goto bad;
     }
 
-  rpc->rc_fhsize = fxdr_unsigned(uint32_t, response.mdata.mount.fhandle.length);
+  rpc->rc_fhsize = fxdr_unsigned(uint32_t,
+                                 response.mdata.mount.fhandle.length);
   memcpy(&rpc->rc_fh, &response.mdata.mount.fhandle.handle, rpc->rc_fhsize);
 
   /* Do the RPC to get a dynamic bounding with the server using PMAP.
@@ -604,7 +652,8 @@ int rpcclnt_connect(FAR struct rpcclnt *rpc)
       goto bad;
     }
 
-  error = rpcclnt_socket(rpc, fxdr_unsigned(uint32_t, response.rdata.pmap.port));
+  error = rpcclnt_socket(rpc,
+                         fxdr_unsigned(uint32_t, response.rdata.pmap.port));
   if (error < 0)
     {
       ferr("ERROR: rpcclnt_socket NFS port returns %d\n", error);
@@ -668,7 +717,8 @@ void rpcclnt_disconnect(FAR struct rpcclnt *rpc)
       goto bad;
     }
 
-  error = rpcclnt_socket(rpc, fxdr_unsigned(uint32_t, response.rdata.pmap.port));
+  error = rpcclnt_socket(rpc,
+                         fxdr_unsigned(uint32_t, response.rdata.pmap.port));
   if (error < 0)
     {
       ferr("ERROR: rpcclnt_socket failed: %d\n", error);
@@ -677,8 +727,10 @@ void rpcclnt_disconnect(FAR struct rpcclnt *rpc)
 
   /* Do RPC to umountd. */
 
-  strncpy(request.mountd.umount.rpath, rpc->rc_path, 90);
-  request.mountd.umount.len = txdr_unsigned(sizeof(request.mountd.umount.rpath));
+  strlcpy(request.mountd.umount.rpath, rpc->rc_path,
+          sizeof(request.mountd.umount.rpath));
+  request.mountd.umount.len =
+    txdr_unsigned(sizeof(request.mountd.umount.rpath));
 
   error = rpcclnt_request(rpc, RPCMNT_UMOUNT, RPCPROG_MNT, RPCMNT_VER3,
                           (FAR void *)&request.mountd,
@@ -700,9 +752,9 @@ bad:
  *
  * Description:
  *   Perform the RPC request.  Logic formats the RPC CALL message and calls
- *   rpcclnt_send to send the RPC CALL message.  It then calls rpcclnt_reply()
- *   to get the response.  It may attempt to re-send the CALL message on
- *   certain errors.
+ *   rpcclnt_send to send the RPC CALL message.  It then calls
+ *   rpcclnt_reply() to get the response.  It may attempt to re-send the
+ *   CALL message on certain errors.
  *
  *   On successful receipt, it verifies the RPC level of the returned values.
  *   (There may still be be NFS layer errors that will be detected by calling
@@ -729,8 +781,8 @@ int rpcclnt_request(FAR struct rpcclnt *rpc, int procnum, int prog,
   rpcclnt_fmtheader((FAR struct rpc_call_header *)request,
                     xid, prog, version, procnum);
 
-  /* Get the full size of the message (the size of variable data plus the size of
-   * the messages header).
+  /* Get the full size of the message (the size of variable data plus the
+   * size of the messages header).
    */
 
   reqlen += sizeof(struct rpc_call_header);
@@ -779,6 +831,7 @@ int rpcclnt_request(FAR struct rpcclnt *rpc, int procnum, int prog,
         {
           break;
         }
+
       rpc_statistics(rpcretries);
     }
 
@@ -805,7 +858,7 @@ int rpcclnt_request(FAR struct rpcclnt *rpc, int procnum, int prog,
     }
   else
     {
-      ferr("ERROR: Unsupported RPC type: %d\n", tmp);
+      ferr("ERROR: Unsupported RPC type: %" PRId32 "\n", tmp);
       return -EOPNOTSUPP;
     }
 

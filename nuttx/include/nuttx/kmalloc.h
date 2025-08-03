@@ -1,6 +1,8 @@
 /****************************************************************************
  * include/nuttx/kmalloc.h
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -32,9 +34,10 @@
 #include <stdlib.h>
 
 #include <nuttx/mm/mm.h>
-#include <nuttx/userspace.h>
 
-#if !defined(CONFIG_BUILD_PROTECTED) || defined(__KERNEL__)
+#ifdef CONFIG_MM_KERNEL_HEAP
+#include <nuttx/sched.h>
+#endif
 
 /****************************************************************************
  * Public Types
@@ -71,11 +74,10 @@ extern "C"
 
 #define kumm_initialize(h,s)     umm_initialize(h,s)
 #define kumm_addregion(h,s)      umm_addregion(h,s)
-#define kumm_trysemaphore()      umm_trysemaphore()
-#define kumm_givesemaphore()     umm_givesemaphore()
 
-#define kumm_calloc(n,s)         calloc(n,s);
+#define kumm_calloc(n,s)         calloc(n,s)
 #define kumm_malloc(s)           malloc(s)
+#define kumm_malloc_size(p)      malloc_size(p)
 #define kumm_zalloc(s)           zalloc(s)
 #define kumm_realloc(p,s)        realloc(p,s)
 #define kumm_memalign(a,s)       memalign(a,s)
@@ -84,25 +86,7 @@ extern "C"
 
 /* This family of allocators is used to manage kernel protected memory */
 
-#if !defined(CONFIG_BUILD_PROTECTED) && !defined(CONFIG_MM_KERNEL_HEAP)
-/* If this is not a kernel build, then these map to the same interfaces
- * as were used for the user-mode function.
- */
-
-#  define kmm_initialize(h,s)    /* Initialization done by kumm_initialize */
-#  define kmm_addregion(h,s)     umm_addregion(h,s)
-#  define kmm_trysemaphore()     umm_trysemaphore()
-#  define kmm_givesemaphore()    umm_givesemaphore()
-
-#  define kmm_calloc(n,s)        calloc(n,s);
-#  define kmm_malloc(s)          malloc(s)
-#  define kmm_zalloc(s)          zalloc(s)
-#  define kmm_realloc(p,s)       realloc(p,s)
-#  define kmm_memalign(a,s)      memalign(a,s)
-#  define kmm_free(p)            free(p)
-#  define kmm_mallinfo()         mallinfo()
-
-#elif !defined(CONFIG_MM_KERNEL_HEAP)
+#ifndef CONFIG_MM_KERNEL_HEAP
 /* If this the kernel phase of a kernel build, and there are only user-space
  * allocators, then the following are defined in userspace.h as macros that
  * call into user-space via a header at the beginning of the user-space blob.
@@ -110,16 +94,17 @@ extern "C"
 
 #  define kmm_initialize(h,s)    /* Initialization done by kumm_initialize */
 #  define kmm_addregion(h,s)     umm_addregion(h,s)
-#  define kmm_trysemaphore()     umm_trysemaphore()
-#  define kmm_givesemaphore()    umm_givesemaphore()
 
-#  define kmm_calloc(n,s)        calloc(n,s);
+#  define kmm_calloc(n,s)        calloc(n,s)
 #  define kmm_malloc(s)          malloc(s)
+#  define kmm_malloc_size(p)     malloc_size(p)
 #  define kmm_zalloc(s)          zalloc(s)
 #  define kmm_realloc(p,s)       realloc(p,s)
 #  define kmm_memalign(a,s)      memalign(a,s)
 #  define kmm_free(p)            free(p)
 #  define kmm_mallinfo()         mallinfo()
+#  define kmm_heapmember(p)      umm_heapmember(p)
+#  define kmm_memdump(p)         umm_memdump(p)
 
 #else
 /* Otherwise, the kernel-space allocators are declared in
@@ -128,8 +113,7 @@ extern "C"
 
 #endif
 
-#if (defined(CONFIG_BUILD_PROTECTED) || defined(CONFIG_BUILD_KERNEL)) && \
-     defined(CONFIG_MM_KERNEL_HEAP)
+#ifdef CONFIG_MM_KERNEL_HEAP
 /****************************************************************************
  * Group memory management
  *
@@ -145,6 +129,11 @@ extern "C"
 
 FAR void *group_malloc(FAR struct task_group_s *group, size_t nbytes);
 
+/* Functions defined in group/group_realloc.c *******************************/
+
+FAR void *group_realloc(FAR struct task_group_s *group, FAR void *oldmem,
+                        size_t newsize);
+
 /* Functions defined in group/group_zalloc.c ********************************/
 
 FAR void *group_zalloc(FAR struct task_group_s *group, size_t nbytes);
@@ -158,9 +147,10 @@ void group_free(FAR struct task_group_s *group, FAR void *mem);
    * in privileges.
    */
 
-#  define group_malloc(g,n) kumm_malloc(n)
-#  define group_zalloc(g,n) kumm_zalloc(n)
-#  define group_free(g,m)   kumm_free(m)
+#  define group_malloc(g,n)      kumm_malloc(n)
+#  define group_realloc(g,p,s)   kumm_realloc((p),(s))
+#  define group_zalloc(g,n)      kumm_zalloc(n)
+#  define group_free(g,m)        kumm_free(m)
 
 #endif
 
@@ -169,5 +159,4 @@ void group_free(FAR struct task_group_s *group, FAR void *mem);
 }
 #endif
 
-#endif /* !CONFIG_BUILD_PROTECTED || __KERNEL__ */
 #endif /* __INCLUDE_NUTTX_KMALLOC_H */

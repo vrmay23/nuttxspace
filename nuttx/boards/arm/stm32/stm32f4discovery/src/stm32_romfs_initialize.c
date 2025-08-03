@@ -1,9 +1,10 @@
-/*****************************************************************************
+/****************************************************************************
  * boards/arm/stm32/stm32f4discovery/src/stm32_romfs_initialize.c
  * This file provides contents of an optional ROMFS volume, mounted at boot.
  *
- *   Copyright (C) 2017 Tomasz Wozniak. All rights reserved.
- *   Author: Tomasz Wozniak <t.wozniak@samsung.com>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2017 Tomasz Wozniak. All rights reserved.
+ * SPDX-FileContributor: Tomasz Wozniak <t.wozniak@samsung.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,7 +35,7 @@
  *
  ****************************************************************************/
 
-/*****************************************************************************
+/****************************************************************************
  * Included Files
  ****************************************************************************/
 
@@ -46,6 +47,7 @@
 #include <debug.h>
 #include <errno.h>
 
+#include <nuttx/fs/fs.h>
 #include <nuttx/drivers/ramdisk.h>
 #include "stm32_romfs.h"
 
@@ -90,15 +92,10 @@ __asm__ (
     \
     ".balign " STR(ROMFS_SECTOR_SIZE) "\n"
     ".globl   romfs_data_end\n"
-"romfs_data_end:\n"
-    ".globl   romfs_data_size\n"
-"romfs_data_size:\n"
-    ".word romfs_data_end - romfs_data_begin\n"
-    ".previous\n");
+"romfs_data_end:\n");
 
-extern const char romfs_data_begin;
-extern const char romfs_data_end;
-extern const int  romfs_data_size;
+extern const uint8_t romfs_data_begin[];
+extern const uint8_t romfs_data_end[];
 
 /****************************************************************************
  * Public Functions
@@ -115,21 +112,21 @@ extern const int  romfs_data_size;
  *   Zero (OK) on success, a negated errno value on error.
  *
  * Assumptions/Limitations:
- *   Memory addresses [&romfs_data_begin .. &romfs_data_begin) should contain
+ *   Memory addresses [romfs_data_begin .. romfs_data_end) should contain
  *   ROMFS volume data, as included in the assembly snippet above (l. 84).
  *
  ****************************************************************************/
 
 int stm32_romfs_initialize(void)
 {
-  uintptr_t romfs_data_len;
+  size_t romfs_data_len;
   int  ret;
 
   /* Create a ROM disk for the /etc filesystem */
 
-  romfs_data_len = (uintptr_t)&romfs_data_end - (uintptr_t)&romfs_data_begin;
+  romfs_data_len = romfs_data_end - romfs_data_begin;
 
-  ret = romdisk_register(CONFIG_STM32_ROMFS_DEV_MINOR, &romfs_data_begin,
+  ret = romdisk_register(CONFIG_STM32_ROMFS_DEV_MINOR, romfs_data_begin,
                          NSECTORS(romfs_data_len), ROMFS_SECTOR_SIZE);
   if (ret < 0)
     {
@@ -142,12 +139,12 @@ int stm32_romfs_initialize(void)
   finfo("Mounting ROMFS filesystem at target=%s with source=%s\n",
         CONFIG_STM32_ROMFS_MOUNTPOINT, MOUNT_DEVNAME);
 
-  ret = mount(MOUNT_DEVNAME, CONFIG_STM32_ROMFS_MOUNTPOINT,
+  ret = nx_mount(MOUNT_DEVNAME, CONFIG_STM32_ROMFS_MOUNTPOINT,
               "romfs", MS_RDONLY, NULL);
   if (ret < 0)
     {
-      ferr("ERROR: mount(%s,%s,romfs) failed: %d\n",
-           MOUNT_DEVNAME, CONFIG_STM32_ROMFS_MOUNTPOINT, errno);
+      ferr("ERROR: nx_mount(%s,%s,romfs) failed: %d\n",
+           MOUNT_DEVNAME, CONFIG_STM32_ROMFS_MOUNTPOINT, ret);
       return ret;
     }
 

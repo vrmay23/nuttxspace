@@ -1,34 +1,22 @@
 /****************************************************************************
- *  arch/arm/src/lpc43/lpc43_rit.c
+ * arch/arm/src/lpc43xx/lpc43_tickless_rit.c
  *
- *   Copyright (C) 2015, 2016 Gregory Nutt. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -49,24 +37,18 @@
 #include <errno.h>
 #include <time.h>
 
+#include <sys/param.h>
+
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/clock.h>
 #include <arch/board/board.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "chip.h"
 #include "hardware/lpc43_rit.h"
 
 #ifdef CONFIG_SCHED_TICKLESS
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#ifndef min
-#  define min(a,b) (a < b ? a : b)
-#endif
 
 /****************************************************************************
  * Private Data
@@ -129,18 +111,13 @@ static inline uint32_t lpc43_tl_get_compare(void)
   return compare_cache;
 }
 
- static inline void lpc43_tl_set_mask(uint32_t value)
+static inline void lpc43_tl_set_mask(uint32_t value)
 {
   if (value != mask_cache)
     {
       mask_cache = value;
       putreg32(value, LPC43_RIT_MASK);
     }
-}
-
-static inline uint32_t lpc43_tl_get_mask(void)
-{
-  return mask_cache;
 }
 
 static inline bool lpc43_tl_get_ctrl_bit(uint32_t bit)
@@ -180,11 +157,6 @@ static inline void lpc43_tl_set_enable(bool value)
   lpc43_tl_set_ctrl_bit(RIT_CTRL_EN, value);
 }
 
-static inline bool lpc43_tl_get_enable(void)
-{
-  return lpc43_tl_get_ctrl_bit(RIT_CTRL_EN);
-}
-
 static inline void lpc43_tl_clear_interrupt(void)
 {
   putreg32(ctrl_cache | RIT_CTRL_INT, LPC43_RIT_CTRL);
@@ -201,7 +173,7 @@ static uint32_t common_dev(uint32_t a, uint32_t b)
 {
   while (b != 0)
     {
-      int h = a%b;
+      int h = a % b;
       a = b;
       b = h;
     }
@@ -209,9 +181,9 @@ static uint32_t common_dev(uint32_t a, uint32_t b)
   return a;
 }
 
-static void lpc43_tl_add(FAR const struct timespec *ts1,
-                         FAR const struct timespec *ts2,
-                         FAR struct timespec *ts3)
+static void lpc43_tl_add(const struct timespec *ts1,
+                         const struct timespec *ts2,
+                         struct timespec *ts3)
 {
   time_t sec = ts1->tv_sec + ts2->tv_sec;
   long nsec  = ts1->tv_nsec + ts2->tv_nsec;
@@ -226,9 +198,9 @@ static void lpc43_tl_add(FAR const struct timespec *ts1,
   ts3->tv_nsec = nsec;
 }
 
-static void lpc43_tl_sub(FAR const struct timespec *ts1,
-                         FAR const struct timespec *ts2,
-                         FAR struct timespec *ts3)
+static void lpc43_tl_sub(const struct timespec *ts1,
+                         const struct timespec *ts2,
+                         struct timespec *ts3)
 {
   time_t sec;
   long nsec;
@@ -261,12 +233,12 @@ static void lpc43_tl_sub(FAR const struct timespec *ts1,
   ts3->tv_nsec = nsec;
 }
 
-static inline uint32_t lpc43_tl_ts2tick(FAR const struct timespec *ts)
+static inline uint32_t lpc43_tl_ts2tick(const struct timespec *ts)
 {
-  return (ts->tv_sec*LPC43_CCLK + (ts->tv_nsec/MIN_NSEC*MIN_TICKS));
+  return (ts->tv_sec * LPC43_CCLK + (ts->tv_nsec / MIN_NSEC * MIN_TICKS));
 }
 
-static uint32_t lpc43_tl_tick2ts(uint32_t ticks, FAR struct timespec *ts,
+static uint32_t lpc43_tl_tick2ts(uint32_t ticks, struct timespec *ts,
                                  bool with_rest)
 {
   uint32_t ticks_whole;
@@ -274,8 +246,8 @@ static uint32_t lpc43_tl_tick2ts(uint32_t ticks, FAR struct timespec *ts,
 
   if (with_rest)
     {
-      uint32_t ticks_mult = ticks/MIN_TICKS;
-      ticks_whole = ticks_mult*MIN_TICKS;
+      uint32_t ticks_mult = ticks / MIN_TICKS;
+      ticks_whole = ticks_mult * MIN_TICKS;
       ticks_rest = ticks - ticks_whole;
     }
   else
@@ -283,8 +255,8 @@ static uint32_t lpc43_tl_tick2ts(uint32_t ticks, FAR struct timespec *ts,
       ticks_whole = ticks;
     }
 
-  ts->tv_sec = ticks_whole/LPC43_CCLK;
-  ts->tv_nsec = ((ticks_whole%LPC43_CCLK)/MIN_TICKS)*MIN_NSEC;
+  ts->tv_sec = ticks_whole / LPC43_CCLK;
+  ts->tv_nsec = ((ticks_whole % LPC43_CCLK) / MIN_TICKS) * MIN_NSEC;
 
   return ticks_rest;
 }
@@ -361,9 +333,9 @@ static void lpc43_tl_save_timer(bool from_isr)
       lpc43_tl_set_compare(UINT32_MAX);
       lpc43_tl_set_mask(0);
       lpc43_tl_clear_interrupt();
-   }
+    }
   else
-   {
+    {
       /* Process reset if any */
 
       uint32_t match = lpc43_tl_get_compare();
@@ -373,7 +345,7 @@ static void lpc43_tl_save_timer(bool from_isr)
       lpc43_tl_set_compare(UINT32_MAX);
       lpc43_tl_set_mask(0);
 
-     if (from_isr || lpc43_tl_get_interrupt())
+      if (from_isr || lpc43_tl_get_interrupt())
         {
           if (lpc43_tl_get_reset_on_match()) /* Was reset? */
             {
@@ -448,18 +420,17 @@ static void lpc43_tl_looped_forced_set_compare(void)
 
 static bool lpc43_tl_set_calc_arm(uint32_t curr, uint32_t to_set, bool arm)
 {
-
   uint32_t calc_time;
 
   if (curr < TO_RESET_NEXT)
     {
-      calc_time = min(TO_RESET_NEXT, to_set);
+      calc_time = MIN(TO_RESET_NEXT, to_set);
     }
   else
     {
       if (curr < TO_END)
         {
-          calc_time = min(curr + RESET_TICKS, to_set);
+          calc_time = MIN(curr + RESET_TICKS, to_set);
         }
       else
         {
@@ -536,7 +507,7 @@ static inline void lpc43_tl_alarm(uint32_t curr)
 
 /* Interrupt handler */
 
-static int lpc43_tl_isr(int irq, FAR void *context, FAR void *arg)
+static int lpc43_tl_isr(int irq, void *context, void *arg)
 {
   lpc43_tl_sync_up();
 
@@ -606,8 +577,8 @@ void up_timer_initialize(void)
   compare_cache = getreg32(LPC43_RIT_COMPVAL);
 
   COMMON_DEV = common_dev(NSEC_PER_SEC, LPC43_CCLK);
-  MIN_TICKS = LPC43_CCLK/COMMON_DEV;
-  MIN_NSEC = NSEC_PER_SEC/COMMON_DEV;
+  MIN_TICKS = LPC43_CCLK / COMMON_DEV;
+  MIN_NSEC = NSEC_PER_SEC / COMMON_DEV;
 
   base_ts.tv_sec = 0;
   base_ts.tv_nsec = 0;
@@ -638,7 +609,7 @@ void up_timer_initialize(void)
 
 /* No reg changes, only processing */
 
-int up_timer_gettime(FAR struct timespec *ts)
+int up_timer_gettime(struct timespec *ts)
 {
   lpc43_tl_sync_up();
 
@@ -679,7 +650,7 @@ int up_timer_gettime(FAR struct timespec *ts)
   return OK;
 }
 
-int up_alarm_cancel(FAR struct timespec *ts)
+int up_alarm_cancel(struct timespec *ts)
 {
   lpc43_tl_sync_up();
 
@@ -698,7 +669,7 @@ int up_alarm_cancel(FAR struct timespec *ts)
   return OK;
 }
 
-int up_alarm_start(FAR const struct timespec *ts)
+int up_alarm_start(const struct timespec *ts)
 {
   lpc43_tl_sync_up();
 
@@ -742,7 +713,7 @@ int up_alarm_start(FAR const struct timespec *ts)
 }
 
 #ifndef CONFIG_SCHED_TICKLESS_ALARM
-int up_timer_cancel(FAR struct timespec *ts)
+int up_timer_cancel(struct timespec *ts)
 {
   lpc43_tl_sync_up();
 
@@ -759,7 +730,7 @@ int up_timer_cancel(FAR struct timespec *ts)
   return OK;
 }
 
-int up_timer_start(FAR const struct timespec *ts)
+int up_timer_start(const struct timespec *ts)
 {
   lpc43_tl_sync_up();
 

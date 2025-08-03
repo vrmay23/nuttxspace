@@ -1,40 +1,27 @@
 /****************************************************************************
  * net/sixlowpan/sixlowpan.h
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
-#ifndef _NET_SIXLOWPAN_SIXLOWPAN_H
-#define _NET_SIXLOWPAN_SIXLOWPAN_H
+#ifndef __NET_SIXLOWPAN_SIXLOWPAN_H
+#define __NET_SIXLOWPAN_SIXLOWPAN_H
 
 /****************************************************************************
  * Included Files
@@ -83,8 +70,8 @@ void sixlowpan_initialize(void);
  * Name: psock_6lowpan_tcp_send
  *
  * Description:
- *   psock_6lowpan_tcp_send() call may be used only when the TCP socket is in a
- *   connected state (so that the intended recipient is known).
+ *   psock_6lowpan_tcp_send() call may be used only when the TCP socket is in
+ *   a connected state (so that the intended recipient is known).
  *
  * Input Parameters:
  *   psock - An instance of the internal socket structure.
@@ -111,7 +98,7 @@ ssize_t psock_6lowpan_tcp_send(FAR struct socket *psock, FAR const void *buf,
  * Name: sixlowpan_tcp_send
  *
  * Description:
- *   TCP output comes through three different mechansims.  Either from:
+ *   TCP output comes through three different mechanisms.  Either from:
  *
  *   1. TCP socket output.  For the case of TCP output to an
  *      IEEE802.15.4, the TCP output is caught in the socket
@@ -121,7 +108,7 @@ ssize_t psock_6lowpan_tcp_send(FAR struct socket *psock, FAR const void *buf,
  *   3. TCP output resulting from TX or timer polling
  *
  *   Cases 2 and 3 will be handled here.  Logic in ipv6_tcp_input(),
- *   devif_poll(), and devif_timer() detect if (1) an attempt to return with
+ *   and devif_poll() detect if (1) an attempt to return with
  *   d_len > 0 and (2) that the device is an IEEE802.15.4 MAC network
  *   driver. Under those conditions, this function will be called to create
  *   the IEEE80215.4 frames.
@@ -275,4 +262,4 @@ void sixlowpan_udp_send(FAR struct net_driver_s *dev,
 #endif
 
 #endif /* CONFIG_NET_6LOWPAN */
-#endif /* _NET_SIXLOWPAN_SIXLOWPAN_H */
+#endif /* __NET_SIXLOWPAN_SIXLOWPAN_H */

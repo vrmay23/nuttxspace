@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/cxd56xx/cxd56_charger.c
  *
- *   Copyright 2018 Sony Semiconductor Solutions Corporation
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
- *    the names of its contributors may be used to endorse or promote
- *    products derived from this software without specific prior written
- *    permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,7 +28,7 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <debug.h>
+#include <assert.h>
 
 #include <sys/types.h>
 #include <stdio.h>
@@ -53,6 +40,7 @@
 #include <math.h>
 
 #include <nuttx/kmalloc.h>
+#include <nuttx/mutex.h>
 #include <nuttx/power/battery_charger.h>
 #include <nuttx/power/battery_ioctl.h>
 
@@ -66,25 +54,10 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Debug ********************************************************************/
-
-#ifdef CONFIG_CXD56_CHARGER_DEBUG
-#define baterr(fmt, ...) logerr(fmt, ## __VA_ARGS__)
-#define batdbg(fmt, ...) logdebug(fmt, ## __VA_ARGS__)
-#else
-#define baterr(fmt, ...)
-#define batdbg(fmt, ...)
-#endif
-
 /* Configuration */
 
-#undef USE_FLOAT_CONVERSION
-
 #ifdef CONFIG_CXD56_CHARGER_TEMP_PRECISE
-#if !defined(CONFIG_LIBM) && !defined(CONFIG_LIBM_NEWLIB)
-#  error Temperature conversion in float requires math library.
-#endif
-#define USE_FLOAT_CONVERSION 1
+#  define USE_FLOAT_CONVERSION
 #endif
 
 /****************************************************************************
@@ -93,26 +66,24 @@
 
 struct charger_dev_s
 {
-  sem_t batsem;
+  mutex_t batlock;
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static int charger_get_status(FAR enum battery_charger_status_e *status);
-static int charger_get_health(FAR enum battery_charger_health_e *health);
-static int charger_online(FAR bool *online);
-static int charger_get_temptable(FAR struct battery_temp_table_s *table);
-static int charger_set_temptable(FAR struct battery_temp_table_s *table);
+static int charger_get_status(enum battery_status_e *status);
+static int charger_get_health(enum battery_health_e *health);
+static int charger_online(bool *online);
+static int charger_get_temptable(struct battery_temp_table_s *table);
+static int charger_set_temptable(struct battery_temp_table_s *table);
 
-static int charger_open(FAR struct file *filep);
-static int charger_close(FAR struct file *filep);
-static ssize_t charger_read(FAR struct file *filep, FAR char *buffer,
+static ssize_t charger_read(struct file *filep, char *buffer,
                             size_t buflen);
-static ssize_t charger_write(FAR struct file *filep,
-                             FAR const char *buffer, size_t buflen);
-static int charger_ioctl(FAR struct file *filep, int cmd,
+static ssize_t charger_write(struct file *filep,
+                             const char *buffer, size_t buflen);
+static int charger_ioctl(struct file *filep, int cmd,
                          unsigned long arg);
 
 /****************************************************************************
@@ -121,21 +92,18 @@ static int charger_ioctl(FAR struct file *filep, int cmd,
 
 static const struct file_operations g_chargerops =
 {
-  charger_open,   /* open */
-  charger_close,  /* close */
+  NULL,           /* open */
+  NULL,           /* close */
   charger_read,   /* read */
   charger_write,  /* write */
-  0,              /* seek */
-  charger_ioctl   /* ioctl */
-#ifndef CONFIG_DISABLE_POLL
-  , NULL          /* poll */
-#endif
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL          /* unlink */
-#endif
+  NULL,           /* seek */
+  charger_ioctl,  /* ioctl */
 };
 
-static struct charger_dev_s g_chargerdev;
+static struct charger_dev_s g_chargerdev =
+{
+  .batlock = NXMUTEX_INITIALIZER,
+};
 
 /****************************************************************************
  * Private Functions
@@ -231,7 +199,7 @@ static int charger_therm2temp(int val)
  * Name: charger_get_status
  ****************************************************************************/
 
-static int charger_get_status(FAR enum battery_charger_status_e *status)
+static int charger_get_status(enum battery_status_e *status)
 {
   uint8_t state;
   int ret;
@@ -290,9 +258,9 @@ static int charger_get_status(FAR enum battery_charger_status_e *status)
  * Name: charger_get_health
  ****************************************************************************/
 
-static int charger_get_health(FAR enum battery_charger_health_e *health)
+static int charger_get_health(enum battery_health_e *health)
 {
-  FAR struct pmic_gauge_s gauge;
+  struct pmic_gauge_s gauge;
   uint8_t state;
   int temp;
   int ret;
@@ -340,7 +308,7 @@ static int charger_get_health(FAR enum battery_charger_health_e *health)
  * Name: charger_online
  ****************************************************************************/
 
-static int charger_online(FAR bool *online)
+static int charger_online(bool *online)
 {
   if (online == NULL)
     {
@@ -355,9 +323,9 @@ static int charger_online(FAR bool *online)
  * Name: charger_get_current
  ****************************************************************************/
 
-static int charger_get_current(FAR int *current)
+static int charger_get_current(int *current)
 {
-  FAR struct pmic_gauge_s gauge;
+  struct pmic_gauge_s gauge;
   int ret;
 
   ASSERT(current);
@@ -370,7 +338,9 @@ static int charger_get_current(FAR int *current)
       return -EIO;
     }
 
-  /* (Register value - 800h) / Current detection resistor (0.1 ohm) * 0.02929 */
+  /* (Register value - 800h) / Current detection resistor (0.1 ohm)
+   *    x 0.02929
+   */
 
 #ifdef USE_FLOAT_CONVERSION
   *current = (gauge.current - 0x800) / 0.1f * 0.02929f;
@@ -385,9 +355,9 @@ static int charger_get_current(FAR int *current)
  * Name: charger_get_voltage
  ****************************************************************************/
 
-static int charger_get_voltage(FAR int *voltage)
+static int charger_get_voltage(int *voltage)
 {
-  FAR struct pmic_gauge_s gauge;
+  struct pmic_gauge_s gauge;
   int ret;
 
   ASSERT(voltage);
@@ -413,7 +383,7 @@ static int charger_get_voltage(FAR int *voltage)
  * Name: charger_get_temptable
  ****************************************************************************/
 
-static int charger_get_temptable(FAR struct battery_temp_table_s *table)
+static int charger_get_temptable(struct battery_temp_table_s *table)
 {
   struct pmic_temp_table_s buf;
   int ret;
@@ -436,7 +406,7 @@ static int charger_get_temptable(FAR struct battery_temp_table_s *table)
  * Name: charger_set_temptable
  ****************************************************************************/
 
-static int charger_set_temptable(FAR struct battery_temp_table_s *table)
+static int charger_set_temptable(struct battery_temp_table_s *table)
 {
   struct pmic_temp_table_s buf;
 
@@ -449,36 +419,10 @@ static int charger_set_temptable(FAR struct battery_temp_table_s *table)
 }
 
 /****************************************************************************
- * Name: charger_open
- *
- * Description:
- *   This function is called whenever the battery device is opened.
- *
- ****************************************************************************/
-
-static int charger_open(FAR struct file *filep)
-{
-  return OK;
-}
-
-/****************************************************************************
- * Name: charger_close
- *
- * Description:
- *   This routine is called when the battery device is closed.
- *
- ****************************************************************************/
-
-static int charger_close(FAR struct file *filep)
-{
-  return OK;
-}
-
-/****************************************************************************
  * Name: charger_read
  ****************************************************************************/
 
-static ssize_t charger_read(FAR struct file *filep, FAR char *buffer,
+static ssize_t charger_read(struct file *filep, char *buffer,
                             size_t buflen)
 {
   /* Return nothing read */
@@ -490,8 +434,8 @@ static ssize_t charger_read(FAR struct file *filep, FAR char *buffer,
  * Name: charger_write
  ****************************************************************************/
 
-static ssize_t charger_write(FAR struct file *filep,
-                             FAR const char *buffer, size_t buflen)
+static ssize_t charger_write(struct file *filep,
+                             const char *buffer, size_t buflen)
 {
   /* Return nothing written */
 
@@ -502,42 +446,42 @@ static ssize_t charger_write(FAR struct file *filep,
  * Name: charger_ioctl
  ****************************************************************************/
 
-static int charger_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
+static int charger_ioctl(struct file *filep, int cmd, unsigned long arg)
 {
-  FAR struct inode *inode = filep->f_inode;
-  FAR struct charger_dev_s *priv  = inode->i_private;
+  struct inode *inode = filep->f_inode;
+  struct charger_dev_s *priv = inode->i_private;
   int ret = -ENOTTY;
 
-  nxsem_wait(&priv->batsem);
+  nxmutex_lock(&priv->batlock);
 
   switch (cmd)
     {
       case BATIOC_STATE:
         {
-          FAR enum battery_charger_status_e *status =
-            (FAR enum battery_charger_status_e *)(uintptr_t)arg;
+          enum battery_status_e *status =
+            (enum battery_status_e *)(uintptr_t)arg;
           ret = charger_get_status(status);
         }
         break;
 
       case BATIOC_HEALTH:
         {
-          FAR enum battery_charger_health_e *health =
-            (FAR enum battery_charger_health_e *)(uintptr_t)arg;
+          enum battery_health_e *health =
+            (enum battery_health_e *)(uintptr_t)arg;
           ret = charger_get_health(health);
         }
         break;
 
       case BATIOC_ONLINE:
         {
-          FAR bool *online = (FAR bool *)(uintptr_t)arg;
+          bool *online = (bool *)(uintptr_t)arg;
           ret = charger_online(online);
         }
         break;
 
       case BATIOC_VOLTAGE:
         {
-          FAR int *voltage = (FAR int *)(uintptr_t)arg;
+          int *voltage = (int *)(uintptr_t)arg;
           ret = cxd56_pmic_setchargevol(*voltage);
         }
         break;
@@ -552,72 +496,72 @@ static int charger_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
       case BATIOC_INPUT_CURRENT:
         {
-          FAR int *current = (FAR int *)(uintptr_t)arg;
+          int *current = (int *)(uintptr_t)arg;
           ret = cxd56_pmic_setchargecurrent(*current);
         }
         break;
 
       case BATIOC_GET_CHGVOLTAGE:
         {
-          FAR int *voltage = (FAR int *)(uintptr_t)arg;
+          int *voltage = (int *)(uintptr_t)arg;
           ret = cxd56_pmic_getchargevol(voltage);
         }
         break;
 
       case BATIOC_GET_CHGCURRENT:
         {
-          FAR int *current = (FAR int *)(uintptr_t)arg;
+          int *current = (int *)(uintptr_t)arg;
           ret = cxd56_pmic_getchargecurrent(current);
         }
         break;
 
       case BATIOC_GET_RECHARGEVOL:
         {
-          FAR int *voltage = (FAR int *)(uintptr_t)arg;
+          int *voltage = (int *)(uintptr_t)arg;
           ret = cxd56_pmic_getrechargevol(voltage);
         }
         break;
 
       case BATIOC_SET_RECHARGEVOL:
         {
-          FAR int *voltage = (FAR int *)(uintptr_t)arg;
+          int *voltage = (int *)(uintptr_t)arg;
           ret = cxd56_pmic_setrechargevol(*voltage);
         }
         break;
 
       case BATIOC_GET_COMPCURRENT:
         {
-          FAR int *current = (FAR int *)(uintptr_t)arg;
+          int *current = (int *)(uintptr_t)arg;
           ret = cxd56_pmic_getchargecompcurrent(current);
         }
         break;
 
       case BATIOC_GET_TEMPTABLE:
         {
-          FAR struct battery_temp_table_s *table =
-            (FAR struct battery_temp_table_s *)(uintptr_t)arg;
+          struct battery_temp_table_s *table =
+            (struct battery_temp_table_s *)(uintptr_t)arg;
           ret = charger_get_temptable(table);
         }
         break;
 
       case BATIOC_SET_TEMPTABLE:
         {
-          FAR struct battery_temp_table_s *table =
-            (FAR struct battery_temp_table_s *)(uintptr_t)arg;
+          struct battery_temp_table_s *table =
+            (struct battery_temp_table_s *)(uintptr_t)arg;
           ret = charger_set_temptable(table);
         }
         break;
 
       case BATIOC_SET_COMPCURRENT:
         {
-          FAR int *current = (FAR int *)(uintptr_t)arg;
+          int *current = (int *)(uintptr_t)arg;
           ret = cxd56_pmic_setchargecompcurrent(*current);
         }
         break;
 
       case BATIOC_GET_CURRENT:
         {
-          FAR int *curr = (FAR int *)(uintptr_t)arg;
+          int *curr = (int *)(uintptr_t)arg;
 
           if (curr)
             {
@@ -625,15 +569,14 @@ static int charger_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
             }
           else
             {
-              set_errno(EINVAL);
-              ret = -1;
+              ret = -EINVAL;
             }
         }
         break;
 
       case BATIOC_GET_VOLTAGE:
         {
-          FAR int *vol = (FAR int *)(uintptr_t)arg;
+          int *vol = (int *)(uintptr_t)arg;
 
           if (vol)
             {
@@ -641,8 +584,7 @@ static int charger_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
             }
           else
             {
-              set_errno(EINVAL);
-              ret = -1;
+              ret = -EINVAL;
             }
         }
         break;
@@ -652,8 +594,7 @@ static int charger_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         break;
     }
 
-  nxsem_post(&priv->batsem);
-
+  nxmutex_unlock(&priv->batlock);
   return ret;
 }
 
@@ -675,21 +616,17 @@ static int charger_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-int cxd56_charger_initialize(FAR const char *devpath)
+int cxd56_charger_initialize(const char *devpath)
 {
-  FAR struct charger_dev_s *priv = &g_chargerdev;
+  struct charger_dev_s *priv = &g_chargerdev;
   int ret;
-
-  /* Initialize the CXD5247 device structure */
-
-  nxsem_init(&priv->batsem, 0, 1);
 
   /* Register battery driver */
 
   ret = register_driver(devpath, &g_chargerops, 0666, priv);
   if (ret < 0)
     {
-      _err("ERROR: register_driver failed: %d\n", ret);
+      baterr("ERROR: register_driver failed: %d\n", ret);
       return -EFAULT;
     }
 
@@ -710,7 +647,7 @@ int cxd56_charger_initialize(FAR const char *devpath)
  *
  ****************************************************************************/
 
-int cxd56_charger_uninitialize(FAR const char *devpath)
+int cxd56_charger_uninitialize(const char *devpath)
 {
   unregister_driver(devpath);
   return OK;

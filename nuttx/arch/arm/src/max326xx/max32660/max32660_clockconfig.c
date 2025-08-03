@@ -1,35 +1,22 @@
 /****************************************************************************
- * arch/arm/src/max32660/max326_clockconfig.c
+ * arch/arm/src/max326xx/max32660/max32660_clockconfig.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,12 +26,12 @@
 
 #include <nuttx/config.h>
 
+#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "hardware/max326_gcr.h"
 #include "hardware/max326_pwrseq.h"
 #include "hardware/max326_flc.h"
@@ -124,7 +111,7 @@ static uint32_t max326_sysclk_frequency(void)
   /* The divider is in the GCR_CLKCTRL:PSC setting:
    *
    * Fsysclk = Fsysclk / (2^psc)
-  */
+   */
 
   regval = getreg32(MAX326_GCR_CLKCTRL);
   psc    = (regval & GCR_CLKCTRL_PSC_MASK) >> GCR_CLKCTRL_PSC_SHIFT;
@@ -139,11 +126,11 @@ static uint32_t max326_sysclk_frequency(void)
  *
  ****************************************************************************/
 
-static void max326_enable_hfio(FAR const struct clock_setup_s *clksetup)
+static void max326_enable_hfio(const struct clock_setup_s *clksetup)
 {
   uint32_t regval;
 
- /* Check if the HFIO is needed. */
+  /* Check if the HFIO is needed. */
 
   if (clksetup->hfio)
     {
@@ -169,7 +156,7 @@ static void max326_enable_hfio(FAR const struct clock_setup_s *clksetup)
  *
  ****************************************************************************/
 
-static void max326_disable_hfio(FAR const struct clock_setup_s *clksetup)
+static void max326_disable_hfio(const struct clock_setup_s *clksetup)
 {
   uint32_t regval;
 
@@ -247,7 +234,7 @@ static void max326_select_lirc8k(void)
  ****************************************************************************/
 
 #ifdef BOARD_HAVE_X32K
-static void max326_enable_x32k(FAR const struct clock_setup_s *clksetup)
+static void max326_enable_x32k(const struct clock_setup_s *clksetup)
 {
   uint32_t regval;
 
@@ -279,7 +266,7 @@ static void max326_enable_x32k(FAR const struct clock_setup_s *clksetup)
  ****************************************************************************/
 
 #ifdef BOARD_HAVE_X32K
-static void max326_disable_x32k(FAR const struct clock_setup_s *clksetup)
+static void max326_disable_x32k(const struct clock_setup_s *clksetup)
 {
   uint32_t regval;
 
@@ -332,7 +319,7 @@ static void max326_select_x32k(void)
  *
  ****************************************************************************/
 
-static void max326_set_ovr(FAR const struct clock_setup_s *clksetup)
+static void max326_set_ovr(const struct clock_setup_s *clksetup)
 {
   uint32_t ovr;
   uint32_t regval;
@@ -383,7 +370,7 @@ static void max326_set_ovr(FAR const struct clock_setup_s *clksetup)
           max326_select_lirc8k();
         }
 
-     /* Wait for SYSOSC to become ready */
+      /* Wait for SYSOSC to become ready */
 
       while ((getreg32(MAX326_GCR_CLKCTRL) & GCR_CLKCTRL_CLKRDY) == 0)
         {
@@ -420,7 +407,7 @@ static void max326_set_ovr(FAR const struct clock_setup_s *clksetup)
  *
  ****************************************************************************/
 
-static void max326_set_clksrc(FAR const struct clock_setup_s *clksetup)
+static void max326_set_clksrc(const struct clock_setup_s *clksetup)
 {
   uint32_t regval;
   uint32_t clksrc;
@@ -439,6 +426,7 @@ static void max326_set_clksrc(FAR const struct clock_setup_s *clksetup)
       switch (clksetup->clksrc)
         {
           case CLKSRC_HFIO:   /* High frequency internal oscillator */
+
             /* Select the High-Frequency Internal Oscillator (HFIO) as the
              * SYSOSC clock source.
              */
@@ -448,6 +436,7 @@ static void max326_set_clksrc(FAR const struct clock_setup_s *clksetup)
             break;
 
           case CLKSRC_8KHZ:   /* 8kHz Internal Ultra-Low Power Nano-Ring Oscillator */
+
             /* Select the 8kHz Internal Ultra-Low Power Nano-Ring Oscillator
              * as the SYSOSC clock source.
              */
@@ -597,9 +586,9 @@ static void max326_periph_reset(void)
  *   clocking using the settings in board.h.  This function also performs
  *   other low-level chip as necessary.
  *
- *****************************************************************************/
+ ****************************************************************************/
 
-void max326_clockconfig(FAR const struct clock_setup_s *clksetup)
+void max326_clockconfig(const struct clock_setup_s *clksetup)
 {
   /* Set the the FLASH wait states to the default value (5) */
 
@@ -685,7 +674,7 @@ void max326_clockconfig(FAR const struct clock_setup_s *clksetup)
  * Description:
  *   Return the High-Frequency Internal Oscillator (HFIO) frequency.
  *
- *****************************************************************************/
+ ****************************************************************************/
 
 uint32_t max326_hfio_frequency(void)
 {
@@ -715,7 +704,7 @@ uint32_t max326_hfio_frequency(void)
  * Description:
  *   Return the current CPU frequency.
  *
- *****************************************************************************/
+ ****************************************************************************/
 
 uint32_t max326_cpu_frequency(void)
 {
@@ -728,7 +717,7 @@ uint32_t max326_cpu_frequency(void)
  * Description:
  *   Return the current peripheral clock frequency.
  *
- *****************************************************************************/
+ ****************************************************************************/
 
 uint32_t max326_pclk_frequency(void)
 {

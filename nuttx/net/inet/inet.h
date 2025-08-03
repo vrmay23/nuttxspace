@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/inet/inet.h
  *
- *   Copyright (C) 2007-2009, 2011-2014 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -48,28 +35,6 @@
 #include <nuttx/net/ip.h>
 
 /****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-/* Configuration */
-
-#undef HAVE_INET_SOCKETS
-#undef HAVE_PFINET_SOCKETS
-#undef HAVE_PFINET6_SOCKETS
-
-#if defined(CONFIG_NET_IPv4) || defined(CONFIG_NET_IPv6)
-#  define HAVE_INET_SOCKETS
-
-#  if defined(CONFIG_NET_IPv4)
-#    define HAVE_PFINET_SOCKETS
-#  endif
-
-#  if defined(CONFIG_NET_IPv6)
-#    define HAVE_PFINET6_SOCKETS
-#  endif
-#endif
-
-/****************************************************************************
  * Public Data
  ****************************************************************************/
 
@@ -82,16 +47,11 @@ extern "C"
 #define EXTERN extern
 #endif
 
-#ifdef CONFIG_NET_IPv4
-/* Increasing number used for the IP ID field. */
-
-EXTERN uint16_t g_ipid;
-#endif /* CONFIG_NET_IPv4 */
-
 /* Well-known IPv6 addresses */
 
 #ifdef CONFIG_NET_IPv6
 EXTERN const net_ipv6addr_t g_ipv6_unspecaddr;       /* An address of all zeroes */
+EXTERN const net_ipv6addr_t g_ipv6_loopback;         /* An address of loopback */
 EXTERN const net_ipv6addr_t g_ipv6_allnodes;         /* All link local nodes */
 
 #if defined(CONFIG_NET_ICMPv6_AUTOCONF) || defined(CONFIG_NET_ICMPv6_ROUTER) || \
@@ -124,9 +84,6 @@ EXTERN const struct ether_addr g_ipv6_ethallrouters;  /* All link local routers 
  * Public Function Prototypes
  ****************************************************************************/
 
-#if defined(CONFIG_NET_TCP) && !defined(CONFIG_NET_TCP_NO_STACK)
-struct tcp_conn_s; /* Forward reference */
-#endif
 struct socket; /* Forward reference */
 
 /****************************************************************************
@@ -180,6 +137,42 @@ int ipv4_setsockopt(FAR struct socket *psock, int option,
 #ifdef CONFIG_NET_IPv6
 int ipv6_setsockopt(FAR struct socket *psock, int option,
                     FAR const void *value, socklen_t value_len);
+#endif
+
+/****************************************************************************
+ * Name: ipv4_getsockopt
+ *
+ * Description:
+ *   ipv4_getsockopt() retrieve the value for the option specified by the
+ *   'option' argument for the socket specified by the 'psock' argument.  If
+ *   the size of the option value is greater than 'value_len', the value
+ *   stored in the object pointed to by the 'value' argument will be silently
+ *   truncated. Otherwise, the length pointed to by the 'value_len' argument
+ *   will be modified to indicate the actual length of the 'value'.
+ *
+ *   See <netinet/in.h> for the a complete list of values of IPv4 protocol
+ *   socket options.
+ *
+ * Input Parameters:
+ *   psock     Socket structure of the socket to query
+ *   option    identifies the option to get
+ *   value     Points to the argument value
+ *   value_len The length of the argument value
+ *
+ * Returned Value:
+ *   Returns zero (OK) on success.  On failure, it returns a negated errno
+ *   value to indicate the nature of the error.  See psock_getsockopt() for
+ *   the list of possible error values.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NET_IPv4
+int ipv4_getsockopt(FAR struct socket *psock, int option,
+                    FAR void *value, FAR socklen_t *value_len);
+#endif
+#ifdef CONFIG_NET_IPv6
+int ipv6_getsockopt(FAR struct socket *psock, int option,
+                    FAR void *value, FAR socklen_t *value_len);
 #endif
 
 /****************************************************************************
@@ -275,6 +268,61 @@ int inet_close(FAR struct socket *psock);
  ****************************************************************************/
 
 int inet_txdrain(FAR struct socket *psock, unsigned int timeout);
+
+/****************************************************************************
+ * Name: ipv4_build_header
+ *
+ * Description:
+ *   build IPv4 header
+ *
+ * Input Parameters:
+ *   ipv4       Pointer to IPv4 header's buffer
+ *   total_len  total length of the IPv4 packet
+ *   prot       the next level protocol used in IPv4 packet
+ *   src_ip     Source IPv4 address
+ *   dst_ip     Destination IPv4 address
+ *   ttl        Time to live(IPv4)
+ *   tos        Type of Service(IPv4)
+ *   opt        IPv4 options
+ *
+ * Returned Value:
+ *   length of IPv4 header
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NET_IPv4
+uint16_t ipv4_build_header(FAR struct ipv4_hdr_s *ipv4, uint16_t total_len,
+                           uint16_t prot, FAR const in_addr_t *src_ip,
+                           FAR const in_addr_t *dst_ip, uint8_t ttl,
+                           uint8_t tos, FAR struct ipv4_opt_s *opt);
+#endif
+
+/****************************************************************************
+ * Name: ipv6_build_header
+ *
+ * Description:
+ *   build IPv6 header
+ *
+ * Input Parameters:
+ *   ipv6         Pointer to IPv6 header's buffer
+ *   payload_len  Length of the IPv6 payload(without IPv6 header length)
+ *   prot         Type of header immediately following the IPv6 header
+ *   src_ip       Source IPv6 address
+ *   dst_ip       Destination IPv6 address
+ *   ttl          hop limit(IPv6)
+ *   tclass       traffic class(IPv6)
+ *
+ * Returned Value:
+ *   length of IPv6 header
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NET_IPv6
+uint16_t ipv6_build_header(FAR struct ipv6_hdr_s *ipv6, uint16_t payload_len,
+                           uint16_t prot, const net_ipv6addr_t src_ip,
+                           const net_ipv6addr_t dst_ip, uint8_t ttl,
+                           uint8_t tclass);
+#endif
 
 #undef EXTERN
 #if defined(__cplusplus)

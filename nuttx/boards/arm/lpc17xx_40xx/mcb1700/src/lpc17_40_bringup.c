@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/lpc17xx_40xx/mcb1700/src/lpc17_40_bringup.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,14 +26,15 @@
 
 #include <nuttx/config.h>
 
-#include <sys/mount.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <syslog.h>
+#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/kthread.h>
 #include <nuttx/board.h>
+#include <nuttx/fs/fs.h>
 #include <nuttx/spi/spi.h>
 #include <nuttx/mmcsd.h>
 #include <nuttx/usb/usbhost.h>
@@ -192,7 +180,7 @@ static int nsh_waiter(int argc, char *argv[])
 #ifdef HAVE_MMCSD
 static int nsh_sdinitialize(void)
 {
-  FAR struct spi_dev_s *ssp;
+  struct spi_dev_s *ssp;
   int ret;
 
   /* Enable power to the SD/MMC via a GPIO. LOW enables SD/MMC. */
@@ -252,7 +240,6 @@ errout:
 #ifdef HAVE_USBHOST
 static int nsh_usbhostinitialize(void)
 {
-  int pid;
   int ret;
 
   /* First, register all of the class drivers needed to support the drivers
@@ -291,7 +278,8 @@ static int nsh_usbhostinitialize(void)
   if (ret != OK)
     {
       syslog(LOG_ERR,
-             "ERROR: Failed to register the CDC/ACM serial class: %d\n", ret);
+             "ERROR: Failed to register the CDC/ACM serial class: %d\n",
+             ret);
     }
 #endif
 
@@ -307,10 +295,10 @@ static int nsh_usbhostinitialize(void)
 
       syslog(LOG_ERR, "ERROR: Start nsh_waiter\n");
 
-      pid = kthread_create("usbhost", CONFIG_MCB1700_USBHOST_PRIO,
+      ret = kthread_create("usbhost", CONFIG_MCB1700_USBHOST_PRIO,
                            CONFIG_MCB1700_USBHOST_STACKSIZE,
-                           (main_t)nsh_waiter, (FAR char * const *)NULL);
-      return pid < 0 ? -ENOEXEC : OK;
+                           nsh_waiter, NULL);
+      return ret < 0 ? -ENOEXEC : OK;
     }
 
   return -ENODEV;
@@ -332,7 +320,7 @@ static int nsh_usbhostinitialize(void)
  *   CONFIG_BOARD_LATE_INITIALIZE=y :
  *     Called from board_late_initialize().
  *
- *   CONFIG_BOARD_LATE_INITIALIZE=y && CONFIG_LIB_BOARDCTL=y :
+ *   CONFIG_BOARD_LATE_INITIALIZE=y && CONFIG_BOARDCTL=y :
  *     Called from the NSH library
  *
  ****************************************************************************/
@@ -372,7 +360,7 @@ int mcb1700_bringup(void)
 #ifdef CONFIG_FS_PROCFS
   /* Mount the procfs file system */
 
-  ret = mount(NULL, "/proc", "procfs", 0, NULL);
+  ret = nx_mount(NULL, "/proc", "procfs", 0, NULL);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to mount procfs at /proc: %d\n", ret);

@@ -1,14 +1,10 @@
 /****************************************************************************
  * apps/netutils/xmlrpc/xmlparser.c
  *
- *   Copyright (C) 2012 Max Holtzberg. All rights reserved.
- *   Author: Max Holtzberg <mh@uvc.de>
- *
- * Based on the embeddable lightweight XML-RPC server code discussed
- * in the article at: http://www.drdobbs.com/web-development/\
- *    an-embeddable-lightweight-xml-rpc-server/184405364
- *
- *  Copyright (c) 2002 Cogito LLC.  All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2012 Max Holtzberg. All rights reserved.
+ * SPDX-FileCopyrightText: 2002 Cogito LLC.  All rights reserved.
+ * SPDX-FileContributor: Max Holtzberg <mh@uvc.de>
  *
  *  Redistribution and use in source and binary forms, with or
  *  without modification, is hereby granted without fee provided
@@ -40,8 +36,13 @@
  * POSSIBILITY OF SUCH DAMAGE.
  ****************************************************************************/
 
-/*
- *  Lightweight Embedded XML-RPC Server XML Parser
+/****************************************************************************
+ * Based on the embeddable lightweight XML-RPC server code discussed
+ * in the article at: http://www.drdobbs.com/web-development/\
+ *    an-embeddable-lightweight-xml-rpc-server/184405364
+ ****************************************************************************/
+
+/*  Lightweight Embedded XML-RPC Server XML Parser
  *
  *  mtj@cogitollc.com
  *
@@ -71,22 +72,22 @@
  ****************************************************************************/
 
 static struct xmlrpc_s g_xmlcall;
-static char g_data[CONFIG_XMLRPC_STRINGSIZE+1];
+static char g_data[CONFIG_XMLRPC_STRINGSIZE + 1];
 static struct xmlrpc_entry_s *g_entries = NULL;
 
-static const char *errorStrings[] =
+static const char *g_error_strings[] =
 {
-  /* 0 */ "Internal error (unknown)",
-  /* 1 */ "Parse Error...",
-  /* 2 */ "Function not found...",
-  /* 3 */ "Unexpected Integer Argument...",
-  /* 4 */ "Unexpected Boolean Argument...",
-  /* 5 */ "Unexpected Double Argument...",
-  /* 6 */ "Unexpected String Argument...",
-  /* 7 */ "Bad Response Argument..."
+  "Internal error (unknown)",
+  "Parse Error...",
+  "Function not found...",
+  "Unexpected Integer Argument...",
+  "Unexpected Boolean Argument...",
+  "Unexpected Double Argument...",
+  "Unexpected String Argument...",
+  "Bad Response Argument..."
 };
 
-#define MAX_ERROR_CODE  (sizeof(errorStrings)/sizeof(char *))
+#define MAX_ERROR_CODE  (sizeof(g_error_strings)/sizeof(char *))
 
 struct parsebuf_s
 {
@@ -99,7 +100,7 @@ struct parsebuf_s
  * Private Functions
  ****************************************************************************/
 
-static int xmlrpc_call(struct xmlrpc_s * call)
+static int xmlrpc_call(struct xmlrpc_s *call)
 {
   int ret = XMLRPC_NO_SUCH_FUNCTION;
   struct xmlrpc_entry_s *entry = g_entries;
@@ -120,7 +121,7 @@ static int xmlrpc_call(struct xmlrpc_s * call)
   return ret;
 }
 
-static int xmlrpc_getelement(struct parsebuf_s * pbuf, char *data, int dataSize)
+static int xmlrpc_getelement(struct parsebuf_s *pbuf, char *data, int size)
 {
   int j = 0;
   int ret = XMLRPC_NO_ERROR;
@@ -146,7 +147,7 @@ static int xmlrpc_getelement(struct parsebuf_s * pbuf, char *data, int dataSize)
 
   data[j++] = pbuf->buf[pbuf->index++];
 
-  while (j < dataSize)
+  while (j < size)
     {
       if (pbuf->buf[pbuf->index] == '>')
         {
@@ -161,7 +162,7 @@ static int xmlrpc_getelement(struct parsebuf_s * pbuf, char *data, int dataSize)
       else
         {
           data[j++] = pbuf->buf[pbuf->index++];
-          if (j >= dataSize)
+          if (j >= size)
             {
               ret = XMLRPC_PARSE_ERROR;
             }
@@ -172,7 +173,7 @@ static int xmlrpc_getelement(struct parsebuf_s * pbuf, char *data, int dataSize)
   return ret;
 }
 
-static int xmlrpc_parseparam(struct parsebuf_s * pbuf)
+static int xmlrpc_parseparam(struct parsebuf_s *pbuf)
 {
   int type;
 
@@ -237,7 +238,8 @@ static int xmlrpc_parseparam(struct parsebuf_s * pbuf)
       break;
 
     case 's':
-      strcpy(g_xmlcall.arguments[g_xmlcall.argsize].u.string, g_data);
+      strlcpy(g_xmlcall.arguments[g_xmlcall.argsize].u.string, g_data,
+              sizeof(g_xmlcall.arguments[g_xmlcall.argsize].u.string));
       break;
 
     default:
@@ -273,9 +275,10 @@ static int xmlrpc_parseparam(struct parsebuf_s * pbuf)
   return XMLRPC_NO_ERROR;
 }
 
-static int xmlrpc_parseparams(struct parsebuf_s * pbuf)
+static int xmlrpc_parseparams(struct parsebuf_s *pbuf)
 {
-  int type, ret = XMLRPC_PARSE_ERROR;
+  int ret = XMLRPC_PARSE_ERROR;
+  int type;
 
   /* First, look for the params tag */
 
@@ -305,11 +308,12 @@ static int xmlrpc_parseparams(struct parsebuf_s * pbuf)
   return ret;
 }
 
-static int xmlrpc_parsemethod(struct parsebuf_s * pbuf)
+static int xmlrpc_parsemethod(struct parsebuf_s *pbuf)
 {
-  int type, ret = XMLRPC_PARSE_ERROR;
+  int ret = XMLRPC_PARSE_ERROR;
+  int type;
 
-  memset((void *)&g_xmlcall, 0, sizeof(struct xmlrpc_s));
+  memset(&g_xmlcall, 0, sizeof(struct xmlrpc_s));
 
   /* Look for the methodName tag */
 
@@ -323,7 +327,7 @@ static int xmlrpc_parsemethod(struct parsebuf_s * pbuf)
         {
           /* Save the method name */
 
-          strcpy(g_xmlcall.name, g_data);
+          strlcpy(g_xmlcall.name, g_data, sizeof(g_xmlcall.name));
 
           /* Find the closing /methodCall */
 
@@ -348,8 +352,8 @@ static void xmlrpc_sendfault(int fault)
       fault = 0;
     }
 
-  xmlrpc_buildresponse(&g_xmlcall, "{is}",
-                        "faultCode", fault, "faultString", errorStrings[fault]);
+  xmlrpc_buildresponse(&g_xmlcall, "{is}", "faultCode",
+                       fault, "faultString", g_error_strings[fault]);
 }
 
 /****************************************************************************

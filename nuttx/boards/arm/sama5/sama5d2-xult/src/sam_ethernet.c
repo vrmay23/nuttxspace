@@ -1,5 +1,7 @@
 /****************************************************************************
- *  boards/arm/sama5/sama5d2-xult/src/sam_ethernet.c
+ * boards/arm/sama5/sama5d2-xult/src/sam_ethernet.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  *  Licensed to the Apache Software Foundation (ASF) under one or more
  *  contributor license agreements.  See the NOTICE file distributed with
@@ -39,6 +41,7 @@
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
+#include <nuttx/spinlock.h>
 
 #include "sam_pio.h"
 #include "sam_ethernet.h"
@@ -77,6 +80,14 @@
 #  define phyerr(x...)
 #  define phywarn(x...)
 #  define phyinfo(x...)
+#endif
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+#ifdef CONFIG_SAMA5_PIOE_IRQ
+static spinlock_t g_phy_lock = SP_UNLOCKED;
 #endif
 
 /****************************************************************************
@@ -166,7 +177,7 @@ void weak_function sam_netinitialize(void)
    * (MICREL KSZ9021/31) operating at 10/100/1000 Mbps.
    * The board supports RGMII interface mode.
    * The Ethernet interface consists of 4 pairs of low voltage differential
-   * pair signals designated from GRX� and GTx� plus control signals for
+   * pair signals designated from GRX and GTx plus control signals for
    * link activity indicators. These signals can be used to connect to a
    * 10/100/1000 BaseT RJ45 connector integrated on the main board.
    *
@@ -241,7 +252,7 @@ void weak_function sam_netinitialize(void)
  ****************************************************************************/
 
 #ifdef CONFIG_SAMA5_PIOE_IRQ
-int arch_phy_irq(FAR const char *intf, xcpt_t handler, void *arg,
+int arch_phy_irq(const char *intf, xcpt_t handler, void *arg,
                  phy_enable_t *enable)
 {
   irqstate_t flags;
@@ -288,7 +299,7 @@ int arch_phy_irq(FAR const char *intf, xcpt_t handler, void *arg,
    * following operations are atomic.
    */
 
-  flags = enter_critical_section();
+  flags = spin_lock_irqsave(&g_phy_lock);
 
   /* Configure the interrupt */
 
@@ -320,7 +331,7 @@ int arch_phy_irq(FAR const char *intf, xcpt_t handler, void *arg,
 
   /* Return the old handler (so that it can be restored) */
 
-  leave_critical_section(flags);
+  spin_unlock_irqrestore(&g_phy_lock, flags);
   return OK;
 }
 #endif /* CONFIG_SAMA5_PIOE_IRQ */

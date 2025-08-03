@@ -7,6 +7,7 @@ menu "Standard C I/O"
 
 config STDIO_DISABLE_BUFFERING
 	bool "Disable STDIO Buffering"
+	depends on FILE_STREAM
 	default n
 	---help---
 		Tiny systems may need to disable all support for I/O buffering in
@@ -49,28 +50,19 @@ config NUNGET_CHARS
 	default 2
 	---help---
 		Number of characters that can be buffered by ungetc() (Only if
-		NFILE_STREAMS > 0)
-
-config LIBC_PRINT_LEGACY
-	bool "Enable legacy printf logic"
-	default n
-	---help---
-		By default, printf (and friends) are implemented using a port from
-		newlib-nano.  That port can be signifcantly smaller, especially if
-		floating support is enabled.  This option is available, however,
-		to revert to the legacy printf version is so desired.
+		FILE_STREAM equals y)
 
 config LIBC_FLOATINGPOINT
 	bool "Enable floating point in printf"
-	default n
+	default !DEFAULT_SMALL && ARCH_FPU
+	depends on !LIBM_NONE
 	---help---
 		By default, floating point support in printf, sscanf, etc. is
 		disabled.  This option will enable floating point support.
 
 config LIBC_LONG_LONG
 	bool "Enable long long support in printf"
-	default y if !DEFAULT_SMALL
-	default n if DEFAULT_SMALL
+	default !DEFAULT_SMALL
 	---help---
 		Enables support for long long formats in printf, sscanf, etc. is
 		enabled.  This is enabled by default but if you are trying to
@@ -86,7 +78,6 @@ config LIBC_LONG_LONG
 config LIBC_NUMBERED_ARGS
 	bool "Enable numbered arguments in printf"
 	default n
-	depends on (LIBC_FLOATINGPOINT || LIBC_LONG_LONG) && !LIBC_PRINT_LEGACY
 	---help---
 		Enables support for numbered arguments in printf.
 
@@ -98,7 +89,7 @@ config LIBC_NUMBERED_ARGS
 
 config LIBC_NL_ARGMAX
 	int "Maximum number of numbered arguments for printf"
-	default 16
+	default 9
 	range 9 999999
 	depends on LIBC_NUMBERED_ARGS
 	---help---
@@ -115,36 +106,21 @@ config LIBC_SCANSET
 	---help---
 		Add scanset support to sscanf().
 
-choice
-	prompt "Newline Options"
-	default EOL_IS_EITHER_CRLF
-	---help---
-		This selection determines the line terminating character that is used.
-		Some environments may return CR as end-of-line, others LF, and others
-		both.  If not specified, the default is either CR or LF (but not both)
-		as the line terminating character.
-
-config EOL_IS_CR
-	bool "EOL is CR"
-
-config EOL_IS_LF
-	bool "EOL is LF"
-
-config EOL_IS_BOTH_CRLF
-	bool "EOL is CR and LF"
-
-config EOL_IS_EITHER_CRLF
-	bool "EOL is CR or LF"
-
-endchoice
-
-config MEMCPY_VIK
-	bool "Vik memcpy()"
+config LIBC_PRINT_EXTENSION
+	bool
 	default n
-	depends on !LIBC_ARCH_MEMCPY
 	---help---
-		Select this option to use the optimized memcpy() function by Daniel Vik.
-		Select this option for improved performance at the expense of increased
-		size. See licensing information in the top-level COPYING file.
+		Enables non-standard "%p*" extensions for the printf family.
+
+		CAVEAT: If your system is using any of the printf C family
+		functions, it's probably unsafe to enable this option because
+		the extension is not compatible with the C standard. Namely,
+		an ordinary character following a "%p" conversion is interpreted
+		in a non-standard way, which might crash the code which expects
+		the standard semantics. For that reason, in the future versions
+		of NuttX, this extension might be removed, or changed in an
+		API-incompatible way to avoid conflicts with the standards.
+		(Eg. use different characters for conversions specifiers,
+		or switch to a completely separate API, say "nuttx_printf".)
 
 endmenu #Standard C I/O

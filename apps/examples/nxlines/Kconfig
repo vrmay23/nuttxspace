@@ -7,7 +7,7 @@ config EXAMPLES_NXLINES
 	tristate "NX graphics lines example"
 	default n
 	depends on NX
-	select LIB_BOARDCTL
+	select BOARDCTL
 	---help---
 		Enable the X graphics lines example
 
@@ -110,11 +110,5 @@ config EXAMPLES_NXLINES_LISTENERPRIO
 	default 80
 	---help---
 		The priority of the event listener thread. Default 80.
-
-config EXAMPLES_NXLINES_NOTIFYSIGNO
-	int "Notify Signal Number"
-	default 4
-	---help---
-		The signal number to use with nx_eventnotify().  Default: 4
 
 endif

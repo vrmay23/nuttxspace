@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/cxd56xx/cxd56_powermgr.c
  *
- *   Copyright 2018 Sony Semiconductor Solutions Corporation
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
- *    the names of its contributors may be used to endorse or promote
- *    products derived from this software without specific prior written
- *    permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,18 +29,19 @@
 
 #include <nuttx/config.h>
 #include <nuttx/kmalloc.h>
+#include <nuttx/mutex.h>
+#include <nuttx/mqueue.h>
+#include <nuttx/queue.h>
 
+#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 #include <sched.h>
-#include <mqueue.h>
 #include <fcntl.h>
-#include <queue.h>
 
 #include <arch/chip/pm.h>
 
-#include "up_internal.h"
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "cxd56_powermgr.h"
 #include "cxd56_icc.h"
 #include "cxd56_pmic.h"
@@ -98,14 +86,22 @@
 
 #define PM_CPUFREQLOCK_FLAG_INITIALIZED (0x8000)
 
-#ifdef CONFIG_CXD56_PM_DEBUG
-#  define pmerr(format, ...)  _err(format, ##__VA_ARGS__)
-#  define pmwarn(format, ...) _warn(format, ##__VA_ARGS__)
-#  define pminfo(format, ...) _info(format, ##__VA_ARGS__)
+/* Debug */
+
+#ifdef CONFIG_CXD56_PM_DEBUG_ERROR
+#  define pmerr(format, ...)   _err(format, ##__VA_ARGS__)
 #else
-#  define pmerr(x...)
-#  define pmwarn(x...)
-#  define pminfo(x...)
+#  define pmerr(x, ...)
+#endif
+#ifdef CONFIG_CXD56_PM_DEBUG_WARN
+#  define pmwarn(format, ...)  _warn(format, ##__VA_ARGS__)
+#else
+#  define pmwarn(x, ...)
+#endif
+#ifdef CONFIG_CXD56_PM_DEBUG_INFO
+#  define pminfo(format, ...)  _info(format, ##__VA_ARGS__)
+#else
+#  define pminfo(x, ...)
 #endif
 
 void up_cpuctxload(void);
@@ -152,48 +148,45 @@ struct pm_cbentry_s
  ****************************************************************************/
 
 static int  cxd56_pm_do_callback(uint8_t id,
-                                 FAR struct cxd56_pm_target_id_s *table);
+                                 struct cxd56_pm_target_id_s *table);
 static int  cxd56_pm_needcallback(uint32_t target,
-                                  FAR struct cxd56_pm_target_id_s *table);
+                                  struct cxd56_pm_target_id_s *table);
 static void cxd56_pm_clkchange(struct cxd56_pm_message_s *message);
-static int  cxd56_pm_semtake(FAR sem_t *id);
 static void cxd56_pm_checkfreqlock(void);
-static int  cxd56_pm_maintask(int argc, FAR char *argv[]);
+static int  cxd56_pm_maintask(int argc, char *argv[]);
 #if defined(CONFIG_CXD56_HOT_SLEEP)
 static void cxd56_pm_do_hotsleep(uint32_t idletime);
 static void cxd56_pm_intc_suspend(void);
 static void cxd56_pm_intc_resume(void);
 #endif
+static int cxd56_pmmsghandler(int cpuid, int protoid, uint32_t pdata,
+                              uint32_t data, void *userdata);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
 static struct cxd56_pm_target_id_s g_target_id_table;
-static mqd_t      g_queuedesc;
-static sem_t      g_regcblock;
-static sem_t      g_freqlock;
-static sem_t      g_freqlockwait;
-static dq_queue_t g_cbqueue;
-static sq_queue_t g_freqlockqueue;
-static sq_queue_t g_wakelockqueue;
-static uint32_t   g_clockcange_start;
-static int        g_freqlock_flag;
+static struct file g_queuedesc;
+static sem_t       g_bootsync = SEM_INITIALIZER(0);
+static mutex_t     g_regcblock = NXMUTEX_INITIALIZER;
+static mutex_t     g_freqlock = NXMUTEX_INITIALIZER;
+static sem_t       g_freqlockwait = SEM_INITIALIZER(0);
+static dq_queue_t  g_cbqueue;
+static sq_queue_t  g_freqlockqueue;
+static sq_queue_t  g_wakelockqueue;
+static uint32_t    g_clockcange_start;
+static int         g_freqlock_flag;
 
 static struct pm_cpu_wakelock_s g_wlock =
   PM_CPUWAKELOCK_INIT(PM_CPUWAKELOCK_TAG('P', 'M', 0));
-
-static int cxd56_pm_semtake(FAR sem_t *id)
-{
-  return nxsem_wait_uninterruptible(id);
-}
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 static int cxd56_pm_needcallback(uint32_t target,
-                                 FAR struct cxd56_pm_target_id_s *table)
+                                 struct cxd56_pm_target_id_s *table)
 {
   uint32_t mask;
 
@@ -238,14 +231,14 @@ static int cxd56_pmsendmsg(int mid, uint32_t data)
 static int cxd56_pm_do_callback(uint8_t id,
                                 struct cxd56_pm_target_id_s *targets)
 {
-  FAR struct pm_cbentry_s *entry;
-  FAR dq_entry_t          *cur;
-  FAR dq_entry_t          *last;
+  struct pm_cbentry_s *entry;
+  dq_entry_t          *cur;
+  dq_entry_t          *last;
   int ret = 0;
 
   for (cur = dq_peek(&g_cbqueue); cur; cur = dq_next(cur))
     {
-      entry = (FAR struct pm_cbentry_s *)cur;
+      entry = (struct pm_cbentry_s *)cur;
       last = cur;
       if (cxd56_pm_needcallback(entry->target, targets))
         {
@@ -277,7 +270,7 @@ static int cxd56_pm_do_callback(uint8_t id,
 
       for (cur = dq_peek(&g_cbqueue); cur != last; cur = dq_next(cur))
         {
-          entry = (FAR struct pm_cbentry_s *)cur;
+          entry = (struct pm_cbentry_s *)cur;
           if (cxd56_pm_needcallback(entry->target, targets))
             {
               entry->callback(id);
@@ -315,24 +308,24 @@ static void cxd56_pm_clkchange(struct cxd56_pm_message_s *message)
       return;
     }
 
-  cxd56_pm_semtake(&g_regcblock);
+  nxmutex_lock(&g_regcblock);
 
   ret = cxd56_pm_do_callback(id, &g_target_id_table);
 
   cxd56_pmsendmsg(mid, ret);
 
-  nxsem_post(&g_regcblock);
+  nxmutex_unlock(&g_regcblock);
 }
 
 static void cxd56_pm_checkfreqlock(void)
 {
-  FAR sq_entry_t *entry;
-  FAR struct pm_cpu_freqlock_s *lock;
+  sq_entry_t *entry;
+  struct pm_cpu_freqlock_s *lock;
   int flag = PM_CPUFREQLOCK_FLAG_INITIALIZED;
 
   for (entry = sq_peek(&g_freqlockqueue); entry; entry = sq_next(entry))
     {
-      lock = (FAR struct pm_cpu_freqlock_s *)entry;
+      lock = (struct pm_cpu_freqlock_s *)entry;
       flag |= lock->flag & PM_CPUFREQLOCK_FLAG_LV;
       flag |= lock->flag & PM_CPUFREQLOCK_FLAG_HV;
     }
@@ -341,7 +334,7 @@ static void cxd56_pm_checkfreqlock(void)
     {
       g_freqlock_flag = flag;
       cxd56_pmsendmsg(MSGID_FREQLOCK, flag);
-      cxd56_pm_semtake(&g_freqlockwait);
+      nxsem_wait_uninterruptible(&g_freqlockwait);
     }
 }
 
@@ -428,15 +421,41 @@ static void cxd56_pm_do_hotsleep(uint32_t idletime)
 }
 #endif
 
-static int cxd56_pm_maintask(int argc, FAR char *argv[])
+static int cxd56_pm_maintask(int argc, char *argv[])
 {
-  int size;
   struct cxd56_pm_message_s message;
+  struct mq_attr attr;
+  int size;
+  int ret;
+
+  attr.mq_maxmsg  = 8;
+  attr.mq_msgsize = sizeof(struct cxd56_pm_message_s);
+  attr.mq_curmsgs = 0;
+  attr.mq_flags   = 0;
+
+  ret = file_mq_open(&g_queuedesc, "cxd56_pm_message",
+                     O_RDWR | O_CREAT, 0666, &attr);
+  DEBUGASSERT(ret >= 0);
+  if (ret < 0)
+    {
+      pmerr("Failed to create message queue\n");
+      return ret;
+    }
+
+  /* Register power manager messaging protocol handler. */
+
+  cxd56_iccinit(CXD56_PROTO_PM);
+
+  cxd56_iccregisterhandler(CXD56_PROTO_PM, cxd56_pmmsghandler, NULL);
+
+  /* Notify that cxd56_pm_maintask is ready */
+
+  nxsem_post(&g_bootsync);
 
   while (1)
     {
-      size = mq_receive(g_queuedesc, (FAR char *)&message, sizeof(message),
-                        NULL);
+      size = file_mq_receive(&g_queuedesc, (char *)&message,
+                             sizeof(message), NULL);
       if (size == sizeof(message))
         {
           switch (message.mid)
@@ -459,41 +478,41 @@ static int cxd56_pm_maintask(int argc, FAR char *argv[])
   return EXIT_SUCCESS;
 }
 
-FAR void *cxd56_pm_register_callback(uint32_t target,
-                                     cxd56_pm_callback callback)
+void *cxd56_pm_register_callback(uint32_t target,
+                                 cxd56_pm_callback callback)
 {
   struct pm_cbentry_s *entry = NULL;
 
-  cxd56_pm_semtake(&g_regcblock);
+  nxmutex_lock(&g_regcblock);
 
-  entry = (struct pm_cbentry_s *)kmm_malloc(sizeof(struct pm_cbentry_s));
+  entry = kmm_malloc(sizeof(struct pm_cbentry_s));
   if (entry == NULL)
     {
-      nxsem_post(&g_regcblock);
+      nxmutex_unlock(&g_regcblock);
       return NULL;
     }
 
   entry->target = target;
   entry->callback = callback;
 
-  dq_addlast((FAR dq_entry_t *)entry, &g_cbqueue);
-  nxsem_post(&g_regcblock);
+  dq_addlast((dq_entry_t *)entry, &g_cbqueue);
+  nxmutex_unlock(&g_regcblock);
 
   return (void *)entry;
 }
 
-void cxd56_pm_unregister_callback(FAR void *handle)
+void cxd56_pm_unregister_callback(void *handle)
 {
-  cxd56_pm_semtake(&g_regcblock);
+  nxmutex_lock(&g_regcblock);
 
-  dq_rem((FAR dq_entry_t *)handle, &g_cbqueue);
+  dq_rem((dq_entry_t *)handle, &g_cbqueue);
   kmm_free(handle);
 
-  nxsem_post(&g_regcblock);
+  nxmutex_unlock(&g_regcblock);
 }
 
 static int cxd56_pmmsghandler(int cpuid, int protoid, uint32_t pdata,
-                              uint32_t data, FAR void *userdata)
+                              uint32_t data, void *userdata)
 {
   uint32_t msgid;
   struct cxd56_pm_message_s message;
@@ -504,21 +523,21 @@ static int cxd56_pmmsghandler(int cpuid, int protoid, uint32_t pdata,
   if (msgid == MSGID_CLK_CHG_START)
     {
       message.mid = MQMSG_CLK_CHG_START;
-      ret = mq_send(g_queuedesc, (FAR const char *)&message, sizeof(message),
-                    CXD56_PM_MESSAGE_PRIO);
+      ret = file_mq_send(&g_queuedesc, (const char *)&message,
+                         sizeof(message), CXD56_PM_MESSAGE_PRIO);
       if (ret < 0)
         {
-          pmerr("ERR:mq_send(CLK_CHG_START)\n");
+          pmerr("ERR:file_mq_send(CLK_CHG_START)\n");
         }
     }
   else if (msgid == MSGID_CLK_CHG_END)
     {
       message.mid = MQMSG_CLK_CHG_END;
-      ret = mq_send(g_queuedesc, (FAR const char *)&message, sizeof(message),
-                    CXD56_PM_MESSAGE_PRIO);
+      ret = file_mq_send(&g_queuedesc, (const char *)&message,
+                         sizeof(message), CXD56_PM_MESSAGE_PRIO);
       if (ret < 0)
         {
-          pmerr("ERR:mq_send(CLK_CHG_END)\n");
+          pmerr("ERR:file_mq_send(CLK_CHG_END)\n");
         }
     }
   else if (msgid == MSGID_FREQLOCK)
@@ -555,13 +574,20 @@ int cxd56_pm_bootup(void)
 
 void up_pm_acquire_freqlock(struct pm_cpu_freqlock_s *lock)
 {
-  FAR sq_entry_t *entry;
+  sq_entry_t *entry;
 
   DEBUGASSERT(lock);
 
   up_pm_acquire_wakelock(&g_wlock);
 
-  cxd56_pm_semtake(&g_freqlock);
+  nxmutex_lock(&g_freqlock);
+
+  if (lock->flag == PM_CPUFREQLOCK_FLAG_HOLD)
+    {
+      /* Return with holding the current frequency */
+
+      return;
+    }
 
   for (entry = sq_peek(&g_freqlockqueue); entry; entry = sq_next(entry))
     {
@@ -573,14 +599,13 @@ void up_pm_acquire_freqlock(struct pm_cpu_freqlock_s *lock)
 
   if (!entry)
     {
-      sq_addlast((FAR sq_entry_t *)lock, &g_freqlockqueue);
+      sq_addlast((sq_entry_t *)lock, &g_freqlockqueue);
       cxd56_pm_checkfreqlock();
     }
 
   lock->count++;
 
-  nxsem_post(&g_freqlock);
-
+  nxmutex_unlock(&g_freqlock);
   up_pm_release_wakelock(&g_wlock);
 }
 
@@ -598,13 +623,20 @@ void up_pm_acquire_freqlock(struct pm_cpu_freqlock_s *lock)
 
 void up_pm_release_freqlock(struct pm_cpu_freqlock_s *lock)
 {
-  FAR sq_entry_t *entry;
+  sq_entry_t *entry;
 
   DEBUGASSERT(lock);
 
+  if (lock->flag == PM_CPUFREQLOCK_FLAG_HOLD)
+    {
+      /* Release holding the current frequency */
+
+      goto exit;
+    }
+
   up_pm_acquire_wakelock(&g_wlock);
 
-  cxd56_pm_semtake(&g_freqlock);
+  nxmutex_lock(&g_freqlock);
 
   for (entry = sq_peek(&g_freqlockqueue); entry; entry = sq_next(entry))
     {
@@ -620,8 +652,8 @@ void up_pm_release_freqlock(struct pm_cpu_freqlock_s *lock)
         }
     }
 
-  nxsem_post(&g_freqlock);
-
+exit:
+  nxmutex_unlock(&g_freqlock);
   up_pm_release_wakelock(&g_wlock);
 }
 
@@ -641,12 +673,12 @@ void up_pm_release_freqlock(struct pm_cpu_freqlock_s *lock)
 
 int up_pm_get_freqlock_count(struct pm_cpu_freqlock_s *lock)
 {
-  FAR sq_entry_t *entry;
+  sq_entry_t *entry;
   int count = 0;
 
   DEBUGASSERT(lock);
 
-  cxd56_pm_semtake(&g_freqlock);
+  nxmutex_lock(&g_freqlock);
 
   for (entry = sq_peek(&g_freqlockqueue); entry; entry = sq_next(entry))
     {
@@ -657,7 +689,7 @@ int up_pm_get_freqlock_count(struct pm_cpu_freqlock_s *lock)
         }
     }
 
-  nxsem_post(&g_freqlock);
+  nxmutex_unlock(&g_freqlock);
   return count;
 }
 
@@ -676,7 +708,7 @@ int up_pm_get_freqlock_count(struct pm_cpu_freqlock_s *lock)
 void up_pm_acquire_wakelock(struct pm_cpu_wakelock_s *lock)
 {
   irqstate_t flags;
-  FAR sq_entry_t *entry;
+  sq_entry_t *entry;
 
   DEBUGASSERT(lock);
 
@@ -692,7 +724,7 @@ void up_pm_acquire_wakelock(struct pm_cpu_wakelock_s *lock)
 
   if (!entry)
     {
-      sq_addlast((FAR sq_entry_t *)lock, &g_wakelockqueue);
+      sq_addlast((sq_entry_t *)lock, &g_wakelockqueue);
     }
 
   lock->count++;
@@ -715,7 +747,7 @@ void up_pm_acquire_wakelock(struct pm_cpu_wakelock_s *lock)
 void up_pm_release_wakelock(struct pm_cpu_wakelock_s *lock)
 {
   irqstate_t flags;
-  FAR sq_entry_t *entry;
+  sq_entry_t *entry;
 
   DEBUGASSERT(lock);
 
@@ -774,11 +806,11 @@ int cxd56_pm_hotsleep(int idletime)
 
   message.mid = MQMSG_HOT_SLEEP;
   message.data = (uint32_t)idletime;
-  ret = mq_send(g_queuedesc, (FAR const char *)&message, sizeof(message),
-                CXD56_PM_MESSAGE_PRIO);
+  ret = file_mq_send(&g_queuedesc, (const char *)&message,
+                     sizeof(message), CXD56_PM_MESSAGE_PRIO);
   if (ret < 0)
     {
-      pmerr("ERR:mq_send(HOT_SLEEP)\n");
+      pmerr("ERR:file_mq_send(HOT_SLEEP)\n");
       return -1;
     }
 
@@ -787,56 +819,23 @@ int cxd56_pm_hotsleep(int idletime)
 
 int cxd56_pm_initialize(void)
 {
-  struct mq_attr attr;
   int taskid;
-  int ret;
-
-  cxd56_iccinit(CXD56_PROTO_PM);
-
-  /* Register power manager messaging protocol handler. */
-
-  cxd56_iccregisterhandler(CXD56_PROTO_PM, cxd56_pmmsghandler, NULL);
 
   dq_init(&g_cbqueue);
   sq_init(&g_freqlockqueue);
   sq_init(&g_wakelockqueue);
 
-  ret = nxsem_init(&g_regcblock, 0, 1);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
-  ret = nxsem_init(&g_freqlock, 0, 1);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
-  ret = nxsem_init(&g_freqlockwait, 0, 0);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
-  attr.mq_maxmsg  = 8;
-  attr.mq_msgsize = sizeof(struct cxd56_pm_message_s);
-  attr.mq_curmsgs = 0;
-  attr.mq_flags   = 0;
-  g_queuedesc = mq_open("cxd56_pm_message", O_RDWR | O_CREAT, 0666, &attr);
-  if (g_queuedesc < 0)
-    {
-      return -EPERM;
-    }
-
   taskid = task_create("cxd56_pm_task", CXD56_PM_TASK_PRIO,
                        CXD56_PM_TASK_STACKSIZE, cxd56_pm_maintask,
-                       (FAR char * const *)NULL);
+                       NULL);
   if (taskid < 0)
     {
       return -EPERM;
     }
 
+  /* wait until cxd56_pm_maintask thread is ready */
+
+  nxsem_wait_uninterruptible(&g_bootsync);
   return OK;
 }
 
@@ -985,16 +984,16 @@ uint32_t up_pm_clr_bootmask(uint32_t mask)
 
 int up_pm_sleep(enum pm_sleepmode_e mode)
 {
-  int PM_DeepSleep(void *);
-  int PM_ColdSleep(void *);
+  int fw_pm_deepsleep(void *);
+  int fw_pm_coldsleep(void *);
 
   switch (mode)
     {
     case PM_SLEEP_DEEP:
-      PM_DeepSleep(NULL);
+      fw_pm_deepsleep(NULL);
       break;
     case PM_SLEEP_COLD:
-      PM_ColdSleep(NULL);
+      fw_pm_coldsleep(NULL);
       break;
     }
 
@@ -1012,8 +1011,8 @@ int up_pm_sleep(enum pm_sleepmode_e mode)
 
 int up_pm_reboot(void)
 {
-  void PM_Reboot(void);
-  PM_Reboot();
+  void fw_pm_reboot(void);
+  fw_pm_reboot();
   __asm volatile ("dsb");
   for (; ; );
 }

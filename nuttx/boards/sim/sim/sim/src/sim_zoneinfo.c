@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/sim/sim/sim/src/sim_zoneinfo.c
  *
- *   Copyright (C) 2015-2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,10 +31,11 @@
 #include <stdlib.h>
 #include <errno.h>
 
+#include <nuttx/fs/fs.h>
 #include <nuttx/drivers/ramdisk.h>
 #include <nuttx/zoneinfo.h>
 
-#ifdef CONFIG_LIB_ZONEINFO_ROMFS
+#ifdef CONFIG_LIBC_ZONEINFO_ROMFS
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -59,10 +47,6 @@
 
 #ifdef CONFIG_DISABLE_MOUNTPOINT
 #  error "Mountpoint support is disabled"
-#endif
-
-#if CONFIG_NFILE_DESCRIPTORS < 4
-#  error "Not enough file descriptors"
 #endif
 
 #ifndef CONFIG_FS_ROMFS
@@ -131,17 +115,17 @@ int sim_zoneinfo(int minor)
 
   /* Use the minor number to create a name for the ROM disk block device */
 
-  snprintf(devname, 32, "/dev/ram%d", minor);
+  snprintf(devname, sizeof(devname), "/dev/ram%d", minor);
 
   /* Mount the ROMFS file system */
 
   printf("Mounting ROMFS filesystem at target=%s with source=%s\n",
          CONFIG_LIBC_TZDIR, devname);
 
-  ret = mount(devname, CONFIG_LIBC_TZDIR, "romfs", MS_RDONLY, NULL);
+  ret = nx_mount(devname, CONFIG_LIBC_TZDIR, "romfs", MS_RDONLY, NULL);
   if (ret < 0)
     {
-      printf("ERROR: Mount failed: %d\n", errno);
+      printf("ERROR: Mount failed: %d\n", ret);
       return ret;
     }
 
@@ -149,4 +133,4 @@ int sim_zoneinfo(int minor)
   return OK;
 }
 
-#endif /* CONFIG_LIB_ZONEINFO_ROMFS */
+#endif /* CONFIG_LIBC_ZONEINFO_ROMFS */

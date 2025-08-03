@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/chrono/chrono_main.c
+ * apps/examples/chrono/chrono_main.c
  *
- *   Copyright (C) 2008, 2011-2012 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -47,6 +34,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <time.h>
+#include <unistd.h>
 #include <sys/time.h>
 
 #include <nuttx/input/buttons.h>
@@ -58,7 +46,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define BUTTON_SIGNO 13
+#define BUTTON_SIGNO 32
 #define BUTTON_STACKSIZE 2048
 #define BUTTON_PRIORITY 100
 #define BUTTON_DEVPATH "/dev/buttons"
@@ -113,10 +101,10 @@ static struct slcd_chrono_s g_slcd;
  ****************************************************************************/
 
 /****************************************************************************
- * Name: button_daemon
+ * Name: chrono_daemon
  ****************************************************************************/
 
-static int button_daemon(int argc, char *argv[])
+static int chrono_daemon(int argc, char *argv[])
 {
   FAR struct slcd_chrono_s *priv = &g_slcd;
   struct btn_notify_s btnevents;
@@ -128,16 +116,16 @@ static int button_daemon(int argc, char *argv[])
 
   UNUSED(i);
 
-  printf("button_daemon: Running\n");
+  printf("chrono_daemon: Running\n");
 
   /* Open the BUTTON driver */
 
-  printf("button_daemon: Opening %s\n", BUTTON_DEVPATH);
+  printf("chrono_daemon: Opening %s\n", BUTTON_DEVPATH);
   fd = open(BUTTON_DEVPATH, O_RDONLY | O_NONBLOCK);
   if (fd < 0)
     {
       int errcode = errno;
-      printf("button_daemon: ERROR: Failed to open %s: %d\n",
+      printf("chrono_daemon: ERROR: Failed to open %s: %d\n",
              BUTTON_DEVPATH, errcode);
       goto errout;
     }
@@ -149,12 +137,12 @@ static int button_daemon(int argc, char *argv[])
   if (ret < 0)
     {
       int errcode = errno;
-      printf("button_daemon: ERROR: ioctl(BTNIOC_SUPPORTED) failed: %d\n",
+      printf("chrono_daemon: ERROR: ioctl(BTNIOC_SUPPORTED) failed: %d\n",
              errcode);
       goto errout_with_fd;
     }
 
-  printf("button_daemon: Supported BUTTONs 0x%02x\n",
+  printf("chrono_daemon: Supported BUTTONs 0x%02x\n",
          (unsigned int)supported);
 
   /* Define the notifications events */
@@ -172,10 +160,14 @@ static int button_daemon(int argc, char *argv[])
   if (ret < 0)
     {
       int errcode = errno;
-      printf("button_daemon: ERROR: ioctl(BTNIOC_SUPPORTED) failed: %d\n",
+      printf("chrono_daemon: ERROR: ioctl(BTNIOC_REGISTER) failed: %d\n",
              errcode);
       goto errout_with_fd;
     }
+
+  /* Ignore the default signal action */
+
+  signal(BUTTON_SIGNO, SIG_IGN);
 
   /* Now loop forever, waiting BUTTONs events */
 
@@ -192,7 +184,8 @@ static int button_daemon(int argc, char *argv[])
       if (ret < 0)
         {
           int errcode = errno;
-          printf("button_daemon: ERROR: sigwaitinfo() failed: %d\n", errcode);
+          printf("chrono_daemon: ERROR: sigwaitinfo() failed: %d\n",
+                 errcode);
           goto errout_with_fd;
         }
 
@@ -217,8 +210,7 @@ errout_with_fd:
   close(fd);
 
 errout:
-
-  printf("button_daemon: Terminating\n");
+  printf("chrono_daemon: Terminating\n");
   return EXIT_FAILURE;
 }
 
@@ -308,7 +300,7 @@ static void slcd_puts(FAR struct lib_outstream_s *outstream,
 int main(int argc, FAR char *argv[])
 {
   FAR struct slcd_chrono_s *priv = &g_slcd;
-  FAR char str[8] = "00:00.0";
+  FAR char str[32] = "00:00.0";
   int fd;
   int ret;
   long sec;
@@ -316,12 +308,12 @@ int main(int argc, FAR char *argv[])
 
   /* Create a thread to wait for the button events */
 
-  ret = task_create("button_daemon", BUTTON_PRIORITY,
-                    BUTTON_STACKSIZE, button_daemon, NULL);
+  ret = task_create("chrono_daemon", BUTTON_PRIORITY,
+                    BUTTON_STACKSIZE, chrono_daemon, NULL);
   if (ret < 0)
     {
       int errcode = errno;
-      printf("buttons_main: ERROR: Failed to start button_daemon: %d\n",
+      printf("buttons_main: ERROR: Failed to start chrono_daemon: %d\n",
              errcode);
       return EXIT_FAILURE;
     }
@@ -333,7 +325,7 @@ int main(int argc, FAR char *argv[])
   fd = open(SLCD_DEVNAME, O_RDWR);
   if (fd < 0)
     {
-      printf("Failed to open %s: %d\n", CONFIG_EXAMPLES_SLCD_DEVNAME, errno);
+      printf("Failed to open %s: %d\n", SLCD_DEVNAME, errno);
       goto errout;
     }
 
@@ -353,7 +345,7 @@ int main(int argc, FAR char *argv[])
       /* Initialize the output stream */
 
       memset(priv, 0, sizeof(struct slcd_chrono_s));
-      priv->stream.put   = slcd_putc;
+      priv->stream.putc  = slcd_putc;
 #ifdef CONFIG_STDIO_LINEBUFFER
       priv->stream.flush = slcd_flush;
 #endif
@@ -403,7 +395,7 @@ int main(int argc, FAR char *argv[])
         {
           /* Copy the initial value */
 
-          strncpy(str, "00:00.0", 7);
+          strlcpy(str, "00:00.0", sizeof(str));
 
           /* Print the initial reset value */
 
@@ -441,8 +433,8 @@ int main(int argc, FAR char *argv[])
 
           sec = sec % 60;
 
-          sprintf(str, "%02d:%02d:%01d", min, sec,
-                  (priv->ts_end.tv_nsec / 100000000));
+          snprintf(str, sizeof(str), "%02ld:%02ld:%01ld",
+                   min, sec, (priv->ts_end.tv_nsec / 100000000));
 
           /* Print it into LCD */
 

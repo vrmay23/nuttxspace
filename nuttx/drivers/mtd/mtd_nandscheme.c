@@ -1,14 +1,8 @@
 /****************************************************************************
  * drivers/mtd/mtd_nandscheme.c
  *
- *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * This logic was based largely on Atmel sample code with modifications for
- * better integration with NuttX.  The Atmel sample code has a BSD
- * compatible license that requires this copyright notice:
- *
- *   Copyright (c) 2012, Atmel Corporation
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: Copyright (c) 2012, Atmel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,7 +38,6 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/mtd/nand_config.h>
 
 #include <sys/types.h>
 #include <errno.h>
@@ -53,117 +46,63 @@
 #include <nuttx/mtd/nand_scheme.h>
 
 /****************************************************************************
- * Private Data
+ * Public Data
  ****************************************************************************/
 
 /* Spare area placement scheme for 256 byte pages */
 
 const struct nand_scheme_s g_nand_sparescheme256 =
 {
-  /* Bad block marker is at position #5 */
-
-  5,
-
-  /* 3 ecc bytes */
-
-  3,
-
-  /* 4 extra bytes */
-
-  4,
-
-  /* Ecc bytes positions */
-
-  {0, 1, 2},
-
-  /* Extra bytes positions */
-
-  {3, 4, 6, 7}
+  5,             /* Bad block marker is at position #5 */
+  3,             /* 3 ecc bytes */
+  4,             /* 4 extra bytes */
+  {0, 1, 2},     /* Ecc bytes positions */
+  {3, 4, 6, 7},  /* Extra bytes positions */
 };
 
 /* Spare area placement scheme for 512 byte pages */
 
 const struct nand_scheme_s g_nand_sparescheme512 =
 {
-  /* Bad block marker is at position #5 */
-
-  5,
-
-  /* 6 ecc bytes */
-
-  6,
-
-  /* 8 extra bytes */
-
-  8,
-
-  /* Ecc bytes positions */
-
-  {0, 1, 2, 3, 6, 7},
-
-  /* Extra bytes positions */
-
-  {8, 9, 10, 11, 12, 13, 14, 15}
+  5,                               /* Bad block marker is at position #5 */
+  6,                               /* 6 ecc bytes */
+  8,                               /* 8 extra bytes */
+  {0, 1, 2, 3, 6, 7},              /* Ecc bytes positions */
+  {8, 9, 10, 11, 12, 13, 14, 15},  /* Extra bytes positions */
 };
 
 /* Spare area placement scheme for 2048 byte pages */
 
 const struct nand_scheme_s g_nand_sparescheme2048 =
 {
-  /* Bad block marker is at position #0 */
-
-  0,
-
-  /* 24 ecc bytes */
-
-  24,
-
-  /* 38 extra bytes */
-
-  38,
-
-  /* Ecc bytes positions */
-
+  0,                          /* Bad block marker is at position #0 */
+  24,                         /* 24 ecc bytes */
+  38,                         /* 38 extra bytes */
   {40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
-   58, 59, 60, 61, 62, 63},
-
-  /* Extra bytes positions */
+  58, 59, 60, 61, 62, 63},   /* Ecc bytes positions */
 
   { 2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-   20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
-   38, 39}
+  20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+  38, 39},                   /* Extra bytes positions */
 };
 
 /* Spare area placement scheme for 4096 byte pages. */
 
 const struct nand_scheme_s g_nand_sparescheme4096 =
 {
-  /* Bad block marker is at position #0 */
-
-  0,
-
-  /* 48 ecc bytes */
-
-  48,
-
-  /* 78 extra bytes */
-
-  78,
-
-  /* Ecc bytes positions */
-
-  { 80,  81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,
-    94,  95,  96,  97,  98,  99, 100, 101, 102, 103, 104, 105, 106, 107,
-   108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
-   122, 123, 124, 125, 126, 127},
-
-  /* Extra bytes positions */
+  0,                              /* Bad block marker is at position #0 */
+  48,                             /* 48 ecc bytes */
+  78,                             /* 78 extra bytes */
+  {80,  81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,
+  94,  95,  96,  97,  98,  99, 100, 101, 102, 103, 104, 105, 106, 107,
+  108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+  122, 123, 124, 125, 126, 127},  /* Ecc bytes positions */
 
   { 2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-   20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
-   38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
-   56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
-   74, 75, 76, 77, 78, 79}
+  20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+  38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+  56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
+  74, 75, 76, 77, 78, 79},        /* Extra bytes positions */
 };
 
 /****************************************************************************
@@ -195,7 +134,7 @@ void nandscheme_readbadblockmarker(FAR const struct nand_scheme_s *scheme,
 }
 
 /****************************************************************************
- * Name: nandscheme_readbadblockmarker
+ * Name: nandscheme_writebadblockmarker
  *
  * Description:
  *   Modifies the bad block marker inside a spare area, using the given
@@ -294,18 +233,18 @@ void nandscheme_readextra(FAR const struct nand_scheme_s *scheme,
                           FAR const uint8_t *spare, FAR void *extra,
                           unsigned int size, unsigned int offset)
 {
-  DEBUGASSERT((size + offset) < scheme->nxbytes);
+  DEBUGASSERT((size + offset) <= scheme->nxbytes);
 
   int i;
 
   for (i = 0; i < size; i++)
     {
-      ((uint8_t *)extra)[i] = spare[scheme->xbytepos[i+offset]];
+      ((FAR uint8_t *)extra)[i] = spare[scheme->xbytepos[i + offset]];
     }
 }
 
 /****************************************************************************
- * Name: nandscheme_readextra
+ * Name: nandscheme_writeextra
  *
  * Description:
  *   Write extra bytes of information inside a spare area, using the provided
@@ -327,40 +266,38 @@ void nandscheme_writeextra(FAR const struct nand_scheme_s *scheme,
                            FAR uint8_t *spare, FAR const void *extra,
                            unsigned int size, unsigned int offset)
 {
-  DEBUGASSERT((size + offset) < scheme->nxbytes);
+  DEBUGASSERT((size + offset) <= scheme->nxbytes);
 
   uint32_t i;
   for (i = 0; i < size; i++)
     {
-      spare[scheme->xbytepos[i+offset]] = ((uint8_t *) extra)[i];
+      spare[scheme->xbytepos[i + offset]] = ((FAR uint8_t *) extra)[i];
     }
 }
 
 /****************************************************************************
- * Name: nandscheme_readextra
+ * Name: nandscheme_build4096
  *
  * Description:
  *   Build a scheme instance for 4096 page size nand flash
  *
  * Input Parameters:
  *   scheme  Pointer to a nand_scheme_s instance.
- *   spareSize Size of spare area.
- *   offset  Index where to write the first extra byte.
- *   size    Number of extra bytes to write.
- *   offset  Index where to write the first extra byte.
+ *   sparesize Size of spare area.
+ *   eccoffset Index where to write the first extra byte.
  *
  * Returned Value:
  *   OK on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-int nandscheme_build4086(FAR struct nand_scheme_s *scheme,
-                         unsigned int spareSize, unsigned int eccOffset)
+int nandscheme_build4096(FAR struct nand_scheme_s *scheme,
+                         unsigned int sparesize, unsigned int eccoffset)
 {
   uint8_t eccsize = g_nand_sparescheme4096.eccsize;
   int i;
 
-  if ((eccOffset + eccsize) > spareSize)
+  if ((eccoffset + eccsize) > sparesize)
     {
       return -E2BIG;
     }
@@ -370,10 +307,10 @@ int nandscheme_build4086(FAR struct nand_scheme_s *scheme,
 
   for (i = 0; i < eccsize; i++)
     {
-      scheme->eccbytepos[i] = eccOffset + i;
+      scheme->eccbytepos[i] = eccoffset + i;
     }
 
-  scheme->nxbytes = spareSize - eccsize - 2;
+  scheme->nxbytes = sparesize - eccsize - 2;
 
   for (i = 0; i < scheme->nxbytes; i++)
     {

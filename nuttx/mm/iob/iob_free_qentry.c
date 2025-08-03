@@ -1,35 +1,22 @@
 /****************************************************************************
  * mm/iob/iob_free_qentry.c
  *
- *   Copyright (C) 2014, 2016-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -73,7 +60,7 @@ FAR struct iob_qentry_s *iob_free_qentry(FAR struct iob_qentry_s *iobq)
    * interrupts very briefly.
    */
 
-  flags = enter_critical_section();
+  flags = spin_lock_irqsave(&g_iob_lock);
 
   /* Which list?  If there is a task waiting for an IOB chain, then put
    * the IOB chain on either the free list or on the committed list where
@@ -81,26 +68,20 @@ FAR struct iob_qentry_s *iob_free_qentry(FAR struct iob_qentry_s *iobq)
    * iob_tryalloc_qentry()).
    */
 
-  if (g_qentry_sem.semcount < 0)
+  if (g_qentry_wait > 0)
     {
       iobq->qe_flink   = g_iob_qcommitted;
       g_iob_qcommitted = iobq;
+      g_qentry_wait--;
+      spin_unlock_irqrestore(&g_iob_lock, flags);
+      nxsem_post(&g_qentry_sem);
     }
   else
     {
       iobq->qe_flink   = g_iob_freeqlist;
       g_iob_freeqlist  = iobq;
+      spin_unlock_irqrestore(&g_iob_lock, flags);
     }
-
-  /* Signal that an I/O buffer chain container is available.  If there
-   * is a thread waiting for an I/O buffer chain container, this will
-   * wake up exactly one thread.  The semaphore count will correctly
-   * indicated that the awakened task owns an I/O buffer chain container
-   * and should find it in the committed list.
-   */
-
-  nxsem_post(&g_qentry_sem);
-  leave_critical_section(flags);
 
   /* And return the I/O buffer chain container after the one that was freed */
 

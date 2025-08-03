@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/sama5/sam_flexcom_serial.c
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,6 +31,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -58,9 +46,7 @@
 
 #include <arch/board/board.h>
 
-#include "up_arch.h"
-#include "up_internal.h"
-
+#include "arm_internal.h"
 #include "chip.h"
 #include "hardware/sam_flexcom.h"
 #include "sam_config.h"
@@ -89,7 +75,7 @@
 #undef USART3_ASSIGNED
 #undef USART4_ASSIGNED
 
-#ifdef SAMA5_HAVE_FLEXCOM_USART
+#ifdef CONFIG_SAMA5_FLEXCOM_USART
 
 /* Which Flexcom with be ttyFC0/console and which ttyFC1? ttyFC2? ttyFC3?
  * ttyFC4? ttyFC5?
@@ -133,16 +119,13 @@
 #    define FLEXUS3_ASSIGNED    1
 #  elif defined(CONFIG_USART4_SERIALDRIVER)
 #    define TTYFC0_DEV          g_flexus4port /* FLEXUS4 is ttyFC0 */
-#    define FLEXUS4_ASSIGNED    4
+#    define FLEXUS4_ASSIGNED    1
 #  endif
 #endif
 
-/* Pick ttyFC1.  This could be any of USART0-4 excluding the console UART. */
+/* Pick ttyFC1.  This could be any of USART1-4 excluding the console UART. */
 
-#if defined(CONFIG_USART0_SERIALDRIVER) && !defined(FLEXUS0_ASSIGNED)
-#  define TTYFC1_DEV           g_flexus0port /* FLEXUS0 is ttyFC1 */
-#  define FLEXUS0_ASSIGNED     1
-#elif defined(CONFIG_USART1_SERIALDRIVER) && !defined(FLEXUS1_ASSIGNED)
+#if defined(CONFIG_USART1_SERIALDRIVER) && !defined(FLEXUS1_ASSIGNED)
 #  define TTYFC1_DEV           g_flexus1port /* FLEXUS1 is ttyFC1 */
 #  define FLEXUS1_ASSIGNED     1
 #elif defined(CONFIG_USART2_SERIALDRIVER) && !defined(FLEXUS2_ASSIGNED)
@@ -156,34 +139,28 @@
 #  define FLEXUS4_ASSIGNED     1
 #endif
 
-/* Pick ttyFC2.  This could be one of FLEXUS1-4. It can't be FLEXUS0
+/* Pick ttyFC2.  This could be one of FLEXUS2-4. It can't be FLEXUS0
  * because that was either assigned as ttyFC0 or ttyFC1.  One of these
  * could also be the console.
  */
 
-#if defined(CONFIG_USART1_SERIALDRIVER) && !defined(FLEXUS1_ASSIGNED)
-#  define TTYFC2_DEV           g_flexus1port /* FLEXUS1 is ttyFC2 */
-#  define FLEXUS1_ASSIGNED     1
-#elif defined(CONFIG_USART2_SERIALDRIVER) && !defined(FLEXUS2_ASSIGNED)
+#if defined(CONFIG_USART2_SERIALDRIVER) && !defined(FLEXUS2_ASSIGNED)
 #  define TTYFC2_DEV           g_flexus2port /* FLEXUS2 is ttyFC2 */
 #  define FLEXUS2_ASSIGNED     1
 #elif defined(CONFIG_USART3_SERIALDRIVER) && !defined(FLEXUS3_ASSIGNED)
 #  define TTYFC2_DEV           g_flexus3port /* FLEXUS3 is ttyFC2 */
 #  define FLEXUS3_ASSIGNED     1
-#elif defined(CONFIG_USART4_SERIALDRIVER) && !defined(USART4_ASSIGNED)
+#elif defined(CONFIG_USART4_SERIALDRIVER) && !defined(FLEXUS4_ASSIGNED)
 #  define TTYFC2_DEV           g_flexus4port /* FLEXUS4 is ttyFC2 */
 #  define FLEXUS4_ASSIGNED     1
 #endif
 
-/* Pick ttyFC3.  This could be one of FLEXUS2-4. It can't be FLEXUS0-1
+/* Pick ttyFC3.  This could be one of FLEXUS3-4. It can't be FLEXUS0-1
  * UART0-1; those have already been assigned to ttyFC0, 1, or 2.  One of
  * FLEXUS2-4 could also be the console.
  */
 
-#if defined(CONFIG_USART2_SERIALDRIVER) && !defined(FLEXUS2_ASSIGNED)
-#  define TTYFC3_DEV           g_flexus2port /* FLEXUS2 is ttyFC3 */
-#  define FLEXUS2_ASSIGNED     1
-#elif defined(CONFIG_USART3_SERIALDRIVER) && !defined(FLEXUS3_ASSIGNED)
+#if defined(CONFIG_USART3_SERIALDRIVER) && !defined(FLEXUS3_ASSIGNED)
 #  define TTYFC3_DEV           g_flexus3port /* FLEXUS3 is ttyFC3 */
 #  define FLEXUS3_ASSIGNED     1
 #elif defined(CONFIG_USART4_SERIALDRIVER) && !defined(FLEXUS4_ASSIGNED)
@@ -191,17 +168,14 @@
 #  define FLEXUS4_ASSIGNED     1
 #endif
 
-/* Pick ttyFC4.  This could be one of USART3-4. It can't be one of
+/* Pick ttyFC4.  This could be USART4. It can't be one of
  * USART0-2; those have already been assigned to ttyFC0-3.  One of
  * USART3-4 could also be the console.
  */
 
-#if defined(CONFIG_USART3_SERIALDRIVER) && !defined(USART3_ASSIGNED)
-#  define TTYFC4_DEV           g_flexus3port /* USART3 is ttyFC4 */
-#  define USART3_ASSIGNED     1
-#elif defined(CONFIG_USART4_SERIALDRIVER) && !defined(USART4_ASSIGNED)
+#if defined(CONFIG_USART4_SERIALDRIVER) && !defined(FLEXUS4_ASSIGNED)
 #  define TTYFC4_DEV           g_flexus4port /* USART4 is ttyFC4 */
-#  define USART4_ASSIGNED     1
+#  define FLEXUS4_ASSIGNED     1
 #endif
 
 /* The Flexcom modules are driven by the peripheral clock (MCK or MCK2). */
@@ -231,13 +205,13 @@ struct flexus_dev_s
  * Private Function Prototypes
  ****************************************************************************/
 
-static int  flexus_interrupt(int irq, void *context, FAR void *arg);
+static int  flexus_interrupt(int irq, void *context, void *arg);
 static int  flexus_setup(struct uart_dev_s *dev);
 static void flexus_shutdown(struct uart_dev_s *dev);
 static int  flexus_attach(struct uart_dev_s *dev);
 static void flexus_detach(struct uart_dev_s *dev);
 static int  flexus_ioctl(struct file *filep, int cmd, unsigned long arg);
-static int  flexus_receive(struct uart_dev_s *dev, uint32_t *status);
+static int  flexus_receive(struct uart_dev_s *dev, unsigned int *status);
 static void flexus_rxint(struct uart_dev_s *dev, bool enable);
 static bool flexus_rxavailable(struct uart_dev_s *dev);
 static void flexus_send(struct uart_dev_s *dev, int ch);
@@ -278,7 +252,7 @@ static char g_flexus0txbuffer[CONFIG_USART0_TXBUFSIZE];
 static char g_flexus1rxbuffer[CONFIG_USART1_RXBUFSIZE];
 static char g_flexus1txbuffer[CONFIG_USART1_TXBUFSIZE];
 #endif
-#ifdef CONFIG_USART2_SERIALDRIVER
+#ifdef CONFIG_SAMA5_FLEXCOM2_USART
 static char g_flexus2rxbuffer[CONFIG_USART2_RXBUFSIZE];
 static char g_flexus2txbuffer[CONFIG_USART2_TXBUFSIZE];
 #endif
@@ -359,7 +333,7 @@ static uart_dev_t g_flexus1port =
 
 /* This describes the state of the USART2 port. */
 
-#ifdef CONFIG_USART2_SERIALDRIVER
+#ifdef CONFIG_SAMA5_FLEXCOM2_USART
 static struct flexus_dev_s g_flexus2priv =
 {
   .usartbase      = SAM_FLEXCOM2_VBASE,
@@ -486,7 +460,9 @@ static inline void flexus_serialout(struct flexus_dev_s *priv, int offset,
 static inline void flexus_restoreusartint(struct flexus_dev_s *priv,
                                           uint32_t imr)
 {
-  /* Restore the previous interrupt state (assuming all interrupts disabled) */
+  /* Restore the previous interrupt state (assuming all interrupts
+   * disabled)
+   */
 
   flexus_serialout(priv, SAM_FLEXUS_IER_OFFSET, imr);
 }
@@ -520,13 +496,15 @@ static void flexus_disableallints(struct flexus_dev_s *priv, uint32_t *imr)
  * Name: flexus_interrupt
  *
  * Description:
- *   This is the common USART interrupt handler.  It should call
- *   uart_transmitchars or uart_receivechar to perform the appropriate
- *   data transfers.
+ *   This is the common USART interrupt handler.  It will be invoked when an
+ *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
+ *   uart_recvchars to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'arg' to the
+ *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
 
-static int flexus_interrupt(int irq, void *context, FAR void *arg)
+static int flexus_interrupt(int irq, void *context, void *arg)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
   struct flexus_dev_s *priv;
@@ -547,7 +525,9 @@ static int flexus_interrupt(int irq, void *context, FAR void *arg)
     {
       handled = false;
 
-      /* Get the UART/USART status (we are only interested in the unmasked interrupts). */
+      /* Get the UART/USART status (we are only interested in the unmasked
+       * interrupts).
+       */
 
       priv->sr = flexus_serialin(priv, SAM_FLEXUS_CSR_OFFSET); /* Save for error reporting */
       imr      = flexus_serialin(priv, SAM_FLEXUS_IMR_OFFSET); /* Interrupt mask */
@@ -820,10 +800,6 @@ static int flexus_ioctl(struct file *filep, int cmd, unsigned long arg)
             break;
           }
 
-        /* Return baud */
-
-        cfsetispeed(termiosp, priv->baud);
-
         /* Return parity */
 
         termiosp->c_cflag = ((priv->parity != 0) ? PARENB : 0) |
@@ -838,6 +814,10 @@ static int flexus_ioctl(struct file *filep, int cmd, unsigned long arg)
 #if defined(CONFIG_SERIAL_IFLOWCONTROL) || defined(CONFIG_SERIAL_OFLOWCONTROL)
         termiosp->c_cflag |= (priv->flowc) ? (CCTS_OFLOW | CRTS_IFLOW): 0;
 #endif
+        /* Return baud */
+
+        cfsetispeed(termiosp, priv->baud);
+
         /* Return number of bits */
 
         switch (priv->bits)
@@ -985,7 +965,7 @@ static int flexus_ioctl(struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int flexus_receive(struct uart_dev_s *dev, uint32_t *status)
+static int flexus_receive(struct uart_dev_s *dev, unsigned int *status)
 {
   struct flexus_dev_s *priv = (struct flexus_dev_s *)dev->priv;
 
@@ -1138,7 +1118,7 @@ static bool flexus_txempty(struct uart_dev_s *dev)
  *
  * Description:
  *   Performs the low level Flexcom USART initialization early so that the
- *   Flexcom serial console will be available during bootup.  This must be
+ *   Flexcom serial console will be available during boot up.  This must be
  *   called before flexus_serialinit.
  *
  ****************************************************************************/

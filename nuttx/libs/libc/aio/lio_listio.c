@@ -1,35 +1,22 @@
 /****************************************************************************
  * libs/libc/aio/lio_listio.c
  *
- *   Copyright (C) 2014-2015, 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,9 +30,11 @@
 #include <signal.h>
 #include <aio.h>
 #include <assert.h>
+#include <debug.h>
 #include <errno.h>
 
 #include <nuttx/signal.h>
+#include <nuttx/sched.h>
 
 #include "libc.h"
 #include "aio/aio.h"
@@ -171,16 +160,13 @@ static void lio_sighandler(int signo, siginfo_t *info, void *ucontext)
   DEBUGASSERT(sighand && sighand->list);
   aiocbp->aio_priv = NULL;
 
-  /* Prevent any asynchronous I/O completions while the signal handler runs */
-
-  sched_lock();
-
   /* Check if all of the pending I/O has completed */
 
   ret = lio_checkio(sighand->list, sighand->nent);
   if (ret != -EINPROGRESS)
     {
       /* All pending I/O has completed */
+
       /* Restore the signal handler */
 
       sigaction(SIGPOLL, &sighand->oact, NULL);
@@ -198,8 +184,6 @@ static void lio_sighandler(int signo, siginfo_t *info, void *ucontext)
 
       lib_free(sighand);
     }
-
-  sched_unlock();
 }
 
 /****************************************************************************
@@ -227,55 +211,25 @@ static int lio_sigsetup(FAR struct aiocb * const *list, int nent,
                         FAR struct sigevent *sig)
 {
   FAR struct aiocb *aiocbp;
-  FAR struct lio_sighand_s *sighand;
+  struct lio_sighand_s sighand;
   sigset_t set;
   struct sigaction act;
   int status;
   int i;
 
-  /* Allocate a structure to pass data to the signal handler */
-
-  sighand = (FAR struct lio_sighand_s *)lib_zalloc(sizeof(struct lio_sighand_s));
-  if (!sighand)
-    {
-      ferr("ERROR: lib_zalloc failed\n");
-      return -ENOMEM;
-    }
-
   /* Initialize the allocated structure */
 
-  sighand->list = list;
-  sighand->sig  = *sig;
-  sighand->nent = nent;
-  sighand->pid  = getpid();
-
-  /* Save this structure as the private data attached to each aiocb */
-
-  for (i = 0; i < nent; i++)
-    {
-      /* Skip over NULL entries in the list */
-
-      aiocbp = list[i];
-      if (aiocbp)
-        {
-          FAR void *priv = NULL;
-
-          /* Check if I/O is pending for  this entry */
-
-          if (aiocbp->aio_result == -EINPROGRESS)
-            {
-              priv = (FAR void *)sighand;
-            }
-
-          aiocbp->aio_priv = priv;
-        }
-    }
+  memset(&sighand, 0, sizeof(struct lio_sighand_s));
+  sighand.list = list;
+  sighand.sig  = *sig;
+  sighand.nent = nent;
+  sighand.pid  = _SCHED_GETPID();
 
   /* Make sure that SIGPOLL is not blocked */
 
   sigemptyset(&set);
   sigaddset(&set, SIGPOLL);
-  status = sigprocmask(SIG_UNBLOCK, &set, &sighand->oprocmask);
+  status = sigprocmask(SIG_UNBLOCK, &set, &sighand.oprocmask);
   if (status != OK)
     {
       int errcode = get_errno();
@@ -294,7 +248,7 @@ static int lio_sigsetup(FAR struct aiocb * const *list, int nent,
   sigfillset(&act.sa_mask);
   sigdelset(&act.sa_mask, SIGPOLL);
 
-  status = sigaction(SIGPOLL, &act, &sighand->oact);
+  status = sigaction(SIGPOLL, &act, &sighand.oact);
   if (status != OK)
     {
       int errcode = get_errno();
@@ -303,6 +257,36 @@ static int lio_sigsetup(FAR struct aiocb * const *list, int nent,
 
       DEBUGASSERT(errcode > 0);
       return -errcode;
+    }
+
+  /* Save this structure as the private data attached to each aiocb */
+
+  for (i = 0; i < nent; i++)
+    {
+      /* Skip over NULL entries in the list */
+
+      aiocbp = list[i];
+      if (aiocbp)
+        {
+          FAR void *priv = NULL;
+
+          /* Check if I/O is pending for  this entry */
+
+          if (aiocbp->aio_result == -EINPROGRESS)
+            {
+              priv = lib_zalloc(sizeof(struct lio_sighand_s));
+              if (!priv)
+                {
+                  ferr("ERROR: lib_zalloc failed\n");
+                  return -ENOMEM;
+                }
+
+              memcpy(priv, (FAR void *)&sighand,
+                      sizeof(struct lio_sighand_s));
+            }
+
+          aiocbp->aio_priv = priv;
+        }
     }
 
   return OK;
@@ -494,12 +478,12 @@ static int lio_waitall(FAR struct aiocb * const *list, int nent)
  *   EIO, then some of the I/O specified by the list may have been initiated.
  *   If the lio_listio() function fails with an error code other than EAGAIN,
  *   EINTR, or EIO, no operations from the list will have been initiated. The
- *   I/O operation indicated by each list element can encounter errors specific
- *   to the individual read or write function being performed. In this event,
- *   the error status for each aiocb control block contains the associated
- *   error code. The error codes that can be set are the same as would be
- *   set by a read() or write() function, with the following additional
- *   error codes possible:
+ *   I/O operation indicated by each list element can encounter errors
+ *   specific to the individual read or write function being performed. In
+ *   this event, the error status for each aiocb control block contains the
+ *   associated error code. The error codes that can be set are the same as
+ *   would be set by a read() or write() function, with the following
+ *   additional error codes possible:
  *
  *     EAGAIN - The requested I/O operation was not queued due to resource
  *       limitations.
@@ -518,10 +502,10 @@ static int lio_waitall(FAR struct aiocb * const *list, int nent)
  *
  ****************************************************************************/
 
-int lio_listio(int mode, FAR struct aiocb *const list[], int nent,
+int lio_listio(int mode, FAR struct aiocb * const list[], int nent,
                FAR struct sigevent *sig)
 {
-  FAR struct aiocb *aiocbp;
+  FAR struct aiocb *aiocbp = NULL;
   int nqueued;
   int errcode;
   int retcode;
@@ -529,7 +513,12 @@ int lio_listio(int mode, FAR struct aiocb *const list[], int nent,
   int ret;
   int i;
 
-  DEBUGASSERT(mode == LIO_WAIT || mode == LIO_NOWAIT);
+  if (mode != LIO_WAIT && mode != LIO_NOWAIT)
+    {
+      set_errno(EINVAL);
+      return ERROR;
+    }
+
   DEBUGASSERT(list);
 
   nqueued = 0;    /* No I/O operations yet queued */
@@ -605,7 +594,8 @@ int lio_listio(int mode, FAR struct aiocb *const list[], int nent,
               {
                 /* Make the invalid operation complete with an error */
 
-                ferr("ERROR: Unrecognized opcode: %d\n", aiocbp->aio_lio_opcode);
+                ferr("ERROR: Unrecognized opcode: %d\n",
+                     aiocbp->aio_lio_opcode);
                 aiocbp->aio_result = -EINVAL;
                 ret = ERROR;
               }
@@ -676,7 +666,7 @@ int lio_listio(int mode, FAR struct aiocb *const list[], int nent,
         }
       else
         {
-          status = nxsig_notification(getpid(), sig,
+          status = nxsig_notification(_SCHED_GETPID(), sig,
                                       SI_ASYNCIO, &aiocbp->aio_sigwork);
           if (status < 0 && ret == OK)
             {

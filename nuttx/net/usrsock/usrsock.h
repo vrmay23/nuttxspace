@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/usrsock/usrsock.h
  *
- *  Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
- *  Author: Jussi Kivilinna <jussi.kivilinna@haltian.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,7 +33,6 @@
 
 #include <sys/types.h>
 #include <sys/uio.h>
-#include <queue.h>
 
 #include <nuttx/semaphore.h>
 
@@ -57,15 +43,6 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifndef ARRAY_SIZE
-#  define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#endif
-
-/* Internal socket type/domain for marking usrsock sockets */
-
-#define SOCK_USRSOCK_TYPE   0x7f
-#define PF_USRSOCK_DOMAIN   0x7f
-
 /* Internal event flags */
 
 #define USRSOCK_EVENT_CONNECT_READY (1 << 0)
@@ -73,24 +50,24 @@
 #define USRSOCK_EVENT_INTERNAL_MASK (USRSOCK_EVENT_CONNECT_READY | \
                                      USRSOCK_EVENT_REQ_COMPLETE)
 
+#define USRSOCK_USOCKID_INVALID     (-1)
+
 /****************************************************************************
  * Public Type Definitions
  ****************************************************************************/
-
-struct usrsockdev_s;
 
 enum usrsock_conn_state_e
 {
   USRSOCK_CONN_STATE_UNINITIALIZED = 0,
   USRSOCK_CONN_STATE_ABORTED,
   USRSOCK_CONN_STATE_READY,
-  USRSOCK_CONN_STATE_CONNECTING,
+  USRSOCK_CONN_STATE_CONNECTING
 };
 
 struct usrsock_poll_s
 {
-  FAR struct socket *psock;        /* Needed to handle loss of connection */
-  struct pollfd *fds;              /* Needed to handle poll events */
+  FAR struct usrsock_conn_s *conn; /* Needed to handle loss of connection */
+  FAR struct pollfd *fds;          /* Needed to handle poll events */
   FAR struct devif_callback_s *cb; /* Needed to teardown the poll */
 };
 
@@ -98,33 +75,26 @@ struct usrsock_conn_s
 {
   /* Common prologue of all connection structures. */
 
-  dq_entry_t node;                   /* Supports a doubly linked list */
-
-  /* This is a list of usrsock callbacks.  Each callback represents a thread
-   * that is stalled, waiting for a specific event.
-   */
-
-  FAR struct devif_callback_s *list; /* Usersock callbacks */
+  struct socket_conn_s sconn;
 
   /* usrsock-specific content follows */
 
   uint8_t    crefs;                  /* Reference counts on this instance */
 
   enum usrsock_conn_state_e state;   /* State of kernel<->daemon link for conn */
-  bool          connected;           /* Socket has been connected */
-  int8_t        type;                /* Socket type (SOCK_STREAM, etc) */
-  int16_t       usockid;             /* Connection number used for kernel<->daemon */
-  uint16_t      flags;               /* Socket state flags */
-  struct usrsockdev_s *dev;          /* Device node used for this conn */
+  bool       connected;              /* Socket has been connected */
+  int16_t    usockid;                /* Connection number used for kernel<->daemon */
+  uint16_t   flags;                  /* Socket state flags */
 
   struct
   {
-    sem_t    sem;         /* Request semaphore (only one outstanding request) */
-    uint8_t  xid;         /* Expected message exchange id */
-    bool     inprogress;  /* Request was received but daemon is still processing */
-    uint16_t valuelen;    /* Length of value from daemon */
+    sem_t    sem;               /* Request semaphore (only one outstanding request) */
+    uint32_t xid;               /* Expected message exchange id */
+    bool     inprogress;        /* Request was received but daemon is still processing */
+    uint16_t valuelen;          /* Length of value from daemon */
     uint16_t valuelen_nontrunc; /* Actual length of value at daemon */
-    int      result;      /* Result for request */
+    int      result;            /* Result for request */
+    uint16_t events;            /* Response events for the request */
 
     struct
     {
@@ -203,8 +173,8 @@ FAR struct usrsock_conn_s *usrsock_alloc(void);
  * Name: usrsock_free()
  *
  * Description:
- *   Free a usrsock connection structure that is no longer in use. This should
- *   be done by the implementation of close().
+ *   Free a usrsock connection structure that is no longer in use. This
+ *   should be done by the implementation of close().
  *
  ****************************************************************************/
 
@@ -224,19 +194,11 @@ void usrsock_free(FAR struct usrsock_conn_s *conn);
 FAR struct usrsock_conn_s *usrsock_nextconn(FAR struct usrsock_conn_s *conn);
 
 /****************************************************************************
- * Name: usrsock_connidx()
- ****************************************************************************/
-
-int usrsock_connidx(FAR struct usrsock_conn_s *conn);
-
-/****************************************************************************
  * Name: usrsock_active()
  *
  * Description:
  *   Find a connection structure that is the appropriate
  *   connection for usrsock
- *
- * Assumptions:
  *
  ****************************************************************************/
 
@@ -256,15 +218,16 @@ int usrsock_setup_request_callback(FAR struct usrsock_conn_s *conn,
  ****************************************************************************/
 
 int usrsock_setup_data_request_callback(FAR struct usrsock_conn_s *conn,
-                                        FAR struct usrsock_data_reqstate_s *pstate,
-                                        FAR devif_callback_event_t event,
-                                        uint16_t flags);
+                                FAR struct usrsock_data_reqstate_s *pstate,
+                                FAR devif_callback_event_t event,
+                                uint16_t flags);
 
 /****************************************************************************
  * Name: usrsock_teardown_request_callback()
  ****************************************************************************/
 
-void usrsock_teardown_request_callback(FAR struct usrsock_reqstate_s *pstate);
+void usrsock_teardown_request_callback(
+                                FAR struct usrsock_reqstate_s *pstate);
 
 /****************************************************************************
  * Name: usrsock_teardown_data_request_callback()
@@ -294,24 +257,19 @@ void usrsock_setup_datain(FAR struct usrsock_conn_s *conn,
  *
  ****************************************************************************/
 
-int usrsock_event(FAR struct usrsock_conn_s *conn, uint16_t events);
+int usrsock_event(FAR struct usrsock_conn_s *conn);
 
 /****************************************************************************
- * Name: usrsockdev_do_request
- ****************************************************************************/
-
-int usrsockdev_do_request(FAR struct usrsock_conn_s *conn,
-                          FAR struct iovec *iov, unsigned int iovcnt);
-
-/****************************************************************************
- * Name: usrsockdev_register
+ * Name: usrsock_do_request
  *
  * Description:
- *   Register /dev/usrsock
+ *   The usrsock_do_request() function will send usrsock request message
+ *   to the usrsock network interface driver
  *
  ****************************************************************************/
 
-void usrsockdev_register(void);
+int usrsock_do_request(FAR struct usrsock_conn_s *conn,
+                       FAR struct iovec *iov, unsigned int iovcnt);
 
 /****************************************************************************
  * Name: usrsock_socket
@@ -324,7 +282,8 @@ void usrsockdev_register(void);
  *   domain   (see sys/socket.h)
  *   type     (see sys/socket.h)
  *   protocol (see sys/socket.h)
- *   psock    A pointer to a user allocated socket structure to be initialized.
+ *   psock    A pointer to a user allocated socket structure to be
+ *            initialized.
  *
  * Returned Value:
  *   0 on success; negative error-code on error
@@ -347,11 +306,10 @@ void usrsockdev_register(void);
  *     The protocol type or the specified protocol is not supported within
  *     this domain.
  *
- * Assumptions:
- *
  ****************************************************************************/
 
-int usrsock_socket(int domain, int type, int protocol, FAR struct socket *psock);
+int usrsock_socket(int domain, int type, int protocol,
+                   FAR struct socket *psock);
 
 /****************************************************************************
  * Name: usrsock_close
@@ -365,8 +323,6 @@ int usrsock_socket(int domain, int type, int protocol, FAR struct socket *psock)
  * Returned Value:
  *   0 on success; -1 on error with errno set appropriately.
  *
- * Assumptions:
- *
  ****************************************************************************/
 
 int usrsock_close(FAR struct usrsock_conn_s *conn);
@@ -375,13 +331,13 @@ int usrsock_close(FAR struct usrsock_conn_s *conn);
  * Name: usrsock_bind
  *
  * Description:
- *   usrsock_bind() gives the socket 'conn' the local address 'addr'. 'addr'
+ *   usrsock_bind() gives the socket 'psock' the local address 'addr'. 'addr'
  *   is 'addrlen' bytes long. Traditionally, this is called "assigning a name
  *   to a socket." When a socket is created with socket, it exists in a name
  *   space (address family) but has no name assigned.
  *
  * Input Parameters:
- *   conn     usrsock socket connection structure
+ *   psock    A reference to the socket structure of the socket to be bound
  *   addr     Socket local address
  *   addrlen  Length of 'addr'
  *
@@ -397,8 +353,6 @@ int usrsock_close(FAR struct usrsock_conn_s *conn);
  *   ENOTSOCK
  *     psock is a descriptor for a file, not a socket.
  *
- * Assumptions:
- *
  ****************************************************************************/
 
 int usrsock_bind(FAR struct socket *psock,
@@ -412,14 +366,12 @@ int usrsock_bind(FAR struct socket *psock,
  *   Perform a usrsock connection
  *
  * Input Parameters:
- *   psock   A reference to the socket structure of the socket to be connected
+ *   psock   A reference to the socket structure of the socket
  *   addr    The address of the remote server to connect to
  *   addrlen Length of address buffer
  *
  * Returned Value:
  *   None
- *
- * Assumptions:
  *
  ****************************************************************************/
 
@@ -448,7 +400,8 @@ int usrsock_connect(FAR struct socket *psock,
  *
  * Returned Value:
  *   On success, zero is returned. On error, a negated errno value is
- *   returned.  See list() for the set of appropriate error values.
+ *   returned.  See listen() for a description of the appropriate error
+ *   value.
  *
  ****************************************************************************/
 
@@ -458,16 +411,16 @@ int usrsock_listen(FAR struct socket *psock, int backlog);
  * Name: usrsock_accept
  *
  * Description:
- *   The usrsock_sockif_accept function is used with connection-based socket
+ *   The usrsock_accept function is used with connection-based socket
  *   types (SOCK_STREAM, SOCK_SEQPACKET and SOCK_RDM). It extracts the first
  *   connection request on the queue of pending connections, creates a new
- *   connected socket with mostly the same properties as 'sockfd', and
+ *   connected socket with mostly the same properties as 'psock', and
  *   allocates a new socket descriptor for the socket, which is returned. The
  *   newly created socket is no longer in the listening state. The original
- *   socket 'sockfd' is unaffected by this call.  Per file descriptor flags
- *   are not inherited across an inet_accept.
+ *   socket 'psock' is unaffected by this call.  Per file descriptor flags
+ *   are not inherited across an usrsock_accept.
  *
- *   The 'sockfd' argument is a socket descriptor that has been created with
+ *   The 'psock' argument is a socket descriptor that has been created with
  *   socket(), bound to a local address with bind(), and is listening for
  *   connections after a call to listen().
  *
@@ -477,20 +430,21 @@ int usrsock_listen(FAR struct socket *psock, int backlog);
  *   actual length of the address returned.
  *
  *   If no pending connections are present on the queue, and the socket is
- *   not marked as non-blocking, inet_accept blocks the caller until a
+ *   not marked as non-blocking, usrsock_accept blocks the caller until a
  *   connection is present. If the socket is marked non-blocking and no
- *   pending connections are present on the queue, inet_accept returns
+ *   pending connections are present on the queue, usrsock_accept returns
  *   EAGAIN.
  *
  * Parameters:
  *   psock    Reference to the listening socket structure
  *   addr     Receives the address of the connecting client
- *   addrlen  Input: allocated size of 'addr', Return: returned size of 'addr'
+ *   addrlen  Input: allocated size of 'addr'
+ *            Return: returned size of 'addr'
  *   newsock  Location to return the accepted socket information.
  *
  * Returned Value:
  *   Returns 0 (OK) on success.  On failure, it returns a negated errno
- *   value.  See accept() for a desrciption of the appropriate error value.
+ *   value.  See accept() for a description of the appropriate error value.
  *
  * Assumptions:
  *   The network is locked.
@@ -498,7 +452,8 @@ int usrsock_listen(FAR struct socket *psock, int backlog);
  ****************************************************************************/
 
 int usrsock_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
-                   FAR socklen_t *addrlen, FAR struct socket *newsock);
+                   FAR socklen_t *addrlen, FAR struct socket *newsock,
+                   int flags);
 
 /****************************************************************************
  * Name: usrsock_poll
@@ -517,41 +472,37 @@ int usrsock_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
  *
  ****************************************************************************/
 
-int usrsock_poll(FAR struct socket *psock, FAR struct pollfd *fds, bool setup);
+int usrsock_poll(FAR struct socket *psock, FAR struct pollfd *fds,
+                 bool setup);
 
 /****************************************************************************
- * Name: usrsock_sendto
+ * Name: usrsock_sendmsg
  *
  * Description:
- *   If sendto() is used on a connection-mode (SOCK_STREAM, SOCK_SEQPACKET)
- *   socket, the parameters to and 'tolen' are ignored (and the error EISCONN
- *   may be returned when they are not NULL and 0), and the error ENOTCONN is
- *   returned when the socket was not actually connected.
+ *   If sendmsg() is used on a connection-mode (SOCK_STREAM, SOCK_SEQPACKET)
+ *   socket, the parameters 'msg_name' and 'msg_namelen' are ignored (and the
+ *   error EISCONN may be returned when they are not NULL and 0), and the
+ *   error ENOTCONN is returned when the socket was not actually connected.
  *
  * Input Parameters:
- *   psock    A reference to the socket structure of the socket to be connected
- *   buf      Data to send
- *   len      Length of data to send
+ *   psock    A reference to the socket structure of the socket
+ *   msg      Message to send
  *   flags    Send flags (ignored)
- *   to       Address of recipient
- *   tolen    The length of the address structure
  *
  * Returned Value:
- *   None
- *
- * Assumptions:
+ *   On success, returns the number of characters sent.  On any failure, a
+ *   negated errno value is returned.
  *
  ****************************************************************************/
 
-ssize_t usrsock_sendto(FAR struct socket *psock, FAR const void *buf,
-                       size_t len, int flags, FAR const struct sockaddr *to,
-                       socklen_t tolen);
+ssize_t usrsock_sendmsg(FAR struct socket *psock, FAR struct msghdr *msg,
+                        int flags);
 
 /****************************************************************************
- * Name: usrsock_recvfrom
+ * Name: usrsock_recvmsg
  *
  * Description:
- *   recvfrom() receives messages from a socket, and may be used to receive
+ *   recvmsg() receives messages from a socket, and may be used to receive
  *   data on a socket whether or not it is connection-oriented.
  *
  *   If from is not NULL, and the underlying protocol provides the source
@@ -561,28 +512,31 @@ ssize_t usrsock_sendto(FAR struct socket *psock, FAR const void *buf,
  *
  * Input Parameters:
  *   psock    A pointer to a NuttX-specific, internal socket structure
- *   buf      Buffer to receive data
- *   len      Length of buffer
+ *   msg      Buffer to receive the message
  *   flags    Receive flags (ignored)
- *   from     Address of source (may be NULL)
- *   fromlen  The length of the address structure
+ *
+ * Returned Value:
+ *   On success, returns the number of characters received.  If no data is
+ *   available to be received and the peer has performed an orderly shutdown,
+ *   recvfrom() will return 0.  Otherwise, on any failure, a negated errno
+ *   value is returned.
  *
  ****************************************************************************/
 
-ssize_t usrsock_recvfrom(FAR struct socket *psock, FAR void *buf, size_t len,
-                         int flags, FAR struct sockaddr *from,
-                         FAR socklen_t *fromlen);
+ssize_t usrsock_recvmsg(FAR struct socket *psock, FAR struct msghdr *msg,
+                        int flags);
 
 /****************************************************************************
  * Name: usrsock_getsockopt
  *
  * Description:
- *   getsockopt() retrieve thse value for the option specified by the
- *   'option' argument for the socket specified by the 'psock' argument. If
- *   the size of the option value is greater than 'value_len', the value
- *   stored in the object pointed to by the 'value' argument will be silently
- *   truncated. Otherwise, the length pointed to by the 'value_len' argument
- *   will be modified to indicate the actual length of the'value'.
+ *   getsockopt() retrieve the value for the option specified by the
+ *   'option' argument at the protocol level specified by the 'level'
+ *   argument. If the size of the option value is greater than 'value_len',
+ *   the value stored in the object pointed to by the 'value' argument will
+ *   be silently truncated. Otherwise, the length pointed to by the
+ *   'value_len' argument will be modified to indicate the actual length
+ *   of the 'value'.
  *
  *   The 'level' argument specifies the protocol level of the option. To
  *   retrieve options at the socket level, specify the level argument as
@@ -591,7 +545,7 @@ ssize_t usrsock_recvfrom(FAR struct socket *psock, FAR void *buf, size_t len,
  *   See <sys/socket.h> a complete list of values for the 'option' argument.
  *
  * Input Parameters:
- *   conn      usrsock socket connection structure
+ *   psock     Socket structure of the socket to query
  *   level     Protocol level to set the option
  *   option    identifies the option to get
  *   value     Points to the argument value
@@ -599,7 +553,7 @@ ssize_t usrsock_recvfrom(FAR struct socket *psock, FAR void *buf, size_t len,
  *
  ****************************************************************************/
 
-int usrsock_getsockopt(FAR struct usrsock_conn_s *conn, int level, int option,
+int usrsock_getsockopt(FAR struct socket *psock, int level, int option,
                        FAR void *value, FAR socklen_t *value_len);
 
 /****************************************************************************
@@ -608,7 +562,7 @@ int usrsock_getsockopt(FAR struct usrsock_conn_s *conn, int level, int option,
  * Description:
  *   psock_setsockopt() sets the option specified by the 'option' argument,
  *   at the protocol level specified by the 'level' argument, to the value
- *   pointed to by the 'value' argument for the socket on the 'psock' argument.
+ *   pointed to by the 'value' argument for the usrsock connection.
  *
  *   The 'level' argument specifies the protocol level of the option. To set
  *   options at the socket level, specify the level argument as SOL_SOCKET.
@@ -616,7 +570,7 @@ int usrsock_getsockopt(FAR struct usrsock_conn_s *conn, int level, int option,
  *   See <sys/socket.h> a complete list of values for the 'option' argument.
  *
  * Input Parameters:
- *   conn      usrsock socket connection structure
+ *   psock     Socket structure of the socket to query
  *   level     Protocol level to set the option
  *   option    identifies the option to set
  *   value     Points to the argument value
@@ -624,8 +578,8 @@ int usrsock_getsockopt(FAR struct usrsock_conn_s *conn, int level, int option,
  *
  ****************************************************************************/
 
-int usrsock_setsockopt(FAR struct usrsock_conn_s *conn, int level, int option,
-                       FAR const void *value, FAR socklen_t value_len);
+int usrsock_setsockopt(FAR struct socket *psock, int level, int option,
+                       FAR const void *value, socklen_t value_len);
 
 /****************************************************************************
  * Name: usrsock_getsockname
@@ -643,7 +597,7 @@ int usrsock_setsockopt(FAR struct usrsock_conn_s *conn, int level, int option,
  *   the object pointed to by address is unspecified.
  *
  * Input Parameters:
- *   conn     usrsock socket connection structure
+ *   psock    A reference to the socket structure of the socket
  *   addr     sockaddr structure to receive data [out]
  *   addrlen  Length of sockaddr structure [in/out]
  *
@@ -668,7 +622,7 @@ int usrsock_getsockname(FAR struct socket *psock,
  *   the object pointed to by address is unspecified.
  *
  * Input Parameters:
- *   conn     usrsock socket connection structure
+ *   psock    A reference to the socket structure of the socket
  *   addr     sockaddr structure to receive data [out]
  *   addrlen  Length of sockaddr structure [in/out]
  *
@@ -681,16 +635,40 @@ int usrsock_getpeername(FAR struct socket *psock,
  * Name: usrsock_ioctl
  *
  * Description:
- *   The usrsock_ioctl() function performs network device specific operations.
+ *   The usrsock_ioctl() function performs network device specific
+ *   operations.
  *
  * Parameters:
- *   psock    A pointer to a NuttX-specific, internal socket structure
+ *   psock    A reference to the socket structure of the socket
  *   cmd      The ioctl command
  *   arg      The argument of the ioctl cmd
  *
  ****************************************************************************/
 
-int usrsock_ioctl(FAR struct socket *psock, int cmd, FAR void *arg, size_t arglen);
+int usrsock_ioctl(FAR struct socket *psock, int cmd, unsigned long arg);
+
+/****************************************************************************
+ * Name: usrsock_shutdown
+ *
+ * Description:
+ *   The shutdown() function will cause all or part of a full-duplex
+ *   connection on the socket associated with the file descriptor socket to
+ *   be shut down.
+ *
+ *   The shutdown() function disables subsequent send and/or receive
+ *   operations on a socket, depending on the value of the how argument.
+ *
+ * Input Parameters:
+ *   psock    A reference to the socket structure of the socket
+ *   how      Specifies the type of shutdown. The values are as follows:
+ *
+ *     SHUT_RD   - Disables further receive operations.
+ *     SHUT_WR   - Disables further send operations.
+ *     SHUT_RDWR - Disables further send and receive operations.
+ *
+ ****************************************************************************/
+
+int usrsock_shutdown(FAR struct socket *psock, int how);
 
 #undef EXTERN
 #ifdef __cplusplus

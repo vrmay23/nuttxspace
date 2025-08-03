@@ -1,6 +1,8 @@
 /****************************************************************************
  * boards/arm/kinetis/freedom-k28f/src/k28_automount.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -28,6 +30,7 @@
 #  define CONFIG_DEBUG_FS 1
 #endif
 
+#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
@@ -36,19 +39,7 @@
 
 #include "freedom-k28f.h"
 
-#ifdef HAVE_AUTOMOUNTER
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#ifndef NULL
-#  define NULL (FAR void *)0
-#endif
-
-#ifndef OK
-#  define OK 0
-#endif
+#ifdef HAVE_SDHC_AUTOMOUNTER
 
 /****************************************************************************
  * Private Types
@@ -58,10 +49,10 @@
 
 struct k28_automount_state_s
 {
-  volatile automount_handler_t handler;    /* Upper half handler */
-  FAR void *arg;                           /* Handler argument */
-  bool enable;                             /* Fake interrupt enable */
-  bool pending;                            /* Set if there an event while disabled */
+  volatile automount_handler_t handler; /* Upper half handler */
+  void *arg;                            /* Handler argument */
+  bool enable;                          /* Fake interrupt enable */
+  bool pending;                         /* Set if there an event while disabled */
 };
 
 /* This structure represents the static configuration of an automounter */
@@ -72,19 +63,19 @@ struct k28_automount_config_s
    * struct automount_lower_s to struct k28_automount_config_s
    */
 
-  struct automount_lower_s lower;          /* Publicly visible part */
-  FAR struct k28_automount_state_s *state; /* Changeable state */
+  struct automount_lower_s lower;      /* Publicly visible part */
+  struct k28_automount_state_s *state; /* Changeable state */
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static int  k28_attach(FAR const struct automount_lower_s *lower,
-                       automount_handler_t isr, FAR void *arg);
-static void k28_enable(FAR const struct automount_lower_s *lower,
-                       bool enable);
-static bool k28_inserted(FAR const struct automount_lower_s *lower);
+static int  k28_sdhc_attach(const struct automount_lower_s *lower,
+                            automount_handler_t isr, void *arg);
+static void k28_sdhc_enable(const struct automount_lower_s *lower,
+                            bool enable);
+static bool k28_sdhc_inserted(const struct automount_lower_s *lower);
 
 /****************************************************************************
  * Private Data
@@ -100,9 +91,9 @@ static const struct k28_automount_config_s g_sdhc_config =
     .mountpoint = CONFIG_FRDMK28F_SDHC_AUTOMOUNT_MOUNTPOINT,
     .ddelay     = MSEC2TICK(CONFIG_FRDMK28F_SDHC_AUTOMOUNT_DDELAY),
     .udelay     = MSEC2TICK(CONFIG_FRDMK28F_SDHC_AUTOMOUNT_UDELAY),
-    .attach     = k28_attach,
-    .enable     = k28_enable,
-    .inserted   = k28_inserted
+    .attach     = k28_sdhc_attach,
+    .enable     = k28_sdhc_enable,
+    .inserted   = k28_sdhc_inserted
   },
   .state        = &g_sdhc_state
 };
@@ -112,7 +103,7 @@ static const struct k28_automount_config_s g_sdhc_config =
  ****************************************************************************/
 
 /****************************************************************************
- * Name:  k28_attach
+ * Name:  k28_sdhc_attach
  *
  * Description:
  *   Attach a new SDHC event handler
@@ -127,15 +118,15 @@ static const struct k28_automount_config_s g_sdhc_config =
  *
  ****************************************************************************/
 
-static int k28_attach(FAR const struct automount_lower_s *lower,
-                      automount_handler_t isr, FAR void *arg)
+static int k28_sdhc_attach(const struct automount_lower_s *lower,
+                           automount_handler_t isr, void *arg)
 {
-  FAR const struct k28_automount_config_s *config;
-  FAR struct k28_automount_state_s *state;
+  const struct k28_automount_config_s *config;
+  struct k28_automount_state_s *state;
 
   /* Recover references to our structure */
 
-  config = (FAR struct k28_automount_config_s *)lower;
+  config = (struct k28_automount_config_s *)lower;
   DEBUGASSERT(config != NULL && config->state != NULL);
 
   state = config->state;
@@ -152,7 +143,7 @@ static int k28_attach(FAR const struct automount_lower_s *lower,
 }
 
 /****************************************************************************
- * Name:  k28_enable
+ * Name:  k28_sdhc_enable
  *
  * Description:
  *   Enable card insertion/removal event detection
@@ -166,16 +157,16 @@ static int k28_attach(FAR const struct automount_lower_s *lower,
  *
  ****************************************************************************/
 
-static void k28_enable(FAR const struct automount_lower_s *lower,
-                       bool enable)
+static void k28_sdhc_enable(const struct automount_lower_s *lower,
+                            bool enable)
 {
-  FAR const struct k28_automount_config_s *config;
-  FAR struct k28_automount_state_s *state;
+  const struct k28_automount_config_s *config;
+  struct k28_automount_state_s *state;
   irqstate_t flags;
 
   /* Recover references to our structure */
 
-  config = (FAR struct k28_automount_config_s *)lower;
+  config = (struct k28_automount_config_s *)lower;
   DEBUGASSERT(config != NULL && config->state != NULL);
 
   state = config->state;
@@ -189,7 +180,7 @@ static void k28_enable(FAR const struct automount_lower_s *lower,
 
   if (enable && state->pending)
     {
-      /* Yes.. perform the fake interrupt if the interrutp is attached */
+      /* Yes.. perform the fake interrupt if the interrupt is attached */
 
       if (state->handler)
         {
@@ -204,7 +195,7 @@ static void k28_enable(FAR const struct automount_lower_s *lower,
 }
 
 /****************************************************************************
- * Name: k28_inserted
+ * Name: k28_sdhc_inserted
  *
  * Description:
  *   Check if a card is inserted into the slot.
@@ -217,7 +208,7 @@ static void k28_enable(FAR const struct automount_lower_s *lower,
  *
  ****************************************************************************/
 
-static bool k28_inserted(FAR const struct automount_lower_s *lower)
+static bool k28_sdhc_inserted(const struct automount_lower_s *lower)
 {
   return k28_cardinserted();
 }
@@ -227,39 +218,11 @@ static bool k28_inserted(FAR const struct automount_lower_s *lower)
  ****************************************************************************/
 
 /****************************************************************************
- * Name:  k28_automount_initialize
+ * Name:  k28_sdhc_automount_event
  *
  * Description:
- *   Configure auto-mounters for each enable and so configured SDHC
- *
- * Input Parameters:
- *   None
- *
- *  Returned Value:
- *    None
- *
- ****************************************************************************/
-
-void k28_automount_initialize(void)
-{
-  FAR void *handle;
-
-  finfo("Initializing automounter(s)\n");
-
-  /* Initialize the SDHC0 auto-mounter */
-
-  handle = automount_initialize(&g_sdhc_config.lower);
-  if (!handle)
-    {
-      ferr("ERROR: Failed to initialize auto-mounter for SDHC0\n");
-    }
-}
-
-/****************************************************************************
- * Name:  k28_automount_event
- *
- * Description:
- *   The SDHC card detection logic has detected an insertion or removal event.
+ *   The SDHC card detection logic has detected an insertion or removal
+ *   event.
  *   It has already scheduled the MMC/SD block driver operations.
  *   Now we need to schedule the auto-mount event which will occur with a
  *   substantial delay to make sure that everything has settle down.
@@ -279,10 +242,10 @@ void k28_automount_initialize(void)
  *
  ****************************************************************************/
 
-void k28_automount_event(bool inserted)
+void k28_sdhc_automount_event(bool inserted)
 {
-  FAR const struct k28_automount_config_s *config = &g_sdhc_config;
-  FAR struct k28_automount_state_s *state = &g_sdhc_state;
+  const struct k28_automount_config_s *config = &g_sdhc_config;
+  struct k28_automount_state_s *state = &g_sdhc_state;
 
   /* Is the auto-mounter interrupt attached? */
 
@@ -307,4 +270,33 @@ void k28_automount_event(bool inserted)
     }
 }
 
-#endif /* HAVE_AUTOMOUNTER */
+/****************************************************************************
+ * Name:  k28_automount_initialize
+ *
+ * Description:
+ *   Configure auto-mounters for each enable and so configured SDHC
+ *
+ * Input Parameters:
+ *   None
+ *
+ *  Returned Value:
+ *    None
+ *
+ ****************************************************************************/
+
+void k28_automount_initialize(void)
+{
+  void *handle;
+
+  finfo("Initializing automounter(s)\n");
+
+  /* Initialize the SDHC0 auto-mounter */
+
+  handle = automount_initialize(&g_sdhc_config.lower);
+  if (!handle)
+    {
+      ferr("ERROR: Failed to initialize auto-mounter for SDHC0\n");
+    }
+}
+
+#endif /* HAVE_SDHC_AUTOMOUNTER */

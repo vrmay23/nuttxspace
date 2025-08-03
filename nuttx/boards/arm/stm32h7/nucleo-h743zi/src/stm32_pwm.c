@@ -1,6 +1,8 @@
 /****************************************************************************
  * boards/arm/stm32h7/nucleo-h743zi/src/stm32_pwm.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -31,15 +33,13 @@
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "stm32_pwm.h"
 #include "nucleo-h743zi.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-#define OK 0
 
 /* Configuration ************************************************************/
 

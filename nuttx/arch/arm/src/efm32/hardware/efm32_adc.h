@@ -1,33 +1,33 @@
-/*******************************************************************************************************************************
- * arch/arm/src/efm32/chip/efm32_adc.h
+/****************************************************************************
+ * arch/arm/src/efm32/hardware/efm32_adc.h
  *
- *  Copyright 2014 Silicon Laboratories, Inc. http://www.silabs.com</b>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2014 Silicon Laboratories, Inc.
+ * SPDX-FileCopyrightText: 2014 Pierre-noel Bouteville . All rights reserved.
+ * SPDX-FileCopyrightText: 2014 Gregory Nutt. All rights reserved.
+ * SPDX-FileContributor: Pierre-noel Bouteville <pnb990@gmail.com>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Permission is granted to anyone to use this software for any purpose,
  * including commercial applications, and to alter it and redistribute it
  * freely, subject to the following restrictions:
  *
  * 1. The origin of this software must not be misrepresented; you must not
- *    claim that you wrote the original software.@n
+ *    claim that you wrote the original software.
  * 2. Altered source versions must be plainly marked as such, and must not be
- *    misrepresented as being the original software.@n
+ *    misrepresented as being the original software.
  * 3. This notice may not be removed or altered from any source distribution.
  *
  * DISCLAIMER OF WARRANTY/LIMITATION OF REMEDIES: Silicon Laboratories, Inc.
  * has no obligation to support this Software. Silicon Laboratories, Inc. is
- * providing the Software "AS IS", with no express or implied warranties of any
- * kind, including, but not limited to, any implied warranties of
- * merchantability or fitness for any particular purpose or warranties against
- * infringement of any proprietary rights of a third party.
+ * providing the Software "AS IS", with no express or implied warranties of
+ * any kind, including, but not limited to, any implied warranties of
+ * merchantability or fitness for any particular purpose or warranties
+ * against infringement of any proprietary rights of a third party.
  *
  * Silicon Laboratories, Inc. will not be liable for any consequential,
  * incidental, or special damages, or any other relief, or for any claim by
  * any third party, arising from your use of this Software.
- *
- *   Copyright (C) 2014 Pierre-noel Bouteville . All rights reserved.
- *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
- *   Authors: Pierre-noel Bouteville <pnb990@gmail.com>
- *            Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -56,14 +56,14 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- *******************************************************************************************************************************/
+ ****************************************************************************/
 
-#ifndef __ARCH_ARM_SRC_EFM32_CHIP_EFM32_ADC_H
-#define __ARCH_ARM_SRC_EFM32_CHIP_EFM32_ADC_H
+#ifndef __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32_ADC_H
+#define __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32_ADC_H
 
-/*******************************************************************************************************************************
+/****************************************************************************
  * Included Files
- *******************************************************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 #include "hardware/efm32_memorymap.h"
@@ -72,10 +72,11 @@
 #  warning This is the EFM32GG header file; Review/modification needed for this architecture
 #endif
 
-/*******************************************************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- *******************************************************************************************************************************/
-/* ADC Register Offsets ********************************************************************************************************/
+ ****************************************************************************/
+
+/* ADC Register Offsets *****************************************************/
 
 #define EFM32_ADC_CTRL_OFFSET                   0x0000  /* Control Register */
 #define EFM32_ADC_CMD_OFFSET                    0x0004  /* Command Register */
@@ -93,7 +94,7 @@
 #define EFM32_ADC_CAL_OFFSET                    0x0034  /* Calibration Register */
 #define EFM32_ADC_BIASPROG_OFFSET               0x003c  /* Bias Programming Register */
 
-/* ADC Register Addresses ******************************************************************************************************/
+/* ADC Register Addresses ***************************************************/
 
 #define EFM32_ADC0_CTRL                         (EFM32_ADC0_BASE+EFM32_ADC_CTRL_OFFSET)
 #define EFM32_ADC0_CMD                          (EFM32_ADC0_BASE+EFM32_ADC_CMD_OFFSET)
@@ -111,7 +112,7 @@
 #define EFM32_ADC0_CAL                          (EFM32_ADC0_BASE+EFM32_ADC_CAL_OFFSET)
 #define EFM32_ADC0_BIASPROG                     (EFM32_ADC0_BASE+EFM32_ADC_BIASPROG_OFFSET)
 
-/* ADC Register Bit Field Definitions ******************************************************************************************/
+/* ADC Register Bit Field Definitions ***************************************/
 
 /* Bit fields for ADC CTRL */
 
@@ -748,4 +749,4 @@
 #define _ADC_BIASPROG_COMPBIAS_DEFAULT          0x00000007UL                          /* Mode DEFAULT for ADC_BIASPROG */
 #define ADC_BIASPROG_COMPBIAS_DEFAULT           (_ADC_BIASPROG_COMPBIAS_DEFAULT << 8) /* Shifted mode DEFAULT for ADC_BIASPROG */
 
-#endif /* __ARCH_ARM_SRC_EFM32_CHIP_EFM32_ADC_H */
+#endif /* __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32_ADC_H */

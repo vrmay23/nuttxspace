@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/mtdpart/mtdpart_main.c
+ * apps/examples/mtdpart/mtdpart_main.c
  *
- *   Copyright (C) 2013, 2016-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -55,6 +42,7 @@
  ****************************************************************************/
 
 /* Configuration ************************************************************/
+
 /* Make sure that support for MTD partitions is enabled */
 
 #ifndef CONFIG_MTD_PARTITION
@@ -75,7 +63,9 @@
 #    error "CONFIG_RAMMTD is required without CONFIG_EXAMPLES_MTDPART_ARCHINIT"
 #  endif
 
-/* This must exactly match the default configuration in drivers/mtd/rammtd.c */
+/* This must exactly match the default configuration in
+ * drivers/mtd/rammtd.c
+ */
 
 #  ifndef CONFIG_RAMMTD_ERASESIZE
 #    define CONFIG_RAMMTD_ERASESIZE 4096
@@ -99,21 +89,18 @@
 #  define CONFIG_EXAMPLES_MTDPART_NPARTITIONS 3
 #endif
 
+#if CONFIG_EXAMPLES_MTDPART_NPARTITIONS <= 0
+#  error "CONFIG_EXAMPLES_MTDPART_NPARTITIONS must be greater than 0"
+#endif
+
 /****************************************************************************
  * Private Types
  ****************************************************************************/
 
-struct mtdpart_filedesc_s
-{
-  FAR char *name;
-  bool deleted;
-  size_t len;
-  uint32_t crc;
-};
-
 /****************************************************************************
  * Private Data
  ****************************************************************************/
+
 /* Pre-allocated simulated flash */
 
 #ifndef CONFIG_EXAMPLES_MTDPART_ARCHINIT
@@ -126,6 +113,7 @@ static uint8_t g_simflash[MTDPART_BUFSIZE];
 
 #ifdef CONFIG_EXAMPLES_MTDPART_ARCHINIT
 extern FAR struct mtd_dev_s *mtdpart_archinitialize(void);
+extern void mtdpart_archuninitialize(FAR struct mtd_dev_s *dev);
 #endif
 
 /****************************************************************************
@@ -142,8 +130,7 @@ int main(int argc, FAR char *argv[])
   FAR struct mtd_dev_s *part[CONFIG_EXAMPLES_MTDPART_NPARTITIONS + 1];
   FAR struct mtd_geometry_s geo;
   FAR uint32_t *buffer;
-  char blockname[32];
-  char charname[32];
+  char mtdname[32];
   size_t partsize;
   ssize_t nbytes;
   off_t nblocks;
@@ -157,6 +144,7 @@ int main(int argc, FAR char *argv[])
   int j;
   int k;
   int ret;
+  int status;
 
   /* Create and initialize a RAM MTD FLASH driver instance */
 
@@ -168,8 +156,8 @@ int main(int argc, FAR char *argv[])
   if (!master)
     {
       printf("ERROR: Failed to create RAM MTD instance\n");
-      fflush(stdout);
-      exit(1);
+      status = 1;
+      exit(status);
     }
 
   /* Perform the IOCTL to erase the entire FLASH part */
@@ -188,31 +176,23 @@ int main(int argc, FAR char *argv[])
    * interesting.
    */
 
-  ret = ftl_initialize(0, master);
+  ret = register_mtddriver("/dev/mtd0", master, 0775, NULL);
   if (ret < 0)
     {
-      printf("ERROR: ftl_initialize /dev/mtdblock0 failed: %d\n", ret);
-      fflush(stdout);
-      exit(2);
-    }
-
-  /* Now create a character device on the block device */
-
-  ret = bchdev_register("/dev/mtdblock0", "/dev/mtd0", false);
-  if (ret < 0)
-    {
-      printf("ERROR: bchdev_register /dev/mtd0 failed: %d\n", ret);
-      fflush(stdout);
-      exit(3);
+      printf("ERROR: register_mtddriver /dev/mtd0 failed: %d\n", ret);
+      status = 2;
+      goto err_master_mtd;
     }
 
   /* Get the geometry of the FLASH device */
 
-  ret = master->ioctl(master, MTDIOC_GEOMETRY, (unsigned long)((uintptr_t)&geo));
+  ret = master->ioctl(master, MTDIOC_GEOMETRY,
+                      (unsigned long)((uintptr_t)&geo));
   if (ret < 0)
     {
-      ferr("ERROR: mtd->ioctl failed: %d\n", ret);
-      exit(3);
+      printf("ERROR: mtd->ioctl failed: %d\n", ret);
+      status = 3;
+      goto err_master_mtd;
     }
 
   printf("Flash Geometry:\n");
@@ -226,11 +206,13 @@ int main(int argc, FAR char *argv[])
    */
 
   blkpererase = geo.erasesize / geo.blocksize;
-  nblocks     = (geo.neraseblocks / CONFIG_EXAMPLES_MTDPART_NPARTITIONS) * blkpererase;
+  nblocks     = (geo.neraseblocks / CONFIG_EXAMPLES_MTDPART_NPARTITIONS) *
+                blkpererase;
   partsize    = nblocks * geo.blocksize;
 
   printf("  No. partitions: %u\n", CONFIG_EXAMPLES_MTDPART_NPARTITIONS);
-  printf("  Partition size: %lu Blocks (%lu bytes)\n", nblocks, partsize);
+  printf("  Partition size: %ju Blocks (%zu bytes)\n", (uintmax_t)nblocks,
+         partsize);
 
   /* Now create MTD FLASH partitions */
 
@@ -250,31 +232,18 @@ int main(int argc, FAR char *argv[])
         {
           printf("ERROR: mtd_partition failed. offset=%lu nblocks=%lu\n",
                 (unsigned long)offset, (unsigned long)nblocks);
-          fflush(stdout);
-          exit(4);
+          status = 4;
+          goto err_part_mtd;
         }
 
-      /* Initialize to provide an FTL block driver on the MTD FLASH interface */
+      snprintf(mtdname, sizeof(mtdname), "/dev/mtd%d", i);
 
-      snprintf(blockname, 32, "/dev/mtdblock%d", i);
-      snprintf(charname, 32, "/dev/mtd%d", i);
-
-      ret = ftl_initialize(i, part[i]);
+      ret = register_mtddriver(mtdname, part[i], 0775, NULL);
       if (ret < 0)
         {
-          printf("ERROR: ftl_initialize %s failed: %d\n", blockname, ret);
-          fflush(stdout);
-          exit(5);
-        }
-
-      /* Now create a character device on the block device */
-
-      ret = bchdev_register(blockname, charname, false);
-      if (ret < 0)
-        {
-          printf("ERROR: bchdev_register %s failed: %d\n", charname, ret);
-          fflush(stdout);
-          exit(6);
+          printf("ERROR: register_mtddriver %s failed: %d\n", mtdname, ret);
+          status = 5;
+          goto err_part_mtd;
         }
     }
 
@@ -284,8 +253,8 @@ int main(int argc, FAR char *argv[])
   if (!buffer)
     {
       printf("ERROR: failed to allocate a sector buffer\n");
-      fflush(stdout);
-      exit(7);
+      status = 6;
+      goto err_part_mtd;
     }
 
   /* Open the master MTD FLASH character driver for writing */
@@ -294,8 +263,8 @@ int main(int argc, FAR char *argv[])
   if (fd < 0)
     {
       printf("ERROR: open /dev/mtd0 failed: %d\n", errno);
-      fflush(stdout);
-      exit(8);
+      status = 7;
+      goto err_buf;
     }
 
   /* Now write the offset into every block */
@@ -321,8 +290,8 @@ int main(int argc, FAR char *argv[])
           if (nbytes < 0)
             {
               printf("ERROR: write to /dev/mtd0 failed: %d\n", errno);
-              fflush(stdout);
-              exit(9);
+              status = 8;
+              goto err_fd;
             }
         }
     }
@@ -342,13 +311,13 @@ int main(int argc, FAR char *argv[])
 
       /* Open the master MTD partition character driver for writing */
 
-      snprintf(charname, 32, "/dev/mtd%d", i);
-      fd = open(charname, O_RDWR);
+      snprintf(mtdname, sizeof(mtdname), "/dev/mtd%d", i);
+      fd = open(mtdname, O_RDWR);
       if (fd < 0)
         {
-          printf("ERROR: open %s failed: %d\n", charname, errno);
-          fflush(stdout);
-          exit(10);
+          printf("ERROR: open %s failed: %d\n", mtdname, errno);
+          status = 9;
+          goto err_buf;
         }
 
       /* Now verify the offset in every block */
@@ -368,8 +337,8 @@ int main(int argc, FAR char *argv[])
             {
               printf("ERROR: lseek to offset %ld failed: %d\n",
                      (unsigned long)sectoff, errno);
-              fflush(stdout);
-              exit(11);
+              status = 10;
+              goto err_fd;
             }
 
           /* Read the next block into memory */
@@ -377,22 +346,9 @@ int main(int argc, FAR char *argv[])
           nbytes = read(fd, buffer, geo.blocksize);
           if (nbytes < 0)
             {
-              printf("ERROR: read from %s failed: %d\n", charname, errno);
-              fflush(stdout);
-              exit(12);
-            }
-          else if (nbytes == 0)
-            {
-              printf("ERROR: Unexpected end-of file in %s\n", charname);
-              fflush(stdout);
-              exit(13);
-            }
-          else if (nbytes != geo.blocksize)
-            {
-              printf("ERROR: Unexpected read size from %s: %ld\n",
-                     charname, (unsigned long)nbytes);
-              fflush(stdout);
-              exit(14);
+              printf("ERROR: read from %s failed: %d\n", mtdname, errno);
+              status = 11;
+              goto err_fd;
             }
 
           /* Since we forced the size of the partition to be an even number
@@ -400,21 +356,21 @@ int main(int argc, FAR char *argv[])
            * indication.
            */
 
-         else if (nbytes == 0)
-           {
-              printf("ERROR: Unexpected end of file on %s\n", charname);
-              fflush(stdout);
-              exit(15);
-           }
+          else if (nbytes == 0)
+            {
+              printf("ERROR: Unexpected end of file on %s\n", mtdname);
+              status = 12;
+              goto err_fd;
+            }
 
-         /* This is not expected at all */
+          /* This is not expected at all */
 
-         else if (nbytes != geo.blocksize)
-           {
+          else if (nbytes != geo.blocksize)
+            {
               printf("ERROR: Short read from %s failed: %lu\n",
-                     charname, (unsigned long)nbytes);
-              fflush(stdout);
-              exit(16);
+                      mtdname, (unsigned long)nbytes);
+              status = 13;
+              goto err_fd;
             }
 
           /* Verify the offsets in the block */
@@ -425,8 +381,8 @@ int main(int argc, FAR char *argv[])
                 {
                   printf("ERROR: Bad offset %lu, expected %lu\n",
                          (long)buffer[k], (long)check);
-                  fflush(stdout);
-                  exit(17);
+                  status = 14;
+                  goto err_fd;
                 }
 
               /* Invert the value to indicate that we have verified
@@ -444,8 +400,8 @@ int main(int argc, FAR char *argv[])
             {
               printf("ERROR: lseek to offset %ld failed: %d\n",
                      (unsigned long)sectoff, errno);
-              fflush(stdout);
-              exit(18);
+              status = 15;
+              goto err_fd;
             }
 
           /* Now write the block back to FLASH with the modified value */
@@ -453,16 +409,16 @@ int main(int argc, FAR char *argv[])
           nbytes = write(fd, buffer, geo.blocksize);
           if (nbytes < 0)
             {
-              printf("ERROR: write to %s failed: %d\n", charname, errno);
-              fflush(stdout);
-              exit(19);
+              printf("ERROR: write to %s failed: %d\n", mtdname, errno);
+              status = 16;
+              goto err_fd;
             }
           else if (nbytes != geo.blocksize)
             {
               printf("ERROR: Unexpected write size to %s: %ld\n",
-                     charname, (unsigned long)nbytes);
-              fflush(stdout);
-              exit(20);
+                     mtdname, (unsigned long)nbytes);
+              status = 17;
+              goto err_fd;
             }
 
           /* Get the offset to the next block */
@@ -475,16 +431,16 @@ int main(int argc, FAR char *argv[])
       nbytes = read(fd, buffer, geo.blocksize);
       if (nbytes != 0)
         {
-          printf("ERROR: Expected end-of-file from %s failed: %d %d\n",
-                 charname, nbytes, errno);
-          fflush(stdout);
-          exit(22);
+          printf("ERROR: Expected end-of-file from %s failed: %zd %d\n",
+                 mtdname, nbytes, errno);
+          status = 18;
+          goto err_fd;
         }
 
       close(fd);
     }
 
-  /* Now verify that all of the verifed blocks appear where we thing they
+  /* Now verify that all of the verified blocks appear where we thing they
    * should on the device.
    */
 
@@ -494,8 +450,8 @@ int main(int argc, FAR char *argv[])
   if (fd < 0)
     {
       printf("ERROR: open /dev/mtd0 failed: %d\n", errno);
-      fflush(stdout);
-      exit(23);
+      status = 19;
+      goto err_buf;
     }
 
   offset = 0;
@@ -508,22 +464,22 @@ int main(int argc, FAR char *argv[])
       nbytes = read(fd, buffer, geo.blocksize);
       if (nbytes < 0)
         {
-          printf("ERROR: read from %s failed: %d\n", charname, errno);
-          fflush(stdout);
-          exit(24);
+          printf("ERROR: read from /dev/mtd0 failed: %d\n", errno);
+          status = 20;
+          goto err_fd;
         }
       else if (nbytes == 0)
         {
-          printf("ERROR: Unexpected end-of file in %s\n", charname);
-          fflush(stdout);
-          exit(25);
+          printf("ERROR: Unexpected end-of file in /dev/mtd0\n");
+          status = 21;
+          goto err_fd;
         }
       else if (nbytes != geo.blocksize)
         {
-          printf("ERROR: Unexpected read size from %s: %ld\n",
-                 charname, (unsigned long)nbytes);
-          fflush(stdout);
-          exit(26);
+          printf("ERROR: Unexpected read size from /dev/mtd0: %ld\n",
+                 (unsigned long)nbytes);
+          status = 22;
+          goto err_fd;
         }
 
       /* Verify the values in the block */
@@ -534,19 +490,40 @@ int main(int argc, FAR char *argv[])
             {
               printf("ERROR: Bad value %lu, expected %lu\n",
                      (long)buffer[k], (long)(~check));
-              fflush(stdout);
-              exit(27);
+              status = 23;
+              goto err_fd;
             }
 
           check += sizeof(uint32_t);
         }
     }
 
-  close(fd);
+  status = 0;
 
   /* And exit without bothering to clean up */
 
   printf("PASS: Everything looks good\n");
+
+err_fd:
+  close(fd);
+
+err_buf:
+  free(buffer);
+
+err_part_mtd:
+  for (i = 1; i <= CONFIG_EXAMPLES_MTDPART_NPARTITIONS; i++)
+    {
+      snprintf(mtdname, sizeof(mtdname), "/dev/mtd%d", i);
+      unregister_mtddriver(mtdname);
+    }
+
+err_master_mtd:
+  unregister_mtddriver("/dev/mtd0");
+#ifdef CONFIG_EXAMPLES_MTDPART_ARCHINIT
+  mtdpart_archuninitialize(master);
+#else
+  rammtd_uninitialize(master);
+#endif
   fflush(stdout);
-  return 0;
+  exit(status);
 }

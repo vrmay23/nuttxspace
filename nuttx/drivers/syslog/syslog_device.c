@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/syslog/syslog_device.c
  *
- *   Copyright (C) 2012, 2016-2017, 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -51,10 +38,11 @@
 #include <assert.h>
 
 #include <nuttx/arch.h>
-#include <nuttx/kmalloc.h>
+#include <nuttx/lib/lib.h>
 #include <nuttx/fs/fs.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 #include <nuttx/syslog/syslog.h>
+#include <nuttx/compiler.h>
 
 #include "syslog.h"
 
@@ -69,10 +57,6 @@
 
 #define SYSLOG_OFLAGS (O_WRONLY | O_CREAT | O_APPEND)
 
-/* An invalid thread ID */
-
-#define NO_HOLDER     ((pid_t)-1)
-
 /****************************************************************************
  * Private Types
  ****************************************************************************/
@@ -84,7 +68,7 @@ enum syslog_dev_state
   SYSLOG_UNINITIALIZED = 0, /* SYSLOG has not been initialized */
   SYSLOG_INITIALIZING,      /* SYSLOG is being initialized */
   SYSLOG_REOPEN,            /* SYSLOG open failed... try again later */
-  SYSLOG_FAILURE,           /* SYSLOG open failed... don't try again */
+  SYSLOG_FAILURE,           /* SYSLOG open failed... close and try again */
   SYSLOG_OPENED,            /* SYSLOG device is open and ready to use */
 };
 
@@ -92,22 +76,42 @@ enum syslog_dev_state
 
 struct syslog_dev_s
 {
+  syslog_channel_t channel;
+
   uint8_t      sl_state;    /* See enum syslog_dev_state */
   uint8_t      sl_oflags;   /* Saved open mode (for re-open) */
   uint16_t     sl_mode;     /* Saved open flags (for re-open) */
-  sem_t        sl_sem;      /* Enforces mutually exclusive access */
-  pid_t        sl_holder;   /* PID of the thread that holds the semaphore */
+  rmutex_t     sl_lock;     /* Enforces mutually exclusive access */
   struct file  sl_file;     /* The syslog file structure */
   FAR char    *sl_devpath;  /* Full path to the character device */
 };
 
 /****************************************************************************
+ * Private Function Prototypes
+ ****************************************************************************/
+
+static ssize_t syslog_dev_write(FAR syslog_channel_t *channel,
+                                FAR const char *buffer, size_t buflen);
+static int syslog_dev_putc(FAR syslog_channel_t *channel, int ch);
+static int syslog_dev_force(FAR syslog_channel_t *channel, int ch);
+static int syslog_dev_flush(FAR syslog_channel_t *channel);
+
+/****************************************************************************
  * Private Data
  ****************************************************************************/
 
-/* This is the device structure for the console or syslogging function. */
+/* This structure contains all SYSLOG device operations */
 
-static struct syslog_dev_s g_syslog_dev;
+static const struct syslog_channel_ops_s g_syslog_dev_ops =
+{
+  syslog_dev_putc,
+  syslog_dev_force,
+  syslog_dev_flush,
+  syslog_dev_write,
+  NULL,
+  syslog_dev_uninitialize
+};
+
 static const uint8_t g_syscrlf[2] =
 {
   '\r', '\n'
@@ -118,60 +122,135 @@ static const uint8_t g_syscrlf[2] =
  ****************************************************************************/
 
 /****************************************************************************
- * Name: syslog_dev_takesem
+ * Name: syslog_dev_lock
  ****************************************************************************/
 
-static inline int syslog_dev_takesem(void)
+static inline int syslog_dev_lock(FAR struct syslog_dev_s *syslog_dev)
 {
-  pid_t me = getpid();
-  int ret;
-
-  /* Does this thread already hold the semaphore?  That could happen if
+  /* Does this thread already hold the lock?  That could happen if
    * we were called recursively, i.e., if the logic kicked off by
    * file_write() where to generate more debug output.  Return an
    * error in that case.
    */
 
-  if (g_syslog_dev.sl_holder == me)
+  if (nxrmutex_is_hold(&syslog_dev->sl_lock))
     {
       /* Return an error (instead of deadlocking) */
 
       return -EWOULDBLOCK;
     }
 
-  /* Either the semaphore is available or is currently held by another
+  /* Either the lock is available or is currently held by another
    * thread.  Wait for it to become available.
    */
 
-  ret = nxsem_wait(&g_syslog_dev.sl_sem);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
-  /* We hold the semaphore.  We can safely mark ourself as the holder
-   * of the semaphore.
-   */
-
-  g_syslog_dev.sl_holder = me;
-  return OK;
+  return nxrmutex_lock(&syslog_dev->sl_lock);
 }
 
 /****************************************************************************
- * Name: syslog_dev_givesem
+ * Name: syslog_dev_unlock
  ****************************************************************************/
 
-static inline void syslog_dev_givesem(void)
+static inline void syslog_dev_unlock(FAR struct syslog_dev_s *syslog_dev)
 {
-#ifdef CONFIG_DEBUG_ASSERTIONS
-  pid_t me = getpid();
-  DEBUGASSERT(g_syslog_dev.sl_holder == me);
-#endif
+  nxrmutex_unlock(&syslog_dev->sl_lock);
+}
 
-  /* Relinquish the semaphore */
+/****************************************************************************
+ * Name: syslog_dev_open
+ *
+ * Description:
+ *   Opens the SYSLOG character device (or file).
+ *
+ * Input Parameters:
+ *   syslog_dev - Handle to syslog device to be used.
+ *   devpath    - The full path to the character device to be used.
+ *   oflags     - File open flags.
+ *   mode       - File open mode (only if oflags include O_CREAT).
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is returned on
+ *   any failure.
+ *
+ ****************************************************************************/
 
-  g_syslog_dev.sl_holder = NO_HOLDER;
-  nxsem_post(&g_syslog_dev.sl_sem);
+static int syslog_dev_open(FAR struct syslog_dev_s *syslog_dev,
+                           FAR const char *devpath, int oflags, int mode)
+{
+  int ret;
+
+  /* At this point, the only expected states are SYSLOG_UNINITIALIZED or
+   * SYSLOG_REOPEN.  Not SYSLOG_INITIALIZING, SYSLOG_FAILURE, SYSLOG_OPENED.
+   */
+
+  DEBUGASSERT(syslog_dev->sl_state == SYSLOG_UNINITIALIZED ||
+              syslog_dev->sl_state == SYSLOG_REOPEN);
+
+  /* Save the path to the device in case we have to re-open it.
+   * If we get here and sl_devpath is not equal to NULL, that is a clue
+   * that we are re-opening the file.
+   */
+
+  if (syslog_dev->sl_state == SYSLOG_REOPEN)
+    {
+      /* Re-opening: Then we should already have a copy of the path to the
+       * device. But that may be for a different device if we revert back
+       * to old syslog destination after the previous attempt failed.
+       */
+
+      DEBUGASSERT(syslog_dev->sl_devpath != NULL);
+    }
+  else
+    {
+      /* Initializing. We do not have the device path yet. */
+
+      DEBUGASSERT(syslog_dev->sl_devpath == NULL);
+    }
+
+  /* Copy the device path so that we can use it if we
+   * have to re-open the file.
+   */
+
+  syslog_dev->sl_oflags  = oflags;
+  syslog_dev->sl_mode    = mode;
+  if (syslog_dev->sl_devpath != devpath)
+    {
+      if (syslog_dev->sl_devpath != NULL)
+        {
+          kmm_free(syslog_dev->sl_devpath);
+        }
+
+      syslog_dev->sl_devpath = strdup(devpath);
+    }
+
+  DEBUGASSERT(syslog_dev->sl_devpath != NULL);
+
+  syslog_dev->sl_state = SYSLOG_INITIALIZING;
+
+  /* Open the device driver. */
+
+  ret = file_open(&syslog_dev->sl_file, devpath, oflags, mode);
+  if (ret < 0)
+    {
+      /* We failed to open the file. Perhaps it does exist?  Perhaps it
+       * exists, but is not ready because it depends on insertion of a
+       * removable device?
+       *
+       * In any case we will attempt to re-open the device repeatedly.
+       * The assumption is that the device path is valid but that the
+       * driver has not yet been registered or a removable device has
+       * not yet been installed.
+       */
+
+      syslog_dev->sl_state = SYSLOG_REOPEN;
+      return ret;
+    }
+
+  /* The SYSLOG device is open and ready for writing. */
+
+  nxrmutex_init(&syslog_dev->sl_lock);
+  syslog_dev->sl_state = SYSLOG_OPENED;
+  return OK;
 }
 
 /****************************************************************************
@@ -188,22 +267,22 @@ static inline void syslog_dev_givesem(void)
  *     (SYSLOG_INITIALIZING).
  * (3) While we are generating SYSLOG output.  The case could happen if
  *     debug output is generated while syslog_dev_putc() executes
- *     (This case is actually handled inside of syslog_semtake()).
+ *     (This case is actually handled inside of syslog_lock()).
  * (4) Any debug output generated from interrupt handlers.  A disadvantage
  *     of using the generic character device for the SYSLOG is that it
  *     cannot handle debug output generated from interrupt level handlers.
  * (5) Any debug output generated from the IDLE loop.  The character
  *     driver interface is blocking and the IDLE thread is not permitted
  *     to block.
- * (6) If an irrecoverable failure occurred during initialization.  In
- *     this case, we won't ever bother to try again (ever).
+ * (6) If any failure occurred during output.  In this case, we properly
+ *     close the device, and set it for later re-opening.
  *
  * NOTE: That the third case is different.  It applies only to the thread
- * that currently holds the sl_sem semaphore.  Other threads should wait.
- * that is why that case is handled in syslog_semtake().
+ * that currently holds the sl_lock.  Other threads should wait.
+ * that is why that case is handled in syslog_lock().
  *
  * Input Parameters:
- *   None.
+ *   syslog_dev  - Handle to syslog device to be used.
  *
  * Returned Value:
  *   Zero (OK) is returned on success; a negated errno value is returned on
@@ -211,13 +290,13 @@ static inline void syslog_dev_givesem(void)
  *
  ****************************************************************************/
 
-static int syslog_dev_outputready(void)
+static int syslog_dev_outputready(FAR struct syslog_dev_s *syslog_dev)
 {
   int ret;
 
   /* Cases (4) and (5) */
 
-  if (up_interrupt_context() || getpid() == 0)
+  if (up_interrupt_context() || sched_idletask())
     {
       return -ENOSYS;
     }
@@ -226,21 +305,24 @@ static int syslog_dev_outputready(void)
    * has been successfully opened.
    */
 
-  if (g_syslog_dev.sl_state != SYSLOG_OPENED)
+  if (syslog_dev->sl_state != SYSLOG_OPENED)
     {
       /* Case (1) and (2) */
 
-      if (g_syslog_dev.sl_state == SYSLOG_UNINITIALIZED ||
-          g_syslog_dev.sl_state == SYSLOG_INITIALIZING)
+      if (syslog_dev->sl_state == SYSLOG_UNINITIALIZED ||
+          syslog_dev->sl_state == SYSLOG_INITIALIZING)
         {
           return -EAGAIN; /* Can't access the SYSLOG now... maybe next time? */
         }
 
       /* Case (6) */
 
-      if (g_syslog_dev.sl_state == SYSLOG_FAILURE)
+      if (syslog_dev->sl_state == SYSLOG_FAILURE)
         {
-          return -ENXIO;  /* There is no SYSLOG device */
+          file_close(&syslog_dev->sl_file);
+          nxrmutex_destroy(&syslog_dev->sl_lock);
+
+          syslog_dev->sl_state = SYSLOG_REOPEN;
         }
 
       /* syslog_dev_initialize() is called as soon as enough of the operating
@@ -248,207 +330,32 @@ static int syslog_dev_outputready(void)
        * possible that the SYSLOG device is not yet registered at that time.
        * In this case, we know that the system is sufficiently initialized
        * to support an attempt to re-open the SYSLOG device.
-       *
-       * NOTE that the scheduler is locked.  That is because we do not have
-       * fully initialized semaphore capability until the SYSLOG device is
-       * successfully initialized.
        */
 
-      sched_lock();
-      if (g_syslog_dev.sl_state == SYSLOG_REOPEN)
+      if (syslog_dev->sl_state == SYSLOG_REOPEN)
         {
           /* Try again to initialize the device.  We may do this repeatedly
            * because the log device might be something that was not ready
-           * the first time that syslog_dev_initialize() was called (such as a
-           * USB serial device that has not yet been connected or a file in
+           * the first time that syslog_dev_initialize() was called (such as
+           * a USB serial device that has not yet been connected or a file in
            * an NFS mounted file system that has not yet been mounted).
            */
 
-          DEBUGASSERT(g_syslog_dev.sl_devpath != NULL);
-          ret = syslog_dev_initialize(g_syslog_dev.sl_devpath,
-                                      (int)g_syslog_dev.sl_oflags,
-                                      (int)g_syslog_dev.sl_mode);
+          DEBUGASSERT(syslog_dev->sl_devpath != NULL);
+          ret = syslog_dev_open(syslog_dev, syslog_dev->sl_devpath,
+                                (int)syslog_dev->sl_oflags,
+                                (int)syslog_dev->sl_mode);
           if (ret < 0)
             {
-              sched_unlock();
               return ret;
             }
         }
 
-      sched_unlock();
-      DEBUGASSERT(g_syslog_dev.sl_state == SYSLOG_OPENED);
+      DEBUGASSERT(syslog_dev->sl_state == SYSLOG_OPENED);
     }
 
   return OK;
 }
-
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: syslog_dev_initialize
- *
- * Description:
- *   Initialize to use the character device (or file) at
- *   CONFIG_SYSLOG_DEVPATH as the SYSLOG sink.
- *
- *   One power up, the SYSLOG facility is non-existent or limited to very
- *   low-level output.  This function may be called later in the
- *   initialization sequence after full driver support has been initialized.
- *   (via syslog_initialize())  It installs the configured SYSLOG drivers
- *   and enables full SYSLOGing capability.
- *
- *   NOTE that this implementation excludes using a network connection as
- *   SYSLOG device.  That would be a good extension.
- *
- * Input Parameters:
- *   devpath - The full path to the character device to be used.
- *   oflags  - File open flags
- *   mode    - File open mode (only if oflags include O_CREAT)
- *
- * Returned Value:
- *   Zero (OK) is returned on success; a negated errno value is returned on
- *   any failure.
- *
- ****************************************************************************/
-
-int syslog_dev_initialize(FAR const char *devpath, int oflags, int mode)
-{
-  int ret;
-
-  /* At this point, the only expected states are SYSLOG_UNINITIALIZED or
-   * SYSLOG_REOPEN.  Not SYSLOG_INITIALIZING, SYSLOG_FAILURE, SYSLOG_OPENED.
-   */
-
-  DEBUGASSERT(g_syslog_dev.sl_state == SYSLOG_UNINITIALIZED ||
-              g_syslog_dev.sl_state == SYSLOG_REOPEN);
-
-  /* Save the path to the device in case we have to re-open it.
-   * If we get here and sl_devpath is not equal to NULL, that is a clue
-   * that we are re-opening the file.
-   */
-
-  if (g_syslog_dev.sl_state == SYSLOG_REOPEN)
-    {
-      /* Re-opening: Then we should already have a copy of the path to the
-       * device. But that may be for a different device if we revert back
-       * to old syslog destination after the previous attempt failed.
-       */
-
-      DEBUGASSERT(g_syslog_dev.sl_devpath != NULL);
-    }
-  else
-    {
-      /* Initializing. We do not have the device path yet. */
-
-      DEBUGASSERT(g_syslog_dev.sl_devpath == NULL);
-    }
-
-  /* Copy the device path so that we can use it if we
-   * have to re-open the file.
-   */
-
-  g_syslog_dev.sl_oflags  = oflags;
-  g_syslog_dev.sl_mode    = mode;
-  if (g_syslog_dev.sl_devpath != devpath)
-    {
-      if (g_syslog_dev.sl_devpath != NULL)
-        {
-          kmm_free(g_syslog_dev.sl_devpath);
-        }
-
-      g_syslog_dev.sl_devpath = strdup(devpath);
-    }
-
-  DEBUGASSERT(g_syslog_dev.sl_devpath != NULL);
-
-  g_syslog_dev.sl_state = SYSLOG_INITIALIZING;
-
-  /* Open the device driver. */
-
-  ret = file_open(&g_syslog_dev.sl_file, devpath, oflags, mode);
-  if (ret < 0)
-    {
-      /* We failed to open the file. Perhaps it does exist?  Perhaps it
-       * exists, but is not ready because it depends on insertion of a
-       * removable device?
-       *
-       * In any case we will attempt to re-open the device repeatedly.
-       * The assumption is that the device path is valid but that the
-       * driver has not yet been registered or a removable device has
-       * not yet been installed.
-       */
-
-      g_syslog_dev.sl_state = SYSLOG_REOPEN;
-      return ret;
-    }
-
-  /* The SYSLOG device is open and ready for writing. */
-
-  nxsem_init(&g_syslog_dev.sl_sem, 0, 1);
-  g_syslog_dev.sl_holder = NO_HOLDER;
-  g_syslog_dev.sl_state  = SYSLOG_OPENED;
-  return OK;
-}
-
-/****************************************************************************
- * Name: syslog_dev_uninitialize
- *
- * Description:
- *   Called to disable the last device/file channel in preparation to use
- *   a different SYSLOG device. Currently only used for CONFIG_SYSLOG_FILE.
- *
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   Zero (OK) is returned on success; a negated errno value is returned on
- *   any failure.
- *
- * Assumptions:
- *   The caller has already switched the SYSLOG source to some safe channel
- *   (the default channel).
- *
- ****************************************************************************/
-
-#ifdef CONFIG_SYSLOG_FILE /* Currently only used in this configuration */
-void syslog_dev_uninitialize(void)
-{
-  /* Check if the system is ready */
-
-  if (syslog_dev_outputready() < 0)
-    {
-      return;
-    }
-
-  /* Attempt to flush any buffered data */
-
-  sched_lock();
-  syslog_dev_flush();
-
-  /* Close the detached file instance */
-
-  g_syslog_dev.sl_state = SYSLOG_UNINITIALIZED;
-  file_close(&g_syslog_dev.sl_file);
-
-  /* Free the device path */
-
-  if (g_syslog_dev.sl_devpath != NULL)
-    {
-      kmm_free(g_syslog_dev.sl_devpath);
-    }
-
-  /* Destroy the semaphore */
-
-  nxsem_destroy(&g_syslog_dev.sl_sem);
-
-  /* Reset the state structure */
-
-  memset(&g_syslog_dev, 0, sizeof(struct syslog_dev_s));
-  sched_unlock();
-}
-#endif /* CONFIG_SYSLOG_FILE */
 
 /****************************************************************************
  * Name: syslog_dev_write
@@ -458,8 +365,9 @@ void syslog_dev_uninitialize(void)
  *   for the character driver interface.
  *
  * Input Parameters:
- *   buffer - The buffer containing the data to be output
- *   buflen - The number of bytes in the buffer
+ *   channel    - Handle to syslog channel to be used.
+ *   buffer     - The buffer containing the data to be output.
+ *   buflen     - The number of bytes in the buffer.
  *
  * Returned Value:
  *   On success, the character is echoed back to the caller. A negated errno
@@ -467,8 +375,10 @@ void syslog_dev_uninitialize(void)
  *
  ****************************************************************************/
 
-ssize_t syslog_dev_write(FAR const char *buffer, size_t buflen)
+static ssize_t syslog_dev_write(FAR syslog_channel_t *channel,
+                                FAR const char *buffer, size_t buflen)
 {
+  FAR struct syslog_dev_s *syslog_dev = (FAR struct syslog_dev_s *)channel;
   FAR const char *endptr;
   ssize_t nwritten;
   size_t writelen;
@@ -477,7 +387,7 @@ ssize_t syslog_dev_write(FAR const char *buffer, size_t buflen)
 
   /* Check if the system is ready to do output operations */
 
-  ret = syslog_dev_outputready();
+  ret = syslog_dev_outputready(syslog_dev);
   if (ret < 0)
     {
       return ret;
@@ -485,10 +395,10 @@ ssize_t syslog_dev_write(FAR const char *buffer, size_t buflen)
 
   /* The syslog device is ready for writing */
 
-  ret = syslog_dev_takesem();
+  ret = syslog_dev_lock(syslog_dev);
   if (ret < 0)
     {
-      /* We probably already hold the semaphore and were probably
+      /* We probably already hold the mutex and were probably
        * re-entered by the logic kicked off by file_write().
        * We might also have been interrupted by a signal.  Either
        * way, we are outta here.
@@ -507,56 +417,71 @@ ssize_t syslog_dev_write(FAR const char *buffer, size_t buflen)
 
       if (*endptr == '\r' || *endptr == '\n')
         {
+          /* Write everything up to the position of the special
+           * character.
+           *
+           * - buffer points to next byte to output.
+           * - endptr points to the special character.
+           */
+
+          writelen = (size_t)((uintptr_t)endptr - (uintptr_t)buffer);
+          if (writelen > 0)
+            {
+              nwritten = file_write(&syslog_dev->sl_file,
+                                    buffer, writelen);
+              if (nwritten < 0)
+                {
+                  ret = (int)nwritten;
+                  goto errout_with_lock;
+                }
+            }
+
           /* Check for pre-formatted CR-LF sequence */
 
           if (remaining > 1 &&
               ((endptr[0] == '\r' && endptr[1] == '\n') ||
                (endptr[0] == '\n' && endptr[1] == '\r')))
             {
-              /* Just skip over pre-formatted CR-LF or LF-CR sequence */
+              writelen = sizeof(g_syscrlf);
+
+              /* Skip over pre-formatted CR-LF or LF-CR sequence */
 
               endptr++;
               remaining--;
             }
           else
             {
-              /* Write everything up to the position of the special
-               * character.
-               *
-               * - buffer points to next byte to output.
-               * - endptr points to the special character.
-               */
-
-              writelen = (size_t)((uintptr_t)endptr - (uintptr_t)buffer);
-              if (writelen > 0)
-                {
-                  nwritten = file_write(&g_syslog_dev.sl_file, buffer, writelen);
-                  if (nwritten < 0)
-                    {
-                      ret = (int)nwritten;
-                      goto errout_with_sem;
-                    }
-                }
-
               /* Ignore the carriage return, but for the linefeed, output
                * both a carriage return and a linefeed.
                */
 
-              if (*endptr == '\n')
+              writelen = *endptr == '\n' ? sizeof(g_syscrlf) : 0;
+            }
+
+          if (writelen > 0)
+            {
+              nwritten = file_write(&syslog_dev->sl_file,
+                                    g_syscrlf, writelen);
+
+              /* Synchronize the file when each CR-LF is encountered
+               * (i.e., implements line buffering always).
+               */
+
+              if (nwritten > 0)
                 {
-                  nwritten = file_write(&g_syslog_dev.sl_file, g_syscrlf, 2);
-                  if (nwritten < 0)
-                    {
-                      ret = (int)nwritten;
-                      goto errout_with_sem;
-                    }
+                  syslog_dev_flush(channel);
                 }
 
-              /* Adjust pointers */
-
-               writelen++;         /* Skip the special character */
-               buffer += writelen; /* Points past the special character */
+              if (nwritten < 0)
+                {
+                  ret = (int)nwritten;
+                  goto errout_with_lock;
+                }
             }
+
+          /* Adjust pointers */
+
+          buffer = endptr + 1;
         }
     }
 
@@ -569,19 +494,20 @@ ssize_t syslog_dev_write(FAR const char *buffer, size_t buflen)
   writelen = (size_t)((uintptr_t)endptr - (uintptr_t)buffer);
   if (writelen > 0)
     {
-      nwritten = file_write(&g_syslog_dev.sl_file, buffer, writelen);
+      nwritten = file_write(&syslog_dev->sl_file, buffer, writelen);
       if (nwritten < 0)
         {
           ret = (int)nwritten;
-          goto errout_with_sem;
+          goto errout_with_lock;
         }
     }
 
-  syslog_dev_givesem();
+  syslog_dev_unlock(syslog_dev);
   return buflen;
 
-errout_with_sem:
-  syslog_dev_givesem();
+errout_with_lock:
+  syslog_dev->sl_state = SYSLOG_FAILURE;
+  syslog_dev_unlock(syslog_dev);
   return ret;
 }
 
@@ -593,7 +519,8 @@ errout_with_sem:
  *   provided for the character driver interface.
  *
  * Input Parameters:
- *   ch - The character to add to the SYSLOG (must be positive).
+ *   channel    - Handle to syslog channel to be used.
+ *   ch         - The character to add to the SYSLOG (must be positive).
  *
  * Returned Value:
  *   On success, the character is echoed back to the caller. A negated errno
@@ -601,15 +528,16 @@ errout_with_sem:
  *
  ****************************************************************************/
 
-int syslog_dev_putc(int ch)
+static int syslog_dev_putc(FAR syslog_channel_t *channel, int ch)
 {
+  FAR struct syslog_dev_s *syslog_dev = (FAR struct syslog_dev_s *)channel;
   ssize_t nbytes;
   uint8_t uch;
   int ret;
 
   /* Check if the system is ready to do output operations */
 
-  ret = syslog_dev_outputready();
+  ret = syslog_dev_outputready(syslog_dev);
   if (ret < 0)
     {
       return ret;
@@ -626,10 +554,10 @@ int syslog_dev_putc(int ch)
    * value to write.
    */
 
-  ret = syslog_dev_takesem();
+  ret = syslog_dev_lock(syslog_dev);
   if (ret < 0)
     {
-      /* We probably already hold the semaphore and were probably
+      /* We probably already hold the lock and were probably
        * re-entered by the logic kicked off by file_write().
        * We might also have been interrupted by a signal.  Either
        * way, we are outta here.
@@ -638,34 +566,32 @@ int syslog_dev_putc(int ch)
       return ret;
     }
 
-  /* Pre-pend a newline with a carriage return. */
+  /* Prepend a newline with a carriage return. */
 
   if (ch == '\n')
     {
       /* Write the CR-LF sequence */
 
-      nbytes = file_write(&g_syslog_dev.sl_file, g_syscrlf, 2);
+      nbytes = file_write(&syslog_dev->sl_file, g_syscrlf, 2);
 
       /* Synchronize the file when each CR-LF is encountered (i.e.,
        * implements line buffering always).
        */
 
-#ifndef CONFIG_DISABLE_MOUNTPOINT
       if (nbytes > 0)
         {
-          syslog_dev_flush();
+          syslog_dev_flush(channel);
         }
-#endif
     }
   else
     {
       /* Write the non-newline character (and don't flush) */
 
       uch = (uint8_t)ch;
-      nbytes = file_write(&g_syslog_dev.sl_file, &uch, 1);
+      nbytes = file_write(&syslog_dev->sl_file, &uch, 1);
     }
 
-  syslog_dev_givesem();
+  syslog_dev_unlock(syslog_dev);
 
   /* Check if the write was successful.  If not, nbytes will be
    * a negated errno value.
@@ -673,9 +599,31 @@ int syslog_dev_putc(int ch)
 
   if (nbytes < 0)
     {
+      syslog_dev->sl_state = SYSLOG_FAILURE;
       return (int)nbytes;
     }
 
+  return ch;
+}
+
+/****************************************************************************
+ * Name: syslog_dev_force
+ *
+ * Description:
+ *   Dummy, do nothing force write operation.
+ *
+ * Input Parameters:
+ *   channel    - Handle to syslog channel to be used.
+ *
+ * Returned Value:
+ *   On success, the character is echoed back to the caller.  A negated
+ *   errno value is returned on any failure.
+ *
+ ****************************************************************************/
+
+static int syslog_dev_force(FAR syslog_channel_t *channel, int ch)
+{
+  UNUSED(channel);
   return ch;
 }
 
@@ -686,23 +634,149 @@ int syslog_dev_putc(int ch)
  *   Flush any buffer data in the file system to media.
  *
  * Input Parameters:
- *   None
+ *   channel    - Handle to syslog channel to be used.
  *
  * Returned Value:
  *   Zero (OK) on success; a negated errno value is returned on any failure.
  *
  ****************************************************************************/
 
-int syslog_dev_flush(void)
+static int syslog_dev_flush(FAR syslog_channel_t *channel)
 {
 #if defined(CONFIG_SYSLOG_FILE) && !defined(CONFIG_DISABLE_MOUNTPOINT)
+  FAR struct syslog_dev_s *syslog_dev = (FAR struct syslog_dev_s *)channel;
+
   /* Ignore return value, always return success.  file_fsync() could fail
    * because the file is not open, the inode is not a mountpoint, or the
    * mountpoint does not support the sync() method.
    */
 
-  file_fsync(&g_syslog_dev.sl_file);
+  file_fsync(&syslog_dev->sl_file);
+#else
+  UNUSED(channel);
 #endif
 
   return OK;
+}
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: syslog_dev_initialize
+ *
+ * Description:
+ *   Initialize to use the character device (or file) at
+ *   CONFIG_SYSLOG_DEVPATH as the SYSLOG sink.
+ *
+ *   On power up, the SYSLOG facility is non-existent or limited to very
+ *   low-level output.  This function may be called later in the
+ *   initialization sequence after full driver support has been initialized.
+ *   (via syslog_initialize())  It installs the configured SYSLOG drivers
+ *   and enables full SYSLOGing capability.
+ *
+ *   NOTE that this implementation excludes using a network connection as
+ *   SYSLOG device.  That would be a good extension.
+ *
+ * Input Parameters:
+ *   devpath - The full path to the character device to be used.
+ *   oflags  - File open flags.
+ *   mode    - File open mode (only if oflags include O_CREAT).
+ *
+ * Returned Value:
+ *   Returns a newly created SYSLOG channel, or NULL in case of any failure.
+ *
+ ****************************************************************************/
+
+FAR syslog_channel_t *syslog_dev_initialize(FAR const char *devpath,
+                                                   int oflags, int mode)
+{
+  FAR struct syslog_dev_s *syslog_dev;
+
+  syslog_dev = kmm_zalloc(sizeof(struct syslog_dev_s));
+
+  if (syslog_dev == NULL)
+    {
+      return NULL;
+    }
+
+  syslog_dev_open(syslog_dev, devpath, oflags, mode);
+
+  syslog_dev->channel.sc_ops = &g_syslog_dev_ops;
+
+  return (FAR syslog_channel_t *)syslog_dev;
+}
+
+/****************************************************************************
+ * Name: syslog_dev_uninitialize
+ *
+ * Description:
+ *   Disable the last device/file channel in preparation to use a different
+ *   SYSLOG device. Currently only used for CONFIG_SYSLOG_FILE.
+ *
+ * Input Parameters:
+ *   channel    - Handle to syslog channel to be used.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is returned on
+ *   any failure.
+ *
+ * Assumptions:
+ *   The caller has already switched the SYSLOG source to some safe channel
+ *   (the default channel).
+ *
+ ****************************************************************************/
+
+void syslog_dev_uninitialize(FAR syslog_channel_t *channel)
+{
+  FAR struct syslog_dev_s *syslog_dev = (FAR struct syslog_dev_s *)channel;
+
+  /* Uninitializing a SYSLOG device should not take place within
+   * interrupt context.
+   */
+
+  if (up_interrupt_context() || sched_idletask())
+    {
+      DEBUGASSERT(!up_interrupt_context() && !sched_idletask());
+      return;
+    }
+
+  /* The device cannot be uninitialized while it is being
+   * initialized simultaneously.
+   */
+
+  DEBUGASSERT(syslog_dev->sl_state != SYSLOG_UNINITIALIZED &&
+              syslog_dev->sl_state != SYSLOG_INITIALIZING);
+
+  /* Attempt to flush any buffered data. */
+
+  syslog_dev_flush(channel);
+
+  /* Close the detached file instance, and destroy the mutex. These are
+   * both only created when the device is in SYSLOG_OPENED or SYSLOG_FAILURE
+   * state.
+   */
+
+  if (syslog_dev->sl_state == SYSLOG_OPENED ||
+      syslog_dev->sl_state == SYSLOG_FAILURE)
+    {
+      file_close(&syslog_dev->sl_file);
+      nxrmutex_destroy(&syslog_dev->sl_lock);
+    }
+
+  /* Set the device in UNINITIALIZED state. */
+
+  syslog_dev->sl_state = SYSLOG_UNINITIALIZED;
+
+  /* Free the device path */
+
+  if (syslog_dev->sl_devpath != NULL)
+    {
+      lib_free(syslog_dev->sl_devpath);
+    }
+
+  /* Free the channel structure */
+
+  kmm_free(syslog_dev);
 }

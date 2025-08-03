@@ -1,35 +1,22 @@
 /*****************************************************************************
  * arch/renesas/src/sh1/sh1_vector.S
  *
- *   Copyright (C) 2008 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  *****************************************************************************/
 
@@ -42,7 +29,7 @@
 #include <arch/irq.h>		/* IRQ definitions */
 
 #include "chip.h"		/* Chip-specific settings */
-#include "up_internal.h"
+#include "renesas_internal.h"
 
 /*****************************************************************************
  * Pre-processor Definitions
@@ -54,7 +41,7 @@
 
 /* Called functions */
 
-	.globl	_up_doirq		/* C interrupt processing logic */
+	.globl	_renesas_doirq		/* C interrupt processing logic */
 
 /*****************************************************************************
  * Macros
@@ -338,7 +325,7 @@ _up_vector:
 	/* Switch to the interrupt stack */
 
 #if CONFIG_ARCH_INTERRUPTSTACK > 3
-	mov.l	.Lintstack, r15		/* SP = interrupt stack base */
+	mov.l	.Lirqstacktop, r15	/* SP = interrupt stack top */
 	mov.l	r5, @r15		/* Save the user stack pointer (pre-decremented) */
 
 	/* Dispatch the interrupt */
@@ -410,15 +397,15 @@ _up_vector:
 	nop
 	.align	2
 #if CONFIG_ARCH_INTERRUPTSTACK > 3
-.Lintstack:
-	.long	_g_intstackbase
+.Lirqstacktop:
+	.long	_g_intstacktop
 #endif
 .Ldoirq:
-        .long   _up_doirq
+        .long   _renesas_doirq
         .size   _up_vector, .-_up_vector
 
 /*****************************************************************************
- * Name: _up_fullcontextrestore
+ * Name: _renesas_fullcontextrestore
  *
  * Description:
  *   restore context from a set of save registers
@@ -427,10 +414,10 @@ _up_vector:
  *
  *****************************************************************************/
 
-	.global _up_fullcontextrestore
-	.type	_up_fullcontextrestore, #function
+	.global _renesas_fullcontextrestore
+	.type	_renesas_fullcontextrestore, #function
 
-_up_fullcontextrestore:
+_renesas_fullcontextrestore:
 	/* Mask all interrupts */
 
 	stc     sr, r8
@@ -498,10 +485,10 @@ _up_fullcontextrestore:
 	.align	2
 .Lintmask:
 	.long	0x000000f0
-	.size	_up_fullcontextrestore, .-_up_fullcontextrestore
+	.size	_renesas_fullcontextrestore, .-_renesas_fullcontextrestore
 
 /************************************************************************************
- *  Name: g_intstackalloc/g_intstackbase
+ *  Name: g_intstackalloc/g_intstacktop
  *
  * Description:
  *   Shouldn't happen
@@ -513,13 +500,12 @@ _up_fullcontextrestore:
 	.align	2
 	.globl	_g_intstackalloc
 	.type	_g_intstackalloc, object
-	.globl	_g_intstackbase
-	.type	_g_intstackbase, object
+	.globl	_g_intstacktop
+	.type	_g_intstacktop, object
 _g_intstackalloc:
-	.skip	((CONFIG_ARCH_INTERRUPTSTACK & ~3) - 4)
-_g_intstackbase:
-	.skip	2
-	.size	_g_intstackbase, 4
+	.skip	(CONFIG_ARCH_INTERRUPTSTACK & ~3)
+_g_intstacktop:
+	.size	_g_intstacktop, 0
 	.size	_g_intstackalloc, (CONFIG_ARCH_INTERRUPTSTACK & ~3)
 #endif
 	.end

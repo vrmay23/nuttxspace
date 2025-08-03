@@ -1,48 +1,30 @@
 /****************************************************************************
  * boards/arm/samv7/samv71-xult/src/sam_ili9488.c
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * References:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/* References:
  * - This driver is a modification of the SAMA4E ILI9341 LCD driver.
  * - Atmel ILI93241 Sample code for the SAM4E
  * - Atmel ILI9488 Sample code for the SAMV71
- *
- * Some the LCD and SMC initialization logic comes from Atmel sample code
- * for the SAMV7.  The Atmel sample code has two-clause BSD-like license
- * which does not require this copyright statement, but here it is anyway:
- *
- *   Copyright (c) 2014, Atmel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX, Atmel, nor the names of contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
- ****************************************************************************/
+ */
 
 /* maXTouch Xplained Pro Xplained Pro LCD Connector *************************
  *
@@ -125,6 +107,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -140,7 +123,7 @@
 #include <nuttx/irq.h>
 #include <arch/board/board.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "sam_gpio.h"
 #include "sam_periphclks.h"
 #include "sam_xdmac.h"
@@ -297,7 +280,7 @@
 #endif
 
 /****************************************************************************
- * Private Type Definition
+ * Private Types
  ****************************************************************************/
 
 /* Type definition for the correct size of one pixel (from the application
@@ -329,7 +312,7 @@ struct sam_dev_s
   /* Allocated DMA channel */
 
   DMA_HANDLE dmach;
-  WDOG_ID dmadog;         /* For DMA timeout detection */
+  struct wdog_s dmadog;   /* For DMA timeout detection */
   volatile int result;    /* Result of the DMA transfer */
   sem_t waitsem;          /* Used to way for DMA completion */
   volatile bool dmabusy;  /* True: DMA is in progress */
@@ -351,29 +334,29 @@ struct sam_dev_s
 
 /* Low Level LCD access */
 
-static int  sam_sendcmd(FAR struct sam_dev_s *priv, uint16_t cmd);
-static int  sam_lcd_put(FAR struct sam_dev_s *priv, uint16_t cmd,
-              FAR const uint16_t *buffer, unsigned int buflen);
-static int  sam_lcd_get(FAR struct sam_dev_s *priv, uint8_t cmd,
-              FAR uint16_t *buffer, unsigned int buflen);
-static int  sam_lcd_getreg(FAR struct sam_dev_s *priv, uint8_t cmd,
-              FAR uint8_t *buffer, unsigned int nbytes);
-static int  sam_setwindow(FAR struct sam_dev_s *priv, sam_color_t row,
+static int  sam_sendcmd(struct sam_dev_s *priv, uint16_t cmd);
+static int  sam_lcd_put(struct sam_dev_s *priv, uint16_t cmd,
+              const uint16_t *buffer, unsigned int buflen);
+static int  sam_lcd_get(struct sam_dev_s *priv, uint8_t cmd,
+              uint16_t *buffer, unsigned int buflen);
+static int  sam_lcd_getreg(struct sam_dev_s *priv, uint8_t cmd,
+              uint8_t *buffer, unsigned int nbytes);
+static int  sam_setwindow(struct sam_dev_s *priv, sam_color_t row,
               sam_color_t col, sam_color_t width, sam_color_t height);
 
 /* Backlight/power controls */
 
 static void sam_disable_backlight(void);
 static int  sam_set_backlight(unsigned int power);
-static int  sam_poweroff(FAR struct sam_dev_s *priv);
+static int  sam_poweroff(struct sam_dev_s *priv);
 
 /* DMA Helpers */
 
 #ifdef CONFIG_DMA_DEBUG
-static void sam_lcd_sample(FAR struct sam_dev_s *priv, int index);
-static void sam_lcd_sampleinit(FAR struct sam_dev_s *priv);
-static void sam_lcd_dumpone(FAR struct sam_dev_s *priv, int index,
-              FAR const char *msg);
+static void sam_lcd_sample(struct sam_dev_s *priv, int index);
+static void sam_lcd_sampleinit(struct sam_dev_s *priv);
+static void sam_lcd_dumpone(struct sam_dev_s *priv, int index,
+              const char *msg);
 static void sam_lcd_dump(struct sam_dev_s *priv);
 #else
 #  define sam_lcd_sample(priv, index)
@@ -382,28 +365,31 @@ static void sam_lcd_dump(struct sam_dev_s *priv);
 #endif
 
 static void sam_lcd_endwait(struct sam_dev_s *priv, int result);
-static void sam_lcd_dmatimeout(int argc, uint32_t arg, ...);
-static int  sam_lcd_dmawait(FAR struct sam_dev_s *priv, uint32_t timeout);
+static void sam_lcd_dmatimeout(wdparm_t arg);
+static int  sam_lcd_dmawait(struct sam_dev_s *priv, uint32_t timeout);
 static void sam_lcd_dmacallback(DMA_HANDLE handle, void *arg, int result);
-static int  sam_lcd_txtransfer(FAR struct sam_dev_s *priv,
-              FAR const uint16_t *buffer, unsigned int buflen);
-static int  sam_lcd_rxtransfer(FAR struct sam_dev_s *priv,
-              FAR const uint16_t *buffer, unsigned int buflen);
+static int  sam_lcd_txtransfer(struct sam_dev_s *priv,
+              const uint16_t *buffer, unsigned int buflen);
+static int  sam_lcd_rxtransfer(struct sam_dev_s *priv,
+              const uint16_t *buffer, unsigned int buflen);
 
 /* LCD Data Transfer Methods */
 
-static int  sam_putrun(fb_coord_t row, fb_coord_t col,
-                       FAR const uint8_t *buffer,
+static int  sam_putrun(struct lcd_dev_s *dev,
+                       fb_coord_t row, fb_coord_t col,
+                       const uint8_t *buffer,
                        size_t npixels);
-static int  sam_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t *buffer,
-              size_t npixels);
+static int  sam_getrun(struct lcd_dev_s *dev,
+                       fb_coord_t row, fb_coord_t col,
+                       uint8_t *buffer,
+                       size_t npixels);
 
 /* LCD Configuration */
 
-static int  sam_getvideoinfo(FAR struct lcd_dev_s *dev,
-              FAR struct fb_videoinfo_s *vinfo);
-static int  sam_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
-              FAR struct lcd_planeinfo_s *pinfo);
+static int  sam_getvideoinfo(struct lcd_dev_s *dev,
+              struct fb_videoinfo_s *vinfo);
+static int  sam_getplaneinfo(struct lcd_dev_s *dev, unsigned int planeno,
+              struct lcd_planeinfo_s *pinfo);
 
 /* LCD RGB Mapping */
 
@@ -419,10 +405,10 @@ static int  sam_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
 
 /* LCD Specific Controls */
 
-static int  sam_getpower(FAR struct lcd_dev_s *dev);
-static int  sam_setpower(FAR struct lcd_dev_s *dev, int power);
-static int  sam_getcontrast(FAR struct lcd_dev_s *dev);
-static int  sam_setcontrast(FAR struct lcd_dev_s *dev,
+static int  sam_getpower(struct lcd_dev_s *dev);
+static int  sam_setpower(struct lcd_dev_s *dev, int power);
+static int  sam_getcontrast(struct lcd_dev_s *dev);
+static int  sam_setcontrast(struct lcd_dev_s *dev,
               unsigned int contrast);
 
 /* Initialization */
@@ -460,7 +446,7 @@ static const uint32_t g_lcdpin[] =
  */
 
 static uint16_t g_runbuffer[LCD_RUNBUFFER_BYTES]
-  __attribute__((aligned(LCD_ALIGN)));
+  aligned_data(LCD_ALIGN);
 
 /* This structure describes the overall LCD video controller */
 
@@ -476,10 +462,10 @@ static const struct fb_videoinfo_s g_videoinfo =
 
 static const struct lcd_planeinfo_s g_planeinfo =
 {
-  .putrun = sam_putrun,                 /* Put a run into LCD memory */
-  .getrun = sam_getrun,                 /* Get a run from LCD memory */
-  .buffer = (FAR uint8_t *)g_runbuffer, /* Run scratch buffer */
-  .bpp    = SAM_BPP,                    /* Bits-per-pixel */
+  .putrun = sam_putrun,             /* Put a run into LCD memory */
+  .getrun = sam_getrun,             /* Get a run from LCD memory */
+  .buffer = (uint8_t *)g_runbuffer, /* Run scratch buffer */
+  .bpp    = SAM_BPP,                /* Bits-per-pixel */
 };
 
 /* This is the ILI9488 LCD driver object */
@@ -506,6 +492,7 @@ static struct sam_dev_s g_lcddev =
     .getcontrast  = sam_getcontrast,
     .setcontrast  = sam_setcontrast,
   },
+  .waitsem = SEM_INITIALIZER(0),
 };
 
 /****************************************************************************
@@ -520,7 +507,7 @@ static struct sam_dev_s g_lcddev =
  *
  ****************************************************************************/
 
-static int sam_sendcmd(FAR struct sam_dev_s *priv, uint16_t cmd)
+static int sam_sendcmd(struct sam_dev_s *priv, uint16_t cmd)
 {
   volatile int i;
   int ret;
@@ -559,8 +546,8 @@ static int sam_sendcmd(FAR struct sam_dev_s *priv, uint16_t cmd)
  *
  ****************************************************************************/
 
-static int sam_lcd_put(FAR struct sam_dev_s *priv, uint16_t cmd,
-                       FAR const uint16_t *buffer, unsigned int buflen)
+static int sam_lcd_put(struct sam_dev_s *priv, uint16_t cmd,
+                       const uint16_t *buffer, unsigned int buflen)
 {
   int ret;
 
@@ -594,8 +581,8 @@ static int sam_lcd_put(FAR struct sam_dev_s *priv, uint16_t cmd,
  *
  ****************************************************************************/
 
-static int sam_lcd_get(FAR struct sam_dev_s *priv, uint8_t cmd,
-                       FAR uint16_t *buffer, unsigned int buflen)
+static int sam_lcd_get(struct sam_dev_s *priv, uint8_t cmd,
+                       uint16_t *buffer, unsigned int buflen)
 {
   int ret;
 
@@ -623,8 +610,8 @@ static int sam_lcd_get(FAR struct sam_dev_s *priv, uint8_t cmd,
  *
  ****************************************************************************/
 
-static int sam_lcd_getreg(FAR struct sam_dev_s *priv, uint8_t cmd,
-                          FAR uint8_t *buffer, unsigned int nbytes)
+static int sam_lcd_getreg(struct sam_dev_s *priv, uint8_t cmd,
+                          uint8_t *buffer, unsigned int nbytes)
 {
   uint32_t tmp[4];
   int ret;
@@ -636,7 +623,7 @@ static int sam_lcd_getreg(FAR struct sam_dev_s *priv, uint8_t cmd,
    * dummy read.
    */
 
-  ret = sam_lcd_get(priv, cmd, (FAR uint16_t *)tmp, nbytes << 2);
+  ret = sam_lcd_get(priv, cmd, (uint16_t *)tmp, nbytes << 2);
   if (ret == OK)
     {
       for (i = 0; i < nbytes; i++)
@@ -656,14 +643,18 @@ static int sam_lcd_getreg(FAR struct sam_dev_s *priv, uint8_t cmd,
  *
  ****************************************************************************/
 
-static int sam_setwindow(FAR struct sam_dev_s *priv, sam_color_t row,
+static int sam_setwindow(struct sam_dev_s *priv, sam_color_t row,
                          sam_color_t col, sam_color_t width,
                          sam_color_t height)
 {
   uint16_t buffer[4];
   int ret;
 
-  lcdinfo("row=%d col=%d width=%d height=%d\n", row, col, width, height);
+  lcdinfo("row=%jd col=%jd width=%jd height=%jd\n",
+          (intmax_t)row,
+          (intmax_t)col,
+          (intmax_t)width,
+          (intmax_t)height);
 
   /* Set Column Address Position */
 
@@ -699,39 +690,6 @@ static int sam_setwindow(FAR struct sam_dev_s *priv, sam_color_t row,
 
   return sam_sendcmd(priv, ILI9488_CMD_NOP);
 }
-
-/****************************************************************************
- * Name:  sam_dumprun
- *
- * Description:
- *   Dump the contexts of the run buffer:
- *
- *  run     - The buffer in containing the run read to be dumped
- *  npixels - The number of pixels to dump
- *
- ****************************************************************************/
-
-#if 0 /* Sometimes useful */
-static void sam_dumprun(FAR const char *msg, FAR uint16_t *run,
-                        size_t npixels)
-{
-  int i;
-  int j;
-
-  syslog(LOG_DEBUG, "\n%s:\n", msg);
-  for (i = 0; i < npixels; i += 16)
-    {
-      up_putc(' ');
-      syslog(LOG_DEBUG, " ");
-      for (j = 0; j < 16; j++)
-        {
-          syslog(LOG_DEBUG, " %04x", *run++);
-        }
-
-      up_putc('\n');
-    }
-}
-#endif
 
 /****************************************************************************
  * Name:  sam_disable_backlight
@@ -791,7 +749,7 @@ static int sam_set_backlight(unsigned int power)
  *
  ****************************************************************************/
 
-static int sam_poweroff(FAR struct sam_dev_s *priv)
+static int sam_poweroff(struct sam_dev_s *priv)
 {
   int ret;
 
@@ -914,7 +872,7 @@ static void sam_lcd_endwait(struct sam_dev_s *priv, int result)
 {
   /* Save the result and cancel the watchdog timeout */
 
-  wd_cancel(priv->dmadog);
+  wd_cancel(&priv->dmadog);
   priv->result = result;
 
   /* Wake up the waiting thread */
@@ -930,8 +888,7 @@ static void sam_lcd_endwait(struct sam_dev_s *priv, int result)
  *   timeout failure.
  *
  * Input Parameters:
- *   argc   - The number of arguments (should be 1)
- *   arg    - The argument (state structure reference cast to uint32_t)
+ *   arg    - The argument
  *
  * Returned Value:
  *   None
@@ -941,12 +898,12 @@ static void sam_lcd_endwait(struct sam_dev_s *priv, int result)
  *
  ****************************************************************************/
 
-static void sam_lcd_dmatimeout(int argc, uint32_t arg, ...)
+static void sam_lcd_dmatimeout(wdparm_t arg)
 {
   struct sam_dev_s *priv = (struct sam_dev_s *)arg;
 
-  DEBUGASSERT(argc == 1 && priv != NULL);
-  sam_lcd_sample((struct sam_dev_s *)arg, SAMPLENDX_TIMEOUT);
+  DEBUGASSERT(priv != NULL);
+  sam_lcd_sample(priv, SAMPLENDX_TIMEOUT);
 
   /* Make sure that any hung DMA is stopped.  dmabusy == false is the cue
    * so the DMA callback is ignored.
@@ -977,17 +934,17 @@ static void sam_lcd_dmatimeout(int argc, uint32_t arg, ...)
  *
  ****************************************************************************/
 
-static int sam_lcd_dmawait(FAR struct sam_dev_s *priv, uint32_t timeout)
+static int sam_lcd_dmawait(struct sam_dev_s *priv, uint32_t timeout)
 {
   int ret;
 
   /* Started ... setup the timeout */
 
-  ret = wd_start(priv->dmadog, timeout, sam_lcd_dmatimeout,
-                 1, (uint32_t)priv);
+  ret = wd_start(&priv->dmadog, timeout,
+                 sam_lcd_dmatimeout, (wdparm_t)priv);
   if (ret < 0)
     {
-      lcderr("ERROR: wd_start failed: %d\n", errno);
+      lcderr("ERROR: wd_start failed: %d\n", ret);
     }
 
   /* Loop until the event (or the timeout occurs). */
@@ -1049,8 +1006,8 @@ static void sam_lcd_dmacallback(DMA_HANDLE handle, void *arg, int result)
  *
  ****************************************************************************/
 
-static int sam_lcd_txtransfer(FAR struct sam_dev_s *priv,
-                              FAR const uint16_t *buffer,
+static int sam_lcd_txtransfer(struct sam_dev_s *priv,
+                              const uint16_t *buffer,
                               unsigned int buflen)
 {
   irqstate_t flags;
@@ -1092,8 +1049,8 @@ static int sam_lcd_txtransfer(FAR struct sam_dev_s *priv,
  *
  ****************************************************************************/
 
-static int sam_lcd_rxtransfer(FAR struct sam_dev_s *priv,
-                              FAR const uint16_t *buffer,
+static int sam_lcd_rxtransfer(struct sam_dev_s *priv,
+                              const uint16_t *buffer,
                               unsigned int buflen)
 {
   irqstate_t flags;
@@ -1133,6 +1090,7 @@ static int sam_lcd_rxtransfer(FAR struct sam_dev_s *priv,
  * Description:
  *   This method can be used to write a partial raster line to the LCD:
  *
+ *   dev     - LCD device
  *   row     - Starting row to write to (range: 0 <= row < yres)
  *   col     - Starting column to write to (range: 0 <= col <= xres-npixels)
  *   buffer  - The buffer containing the run to be written to the LCD
@@ -1141,10 +1099,12 @@ static int sam_lcd_rxtransfer(FAR struct sam_dev_s *priv,
  *
  ****************************************************************************/
 
-static int sam_putrun(fb_coord_t row, fb_coord_t col,
-                      FAR const uint8_t *buffer, size_t npixels)
+static int sam_putrun(struct lcd_dev_s *dev,
+                      fb_coord_t row, fb_coord_t col,
+                      const uint8_t *buffer,
+                      size_t npixels)
 {
-  FAR struct sam_dev_s *priv = &g_lcddev;
+  struct sam_dev_s *priv = &g_lcddev;
   int ret;
 
   /* Buffer must be provided and aligned to a 16-bit address boundary */
@@ -1164,7 +1124,7 @@ static int sam_putrun(fb_coord_t row, fb_coord_t col,
   /* Write the run into the LCD */
 
   return sam_lcd_put(priv, ILI9488_CMD_MEMORY_WRITE,
-                    (FAR const uint16_t *)buffer,
+                    (const uint16_t *)buffer,
                      npixels * sizeof(uint16_t));
 }
 
@@ -1174,6 +1134,7 @@ static int sam_putrun(fb_coord_t row, fb_coord_t col,
  * Description:
  *   This method can be used to read a partial raster line from the LCD:
  *
+ *  dev     - LCD device
  *  row     - Starting row to read from (range: 0 <= row < yres)
  *  col     - Starting column to read read (range: 0 <= col <= xres-npixels)
  *  buffer  - The buffer in which to return the run read from the LCD
@@ -1182,10 +1143,12 @@ static int sam_putrun(fb_coord_t row, fb_coord_t col,
  *
  ****************************************************************************/
 
-static int sam_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t *buffer,
+static int sam_getrun(struct lcd_dev_s *dev,
+                      fb_coord_t row, fb_coord_t col,
+                      uint8_t *buffer,
                       size_t npixels)
 {
-  FAR struct sam_dev_s *priv = &g_lcddev;
+  struct sam_dev_s *priv = &g_lcddev;
   int ret;
 
   /* Buffer must be provided and aligned to a 16-bit address boundary */
@@ -1204,7 +1167,7 @@ static int sam_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t *buffer,
 
   /* Write the run into the LCD */
 
-  return sam_lcd_get(priv, ILI9488_CMD_MEMORY_READ, (FAR uint16_t *)buffer,
+  return sam_lcd_get(priv, ILI9488_CMD_MEMORY_READ, (uint16_t *)buffer,
                      npixels * sizeof(uint16_t));
 }
 
@@ -1216,8 +1179,8 @@ static int sam_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t *buffer,
  *
  ****************************************************************************/
 
-static int sam_getvideoinfo(FAR struct lcd_dev_s *dev,
-                            FAR struct fb_videoinfo_s *vinfo)
+static int sam_getvideoinfo(struct lcd_dev_s *dev,
+                            struct fb_videoinfo_s *vinfo)
 {
   DEBUGASSERT(dev && vinfo);
   lcdinfo("fmt: %d xres: %d yres: %d nplanes: %d\n",
@@ -1236,12 +1199,13 @@ static int sam_getvideoinfo(FAR struct lcd_dev_s *dev,
  *
  ****************************************************************************/
 
-static int sam_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
-                              FAR struct lcd_planeinfo_s *pinfo)
+static int sam_getplaneinfo(struct lcd_dev_s *dev, unsigned int planeno,
+                              struct lcd_planeinfo_s *pinfo)
 {
   DEBUGASSERT(dev && pinfo && planeno == 0);
   lcdinfo("planeno: %d bpp: %d\n", planeno, g_planeinfo.bpp);
   memcpy(pinfo, &g_planeinfo, sizeof(struct lcd_planeinfo_s));
+  pinfo->dev = dev;
   return OK;
 }
 
@@ -1257,7 +1221,7 @@ static int sam_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
 
 static int sam_getpower(struct lcd_dev_s *dev)
 {
-  FAR struct sam_dev_s *priv = (FAR struct sam_dev_s *)dev;
+  struct sam_dev_s *priv = (struct sam_dev_s *)dev;
 
   lcdinfo("power: %d\n", 0);
   return priv->power;
@@ -1275,7 +1239,7 @@ static int sam_getpower(struct lcd_dev_s *dev)
 
 static int sam_setpower(struct lcd_dev_s *dev, int power)
 {
-  FAR struct sam_dev_s *priv = (FAR struct sam_dev_s *)dev;
+  struct sam_dev_s *priv = (struct sam_dev_s *)dev;
   int ret;
 
   lcdinfo("power: %d\n", power);
@@ -1425,7 +1389,7 @@ static inline void sam_smc_initialize(void)
 
 static inline int sam_lcd_initialize(void)
 {
-  FAR struct sam_dev_s *priv = &g_lcddev;
+  struct sam_dev_s *priv = &g_lcddev;
   uint8_t buffer[4] =
   {
     0, 0, 0, 0
@@ -1555,7 +1519,7 @@ static inline int sam_lcd_initialize(void)
 
 int board_lcd_initialize(void)
 {
-  FAR struct sam_dev_s *priv = &g_lcddev;
+  struct sam_dev_s *priv = &g_lcddev;
   int ret;
 
   lcdinfo("Initializing\n");
@@ -1568,28 +1532,13 @@ int board_lcd_initialize(void)
 
   sam_smc_initialize();
 
-  /* Initialize the LCD state structure */
-
-  nxsem_init(&priv->waitsem, 0, 0);
-
   /* Allocate a DMA channel */
 
   priv->dmach = sam_dmachannel(0, DMA_FLAGS);
   if (!priv->dmach)
     {
       lcderr("ERROR: Failed to allocate a DMA channel\n");
-      ret =  -EAGAIN;
-      goto errout_with_waitsem;
-    }
-
-  /* Allocate a watchdog timer to catch DMA timeouts */
-
-  priv->dmadog = wd_create();
-  if (!priv->dmadog)
-    {
-      lcderr("ERROR: Failed to allocate a timer\n");
-      ret = -EAGAIN;
-      goto errout_with_dmach;
+      return -EAGAIN;
     }
 
   /* Identify and configure the LCD */
@@ -1599,7 +1548,7 @@ int board_lcd_initialize(void)
   if (ret < 0)
     {
       lcderr("ERROR: sam_lcd_initialize failed: %d\n", ret);
-      goto errout_with_dmadog;
+      goto errout_with_dmach;
     }
 
   /* Clear the display (setting it to the color 0=black) */
@@ -1612,21 +1561,14 @@ int board_lcd_initialize(void)
   if (ret < 0)
     {
       lcderr("ERROR: sam_poweroff failed: %d\n", ret);
-      goto errout_with_dmadog;
+      goto errout_with_dmach;
     }
 
   return OK;
 
-errout_with_dmadog:
-  wd_delete(priv->dmadog);
-  priv->dmadog = NULL;
-
 errout_with_dmach:
   sam_dmafree(priv->dmach);
   priv->dmach = NULL;
-
-errout_with_waitsem:
-  nxsem_destroy(&priv->waitsem);
   return ret;
 }
 
@@ -1639,7 +1581,7 @@ errout_with_waitsem:
  *
  ****************************************************************************/
 
-FAR struct lcd_dev_s *board_lcd_getdev(int lcddev)
+struct lcd_dev_s *board_lcd_getdev(int lcddev)
 {
   DEBUGASSERT(lcddev == 0);
   return &g_lcddev.dev;
@@ -1655,7 +1597,7 @@ FAR struct lcd_dev_s *board_lcd_getdev(int lcddev)
 
 void board_lcd_uninitialize(void)
 {
-  FAR struct sam_dev_s *priv = &g_lcddev;
+  struct sam_dev_s *priv = &g_lcddev;
 
   /* Free the DMA channel */
 
@@ -1667,10 +1609,7 @@ void board_lcd_uninitialize(void)
 
   /* Free other resources */
 
-  wd_delete(priv->dmadog);
-  priv->dmadog = NULL;
-
-  nxsem_destroy(&priv->waitsem);
+  wd_cancel(&priv->dmadog);
 
   /* Put the LCD in the lowest possible power state */
 
@@ -1690,7 +1629,7 @@ void board_lcd_uninitialize(void)
 
 void sam_lcdclear(uint16_t color)
 {
-  FAR struct sam_dev_s *priv = &g_lcddev;
+  struct sam_dev_s *priv = &g_lcddev;
   unsigned int row;
   unsigned int col;
   int ret;
@@ -1713,7 +1652,8 @@ void sam_lcdclear(uint16_t color)
 
   for (row = 0; row < SAM_YRES; row++)
     {
-      ret = sam_putrun(row, 0, (FAR const uint8_t *)g_runbuffer, SAM_XRES);
+      ret = sam_putrun(&priv->dev, row, 0, (const uint8_t *)g_runbuffer,
+                       SAM_XRES);
       if (ret < 0)
         {
           lcderr("ERROR: sam_putrun failed on row %d: %d\n", row, ret);

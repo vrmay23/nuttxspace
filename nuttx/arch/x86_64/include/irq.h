@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/x86_64/include/irq.h
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -42,30 +44,66 @@
  */
 
 #ifdef CONFIG_ARCH_INTEL64
-# include <arch/intel64/irq.h>
+#  include <arch/intel64/irq.h>
 #endif
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-/****************************************************************************
- * Public Types
- ****************************************************************************/
-
-/****************************************************************************
- * Inline functions
- ****************************************************************************/
+#define X86_64_CPUPRIV_USTACK_OFFSET      (16)
+#define X86_64_CPUPRIV_UVBASE_OFFSET      (24)
+#define X86_64_CPUPRIV_KTOPSTK_OFFSET     (32)
 
 /****************************************************************************
  * Public Data
  ****************************************************************************/
 
+#ifndef __ASSEMBLY__
+/* CPU private data */
+
+struct intel64_cpu_s
+{
+  int     id;
+  uint8_t loapic_id;
+  bool    ready;
+
+  /* Interrupt Context */
+
+  bool interrupt_context;
+
+  /* Current task */
+
+  struct tcb_s *this_task;
+
+#ifdef CONFIG_LIB_SYSCALL
+  /* Current user RSP for syscall */
+
+  uint64_t *ustack;
+
+  /* Userspace virtual address */
+
+  uint64_t *uvbase;
+#endif
+
+#ifdef CONFIG_ARCH_KERNEL_STACK
+  /* Kernel stack pointer.
+   *
+   * We have to track the current kernel stack pointer to handle
+   * syscalls in kernel mode. All registers are occupied when entering
+   * syscall, so we cannot get this value from tcb in syscall handler.
+   * We keep referenve to kernel stack in CPU private data and update it
+   * at each context switch.
+   */
+
+  uint64_t *ktopstk;
+#endif
+};
+
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
 
-#ifndef __ASSEMBLY__
 #ifdef __cplusplus
 #define EXTERN extern "C"
 extern "C"
@@ -73,6 +111,83 @@ extern "C"
 #else
 #define EXTERN extern
 #endif
+
+/****************************************************************************
+ * Name: up_cpu_index
+ *
+ * Description:
+ *   Return the real core number regardless CONFIG_SMP setting
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_ARCH_HAVE_MULTICPU
+static inline_function int up_cpu_index(void)
+{
+  int cpu;
+
+  __asm__ volatile(
+    "\tmovl %%gs:(%c1), %0\n"
+    : "=r" (cpu)
+    : "i" (offsetof(struct intel64_cpu_s, id))
+    :);
+
+  return cpu;
+}
+#endif /* CONFIG_ARCH_HAVE_MULTICPU */
+
+/****************************************************************************
+ * Inline functions
+ ****************************************************************************/
+
+static inline_function bool up_interrupt_context(void)
+{
+  bool flag;
+  __asm__ volatile("movb %%gs:(%c1), %0"
+                   : "=qm" (flag)
+                   : "i" (offsetof(struct intel64_cpu_s,
+                                   interrupt_context)));
+  return flag;
+}
+
+static inline_function void up_set_interrupt_context(bool flag)
+{
+  __asm__ volatile("movb %0, %%gs:(%c1)"
+                   :: "r" (flag),
+                   "i" (offsetof(struct intel64_cpu_s,
+                                 interrupt_context)));
+}
+
+/****************************************************************************
+  * Schedule acceleration macros
+ ****************************************************************************/
+
+#define up_this_task()                                                  \
+  ({                                                                    \
+    struct tcb_s *this_task;                                            \
+    __asm__ volatile("movq %%gs:(%c1), %0"                              \
+                    : "=r" (this_task)                                  \
+                    : "i" (offsetof(struct intel64_cpu_s, this_task))); \
+    this_task;                                                          \
+  })
+
+#define up_update_task(t)                                               \
+  __asm__ volatile("movq %0, %%gs:(%c1)"                                \
+                   :: "r" ((struct tcb_s *)t),                          \
+                   "i" (offsetof(struct intel64_cpu_s, this_task)))
+
+/****************************************************************************
+ * Name: up_getusrpc
+ ****************************************************************************/
+
+#define up_getusrpc(regs) \
+    (((uint64_t *)((regs) ? (regs) : running_regs()))[REG_RIP])
+
+/****************************************************************************
+ * Name: up_getusrsp
+ ****************************************************************************/
+
+#define up_getusrsp(regs) \
+    ((uintptr_t)((uint64_t *)(regs))[REG_RSP])
 
 #undef EXTERN
 #ifdef __cplusplus

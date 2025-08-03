@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/tcp/tcp_setsockopt.c
  *
- *   Copyright (C) 2018, 2020 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -87,16 +74,10 @@
 int tcp_setsockopt(FAR struct socket *psock, int option,
                    FAR const void *value, socklen_t value_len)
 {
-#ifdef CONFIG_NET_TCP_KEEPALIVE
-  /* Keep alive options are the only TCP protocol socket option currently
-   * supported.
-   */
-
   FAR struct tcp_conn_s *conn;
-  int ret;
+  int ret = OK;
 
-  DEBUGASSERT(psock != NULL && value != NULL && psock->s_conn != NULL);
-  conn = (FAR struct tcp_conn_s *)psock->s_conn;
+  conn = psock->s_conn;
 
   /* All of the TCP protocol options apply only TCP sockets.  The sockets
    * do not have to be connected.. that might occur later with the KeepAlive
@@ -122,8 +103,9 @@ int tcp_setsockopt(FAR struct socket *psock, int option,
        * all of the clones that may use the underlying connection.
        */
 
-      case SO_KEEPALIVE:  /* Verifies TCP connections active by enabling the
-                           * periodic transmission of probes */
+#ifdef CONFIG_NET_TCP_KEEPALIVE
+      case SO_KEEPALIVE: /* Verifies TCP connections active by enabling the
+                          * periodic transmission of probes */
         if (value_len != sizeof(int))
           {
             ret = -EDOM;
@@ -140,95 +122,70 @@ int tcp_setsockopt(FAR struct socket *psock, int option,
               }
             else
               {
-                conn->keepalive = (bool)keepalive;
-                conn->keeptime  = clock_systimer();   /* Reset start time */
-                ret = OK;
+                conn->keepalive = keepalive;
+
+                /* Reset timer */
+
+                tcp_update_keeptimer(conn, keepalive ? conn->keepidle : 0);
+                conn->keepretries = 0;
               }
           }
-        break;
-
-      case TCP_NODELAY: /* Avoid coalescing of small segments. */
-        nerr("ERROR: TCP_NODELAY not supported\n");
-        ret = -ENOSYS;
         break;
 
       case TCP_KEEPIDLE:  /* Start keepalives after this IDLE period */
-        if (value_len != sizeof(struct timeval))
-          {
-            ret = -EDOM;
-          }
-        else
-          {
-            FAR struct timeval *tv = (FAR struct timeval *)value;
-
-            if (tv == NULL)
-              {
-                ret = -EINVAL;
-              }
-            else
-              {
-                unsigned int dsecs;
-
-               /* Get the IDLE time value.  Any microsecond remainder will
-                * be forced to the next larger, whole decisecond value.
-                */
-
-               dsecs = (socktimeo_t)net_timeval2dsec(tv, TV2DS_CEIL);
-               if (dsecs > UINT16_MAX)
-                  {
-                    nwarn("WARNING: TCP_KEEPIDLE value out of range: %u\n",
-                          dsecs);
-                    ret = -EDOM;
-                  }
-                else
-                  {
-                    conn->keepidle = (uint16_t)dsecs;
-                    conn->keeptime = clock_systimer();   /* Reset start time */
-                    ret = OK;
-                  }
-              }
-          }
-        break;
-
       case TCP_KEEPINTVL: /* Interval between keepalives */
-        if (value_len != sizeof(struct timeval))
-          {
-            ret = -EDOM;
-          }
-        else
-          {
-            FAR struct timeval *tv = (FAR struct timeval *)value;
+        {
+          unsigned int dsecs;
 
-            if (tv == NULL)
-              {
-                ret = -EINVAL;
-              }
-            else
-              {
-                unsigned int dsecs;
+          if (value == NULL)
+            {
+              return -EINVAL;
+            }
+          else if (value_len == sizeof(struct timeval))
+            {
+              FAR struct timeval *tv = (FAR struct timeval *)value;
 
-               /* Get the IDLE time value.  Any microsecond remainder will
-                * be forced to the next larger, whole decisecond value.
-                */
+              /* Get the IDLE time value.  Any microsecond remainder will
+               * be forced to the next larger, whole decisecond value.
+               */
 
-               dsecs = (socktimeo_t)net_timeval2dsec(tv, TV2DS_CEIL);
-               if (dsecs > UINT16_MAX)
-                  {
-                    nwarn("WARNING: TCP_KEEPINTVL value out of range: %u\n",
-                          dsecs);
-                    ret = -EDOM;
-                  }
-                else
-                  {
-                    conn->keepintvl = (uint16_t)dsecs;
-                    conn->keeptime  = clock_systimer();   /* Reset start time */
-                    ret = OK;
-                  }
-              }
-          }
+              dsecs = net_timeval2dsec(tv, TV2DS_CEIL);
+            }
+          else if (value_len == sizeof(int))
+            {
+              dsecs = *(FAR int *)value;
+            }
+          else
+            {
+              return -EDOM;
+            }
+
+          if (dsecs > UINT16_MAX)
+             {
+               nwarn("WARNING: value out of range: %u\n", dsecs);
+               return -EDOM;
+             }
+
+          if (option == TCP_KEEPIDLE)
+            {
+              conn->keepidle = dsecs;
+            }
+          else
+            {
+              conn->keepintvl = dsecs;
+            }
+
+           /* Reset timer */
+
+          if (conn->keepalive)
+            {
+              tcp_update_keeptimer(conn, conn->keepidle);
+              conn->keepretries = 0;
+            }
+        }
         break;
 
-      case TCP_KEEPCNT:   /* Number of keepalives before death */
+      case TCP_KEEPCNT: /* Number of keepalives before death */
         if (value_len != sizeof(int))
           {
             ret = -EDOM;
@@ -244,9 +201,61 @@ int tcp_setsockopt(FAR struct socket *psock, int option,
               }
             else
               {
-                conn->keepcnt  = (uint8_t)keepcnt;
-                conn->keeptime = clock_systimer();   /* Reset start time */
-                ret = OK;
+                conn->keepcnt = keepcnt;
+
+                /* Reset time */
+
+                if (conn->keepalive)
+                  {
+                    tcp_update_keeptimer(conn, conn->keepidle);
+                    conn->keepretries = 0;
+                  }
+              }
+          }
+        break;
+#endif /* CONFIG_NET_TCP_KEEPALIVE */
+
+      case TCP_NODELAY: /* Avoid coalescing of small segments. */
+        if (value_len != sizeof(int))
+          {
+            ret = -EDOM;
+          }
+        else
+          {
+            int nodelay = *(FAR int *)value;
+
+            if (!nodelay)
+              {
+                nerr("ERROR: TCP_NODELAY not supported\n");
+                ret = -ENOSYS;
+              }
+          }
+        break;
+
+      case TCP_MAXSEG: /* The maximum segment size */
+        if (value_len != sizeof(int))
+          {
+            ret = -EFAULT;
+          }
+        else
+          {
+            int mss = *(FAR int *)value;
+
+            if (conn->tcpstateflags != TCP_ALLOCATED)
+              {
+                /* Set TCP_MAXSEG in the wrong state, direct return success */
+
+                return OK;
+              }
+
+            if (mss < TCP_MIN_MSS || mss > UINT16_MAX)
+              {
+                nerr("ERROR: TCP_MAXSEG value out of range: %d\n", mss);
+                return -EINVAL;
+              }
+            else
+              {
+                conn->user_mss = mss;
               }
           }
         break;
@@ -258,9 +267,6 @@ int tcp_setsockopt(FAR struct socket *psock, int option,
     }
 
   return ret;
-#else
-  return -ENOPROTOOPT;
-#endif /* CONFIG_NET_TCP_KEEPALIVE */
 }
 
 #endif /* CONFIG_NET_TCPPROTO_OPTIONS */

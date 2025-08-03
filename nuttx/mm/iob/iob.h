@@ -1,35 +1,22 @@
 /****************************************************************************
  * mm/iob/iob.h
  *
- *   Copyright (C) 2014, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,6 +33,7 @@
 
 #include <nuttx/mm/iob.h>
 #include <nuttx/semaphore.h>
+#include <nuttx/spinlock.h>
 
 #ifdef CONFIG_MM_IOB
 
@@ -54,33 +42,13 @@
  ****************************************************************************/
 
 #if defined(CONFIG_DEBUG_FEATURES) && defined(CONFIG_IOB_DEBUG)
-#ifdef CONFIG_CPP_HAVE_VARARGS
-
-#  define ioberr(format, ...)    _err(format, ##__VA_ARGS__)
-#  define iobwarn(format, ...)   _warn(format, ##__VA_ARGS__)
-#  define iobinfo(format, ...)   _info(format, ##__VA_ARGS__)
-
-#else
-
 #  define ioberr                 _err
 #  define iobwarn                _warn
 #  define iobinfo                _info
-
-#endif
 #else
-#ifdef CONFIG_CPP_HAVE_VARARGS
-
-#  define ioberr(format, ...)
-#  define iobwarn(format, ...)
-#  define iobinfo(format, ...)
-
-#else
-
-#  define ioberr                 (void)
-#  define iobwarn                (void)
-#  define iobinfo                (void)
-
-#endif
+#  define ioberr                 _none
+#  define iobwarn                _none
+#  define iobinfo                _none
 #endif /* CONFIG_DEBUG_FEATURES && CONFIG_IOB_DEBUG */
 
 /****************************************************************************
@@ -105,15 +73,30 @@ extern FAR struct iob_qentry_s *g_iob_freeqlist;
 extern FAR struct iob_qentry_s *g_iob_qcommitted;
 #endif
 
-/* Counting semaphores that tracks the number of free IOBs/qentries */
+/* semaphores that IOBs need wait */
 
-extern sem_t g_iob_sem;       /* Counts free I/O buffers */
+extern sem_t g_iob_sem;
+
+/* Counts free I/O buffers */
+
+extern int16_t g_iob_count;
+
 #if CONFIG_IOB_THROTTLE > 0
-extern sem_t g_throttle_sem;  /* Counts available I/O buffers when throttled */
+extern sem_t g_throttle_sem;
+
+/* Wait Counts for throttle */
+
+extern int16_t g_throttle_wait;
 #endif
 #if CONFIG_IOB_NCHAINS > 0
-extern sem_t g_qentry_sem;    /* Counts free I/O buffer queue containers */
+extern sem_t g_qentry_sem;
+
+/* Wait Counts for qentry */
+
+extern int16_t g_qentry_wait;
 #endif
+
+extern volatile spinlock_t g_iob_lock;
 
 /****************************************************************************
  * Public Function Prototypes
@@ -176,46 +159,6 @@ FAR struct iob_qentry_s *iob_free_qentry(FAR struct iob_qentry_s *iobq);
 
 #ifdef CONFIG_IOB_NOTIFIER
 void iob_notifier_signal(void);
-#endif
-
-/****************************************************************************
- * Name: iob_stats_onalloc
- *
- * Description:
- *   An IOB has just been allocated for the consumer. This is a hook for the
- *   IOB statistics to be updated when /proc/iobinfo is enabled.
- *
- * Input Parameters:
- *   consumerid - id representing who is consuming the IOB
- *
- * Returned Value:
- *   None.
- *
- ****************************************************************************/
-
-#if !defined(CONFIG_DISABLE_MOUNTPOINT) && defined(CONFIG_FS_PROCFS) && \
-    defined(CONFIG_MM_IOB) && !defined(CONFIG_FS_PROCFS_EXCLUDE_IOBINFO)
-void iob_stats_onalloc(enum iob_user_e consumerid);
-#endif
-
-/****************************************************************************
- * Name: iob_stats_onfree
- *
- * Description:
- *   An IOB has just been freed by the producer. This is a hook for the
- *   IOB statistics to be updated when /proc/iobinfo is enabled.
- *
- * Input Parameters:
- *   consumerid - id representing who is consuming the IOB
- *
- * Returned Value:
- *   None.
- *
- ****************************************************************************/
-
-#if !defined(CONFIG_DISABLE_MOUNTPOINT) && defined(CONFIG_FS_PROCFS) && \
-    defined(CONFIG_MM_IOB) && !defined(CONFIG_FS_PROCFS_EXCLUDE_IOBINFO)
-void iob_stats_onfree(enum iob_user_e producerid);
 #endif
 
 #endif /* CONFIG_MM_IOB */

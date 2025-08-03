@@ -1,5 +1,7 @@
 /****************************************************************************
- * boards/arm/stm32f4/nucleo-f429zi/src/stm32_usb.c
+ * boards/arm/stm32/nucleo-f429zi/src/stm32_usb.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -37,13 +39,13 @@
 #include <nuttx/usb/usbhost.h>
 #include <nuttx/usb/usbdev_trace.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "chip.h"
 #include "stm32_gpio.h"
 #include "stm32_otg.h"
 #include "nucleo-144.h"
 
-#ifdef CONFIG_STM32F4_OTGFS
+#ifdef CONFIG_STM32_OTGFS
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -121,7 +123,7 @@ static int usbhost_waiter(int argc, char *argv[])
  * Name: stm32_usbinitialize
  *
  * Description:
- *   Called from stm32_usbinitialize very early in inialization
+ *   Called from stm32_usbinitialize very early in initialization
  *   to setup USB-related GPIO pins for the nucleo-144 board.
  *
  ****************************************************************************/
@@ -136,7 +138,7 @@ void stm32_usbinitialize(void)
    * Power On, and Overcurrent GPIOs
    */
 
-#ifdef CONFIG_STM32F4_OTGFS
+#ifdef CONFIG_STM32_OTGFS
   stm32_configgpio(GPIO_OTGFS_VBUS);
   stm32_configgpio(GPIO_OTGFS_PWRON);
   stm32_configgpio(GPIO_OTGFS_OVER);
@@ -156,11 +158,7 @@ void stm32_usbinitialize(void)
 #ifdef CONFIG_USBHOST
 int stm32_usbhost_initialize(void)
 {
-  int pid;
-#if defined(CONFIG_USBHOST_HUB)    || defined(CONFIG_USBHOST_MSC) || \
-    defined(CONFIG_USBHOST_HIDKBD) || defined(CONFIG_USBHOST_HIDMOUSE)
   int ret;
-#endif
 
   /* First, register all of the class drivers needed to support the drivers
    * that we care about:
@@ -228,10 +226,10 @@ int stm32_usbhost_initialize(void)
 
       uinfo("Start usbhost_waiter\n");
 
-      pid = kthread_create("usbhost", CONFIG_STM32F4DISCO_USBHOST_PRIO,
+      ret = kthread_create("usbhost", CONFIG_STM32F4DISCO_USBHOST_PRIO,
                            CONFIG_STM32F4DISCO_USBHOST_STACKSIZE,
-                           (main_t)usbhost_waiter, (FAR char * const *)NULL);
-      return pid < 0 ? -ENOEXEC : OK;
+                           usbhost_waiter, NULL);
+      return ret < 0 ? -ENOEXEC : OK;
     }
 
   return -ENODEV;
@@ -315,7 +313,7 @@ int stm32_setup_overcurrent(xcpt_t handler, void *arg)
  ****************************************************************************/
 
 #ifdef CONFIG_USBDEV
-void stm32_usbsuspend(FAR struct usbdev_s *dev, bool resume)
+void stm32_usbsuspend(struct usbdev_s *dev, bool resume)
 {
   uinfo("resume: %d\n", resume);
 }

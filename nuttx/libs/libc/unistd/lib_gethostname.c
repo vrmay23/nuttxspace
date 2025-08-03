@@ -1,10 +1,11 @@
 /****************************************************************************
  * libs/libc/unistd/lib_gethostname.c
  *
- *   Copyright (C) 2015 Stavros Polymenis. All rights reserved.
- *   Copyright (C) 2015, 2016 Gregory Nutt. All rights reserved.
- *   Author: Stavros Polymenis <sp@orbitalfox.com>
- *           Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2015 Stavros Polymenis. All rights reserved.
+ * SPDX-FileCopyrightText: 2015, 2016 Gregory Nutt. All rights reserved.
+ * SPDX-FileContributor: Stavros Polymenis <sp@orbitalfox.com>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,11 +42,18 @@
 
 #include <nuttx/config.h>
 
-#include <sys/utsname.h>
 #include <string.h>
 #include <unistd.h>
 
 #include <nuttx/irq.h>
+
+/* Further, in the protected and kernel build modes where kernel and
+ * application code are separated, the hostname is a common system property
+ * and must reside only in the kernel.  In that case, this accessor
+ * function only be called from user space is only via a kernel system call.
+ */
+
+#if defined(CONFIG_BUILD_FLAT) || defined(__KERNEL__)
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -55,8 +63,8 @@
  * changed via sethostname(), however.
  */
 
-#ifndef CONFIG_LIB_HOSTNAME
-#  define CONFIG_LIB_HOSTNAME ""
+#ifndef CONFIG_LIBC_HOSTNAME
+#  define CONFIG_LIBC_HOSTNAME ""
 #endif
 
 /****************************************************************************
@@ -65,7 +73,7 @@
 
 /* This is the system hostname */
 
-char g_hostname[HOST_NAME_MAX + 1] = CONFIG_LIB_HOSTNAME;
+char g_hostname[HOST_NAME_MAX + 1] = CONFIG_LIBC_HOSTNAME;
 
 /****************************************************************************
  * Public Functions
@@ -96,18 +104,6 @@ char g_hostname[HOST_NAME_MAX + 1] = CONFIG_LIB_HOSTNAME;
 
 int gethostname(FAR char *name, size_t namelen)
 {
-/* In the protected and kernel build modes where kernel and application code
- * are separated, the hostname is a common system property and must reside
- * only in the kernel.  In that case, we need to do things differently.
- *
- * uname() is implemented as a system call and can be called from user space.
- * So, in these configurations we will get the hostname via the uname
- * function.
- */
-
-#if (!defined(CONFIG_BUILD_PROTECTED) && !defined(CONFIG_BUILD_KERNEL)) || \
-      defined(__KERNEL__)
-
   irqstate_t flags;
 
   /* Return the host name, truncating to fit into the user provided buffer.
@@ -116,28 +112,10 @@ int gethostname(FAR char *name, size_t namelen)
    */
 
   flags = enter_critical_section();
-  strncpy(name, g_hostname, namelen);
+  strlcpy(name, g_hostname, namelen);
   leave_critical_section(flags);
 
   return 0;
-
-#else
-
-  struct utsname info;
-  int ret;
-
-  /* Get uname data */
-
-  ret = uname(&info);
-  if (ret < 0)
-    {
-      return ret;
-    }
-
-  /* Return the nodename from the uname data */
-
-  strncpy(name, info.nodename, namelen);
-  return 0;
-
-#endif
 }
+
+#endif /* CONFIG_BUILD_FLAT || __KERNEL__ */

@@ -1,58 +1,45 @@
-/************************************************************************************
+/****************************************************************************
  * arch/arm/include/stm32h7/irq.h
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
-/* This file should never be included directly but, rather, only indirectly through
- * nuttx/irq.h
+/* This file should never be included directly but, rather, only indirectly
+ * through nuttx/irq.h
  */
 
 #ifndef __ARCH_ARM_INCLUDE_STM32H7_IRQ_H
 #define __ARCH_ARM_INCLUDE_STM32H7_IRQ_H
 
-/************************************************************************************
+/****************************************************************************
  * Included Files
- ************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 
-/************************************************************************************
- * Pre-processor Definitions
- ************************************************************************************/
+/****************************************************************************
+ * Pre-processor Prototypes
+ ****************************************************************************/
 
-/* IRQ numbers.  The IRQ number corresponds vector number and hence map directly to
- * bits in the NVIC.  This does, however, waste several words of memory in the IRQ
- * to handle mapping tables.
+/* IRQ numbers.  The IRQ number corresponds vector number and hence map
+ * directly to bits in the NVIC.  This does, however, waste several words of
+ * memory in the IRQ to handle mapping tables.
  */
 
 /* Processor Exceptions (vectors 0-15) */
@@ -72,25 +59,39 @@
 #define STM32_IRQ_PENDSV        (14) /* Vector 14: Pendable system service request */
 #define STM32_IRQ_SYSTICK       (15) /* Vector 15: System tick */
 
-/* External interrupts (vectors >= 16).  These definitions are chip-specific */
+/* External interrupts (vectors >= 16).  These definitions are
+ * chip-specific
+ */
 
 #define STM32_IRQ_FIRST         (16) /* Vector number of the first external interrupt */
 
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
 #if defined(CONFIG_STM32H7_STM32H7X3XX)
 #  include <arch/stm32h7/stm32h7x3xx_irq.h>
+#elif defined(CONFIG_STM32H7_STM32H7B3XX)
+#  include <arch/stm32h7/stm32h7x3xx_irq.h>
+#elif defined(CONFIG_STM32H7_STM32H7X5XX)
+#  if CONFIG_ARCH_CHIP_STM32H7_CORTEXM7
+#    include <arch/stm32h7/stm32h7x5xx_irq.h>
+#  else
+#    include <arch/stm32h7/stm32h7x5xx_cpu2_irq.h>
+#  endif
 #elif defined(CONFIG_STM32H7_STM32H7X7XX)
 #  include <arch/stm32h7/stm32h7x7xx_irq.h>
 #else
 #  error "Unsupported STM32 H7 chip"
 #endif
 
-/************************************************************************************
+/****************************************************************************
  * Public Types
- ************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************
+/****************************************************************************
  * Public Data
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ASSEMBLY__
 #ifdef __cplusplus
@@ -101,9 +102,9 @@ extern "C"
 #define EXTERN extern
 #endif
 
-/************************************************************************************
- * Public Functions
- ************************************************************************************/
+/****************************************************************************
+ * Public Function Prototypes
+ ****************************************************************************/
 
 #undef EXTERN
 #ifdef __cplusplus

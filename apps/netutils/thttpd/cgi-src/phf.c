@@ -1,14 +1,10 @@
 /****************************************************************************
- * netutils/thttpd/cgi-src/phf.c
- * Cracker trap
+ * apps/netutils/thttpd/cgi-src/phf.c
  *
- *   Copyright (C) 2009, 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * Derived from the file of the same name in the original THTTPD package:
- *
- *   Copyright © 1996 by Jef Poskanzer <jef@mail.acme.com>.
- *   All rights reserved.
+ * SPDX-License-Identifier: BSD-2-Clause
+ * SPDX-FileCopyrightText: 2009, 2015 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 1996 by Jef Poskanzer <jef@mail.acme.com>.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -67,15 +63,15 @@ int main(int argc, char *argv[])
 {
   fprintf(stderr, "phf CGI probe from %s\n", getenv("REMOTE_ADDR"));
 
-  printf("\
-Content-type: text/html\n\
-Status: 404/html\n\
-\n\
-<HTML><HEAD><TITLE>404 Not Found</TITLE></HEAD>\n\
-<BODY><H2>404 Not Found</H2>\n\
-The requested object does not exist on this server.\n\
-The link you followed is either outdated, inaccurate,\n\
-or the server has been instructed not to let you have it.\n\
-</BODY></HTML>\n");
+  printf("Content-type: text/html\n"
+         "Status: 404/html\n"
+         "\n"
+         "<HTML><HEAD><TITLE>404 Not Found</TITLE></HEAD>\n"
+         "<BODY><H2>404 Not Found</H2>\n"
+         "The requested object does not exist on this server.\n"
+         "The link you followed is either outdated, inaccurate,\n"
+         "or the server has been instructed not to let you have it.\n"
+         "</BODY></HTML>\n");
+
   return 0;
 }

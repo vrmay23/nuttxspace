@@ -1,47 +1,34 @@
 #!/usr/bin/env bash
 # tools/mkexport.sh
 #
-#   Copyright (C) 2011-2012, 2014, 2016, 2019 Gregory Nutt. All rights reserved.
-#   Author: Gregory Nutt <gnutt@nuttx.org>
+# SPDX-License-Identifier: Apache-2.0
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
 #
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in
-#    the documentation and/or other materials provided with the
-#    distribution.
-# 3. Neither the name NuttX nor the names of its contributors may be
-#    used to endorse or promote products derived from this software
-#    without specific prior written permission.
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
-# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
-# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
 #
 
 # Get the input parameter list
 
-USAGE="USAGE: $0 [-d] [-z] [-u] [-w|wy|wn] -t <top-dir> [-x <lib-ext>] [-a <apps-dir>] [-m <make-exe>] -l \"lib1 [lib2 [lib3 ...]]\""
+USAGE="USAGE: $0 [-d] [-z] [-u] [-t <top-dir> [-x <lib-ext>] [-a <apps-dir>] [-m <make-exe>] -l \"lib1 [lib2 [lib3 ...]]\""
 unset TOPDIR
 unset LIBLIST
 unset TGZ
 unset APPDIR
+unset BOARDDIR
 
 USRONLY=n
-WINTOOL=n
 LIBEXT=.a
 
 while [ ! -z "$1" ]; do
@@ -49,6 +36,10 @@ while [ ! -z "$1" ]; do
   -a )
     shift
     APPDIR="$1"
+    ;;
+  -b )
+    shift
+    BOARDDIR="$1"
     ;;
   -d )
     set -x
@@ -60,12 +51,6 @@ while [ ! -z "$1" ]; do
   -m )
     shift
     MAKE="$1"
-    ;;
-  -wy )
-    WINTOOL=y
-    ;;
-  -w | -wn )
-    WINTOOL=n
     ;;
   -t )
     shift
@@ -173,13 +158,14 @@ fi
 cp -a "${TOPDIR}/.config" "${EXPORTDIR}/.config" ||
   { echo "MK: Failed to copy ${TOPDIR}/.config to ${EXPORTDIR}/.config"; exit 1; }
 
-# Copy the Make.defs files, but disable windows path conversions
+# Copy the Make.defs files
 
-grep -v "WINTOOL[ \t]*=[ \t]y" "${TOPDIR}/Make.defs"  > "${EXPORTDIR}/Make.defs"
+cp -a "${TOPDIR}/Make.defs" "${EXPORTDIR}/Make.defs" ||
+  { echo "MK: Failed to copy ${TOPDIR}/Make.defs to ${EXPORTDIR}/Make.defs"; exit 1; }
 
 # Extract information from the Make.defs file.  A Makefile can do this best
 
-${MAKE} -C "${TOPDIR}/tools" -f Makefile.export TOPDIR="${TOPDIR}" EXPORTDIR="${EXPORTDIR}"
+${MAKE} -C "${TOPDIR}/tools" -f Export.mk TOPDIR="${TOPDIR}" EXPORTDIR="${EXPORTDIR}"
 source "${EXPORTDIR}/makeinfo.sh"
 rm -f "${EXPORTDIR}/makeinfo.sh"
 rm -f "${EXPORTDIR}/Make.defs"
@@ -191,9 +177,29 @@ if [ ! -d "${ARCHDIR}" ]; then
   exit 1
 fi
 
-# Copy the default linker script
+# Copy the depends script
 
-cp -f "${TOPDIR}/binfmt/libelf/gnu-elf.ld" "${EXPORTDIR}/scripts/."
+cp "${TOPDIR}/tools/mkdeps.c" "${EXPORTDIR}/tools/."
+cp "${TOPDIR}/tools/incdir.c" "${EXPORTDIR}/tools/."
+
+# Copy the board specific linker if found, or use the default when not.
+
+APPLD=gnu-elf.ld
+if [ -f "${BOARDDIR}/scripts/${APPLD}" ]; then
+  cp -f "${BOARDDIR}/scripts/${APPLD}" "${EXPORTDIR}/scripts/."
+else
+  cp -f "${TOPDIR}/libs/libc/elf/${APPLD}" "${EXPORTDIR}/scripts/."
+fi
+
+if [ "${NUTTX_BUILD}" = "kernel" ]; then
+  LDNAME=${APPLD}
+fi
+
+# Copy the board config script
+
+if [ -f "${BOARDDIR}/scripts/Config.mk" ]; then
+  cp -f "${BOARDDIR}/scripts/Config.mk" "${EXPORTDIR}/scripts/."
+fi
 
 # Is there a linker script in this configuration?
 
@@ -225,15 +231,23 @@ if [ "X${USRONLY}" != "Xy" ]; then
   done
 fi
 
+# Drop kernel folder elf/gnu-elf.ld as the exported script shall suffice
+
+LDELFFLAGS=$(echo "$LDELFFLAGS" | sed -e 's:-T.*ld::')
+
+# Set LDMODULEFLAGS so that kernel modules can build in kernel mode
+
+LDMODULEFLAGS="-r"
+
 # Save the compilation options
 
 echo "ARCHCFLAGS       = ${ARCHCFLAGS}" >"${EXPORTDIR}/scripts/Make.defs"
+echo "ARCHCPUFLAGS     = ${ARCHCPUFLAGS}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "ARCHCXXFLAGS     = ${ARCHCXXFLAGS}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "ARCHPICFLAGS     = ${ARCHPICFLAGS}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "ARCHWARNINGS     = ${ARCHWARNINGS}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "ARCHWARNINGSXX   = ${ARCHWARNINGSXX}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "ARCHOPTIMIZATION = ${ARCHOPTIMIZATION}" >>"${EXPORTDIR}/scripts/Make.defs"
-echo "WINTOOL          = ${WINTOOL}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "CROSSDEV         = ${CROSSDEV}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "CC               = ${CC}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "CXX              = ${CXX}" >>"${EXPORTDIR}/scripts/Make.defs"
@@ -244,6 +258,12 @@ echo "NM               = ${NM}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "STRIP            = ${STRIP}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "OBJCOPY          = ${OBJCOPY}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "OBJDUMP          = ${OBJDUMP}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "ZIG              = ${ZIG}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "ZIGFLAGS         = ${ZIGFLAGS}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "DC               = ${DC}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "DFLAGS           = ${DFLAGS}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "SWIFTC           = ${SWIFTC}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "SWIFTFLAGS       = ${SWIFTFLAGS}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "NXFLATLDFLAGS1   = ${NXFLATLDFLAGS1}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "NXFLATLDFLAGS2   = ${NXFLATLDFLAGS2}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "OBJEXT           = ${OBJEXT}" >>"${EXPORTDIR}/scripts/Make.defs"
@@ -254,23 +274,75 @@ echo "HOSTINCLUDES     = ${HOSTINCLUDES}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "HOSTCFLAGS       = ${HOSTCFLAGS}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "HOSTLDFLAGS      = ${HOSTLDFLAGS}" >>"${EXPORTDIR}/scripts/Make.defs"
 echo "HOSTEXEEXT       = ${HOSTEXEEXT}" >>"${EXPORTDIR}/scripts/Make.defs"
-echo "DIRLINK          = ${DIRLINK}" >>"${EXPORTDIR}/scripts/Make.defs"
-echo "DIRUNLINK        = ${DIRUNLINK}" >>"${EXPORTDIR}/scripts/Make.defs"
-echo "MKDEP            = ${MKDEP}" >>"${EXPORTDIR}/scripts/Make.defs"
-echo "LDSCRIPT         = ${LDSCRIPT}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "LDNAME           = ${LDNAME}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "LDELFFLAGS       = ${LDELFFLAGS}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "LDMODULEFLAGS    = ${LDMODULEFLAGS}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "NUTTX_ARCH       = ${NUTTX_ARCH}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "NUTTX_ARCH_CHIP  = ${NUTTX_ARCH_CHIP}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "NUTTX_BOARD      = ${NUTTX_BOARD}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "NUTTX_BUILD      = ${NUTTX_BUILD}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "NUTTX_CXX        = ${NUTTX_CXX}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "LLVM_ARCHTYPE    = ${LLVM_ARCHTYPE}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "LLVM_CPUTYPE     = ${LLVM_CPUTYPE}" >>"${EXPORTDIR}/scripts/Make.defs"
+echo "LLVM_ABITYPE     = ${LLVM_ABITYPE}" >>"${EXPORTDIR}/scripts/Make.defs"
+
+echo "set(ARCHCFLAGS          \"${ARCHCFLAGS}\")"       > "${EXPORTDIR}/scripts/target.cmake"
+echo "set(ARCHCPUFLAGS        \"${ARCHCPUFLAGS}\")"     >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(ARCHCXXFLAGS        \"${ARCHCXXFLAGS}\")"     >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(ARCHPICFLAGS        \"${ARCHPICFLAGS}\")"     >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(ARCHWARNINGS        \"${ARCHWARNINGS}\")"     >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(ARCHWARNINGSXX      \"${ARCHWARNINGSXX}\")"   >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(ARCHOPTIMIZATION    \"${ARCHOPTIMIZATION}\")" >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(CROSSDEV            \"${CROSSDEV}\")"         >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(CMAKE_C_COMPILER    \"${CC}\")"               >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(CMAKE_CXX_COMPILER  \"${CXX}\")"              >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(CMAKE_LINKER        \"${LD}\")"               >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(CMAKE_OBJCOPY       \"${OBJCOPY}\")"          >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(CMAKE_OBJDUMP       \"${OBJDUMP}\")"          >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(NXFLATLDFLAGS1      \"${NXFLATLDFLAGS1}\")"   >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(NXFLATLDFLAGS2      \"${NXFLATLDFLAGS2}\")"   >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(OBJEXT              \"${OBJEXT}\")"           >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(LIBEXT              \"${LIBEXT}\")"           >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(EXEEXT              \"${EXEEXT}\")"           >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(HOSTCC              \"${HOSTCC}\")"           >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(HOSTINCLUDES        \"${HOSTINCLUDES}\")"     >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(HOSTCFLAGS          \"${HOSTCFLAGS}\")"       >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(HOSTLDFLAGS         \"${HOSTLDFLAGS}\")"      >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(HOSTEXEEXT          \"${HOSTEXEEXT}\")"       >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(LDNAME              \"${LDNAME}\")"           >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(LDELFFLAGS          \"${LDELFFLAGS}\")"       >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(LDMODULEFLAGS       \"${LDMODULEFLAGS}\")"    >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(NUTTX_ARCH          \"${NUTTX_ARCH}\")"       >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(NUTTX_ARCH_CHIP     \"${NUTTX_ARCH_CHIP}\")"  >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(NUTTX_BOARD         \"${NUTTX_BOARD}\")"      >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(NUTTX_BUILD         \"${NUTTX_BUILD}\")"      >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(NUTTX_CXX           \"${NUTTX_CXX}\")"        >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(LLVM_ARCHTYPE       \"${LLVM_ARCHTYPE}\")"    >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(LLVM_CPUTYPE        \"${LLVM_CPUTYPE}\")"     >>"${EXPORTDIR}/scripts/target.cmake"
+echo "set(LLVM_ABITYPE        \"${LLVM_ABITYPE}\")"     >>"${EXPORTDIR}/scripts/target.cmake"
+
 
 # Additional compilation options when the kernel is built
 
 if [ "X${USRONLY}" != "Xy" ]; then
-  echo "LDFLAGS      = ${LDFLAGS}" >>"${EXPORTDIR}/scripts/Make.defs"
-  echo "HEAD_OBJ     = ${HEAD_OBJ}" >>"${EXPORTDIR}/scripts/Make.defs"
-  echo "EXTRA_OBJS   = ${EXTRA_OBJS}" >>"${EXPORTDIR}/scripts/Make.defs"
-  echo "LDSTARTGROUP = ${LDSTARTGROUP}" >>"${EXPORTDIR}/scripts/Make.defs"
-  echo "LDLIBS       = ${LDLIBS}" >>"${EXPORTDIR}/scripts/Make.defs"
-  echo "EXTRA_LIBS   = ${EXTRA_LIBS}" >>"${EXPORTDIR}/scripts/Make.defs"
-  echo "LIBGCC       = ${LIBGCC}" >>"${EXPORTDIR}/scripts/Make.defs"
-  echo "LDENDGROUP   = ${LDENDGROUP}" >>"${EXPORTDIR}/scripts/Make.defs"
+  echo "EXTRA_LIBS       = ${EXTRA_LIBS}" >>"${EXPORTDIR}/scripts/Make.defs"
+  echo "EXTRA_OBJS       = ${EXTRA_OBJS}" >>"${EXPORTDIR}/scripts/Make.defs"
+  echo "HEAD_OBJ         = ${HEAD_OBJ}" >>"${EXPORTDIR}/scripts/Make.defs"
+  echo "LDENDGROUP       = ${LDENDGROUP}" >>"${EXPORTDIR}/scripts/Make.defs"
+  echo "LDFLAGS          = ${LDFLAGS}" >>"${EXPORTDIR}/scripts/Make.defs"
+  echo "LDSTARTGROUP     = ${LDSTARTGROUP}" >>"${EXPORTDIR}/scripts/Make.defs"
+
+  echo "set(EXTRA_LIBS       \"${EXTRA_LIBS}\")"   >>"${EXPORTDIR}/scripts/target.cmake"
+  echo "set(EXTRA_OBJS       \"${EXTRA_OBJS}\")"   >>"${EXPORTDIR}/scripts/target.cmake"
+  echo "set(HEAD_OBJ         \"${HEAD_OBJ}\")"     >>"${EXPORTDIR}/scripts/target.cmake"
+  echo "set(LDENDGROUP       \"${LDENDGROUP}\")"   >>"${EXPORTDIR}/scripts/target.cmake"
+  echo "set(LDFLAGS          \"${LDFLAGS}\")"      >>"${EXPORTDIR}/scripts/target.cmake"
+  echo "set(LDSTARTGROUP     \"${LDSTARTGROUP}\")" >>"${EXPORTDIR}/scripts/target.cmake"
 fi
+
+# Copy the CMake toolchain file
+
+cp "${TOPDIR}/tools/toolchain.cmake.export" "${EXPORTDIR}/scripts/toolchain.cmake"
 
 # Copy the system map file(s)
 
@@ -361,62 +433,63 @@ if [ "X${USRONLY}" != "Xy" ]; then
   fi
 fi
 
+LDLIBS=`basename -a ${LIBLIST} | sed -e "s/lib/-l/g" -e "s/\.${LIBEXT:1}//g" | tr "\n" " "`
+
+if [ "X${USRONLY}" != "Xy" ]; then
+  echo "LDLIBS           = ${LDLIBS}" >> "${EXPORTDIR}/scripts/Make.defs"
+
+  echo "set(LDLIBS     \"${LDLIBS}\")" >>"${EXPORTDIR}/scripts/target.cmake"
+fi
+
 # Then process each library
 
-AR=${CROSSDEV}ar
 for lib in ${LIBLIST}; do
   if [ ! -f "${TOPDIR}/${lib}" ]; then
     echo "MK: Library ${TOPDIR}/${lib} does not exist"
     exit 1
   fi
 
-  # Get some shorter names for the library
+  cp ${TOPDIR}/${lib} ${EXPORTDIR}/libs
+done
 
-  libname=`basename ${lib} ${LIBEXT}`
-  shortname=`echo ${libname} | sed -e "s/^lib//g"`
+# Process extra librarys
 
-  # Copy the application library unmodified
+for lib in ${EXTRA_LIBS}; do
 
-  if [ "X${libname}" = "Xlibapps" ]; then
-    cp -p "${TOPDIR}/${lib}" "${EXPORTDIR}/libs/." || \
-      { echo "MK: cp ${TOPDIR}/${lib} failed"; exit 1; }
-  else
+  # Convert library name
 
-    # Create a temporary directory and extract all of the objects there
-    # Hmmm.. this probably won't work if the archiver is not 'ar'
+  if [ ${lib:0:2} = "-l" ]; then
+    lib=`echo "${lib}" | sed -e "s/-l/lib/" -e "s/$/${LIBEXT}/"`
+  fi
 
-    mkdir "${EXPORTDIR}/tmp" || \
-      { echo "MK: 'mkdir ${EXPORTDIR}/tmp' failed"; exit 1; }
-    cd "${EXPORTDIR}/tmp" || \
-      { echo "MK: 'cd ${EXPORTDIR}/tmp' failed"; exit 1; }
-    if [ "X${WINTOOL}" = "Xy" ]; then
-      WLIB=`cygpath -w "${TOPDIR}/${lib}"`
-      ${AR} x "${WLIB}"
-    else
-      ${AR} x "${TOPDIR}/${lib}"
+  if [ -f "${lib}" ]; then
+    cp -a ${lib} ${EXPORTDIR}/libs
+    continue
+  fi
+
+  for path in ${EXTRA_LIBPATHS}; do
+
+    # Skip the library path options
+
+    if [ ${#path} == 2 ]; then continue; fi
+
+    if [ ${path:0:2} = "-l" ] || [ ${path:0:2} = "-L" ]; then
+      path=${path:2}
     fi
 
-    # Rename each object file (to avoid collision when they are combined)
-    # and add the file to libnuttx
+    # Export the extra librarys
 
-    for file in `ls`; do
-      mv "${file}" "${shortname}-${file}"
-      if [ "X${WINTOOL}" = "Xy" ]; then
-        WLIB=`cygpath -w "${EXPORTDIR}/libs/libnuttx${LIBEXT}"`
-        ${AR} rcs "${WLIB}" "${shortname}-${file}"
-      else
-        ${AR} rcs "${EXPORTDIR}/libs/libnuttx${LIBEXT}" "${shortname}-${file}"
-      fi
-    done
+    if [ -f "${path}/${lib}" ]; then
+      cp -a ${path}/${lib} ${EXPORTDIR}/libs
+      break
+    fi
 
-    cd "${TOPDIR}" || \
-      { echo "MK: 'cd ${TOPDIR}' failed"; exit 1; }
-    rm -rf "${EXPORTDIR}/tmp"
-  fi
+  done
 done
 
 # Copy the essential build script file(s)
 
+cp -f "${TOPDIR}/tools/Config.mk" "${EXPORTDIR}/tools/"
 cp -f "${TOPDIR}/tools/copydir.bat" "${EXPORTDIR}/tools/"
 cp -f "${TOPDIR}/tools/copydir.sh" "${EXPORTDIR}/tools/"
 cp -f "${TOPDIR}/tools/define.bat" "${EXPORTDIR}/tools/"
@@ -434,15 +507,15 @@ cd "${TOPDIR}" || \
   { echo "MK: 'cd ${TOPDIR}' failed"; exit 1; }
 
 if [ -e "${APPDIR}/Makefile" ]; then
-  "${MAKE}" -C "${TOPDIR}/${APPDIR}" EXPORTDIR="$(cd "${EXPORTSUBDIR}" ; pwd )" TOPDIR="${TOPDIR}" export || \
+  ${MAKE} -C "${APPDIR}" EXPORTDIR="$(cd "${EXPORTSUBDIR}" ; pwd )" TOPDIR="${TOPDIR}" export || \
       { echo "MK: call make export for APPDIR not supported"; }
 fi
 
 if [ "X${TGZ}" = "Xy" ]; then
-  tar cvf "${EXPORTSUBDIR}.tar" "${EXPORTSUBDIR}" 1>/dev/null 2>&1
+  tar cvf "${EXPORTSUBDIR}.tar" "${EXPORTSUBDIR}" 1>/dev/null
   gzip -f "${EXPORTSUBDIR}.tar"
 else
-  zip -r "${EXPORTSUBDIR}.zip" "${EXPORTSUBDIR}" 1>/dev/null 2>&1
+  zip -r "${EXPORTSUBDIR}.zip" "${EXPORTSUBDIR}" 1>/dev/null
 fi
 
 # Clean up after ourselves

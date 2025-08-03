@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/am335x/am335x_irq.c
  *
- *   Copyright (C) 2018 Petro Karashchenko. All rights reserved.
- *   Author: Petro Karashchenko <petro.karashchenko@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,8 +30,7 @@
 
 #include <nuttx/arch.h>
 
-#include "up_arch.h"
-#include "up_internal.h"
+#include "arm_internal.h"
 #include "sctlr.h"
 
 #include "am335x_gpio.h"
@@ -54,18 +40,10 @@
  * Public Data
  ****************************************************************************/
 
-/* g_current_regs[] holds a references to the current interrupt level
- * register storage structure.  If is non-NULL only during interrupt
- * processing.  Access to g_current_regs[] must be through the macro
- * CURRENT_REGS for portability.
- */
-
-volatile uint32_t *g_current_regs[1];
-
 /* Symbols defined via the linker script */
 
-extern uint32_t _vector_start; /* Beginning of vector block */
-extern uint32_t _vector_end;   /* End+1 of vector block */
+extern uint8_t _vector_start[]; /* Beginning of vector block */
+extern uint8_t _vector_end[];   /* End+1 of vector block */
 
 /****************************************************************************
  * Public Functions
@@ -102,8 +80,8 @@ void up_irqinitialize(void)
 
   /* Set the VBAR register to the address of the vector table */
 
-  DEBUGASSERT((((uintptr_t)&_vector_start) & ~VBAR_MASK) == 0);
-  cp15_wrvbar((uint32_t)&_vector_start);
+  DEBUGASSERT((((uintptr_t)_vector_start) & ~VBAR_MASK) == 0);
+  cp15_wrvbar((uint32_t)_vector_start);
 #endif /* CONFIG_ARCH_LOWVECTORS */
 
   /* The following operations need to be atomic, but since this function is
@@ -131,13 +109,10 @@ void up_irqinitialize(void)
   for (i = 0; i < AM335X_IRQ_NINT; i += 32)
     {
       putreg32(0xffffffff, AM335X_INTC_MIR_SET(i)); /* 1 masks corresponding interrupt */
+
       getreg32(AM335X_INTC_PEND_IRQ(i));   /* Reading status clears pending interrupts */
       getreg32(AM335X_INTC_PEND_FIQ(i));   /* Reading status clears pending interrupts */
     }
-
-  /* currents_regs is non-NULL only while processing an interrupt */
-
-  CURRENT_REGS = NULL;
 
 #ifndef CONFIG_SUPPRESS_INTERRUPTS
   /* Initialize logic to support a second level of interrupt decoding for

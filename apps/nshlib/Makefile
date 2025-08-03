@@ -1,56 +1,36 @@
 ############################################################################
 # apps/nshlib/Makefile
 #
-#   Copyright (C) 2011-2013, 2016 Gregory Nutt. All rights reserved.
-#   Author: Gregory Nutt <gnutt@nuttx.org>
+# SPDX-License-Identifier: Apache-2.0
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
 #
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in
-#    the documentation and/or other materials provided with the
-#    distribution.
-# 3. Neither the name NuttX nor the names of its contributors may be
-#    used to endorse or promote products derived from this software
-#    without specific prior written permission.
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
-# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
-# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
 #
 ############################################################################
 
--include $(TOPDIR)/Make.defs
+include $(APPDIR)/Make.defs
 
 # NSH Library
 
 CSRCS  = nsh_init.c nsh_parse.c nsh_console.c nsh_script.c nsh_system.c
-CSRCS += nsh_command.c nsh_fscmds.c nsh_ddcmd.c nsh_proccmds.c nsh_mmcmds.c
-CSRCS += nsh_timcmds.c nsh_envcmds.c nsh_syscmds.c nsh_dbgcmds.c
+CSRCS += nsh_command.c nsh_fscmds.c nsh_proccmds.c nsh_mmcmds.c
+CSRCS += nsh_timcmds.c nsh_envcmds.c nsh_syscmds.c nsh_dbgcmds.c nsh_prompt.c
 
-ifeq ($(CONFIG_NFILE_STREAMS),0)
-CSRCS += nsh_stdsession.c
-ifeq ($(CONFIG_NSH_CONSOLE_LOGIN),y)
-CSRCS += nsh_stdlogin.c
-endif
-else
 CSRCS += nsh_session.c
 ifeq ($(CONFIG_NSH_CONSOLE_LOGIN),y)
 CSRCS += nsh_login.c
-endif
 endif
 
 CSRCS += nsh_fsutils.c
@@ -65,10 +45,6 @@ endif
 
 ifeq ($(CONFIG_NSH_VARS),y)
 CSRCS += nsh_vars.c
-endif
-
-ifeq ($(CONFIG_NSH_ROMFSETC),y)
-CSRCS += nsh_romfsetc.c
 endif
 
 ifeq ($(CONFIG_NET),y)
@@ -108,6 +84,10 @@ ifneq ($(CONFIG_NSH_DISABLESCRIPT),y)
 CSRCS += nsh_test.c
 endif
 
+ifneq ($(CONFIG_NSH_DISABLE_WAIT),y)
+CSRCS += nsh_wait.c
+endif
+
 ifeq ($(CONFIG_USBDEV),y)
 CSRCS += nsh_usbconsole.c
 endif
@@ -126,6 +106,10 @@ endif
 
 ifeq ($(CONFIG_NSH_LOGIN_PASSWD),y)
 CSRCS += nsh_passwdcmds.c
+endif
+
+ifeq ($(CONFIG_NSH_ALIAS),y)
+CSRCS += nsh_alias.c
 endif
 
 include $(APPDIR)/Application.mk

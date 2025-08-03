@@ -1,33 +1,33 @@
-/*******************************************************************************************************************************
- * arch/arm/src/efm32/chip/efm32_emu.h
+/****************************************************************************
+ * arch/arm/src/efm32/hardware/efm32_emu.h
  *
- *  Copyright 2014 Silicon Laboratories, Inc. http://www.silabs.com</b>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2014 Silicon Laboratories, Inc.
+ * SPDX-FileCopyrightText: 2014 Pierre-noel Bouteville . All rights reserved.
+ * SPDX-FileCopyrightText: 2014 Gregory Nutt. All rights reserved.
+ * SPDX-FileContributor: Pierre-noel Bouteville <pnb990@gmail.com>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Permission is granted to anyone to use this software for any purpose,
  * including commercial applications, and to alter it and redistribute it
  * freely, subject to the following restrictions:
  *
  * 1. The origin of this software must not be misrepresented; you must not
- *    claim that you wrote the original software.@n
+ *    claim that you wrote the original software.
  * 2. Altered source versions must be plainly marked as such, and must not be
- *    misrepresented as being the original software.@n
+ *    misrepresented as being the original software.
  * 3. This notice may not be removed or altered from any source distribution.
  *
  * DISCLAIMER OF WARRANTY/LIMITATION OF REMEDIES: Silicon Laboratories, Inc.
  * has no obligation to support this Software. Silicon Laboratories, Inc. is
- * providing the Software "AS IS", with no express or implied warranties of any
- * kind, including, but not limited to, any implied warranties of
- * merchantability or fitness for any particular purpose or warranties against
- * infringement of any proprietary rights of a third party.
+ * providing the Software "AS IS", with no express or implied warranties of
+ * any kind, including, but not limited to, any implied warranties of
+ * merchantability or fitness for any particular purpose or warranties
+ * against infringement of any proprietary rights of a third party.
  *
  * Silicon Laboratories, Inc. will not be liable for any consequential,
  * incidental, or special damages, or any other relief, or for any claim by
  * any third party, arising from your use of this Software.
- *
- *   Copyright (C) 2014 Pierre-noel Bouteville . All rights reserved.
- *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
- *   Authors: Pierre-noel Bouteville <pnb990@gmail.com>
- *            Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -56,14 +56,14 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- *******************************************************************************************************************************/
+ ****************************************************************************/
 
-#ifndef __ARCH_ARM_SRC_EFM32_CHIP_EFM32_EMU_H
-#define __ARCH_ARM_SRC_EFM32_CHIP_EFM32_EMU_H
+#ifndef __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32_EMU_H
+#define __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32_EMU_H
 
-/*******************************************************************************************************************************
+/****************************************************************************
  * Included Files
- *******************************************************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 #include "hardware/efm32_memorymap.h"
@@ -72,10 +72,11 @@
 #  warning This is the EFM32GG header file; Review/modification needed for this architecture
 #endif
 
-/*******************************************************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- *******************************************************************************************************************************/
-/* EMU Register Offsets ********************************************************************************************************/
+ ****************************************************************************/
+
+/* EMU Register Offsets *****************************************************/
 
 #define EFM32_EMU_CTRL_OFFSET                0x0000  /* Control Register */
 #define EFM32_EMU_MEMCTRL_OFFSET             0x0004  /* Memory Control Register */
@@ -95,7 +96,7 @@
 #define EFM32_EMU_BUBODBUVINCAL_OFFSET       0x0058  /* BU_VIN Backup BOD calibration */
 #define EFM32_EMU_BUBODUNREGCAL_OFFSET       0x005c  /* Unregulated power Backup BOD calibration */
 
-/* EMU Register Addresses ******************************************************************************************************/
+/* EMU Register Addresses ***************************************************/
 
 #define EFM32_EMU_CTRL                       (EFM32_EMU_BASE+EFM32_EMU_CTRL_OFFSET)
 #define EFM32_EMU_MEMCTRL                    (EFM32_EMU_BASE+EFM32_EMU_MEMCTRL_OFFSET)
@@ -115,7 +116,7 @@
 #define EFM32_EMU_BUBODBUVINCAL              (EFM32_EMU_BASE+EFM32_EMU_BUBODBUVINCAL_OFFSET)
 #define EFM32_EMU_BUBODUNREGCAL              (EFM32_EMU_BASE+EFM32_EMU_BUBODUNREGCAL_OFFSET)
 
-/* EMU Register Bit Field Definitions ******************************************************************************************/
+/* EMU Register Bit Field Definitions ***************************************/
 
 /* Bit fields for EMU CTRL */
 
@@ -439,4 +440,4 @@
 #define _EMU_BUBODUNREGCAL_RANGE_DEFAULT     0x00000001UL                            /* Mode DEFAULT for EMU_BUBODUNREGCAL */
 #define EMU_BUBODUNREGCAL_RANGE_DEFAULT      (_EMU_BUBODUNREGCAL_RANGE_DEFAULT << 3) /* Shifted mode DEFAULT for EMU_BUBODUNREGCAL */
 
-#endif /* __ARCH_ARM_SRC_EFM32_CHIP_EFM32_EMU_H */
+#endif /* __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32_EMU_H */

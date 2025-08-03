@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/armv7-a/arm_mmu.c
  *
- *   Copyright (C) 2013, 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -65,10 +52,10 @@
  ****************************************************************************/
 
 #ifndef CONFIG_ARCH_ROMPGTABLE
-void mmu_l1_setentry(uint32_t paddr, uint32_t vaddr, uint32_t mmuflags)
+void mmu_l1table_setentry(uintptr_t *l1table, uintptr_t paddr,
+                          uintptr_t vaddr, uint32_t mmuflags)
 {
-  uint32_t *l1table = (uint32_t *)PGTABLE_BASE_VADDR;
-  uint32_t  index   = vaddr >> 20;
+  uint32_t index = vaddr >> 20;
 
   /* Save the page table entry */
 
@@ -83,6 +70,11 @@ void mmu_l1_setentry(uint32_t paddr, uint32_t vaddr, uint32_t mmuflags)
   /* Invalidate the TLB cache associated with virtual address range */
 
   mmu_invalidate_region(vaddr, SECTION_SIZE);
+}
+
+void mmu_l1_setentry(uintptr_t paddr, uintptr_t vaddr, uint32_t mmuflags)
+{
+  mmu_l1table_setentry(mmu_l1_getpgtable(), paddr, vaddr, mmuflags);
 }
 #endif
 
@@ -100,10 +92,10 @@ void mmu_l1_setentry(uint32_t paddr, uint32_t vaddr, uint32_t mmuflags)
  ****************************************************************************/
 
 #if !defined(CONFIG_ARCH_ROMPGTABLE) && defined(CONFIG_ARCH_ADDRENV)
-void mmu_l1_restore(uintptr_t vaddr, uint32_t l1entry)
+void mmu_l1_restore(uintptr_t vaddr, uintptr_t l1entry)
 {
-  uint32_t *l1table = (uint32_t *)PGTABLE_BASE_VADDR;
-  uint32_t  index   = vaddr >> 20;
+  uintptr_t *l1table = mmu_l1_getpgtable();
+  uint32_t  index    = vaddr >> 20;
 
   /* Set the encoded page table entry */
 
@@ -139,11 +131,11 @@ void mmu_l1_restore(uintptr_t vaddr, uint32_t l1entry)
  ****************************************************************************/
 
 #ifndef CONFIG_ARCH_ROMPGTABLE
-void mmu_l2_setentry(uint32_t l2vaddr, uint32_t paddr, uint32_t vaddr,
+void mmu_l2_setentry(uintptr_t l2vaddr, uintptr_t paddr, uintptr_t vaddr,
                      uint32_t mmuflags)
 {
-  uint32_t *l2table  = (uint32_t *)l2vaddr;
-  uint32_t  index;
+  uintptr_t *l2table  = (uintptr_t *)l2vaddr;
+  uint32_t index;
 
   /* The table divides a 1Mb address space up into 256 entries, each
    * corresponding to 4Kb of address space.  The page table index is
@@ -226,6 +218,133 @@ void mmu_l1_map_regions(const struct section_mapping_s *mappings,
 #endif
 
 /****************************************************************************
+ * Name: mmu_l1_map_page
+ *
+ * Description:
+ *   Set level 1 page entry in order to map a region
+ *   array of memory.
+ *
+ * Input Parameters:
+ *   mapping - Describes the mapping to be performed.
+ *
+ ****************************************************************************/
+
+#ifndef CONFIG_ARCH_ROMPGTABLE
+void mmu_l1_map_page(const struct section_mapping_s *mapping)
+{
+  uintptr_t virtaddr = mapping->virtbase;
+  uintptr_t l2table = mapping->physbase;
+  uint32_t i;
+
+  for (i = 0; i < mapping->nsections; i++)
+    {
+      mmu_l1_setentry(l2table, virtaddr, mapping->mmuflags);
+
+      /* Update the L2 page table address for the next L1 table entry. */
+
+      virtaddr += SECTION_SIZE;
+      l2table += 1024;
+    }
+}
+#endif
+
+/****************************************************************************
+ * Name: mmu_l1_map_pages
+ *
+ * Description:
+ *   Set multiple level 1 page entries in order to map a region
+ *   array of memory.
+ *
+ * Input Parameters:
+ *   mappings - Describes the mapping to be performed.
+ *   count    - The number of mappings to be performed.
+ *
+ ****************************************************************************/
+
+#ifndef CONFIG_ARCH_ROMPGTABLE
+void mmu_l1_map_pages(const struct section_mapping_s *mappings,
+                      size_t count)
+{
+  size_t i;
+
+  for (i = 0; i < count; i++)
+    {
+      mmu_l1_map_page(&mappings[i]);
+    }
+}
+#endif
+
+/****************************************************************************
+ * Name: mmu_l2_map_page
+ *
+ * Description:
+ *   Set level 2 page entry in order to map a region
+ *   array of memory.
+ *
+ * Input Parameters:
+ *   mapping - Describes the mapping to be performed.
+ *
+ ****************************************************************************/
+
+#ifndef CONFIG_ARCH_ROMPGTABLE
+void mmu_l2_map_page(const struct page_mapping_s *mapping)
+{
+  uint32_t l2table = mapping->l2table;
+  struct page_entry_s *entry;
+  uint32_t paddr;
+  uint32_t vaddr;
+  uint32_t entry_cnt;
+  uint32_t page_cnt;
+
+  for (entry_cnt = 0; entry_cnt < mapping->entrynum; entry_cnt++)
+    {
+      entry = (struct page_entry_s *)&mapping->entry[entry_cnt];
+      paddr = entry->physbase;
+      vaddr = entry->virtbase;
+
+      for (page_cnt = 0; page_cnt < entry->npages; page_cnt++)
+        {
+          mmu_l2_setentry(l2table, paddr, vaddr, entry->mmuflags);
+
+          paddr += 4096;
+          vaddr += 4096;
+
+          if ((vaddr & 0x000ff000) == 0)
+            {
+              l2table += 1024;
+            }
+        }
+    }
+}
+#endif
+
+/****************************************************************************
+ * Name: mmu_l2_map_pages
+ *
+ * Description:
+ *   Set multiple level 2 page entries in order to map a region
+ *   array of memory.
+ *
+ * Input Parameters:
+ *   mappings - Describes the mapping to be performed.
+ *   count    - The number of mappings to be performed.
+ *
+ ****************************************************************************/
+
+#ifndef CONFIG_ARCH_ROMPGTABLE
+void mmu_l2_map_pages(const struct page_mapping_s *mappings,
+                      size_t count)
+{
+  size_t i;
+
+  for (i = 0; i < count; i++)
+    {
+      mmu_l2_map_page(&mappings[i]);
+    }
+}
+#endif
+
+/****************************************************************************
  * Name: mmu_invalidate_region
  *
  * Description:
@@ -238,7 +357,7 @@ void mmu_l1_map_regions(const struct section_mapping_s *mappings,
  ****************************************************************************/
 
 #ifndef CONFIG_ARCH_ROMPGTABLE
-void mmu_invalidate_region(uint32_t vstart, size_t size)
+void mmu_invalidate_region(uintptr_t vstart, size_t size)
 {
   uint32_t vaddr = vstart & 0xfffff000;
   uint32_t vend  = vstart + size;

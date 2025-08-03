@@ -1,50 +1,38 @@
-/********************************************************************************************
+/****************************************************************************
  * arch/arm/src/samd2l2/hardware/samd_sysctrl.h
  *
- *   Copyright (C) 2014, 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * References:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/* References:
  *   "Atmel SAM D20J / SAM D20G / SAM D20E ARM-Based Microcontroller
- *   Datasheet", 42129J–SAM–12/2013
+ *   Datasheet", 42129J-SAM-12/2013
  *   "Atmel SAM D21E / SAM D21G / SAM D21J SMART ARM-Based Microcontroller
- *   Datasheet", Atmel-42181E–SAM-D21_Datasheet–02/2015
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
- ********************************************************************************************/
+ *   Datasheet", Atmel-42181E-SAM-D21_Datasheet-02/2015
+ */
 
 #ifndef __ARCH_ARM_SRC_SAMD2L2_HARDWARE_SAMD_SYSCTRL_H
 #define __ARCH_ARM_SRC_SAMD2L2_HARDWARE_SAMD_SYSCTRL_H
 
-/********************************************************************************************
+/****************************************************************************
  * Included Files
- ********************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -52,10 +40,11 @@
 
 #if defined(CONFIG_ARCH_FAMILY_SAMD20) || defined(CONFIG_ARCH_FAMILY_SAMD21)
 
-/********************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- ********************************************************************************************/
-/* SYSCTRL register offsets *****************************************************************/
+ ****************************************************************************/
+
+/* SYSCTRL register offsets *************************************************/
 
 #define SAM_SYSCTRL_INTENCLR_OFFSET     0x0000  /* Interrupt enable clear */
 #define SAM_SYSCTRL_INTENSET_OFFSET     0x0004  /* Interrupt enable set */
@@ -85,7 +74,7 @@
 #  define SAM_SYSCTRL_DPLLSTATUS_OFFSET 0x0050  /* DPLL status */
 #endif
 
-/* SYSCTRL register addresses ***************************************************************/
+/* SYSCTRL register addresses ***********************************************/
 
 #define SAM_SYSCTRL_INTENCLR            (SAM_SYSCTRL_BASE+SAM_SYSCTRL_INTENCLR_OFFSET)
 #define SAM_SYSCTRL_INTENSET            (SAM_SYSCTRL_BASE+SAM_SYSCTRL_INTENSET_OFFSET)
@@ -115,10 +104,10 @@
 #  define SAM_SYSCTRL_DPLLSTATUS        (SAM_SYSCTRL_BASE+SAM_SYSCTRL_DPLLSTATUS_OFFSET)
 #endif
 
-/* SYSCTRL register bit definitions *********************************************************/
+/* SYSCTRL register bit definitions *****************************************/
 
-/* Interrupt enable clear, Interrupt enable set, Interrupt flag status and clear, and
- * Power and clocks status registers.
+/* Interrupt enable clear, Interrupt enable set, Interrupt flag status and
+ * clear, and Power and clocks status registers.
  */
 
 #define SYSCTRL_INT_XOSCRDY             (1 << 0)  /* Bit 0:  XOSC ready interrupt */
@@ -162,26 +151,27 @@
 #  define SYSCTRL_XOSC_GAIN_8MHZ        (2 << SYSCTRL_XOSC_GAIN_SHIFT) /* 8MHz */
 #  define SYSCTRL_XOSC_GAIN_16MHZ       (3 << SYSCTRL_XOSC_GAIN_SHIFT) /* 16MHz */
 #  define SYSCTRL_XOSC_GAIN_30MHZ       (4 << SYSCTRL_XOSC_GAIN_SHIFT) /* 30MHz */
+
 #define SYSCTRL_XOSC_AMPGC              (1 << 11) /* Bit 11: Automatic amplitude gain control */
 #define SYSCTRL_XOSC_STARTUP_SHIFT      (12)      /* Bits 12-15: Start-up time */
 #define SYSCTRL_XOSC_STARTUP_MASK       (15 << SYSCTRL_XOSC_STARTUP_SHIFT)
 #  define SYSCTRL_XOSC_STARTUP(n)       ((n) << SYSCTRL_XOSC_STARTUP_SHIFT)
-#  define SYSCTRL_XOSC_STARTUP_31US     (0 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 31µs */
-#  define SYSCTRL_XOSC_STARTUP_61US     (1 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 61µs */
-#  define SYSCTRL_XOSC_STARTUP_122US    (2 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 122µs */
-#  define SYSCTRL_XOSC_STARTUP_244US    (3 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 244µs */
-#  define SYSCTRL_XOSC_STARTUP_488US    (4 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 488µs */
-#  define SYSCTRL_XOSC_STARTUP_977US    (5 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 977µs */
-#  define SYSCTRL_XOSC_STARTUP_2MS      (6 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 1953µs */
-#  define SYSCTRL_XOSC_STARTUP_4MS      (7 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 3906µs */
-#  define SYSCTRL_XOSC_STARTUP_8MS      (8 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 7813µs */
-#  define SYSCTRL_XOSC_STARTUP_16MS     (9 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 15625µs */
-#  define SYSCTRL_XOSC_STARTUP_31MS     (10 << SYSCTRL_XOSC_STARTUP_SHIFT) /* 31250µs */
-#  define SYSCTRL_XOSC_STARTUP_63MS     (11 << SYSCTRL_XOSC_STARTUP_SHIFT) /* 62500µs */
-#  define SYSCTRL_XOSC_STARTUP_125MS    (12 << SYSCTRL_XOSC_STARTUP_SHIFT) /* 125000µs */
-#  define SYSCTRL_XOSC_STARTUP_250MS    (13 << SYSCTRL_XOSC_STARTUP_SHIFT) /* 250000µs */
-#  define SYSCTRL_XOSC_STARTUP_500MS    (14 << SYSCTRL_XOSC_STARTUP_SHIFT) /* 500000µs */
-#  define SYSCTRL_XOSC_STARTUP_1S       (15 << SYSCTRL_XOSC_STARTUP_SHIFT) /* 1000000µs */
+#  define SYSCTRL_XOSC_STARTUP_31US     (0 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 31Âµs */
+#  define SYSCTRL_XOSC_STARTUP_61US     (1 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 61Âµs */
+#  define SYSCTRL_XOSC_STARTUP_122US    (2 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 122Âµs */
+#  define SYSCTRL_XOSC_STARTUP_244US    (3 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 244Âµs */
+#  define SYSCTRL_XOSC_STARTUP_488US    (4 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 488Âµs */
+#  define SYSCTRL_XOSC_STARTUP_977US    (5 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 977Âµs */
+#  define SYSCTRL_XOSC_STARTUP_2MS      (6 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 1953Âµs */
+#  define SYSCTRL_XOSC_STARTUP_4MS      (7 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 3906Âµs */
+#  define SYSCTRL_XOSC_STARTUP_8MS      (8 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 7813Âµs */
+#  define SYSCTRL_XOSC_STARTUP_16MS     (9 << SYSCTRL_XOSC_STARTUP_SHIFT)  /* 15625Âµs */
+#  define SYSCTRL_XOSC_STARTUP_31MS     (10 << SYSCTRL_XOSC_STARTUP_SHIFT) /* 31250Âµs */
+#  define SYSCTRL_XOSC_STARTUP_63MS     (11 << SYSCTRL_XOSC_STARTUP_SHIFT) /* 62500Âµs */
+#  define SYSCTRL_XOSC_STARTUP_125MS    (12 << SYSCTRL_XOSC_STARTUP_SHIFT) /* 125000Âµs */
+#  define SYSCTRL_XOSC_STARTUP_250MS    (13 << SYSCTRL_XOSC_STARTUP_SHIFT) /* 250000Âµs */
+#  define SYSCTRL_XOSC_STARTUP_500MS    (14 << SYSCTRL_XOSC_STARTUP_SHIFT) /* 500000Âµs */
+#  define SYSCTRL_XOSC_STARTUP_1S       (15 << SYSCTRL_XOSC_STARTUP_SHIFT) /* 1000000Âµs */
 
 /* 32kHz external crystal oscillator control register */
 
@@ -195,14 +185,15 @@
 #define SYSCTRL_XOSC32K_STARTUP_SHIFT   (8)       /* Bits 8-10: Oscillator start-up time */
 #define SYSCTRL_XOSC32K_STARTUP_MASK    (7 << SYSCTRL_XOSC32K_STARTUP_SHIFT)
 #  define SYSCTRL_XOSC32K_STARTUP(n)    ((n) << SYSCTRL_XOSC32K_STARTUP_SHIFT)
-#  define SYSCTRL_XOSC32K_STARTUP_122US (0 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 122µs */
-#  define SYSCTRL_XOSC32K_STARTUP_1MS   (1 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 1068µs */
-#  define SYSCTRL_XOSC32K_STARTUP_63MS  (2 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 62592µs */
-#  define SYSCTRL_XOSC32K_STARTUP_125MS (3 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 125092µs */
-#  define SYSCTRL_XOSC32K_STARTUP_500MS (4 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 500092µs */
-#  define SYSCTRL_XOSC32K_STARTUP_1S    (5 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 1000092µs */
-#  define SYSCTRL_XOSC32K_STARTUP_2S    (6 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 2000092µs */
-#  define SYSCTRL_XOSC32K_STARTUP_4S    (7 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 4000092µs */
+#  define SYSCTRL_XOSC32K_STARTUP_122US (0 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 122Âµs */
+#  define SYSCTRL_XOSC32K_STARTUP_1MS   (1 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 1068Âµs */
+#  define SYSCTRL_XOSC32K_STARTUP_63MS  (2 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 62592Âµs */
+#  define SYSCTRL_XOSC32K_STARTUP_125MS (3 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 125092Âµs */
+#  define SYSCTRL_XOSC32K_STARTUP_500MS (4 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 500092Âµs */
+#  define SYSCTRL_XOSC32K_STARTUP_1S    (5 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 1000092Âµs */
+#  define SYSCTRL_XOSC32K_STARTUP_2S    (6 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 2000092Âµs */
+#  define SYSCTRL_XOSC32K_STARTUP_4S    (7 << SYSCTRL_XOSC32K_STARTUP_SHIFT) /* 4000092Âµs */
+
 #define SYSCTRL_XOSC32K_WRTLOCK         (1 << 12)  /* Bit 12: Write lock */
 
 /* 32kHz internal oscillator control register */
@@ -219,14 +210,15 @@
 #define SYSCTRL_OSC32K_STARTUP_SHIFT    (8)       /* Bits 8-10: Oscillator start-up time */
 #define SYSCTRL_OSC32K_STARTUP_MASK     (7 << SYSCTRL_OSC32K_STARTUP_SHIFT)
 #  define SYSCTRL_OSC32K_STARTUP(n)     ((n) << SYSCTRL_OSC32K_STARTUP_SHIFT)
-#  define SYSCTRL_OSC32K_STARTUP_92US   (0 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 92µs */
-#  define SYSCTRL_OSC32K_STARTUP_122US  (1 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 122µs */
-#  define SYSCTRL_OSC32K_STARTUP_183US  (2 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 183µs */
-#  define SYSCTRL_OSC32K_STARTUP_305US  (3 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 305µs */
-#  define SYSCTRL_OSC32K_STARTUP_549US  (4 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 549µs */
-#  define SYSCTRL_OSC32K_STARTUP_1MS    (5 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 1038µs */
-#  define SYSCTRL_OSC32K_STARTUP_2MS    (6 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 2014µs */
-#  define SYSCTRL_OSC32K_STARTUP_4MS    (7 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 3967µs */
+#  define SYSCTRL_OSC32K_STARTUP_92US   (0 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 92Âµs */
+#  define SYSCTRL_OSC32K_STARTUP_122US  (1 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 122Âµs */
+#  define SYSCTRL_OSC32K_STARTUP_183US  (2 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 183Âµs */
+#  define SYSCTRL_OSC32K_STARTUP_305US  (3 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 305Âµs */
+#  define SYSCTRL_OSC32K_STARTUP_549US  (4 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 549Âµs */
+#  define SYSCTRL_OSC32K_STARTUP_1MS    (5 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 1038Âµs */
+#  define SYSCTRL_OSC32K_STARTUP_2MS    (6 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 2014Âµs */
+#  define SYSCTRL_OSC32K_STARTUP_4MS    (7 << SYSCTRL_OSC32K_STARTUP_SHIFT) /* 3967Âµs */
+
 #define SYSCTRL_OSC32K_WRTLOCK          (1 << 12)  /* Bit 12: Write lock */
 #define SYSCTRL_OSC32K_CALIB_SHIFT      (16)       /* Bits 16-22: Oscillator calibration */
 #define SYSCTRL_OSC32K_CALIB_MASK       (0x7f << SYSCTRL_OSC32K_CALIB_SHIFT)
@@ -251,6 +243,7 @@
 #  define SYSCTRL_OSC8M_PRESC_DIV2      (1 << SYSCTRL_OSC8M_PRESC_SHIFT) /* 2 */
 #  define SYSCTRL_OSC8M_PRESC_DIV3      (2 << SYSCTRL_OSC8M_PRESC_SHIFT) /* 4 */
 #  define SYSCTRL_OSC8M_PRESC_DIV8      (3 << SYSCTRL_OSC8M_PRESC_SHIFT) /* 8 */
+
 #define SYSCTRL_OSC8M_CALIB_SHIFT       (16)      /* Bits 16-27: Oscillator calibration */
 #define SYSCTRL_OSC8M_CALIB_MASK        (0xfff << SYSCTRL_OSC8M_CALIB_SHIFT)
 #  define SYSCTRL_OSC8M_CALIB(n)        ((n) << SYSCTRL_OSC8M_CALIB_SHIFT)
@@ -321,6 +314,7 @@
 #  define SYSCTRL_BOD33_ACTION_NONE     (0 << SYSCTRL_BOD33_ACTION_SHIFT) /* No action */
 #  define SYSCTRL_BOD33_ACTION_RESET    (1 << SYSCTRL_BOD33_ACTION_SHIFT) /* BOD33 generates reset */
 #  define SYSCTRL_BOD33_ACTION_INTR     (2 << SYSCTRL_BOD33_ACTION_SHIFT) /* BOD33 generates interrupt */
+
 #define SYSCTRL_BOD33_RUNSTDBY          (1 << 6)  /* Bit 6: Run in standby */
 #define SYSCTRL_BOD33_MODE              (1 << 8)  /* Bit 8: Operation mode */
 #define SYSCTRL_BOD33_CEN               (1 << 9)  /* Bit 9: Clock enable */
@@ -343,6 +337,7 @@
 #  define SYSCTRL_BOD33_PSEL_DIV16K     (13 << SYSCTRL_BOD33_PSEL_SHIFT) /* Divide clock by 16384 */
 #  define SYSCTRL_BOD33_PSEL_DIV32K     (14 << SYSCTRL_BOD33_PSEL_SHIFT) /* Divide clock by 32768 */
 #  define SYSCTRL_BOD33_PSEL_DIV64K     (15 << SYSCTRL_BOD33_PSEL_SHIFT) /* Divide clock by 65536 */
+
 #define SYSCTRL_BOD33_LEVEL_SHIFT       (16)      /* Bits 16-21: BOD33 threshold level */
 #define SYSCTRL_BOD33_LEVEL_MASK        (0x3f << SYSCTRL_BOD33_LEVEL_SHIFT)
 #  define SYSCTRL_BOD33_LEVEL(n)        ((n) << SYSCTRL_BOD33_LEVEL_SHIFT)
@@ -390,6 +385,7 @@
 #    define SYSCTRL_DPLLCTRLB_FILTER_LBFILT   (1 << SYSCTRL_DPLLCTRLB_FILTER_SHIFT) /* Low bandwidth filter */
 #    define SYSCTRL_DPLLCTRLB_FILTER_HBFILT   (2 << SYSCTRL_DPLLCTRLB_FILTER_SHIFT) /* High bandwidth filter */
 #    define SYSCTRL_DPLLCTRLB_FILTER_HDFILT   (3 << SYSCTRL_DPLLCTRLB_FILTER_SHIFT) /* High damping filter */
+
 #  define SYSCTRL_DPLLCTRLB_LPEN              (1 << 2)  /* Bit 2:  Low-Power Enable */
 #  define SYSCTRL_DPLLCTRLB_WUF               (1 << 3)  /* Bit 3:  Wake Up Fast */
 #  define SYSCTRL_DPLLCTRLB_REFCLK_SHIFT      (4)       /* Bits 4-5: Reference Clock Selection */
@@ -397,6 +393,7 @@
 #    define SYSCTRL_DPLLCTRLB_REFCLK_XOSC32   (0 << SYSCTRL_DPLLCTRLB_REFCLK_SHIFT) /* XOSC32 clock reference */
 #    define SYSCTRL_DPLLCTRLB_REFCLK_XOSC     (1 << SYSCTRL_DPLLCTRLB_REFCLK_SHIFT) /* XOSC clock reference */
 #    define SYSCTRL_DPLLCTRLB_REFCLK_GCLKDPLL (2 << SYSCTRL_DPLLCTRLB_REFCLK_SHIFT) /* GCLK_DPLL clock reference */
+
 #  define SYSCTRL_DPLLCTRLB_LTIME_SHIFT       (8)    /* Bits 8-10: Lock Time */
 #  define SYSCTRL_DPLLCTRLB_LTIME_MASK        (7 << SYSCTRL_DPLLCTRLB_LTIME_SHIFT)
 #    define SYSCTRL_DPLLCTRLB_LTIME_DEFAULT   (0 << SYSCTRL_DPLLCTRLB_LTIME_SHIFT) /* No time-out */
@@ -404,6 +401,7 @@
 #    define SYSCTRL_DPLLCTRLB_LTIME_9MS       (5 << SYSCTRL_DPLLCTRLB_LTIME_SHIFT) /* Time-out if no lock within 9 ms */
 #    define SYSCTRL_DPLLCTRLB_LTIME_10MS      (6 << SYSCTRL_DPLLCTRLB_LTIME_SHIFT) /* Time-out if no lock within 10 ms */
 #    define SYSCTRL_DPLLCTRLB_LTIME_11MS      (7 << SYSCTRL_DPLLCTRLB_LTIME_SHIFT) /* Time-out if no lock within 11 ms */
+
 #  define SYSCTRL_DPLLCTRLB_LBYPASS           (1 << 12)  /* Bit 12:  Lock Bypass */
 #  define SYSCTRL_DPLLCTRLB_DIV_SHIFT         (16)       /* Bits 16-26:  */
 #  define SYSCTRL_DPLLCTRLB_DIV_MASK          (0x7ff << SYSCTRL_DPLLCTRLB_DIV_SHIFT)
@@ -419,17 +417,17 @@
 #  define SYSCTRL_DPLLSTATUS_DIV        (1 << 3)  /* Bit 3:  Divider Enable */
 #endif
 
-/********************************************************************************************
+/****************************************************************************
  * Public Types
- ********************************************************************************************/
+ ****************************************************************************/
 
-/********************************************************************************************
+/****************************************************************************
  * Public Data
- ********************************************************************************************/
+ ****************************************************************************/
 
-/********************************************************************************************
- * Public Functions
- ********************************************************************************************/
+/****************************************************************************
+ * Public Functions Prototypes
+ ****************************************************************************/
 
 #endif /* CONFIG_ARCH_FAMILY_SAMD20 || CONFIG_ARCH_FAMILY_SAMD21 */
 #endif /* __ARCH_ARM_SRC_SAMD2L2_HARDWARE_SAMD_SYSCTRL_H */

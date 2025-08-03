@@ -1,6 +1,8 @@
 ############################################################################
 # arch/z16/src/z16f/Toolchain.defs
 #
+# SPDX-License-Identifier: Apache-2.0
+#
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
 # this work for additional information regarding copyright ownership.  The
@@ -17,19 +19,6 @@
 # under the License.
 #
 ############################################################################
-
-# Setup for the selected toolchain
-
-#
-# The ZiLOG ZDS-II Windows toolchain is the only toolchain available for
-# the ez80.
-#
-
-CONFIG_Z16F_TOOLCHAIN ?= ZDSII
-
-ifeq ($(CONFIG_WINDOWS_CYGWIN),y)
-  WINTOOL = y
-endif
 
 # These are the default directories where the ZDS-II toolchain is installed.
 # NOTE that short 8.3 path names are used in order to avoid spaces.  On my
@@ -49,20 +38,22 @@ ZDSVERSION := 5.0.1
 else ifeq ($(CONFIG_Z16F_ZDSII_V521),y)
 INSTALLROOT = C:/ZiLOG
 ZDSVERSION := 5.2.1
+else ifeq ($(CONFIG_Z16F_ZDSII_V522),y)
+INSTALLROOT = C:/ZiLOG
+ZDSVERSION := 5.2.2
 endif
 
 ifeq ($(CONFIG_WINDOWS_NATIVE),y)
   ZDSINSTALLDIR = $(INSTALLROOT)/ZDSII_ZNEO_$(ZDSVERSION)
-  INSTALLDIR = ${shell echo $(ZDSINSTALLDIR)| sed -e "s/\//\\/g"}
+  INSTALLDIR = $(shell echo $(ZDSINSTALLDIR)| sed -e "s/\//\\/g")
   ZDSBINDIR = $(INSTALLDIR)\bin
   ZDSSTDINCDIR = $(INSTALLDIR)\include\std
   ZDSZILOGINCDIR = $(INSTALLDIR)\include\zilog
   ZDSSTDLIBDIR = $(INSTALLDIR)\lib\std
   ZDSZILOGLIBDIR = $(INSTALLDIR)\lib\zilog
 else
-  WINTOOL = y
   ZDSINSTALLDIR = $(INSTALLROOT)/ZDSII_ZNEO_$(ZDSVERSION)
-  INSTALLDIR = ${shell cygpath -u "$(ZDSINSTALLDIR)"}
+  INSTALLDIR = $(shell cygpath -u "$(ZDSINSTALLDIR)")
   ZDSBINDIR = $(INSTALLDIR)/bin
   ZDSSTDINCDIR = $(INSTALLDIR)/include/std
   ZDSZILOGINCDIR = $(INSTALLDIR)/include/zilog
@@ -72,17 +63,17 @@ else
   # These are the same directories but with the directory separator
   # character swapped as needed by the ZDS-II compiler
 
-  WTOPDIR = ${shell cygpath -w "$(TOPDIR)"}
-  WZDSSTDINCDIR = ${shell cygpath -w "$(ZDSSTDINCDIR)"}
-  WZDSZILOGINCDIR = ${shell cygpath -w "$(ZDSZILOGINCDIR)"}
-  WZDSSTDLIBDIR = ${shell cygpath -w "$(ZDSSTDLIBDIR)"}
-  WZDSZILOGLIBDIR = ${shell cygpath -w "$(ZDSZILOGLIBDIR)"}
+  WTOPDIR = $(shell cygpath -w "$(TOPDIR)")
+  WZDSSTDINCDIR = $(shell cygpath -w "$(ZDSSTDINCDIR)")
+  WZDSZILOGINCDIR = $(shell cygpath -w "$(ZDSZILOGINCDIR)")
+  WZDSSTDLIBDIR = $(shell cygpath -w "$(ZDSSTDLIBDIR)")
+  WZDSZILOGLIBDIR = $(shell cygpath -w "$(ZDSZILOGLIBDIR)")
 
   # Escaped versions
 
-  ETOPDIR = ${shell echo "$(WTOPDIR)" | sed -e "s/ /%20/g"}
-  EZDSSTDINCDIR = ${shell echo "$(WZDSSTDINCDIR)" | sed -e "s/ /%20/g"}
-  EZDSZILOGINCDIR = ${shell echo "$(WZDSZILOGINCDIR)" | sed -e "s/ /%20/g"}
+  ETOPDIR = $(shell echo "$(WTOPDIR)" | sed -e "s/ /%20/g")
+  EZDSSTDINCDIR = $(shell echo "$(WZDSSTDINCDIR)" | sed -e "s/ /%20/g")
+  EZDSZILOGINCDIR = $(shell echo "$(WZDSZILOGINCDIR)" | sed -e "s/ /%20/g")
 endif
 
 # CPU Identification
@@ -105,7 +96,7 @@ endif
 
 CROSSDEV =
 CC = $(ZDSBINDIR)$(DELIM)zneocc.exe
-CPP = gcc -E
+CPP = gcc -E -P -x c
 LD = $(ZDSBINDIR)$(DELIM)zneolink.exe
 AS = $(ZDSBINDIR)$(DELIM)zneoasm.exe
 AR = $(ZDSBINDIR)$(DELIM)zneolib.exe
@@ -116,3 +107,16 @@ ASMEXT = .asm
 OBJEXT = .obj
 LIBEXT = .lib
 EXEEXT = .hex
+
+# Loadable module definitions
+
+CMODULEFLAGS = $(CFLAGS) -fvisibility=hidden
+LDMODULEFLAGS = -r -T $(call CONVERT_PATH,$(TOPDIR)/libs/libc/elf/gnu-elf.ld)
+
+# ELF module definitions
+
+CELFFLAGS = $(CFLAGS) -fvisibility=hidden
+CXXELFFLAGS = $(CXXFLAGS) -fvisibility=hidden
+
+LDELFFLAGS = -r -e main
+LDELFFLAGS += -T $(call CONVERT_PATH,$(TOPDIR)$(DELIM)libs$(DELIM)libc$(DELIM)elf$(DELIM)gnu-elf.ld)

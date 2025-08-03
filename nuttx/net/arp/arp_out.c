@@ -1,6 +1,8 @@
 /****************************************************************************
  * net/arp/arp_out.c
  *
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  *   Copyright (C) 2007-2011, 2014-2015, 2017-2018 Gregory Nutt. All rights
  *     reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
@@ -47,21 +49,13 @@
 #include <string.h>
 #include <debug.h>
 
+#include <nuttx/net/net.h>
 #include <nuttx/net/netdev.h>
-#include <nuttx/net/arp.h>
 
 #include "route/route.h"
 #include "arp/arp.h"
 
 #ifdef CONFIG_NET_ARP
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#define ETHBUF  ((struct eth_hdr_s *)&dev->d_buf[0])
-#define ARPBUF  ((struct arp_hdr_s *)&dev->d_buf[ETH_HDRLEN])
-#define IPBUF   ((struct arp_iphdr_s *)&dev->d_buf[ETH_HDRLEN])
 
 /****************************************************************************
  * Private Data
@@ -95,7 +89,7 @@ static const uint16_t g_broadcast_ipaddr[2] =
  * 33-33-00-00-00-00 0x86DD IPv6 Neighbor Discovery
  * 33-33-xx-xx-xx-xx 0x86DD IPv6 Multicast Address (RFC3307)
  *
- * The following is the first three octects of the IGMP address:
+ * The following is the first three octets of the IGMP address:
  */
 
 #ifdef CONFIG_NET_IGMP
@@ -121,7 +115,7 @@ static const uint8_t g_multicast_ethaddr[3] =
  *   If the destination IP address is in the local network (determined
  *   by logical ANDing of netmask and our IP address), the function
  *   checks the ARP cache to see if an entry for the destination IP
- *   address is found.  If so, an Ethernet header is pre-pended at the
+ *   address is found.  If so, an Ethernet header is prepended at the
  *   beginning of the packet and the function returns.
  *
  *   If no ARP cache entry is found for the destination IP address, the
@@ -140,10 +134,21 @@ void arp_out(FAR struct net_driver_s *dev)
 {
   struct ether_addr ethaddr;
   FAR struct eth_hdr_s *peth = ETHBUF;
-  FAR struct arp_iphdr_s *pip = IPBUF;
+  FAR struct arp_iphdr_s *pip = ARPIPBUF;
   in_addr_t ipaddr;
   in_addr_t destipaddr;
   int ret;
+
+  /* ARP support is only built if the Ethernet link layer is supported.
+   * Continue and send the ARP request only if this device uses the
+   * Ethernet link layer protocol.
+   */
+
+  if (dev->d_lltype != NET_LL_ETHERNET &&
+      dev->d_lltype != NET_LL_IEEE80211)
+    {
+      return;
+    }
 
 #if defined(CONFIG_NET_PKT) || defined(CONFIG_NET_ARP_SEND)
   /* Skip sending ARP requests when the frame to be transmitted was
@@ -171,14 +176,17 @@ void arp_out(FAR struct net_driver_s *dev)
 
   if (net_ipv4addr_hdrcmp(pip->eh_destipaddr, g_broadcast_ipaddr))
     {
-      memcpy(peth->dest, g_broadcast_ethaddr.ether_addr_octet, ETHER_ADDR_LEN);
+      memcpy(peth->dest,
+             g_broadcast_ethaddr.ether_addr_octet,
+             ETHER_ADDR_LEN);
       goto finish_header;
     }
 
 #ifdef CONFIG_NET_IGMP
   /* Check if the destination address is a multicast address
    *
-   * - IPv4: multicast addresses lie in the class D group -- The address range
+   * - IPv4:
+   *   multicast addresses lie in the class D group -- The address range
    *   224.0.0.0 to 239.255.255.255 (224.0.0.0/4)
    *
    * - IPv6 multicast addresses are have the high-order octet of the
@@ -240,7 +248,9 @@ void arp_out(FAR struct net_driver_s *dev)
     {
       /* Yes.. then we won't need to know the destination MAC address */
 
-      memcpy(peth->dest, g_broadcast_ethaddr.ether_addr_octet, ETHER_ADDR_LEN);
+      memcpy(peth->dest,
+             g_broadcast_ethaddr.ether_addr_octet,
+             ETHER_ADDR_LEN);
       goto finish_header;
     }
   else
@@ -252,7 +262,7 @@ void arp_out(FAR struct net_driver_s *dev)
 
   /* Check if we already have this destination address in the ARP table */
 
-  ret = arp_find(ipaddr, &ethaddr);
+  ret = arp_find(ipaddr, ethaddr.ether_addr_octet, dev, false);
   if (ret < 0)
     {
       ninfo("ARP request for IP %08lx\n", (unsigned long)ipaddr);

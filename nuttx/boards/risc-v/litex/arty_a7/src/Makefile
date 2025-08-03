@@ -1,6 +1,8 @@
 ############################################################################
 # boards/risc-v/litex/arty_a7/src/Makefile
 #
+# SPDX-License-Identifier: Apache-2.0
+#
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
 # this work for additional information regarding copyright ownership.  The
@@ -18,12 +20,32 @@
 #
 ############################################################################
 
--include $(TOPDIR)/Make.defs
+include $(TOPDIR)/Make.defs
 
 CSRCS  = litex_bringup.c litex_boot.c
 
-ifeq ($(CONFIG_LIB_BOARDCTL),y)
+ifeq ($(CONFIG_BOARDCTL),y)
 CSRCS += litex_appinit.c
+endif
+
+ifeq ($(CONFIG_LITEX_SDIO),y)
+CSRCS += litex_sdio.c
+endif
+
+ifeq ($(CONFIG_FS_AUTOMOUNTER),y)
+CSRCS += litex_automount.c
+endif
+
+ifeq ($(CONFIG_LITEX_PWM),y)
+CSRCS += litex_pwm.c
+endif
+
+ifeq ($(CONFIG_LITEX_APPLICATION_RAMDISK),y)
+CSRCS += litex_ramdisk.c
+endif
+
+ifeq ($(CONFIG_BOARDCTL_RESET),y)
+CSRCS += litex_reset.c
 endif
 
 include $(TOPDIR)/boards/Board.mk

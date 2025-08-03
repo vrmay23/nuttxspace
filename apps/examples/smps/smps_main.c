@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/smps/smps_main.c
+ * apps/examples/smps/smps_main.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Mateusz Szafoni <raiden00@railab.me>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -55,19 +42,9 @@
 #include <nuttx/fs/fs.h>
 #include <nuttx/power/smps.h>
 
-#if defined(CONFIG_EXAMPLES_SMPS)
-
-#ifndef CONFIG_DRIVERS_SMPS
-#  error "Smps example requires smps support"
-#endif
-
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-#ifndef CONFIG_LIBC_FLOATINGPOINT
-#  error "CONFIG_LIBC_FLOATINGPOINT must be set!"
-#endif
 
 #ifndef CONFIG_EXAMPLES_SMPS_TIME_DEFAULT
 #  define CONFIG_EXAMPLES_SMPS_TIME_DEFAULT 10
@@ -102,7 +79,7 @@
 #endif
 
 /****************************************************************************
- * Private Type Definition
+ * Private Types
  ****************************************************************************/
 
 /* Application arguments */
@@ -210,7 +187,7 @@ static void parse_args(FAR struct args_s *args, int argc, FAR char **argv)
   int index;
   int nargs;
 
-  for (index = 1; index < argc;)
+  for (index = 1; index < argc; )
     {
       ptr = argv[index];
       if (ptr[0] != '-')
@@ -323,21 +300,24 @@ static int validate_args(FAR struct args_s *args)
   int ret = OK;
 
   if (args->current < 0 ||
-      args->current > (((float)CONFIG_EXAMPLES_SMPS_OUT_CURRENT_LIMIT)/1000.0))
+      args->current >
+     (((float)CONFIG_EXAMPLES_SMPS_OUT_CURRENT_LIMIT) / 1000.0))
     {
       printf("Not valid current value: %.2f\n", args->current);
       goto errout;
     }
 
   if (args->voltage < 0 ||
-      args->voltage > (((float)CONFIG_EXAMPLES_SMPS_OUT_VOLTAGE_LIMIT)/1000.0))
+      args->voltage >
+     (((float)CONFIG_EXAMPLES_SMPS_OUT_VOLTAGE_LIMIT) / 1000.0))
     {
       printf("Not valid voltage value: %.2f\n", args->voltage);
       goto errout;
     }
 
   if (args->power < 0 ||
-      args->power > (((float)CONFIG_EXAMPLES_SMPS_OUT_POWER_LIMIT)/1000.0))
+      args->power >
+     (((float)CONFIG_EXAMPLES_SMPS_OUT_POWER_LIMIT) / 1000.0))
     {
       printf("Not valid power value: %.2f\n", args->power);
       goto errout;
@@ -377,7 +357,8 @@ static void feedback_print(FAR struct smps_feedback_s *fb)
   printf("\n");
 }
 
-static void print_info(struct smps_limits_s *limits, struct smps_params_s *params,
+static void print_info(struct smps_limits_s *limits,
+                       struct smps_params_s *params,
                        uint8_t *mode, struct args_s *args)
 {
   printf("-------------------------------------\n");
@@ -458,22 +439,28 @@ int main(int argc, char *argv[])
   /* Initialize SMPS limits */
 
 #if CONFIG_EXAMPLES_SMPS_OUT_VOLTAGE_LIMIT > 0
-  smps_limits.v_out = (float)CONFIG_EXAMPLES_SMPS_OUT_VOLTAGE_LIMIT/1000.0;
+  smps_limits.v_out =
+            (float)CONFIG_EXAMPLES_SMPS_OUT_VOLTAGE_LIMIT / 1000.0;
 #endif
 #if CONFIG_EXAMPLES_SMPS_IN_VOLTAGE_LIMIT > 0
-  smps_limits.v_in  = (float)CONFIG_EXAMPLES_SMPS_IN_VOLTAGE_LIMIT/1000.0;
+  smps_limits.v_in  =
+            (float)CONFIG_EXAMPLES_SMPS_IN_VOLTAGE_LIMIT / 1000.0;
 #endif
 #if CONFIG_EXAMPLES_SMPS_OUT_CURRENT_LIMIT > 0
-  smps_limits.i_out = (float)CONFIG_EXAMPLES_SMPS_OUT_CURRENT_LIMIT/1000.0;
+  smps_limits.i_out =
+            (float)CONFIG_EXAMPLES_SMPS_OUT_CURRENT_LIMIT / 1000.0;
 #endif
 #if CONFIG_EXAMPLES_SMPS_IN_CURRENT_LIMIT > 0
-  smps_limits.i_in  = (float)CONFIG_EXAMPLES_SMPS_IN_CURRENT_LIMIT/1000.0;
+  smps_limits.i_in  =
+            (float)CONFIG_EXAMPLES_SMPS_IN_CURRENT_LIMIT / 1000.0;
 #endif
 #if CONFIG_EXAMPLES_SMPS_OUT_CURRENT_LIMIT > 0
-  smps_limits.p_out = (float)CONFIG_EXAMPLES_SMPS_OUT_POWER_LIMIT/1000.0;
+  smps_limits.p_out =
+            (float)CONFIG_EXAMPLES_SMPS_OUT_POWER_LIMIT / 1000.0;
 #endif
 #if CONFIG_EXAMPLES_SMPS_IN_CURRENT_LIMIT > 0
-  smps_limits.p_in  = (float)CONFIG_EXAMPLES_SMPS_IN_POWER_LIMIT/1000.0;
+  smps_limits.p_in  =
+            (float)CONFIG_EXAMPLES_SMPS_IN_POWER_LIMIT / 1000.0;
 #endif
 
   /* Parse the command line */
@@ -508,13 +495,14 @@ int main(int argc, char *argv[])
   /* Set SMPS params */
 
   smps_params.v_out = (args->voltage > 0 ? args->voltage :
-                       (float)CONFIG_EXAMPLES_SMPS_OUT_VOLTAGE_DEFAULT/1000.0);
+                (float)CONFIG_EXAMPLES_SMPS_OUT_VOLTAGE_DEFAULT / 1000.0);
   smps_params.i_out = (args->current > 0 ? args->current :
-                       (float)CONFIG_EXAMPLES_SMPS_OUT_CURRENT_DEFAULT/1000.0);
+                (float)CONFIG_EXAMPLES_SMPS_OUT_CURRENT_DEFAULT / 1000.0);
   smps_params.p_out = (args->power > 0 ? args->power :
-                       (float)CONFIG_EXAMPLES_SMPS_OUT_POWER_DEFAULT/1000.0);
+                (float)CONFIG_EXAMPLES_SMPS_OUT_POWER_DEFAULT / 1000.0);
 
-  args->time = (args->time == 0 ? CONFIG_EXAMPLES_SMPS_TIME_DEFAULT : args->time);
+  args->time = (args->time == 0 ? CONFIG_EXAMPLES_SMPS_TIME_DEFAULT :
+                args->time);
 
   printf("\nStart smps_main application!\n\n");
 
@@ -527,7 +515,8 @@ int main(int argc, char *argv[])
   fd = open(CONFIG_EXAMPLES_SMPS_DEVPATH, 0);
   if (fd <= 0)
     {
-      printf("smps_main: open %s failed %d\n", CONFIG_EXAMPLES_SMPS_DEVPATH, errno);
+      printf("smps_main: open %s failed %d\n",
+             CONFIG_EXAMPLES_SMPS_DEVPATH, errno);
       goto errout;
     }
 
@@ -569,14 +558,14 @@ int main(int argc, char *argv[])
 
   /* Main loop */
 
-  while(terminate != true)
+  while (terminate != true)
     {
       /* Get current SMPS state */
 
       ret = ioctl(fd, PWRIOC_GET_STATE, (unsigned long)&smps_state);
       if (ret < 0)
         {
-          printf("Failed to get state %d \n", ret);
+          printf("Failed to get state %d\n", ret);
         }
 
       /* Terminate if fault state */
@@ -618,7 +607,6 @@ int main(int argc, char *argv[])
     }
 
 errout:
-
   if (fd > 0)
     {
       printf("Stop smps driver\n");
@@ -639,4 +627,3 @@ errout:
   return 0;
 }
 
-#endif /* CONFIG_EXAMPLE_SMPS */

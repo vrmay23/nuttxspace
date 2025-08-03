@@ -1,70 +1,66 @@
 /****************************************************************************
  * apps/testing/ostest/signest.c
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
-#include <sys/types.h>
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
+#include <nuttx/config.h>
+
+#include <assert.h>
+#include <errno.h>
+#include <pthread.h>
+#include <sched.h>
+#include <semaphore.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/types.h>
 #include <unistd.h>
-#include <semaphore.h>
-#include <signal.h>
-#include <sched.h>
-#include <errno.h>
+#include <debug.h>
+
 #include "ostest.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifndef NULL
-# define NULL (void*)0
-#endif
-
-#define WAKEUP_SIGNAL 17
+#define WAKEUP_SIGNAL SIGRTMIN
 #define SIGVALUE_INT  42
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
+static pthread_t g_waiterpid;
+static pthread_t g_interferepid;
 static sem_t g_waiter_sem;
 static sem_t g_interferer_sem;
+static sem_t g_sem_thread_started;
+static sem_t g_sem_signal_finish;
 static volatile bool g_waiter_running;
 static volatile bool g_interferer_running;
 static volatile bool g_done;
-static volatile int g_nestlevel;
 
 static volatile int g_even_handled;
 static volatile int g_odd_handled;
@@ -80,29 +76,47 @@ static volatile int g_nest_level;
 static bool signest_catchable(int signo)
 {
 #ifdef CONFIG_SIG_SIGSTOP_ACTION
-   if (signo == SIGSTOP || signo == SIGCONT)
-     {
-       return false;
-     }
+  if (signo == SIGSTOP || signo == SIGCONT)
+    {
+      return false;
+    }
 #endif
 
 #ifdef CONFIG_SIG_SIGKILL_ACTION
-   if (signo == SIGKILL)
-     {
-       return false;
-     }
+  if (signo == SIGKILL)
+    {
+      return false;
+    }
 #endif
 
   return true;
+}
+
+static void interfere_action(int signo)
+{
+  pthread_t pid = pthread_self();
+  if (pid != g_interferepid)
+    {
+      printf("interfere_action: Delivered to wrong TID %d, expected %d\n",
+             pid, g_interferepid);
+      ASSERT(false);
+    }
 }
 
 static void waiter_action(int signo)
 {
   int nest_level;
 
+  pthread_t pid = pthread_self();
+  if (pid != g_waiterpid)
+    {
+      printf("waiter_action: Delivered to wrong TID %d, expected %d\n",
+             pid, g_waiterpid);
+      ASSERT(false);
+    }
+
   sched_lock();
   nest_level = g_nest_level++;
-  sched_unlock();
 
   if ((signo & 1) != 0)
     {
@@ -122,33 +136,37 @@ static void waiter_action(int signo)
     }
 
   g_nest_level = nest_level;
+  sched_unlock();
+
+  sem_post(&g_sem_signal_finish);
 }
 
-static int waiter_main(int argc, char *argv[])
+static FAR void *waiter_main(FAR void *arg)
 {
   sigset_t set;
   struct sigaction act;
   int ret;
   int i;
 
-  printf("waiter_main: Waiter started\n" );
-  printf("waiter_main: Setting signal mask\n" );
+  printf("waiter_main: Waiter started\n");
+  printf("waiter_main: Setting signal mask\n");
 
   sigemptyset(&set);
   ret = sigprocmask(SIG_SETMASK, &set, NULL);
   if (ret < 0)
     {
       printf("waiter_main: ERROR sigprocmask failed: %d\n", errno);
-      return EXIT_FAILURE;
+      ASSERT(false);
+      return NULL;
     }
 
-  printf("waiter_main: Registering signal handler\n" );
+  printf("waiter_main: Registering signal handler\n");
 
   act.sa_handler = waiter_action;
   act.sa_flags   = 0;
 
   sigemptyset(&act.sa_mask);
-  for (i = 1; i < MAX_SIGNO; i += 2)
+  for (i = 1; i <= MAX_SIGNO - 1; i += 2)
     {
       if (signest_catchable(i))
         {
@@ -156,23 +174,30 @@ static int waiter_main(int argc, char *argv[])
         }
     }
 
-  for (i = 1; i < MAX_SIGNO; i++)
+  for (i = 1; i <= MAX_SIGNO - 1; i++)
     {
       if (signest_catchable(i))
         {
           ret = sigaction(i, &act, NULL);
           if (ret < 0)
             {
-              printf("waiter_main: WARNING sigaction failed\n" , errno);
-              return EXIT_FAILURE;
+              printf("waiter_main: WARNING sigaction failed with %d\n",
+                     errno);
+              return NULL;
             }
         }
     }
 
+  act.sa_handler = interfere_action;
+  act.sa_flags   = 0;
+  sigemptyset(&act.sa_mask);
+  sigaction(MAX_SIGNO, &act, NULL);
+
   /* Now just loop until the test completes */
 
-  printf("waiter_main: Waiting on semaphore\n" );
+  printf("waiter_main: Waiting on semaphore\n");
   FFLUSH();
+  sem_post(&g_sem_thread_started);
 
   g_waiter_running = true;
   while (!g_done)
@@ -183,14 +208,14 @@ static int waiter_main(int argc, char *argv[])
   /* Just exit, the system should clean up the signal handlers */
 
   g_waiter_running = false;
-  return EXIT_SUCCESS;
+  return NULL;
 }
 
-static int interfere_main(int argc, char *argv[])
+static FAR void *interfere_main(FAR void *arg)
 {
   /* Now just loop staying in the way as much as possible */
 
-  printf("interfere_main: Waiting on semaphore\n" );
+  printf("interfere_main: Waiting on semaphore\n");
   FFLUSH();
 
   g_interferer_running = true;
@@ -204,6 +229,37 @@ static int interfere_main(int argc, char *argv[])
   g_interferer_running = false;
   return EXIT_SUCCESS;
 }
+
+static void wait_finish(int pid, int sig)
+{
+  struct timespec ts;
+  int wait_times;
+
+  wait_times = 0;
+  if (signest_catchable(sig))
+    {
+      wait_times++;
+    }
+
+  if (signest_catchable(sig + 1))
+    {
+      wait_times++;
+    }
+
+  while (wait_times > 0)
+    {
+      clock_gettime(CLOCK_REALTIME, &ts);
+      ts.tv_sec += 2;
+      if (sem_timedwait(&g_sem_signal_finish, &ts) != OK)
+        {
+          sinfo("signest_test wait too long");
+          ASSERT(false);
+        }
+
+      wait_times--;
+    }
+}
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -211,24 +267,23 @@ static int interfere_main(int argc, char *argv[])
 void signest_test(void)
 {
   struct sched_param param;
-  pid_t waiterpid;
-  pid_t interferepid;
+  pthread_attr_t attr;
   int total_signals;
   int total_handled;
   int total_nested;
   int even_signals;
   int odd_signals;
-  int prio;
   int ret;
   int i;
   int j;
 
   sem_init(&g_waiter_sem, 0, 0);
   sem_init(&g_interferer_sem, 0, 0);
+  sem_init(&g_sem_thread_started, 0, 0);
+  sem_init(&g_sem_signal_finish, 0, 0);
   g_waiter_running = false;
   g_interferer_running = false;
   g_done = false;
-  g_nestlevel = 0;
 
   even_signals = 0;
   odd_signals = 0;
@@ -240,81 +295,90 @@ void signest_test(void)
 
   g_nest_level = 0;
 
-  ret = sched_getparam (0, &param);
+  ret = sched_getparam(0, &param);
   if (ret < 0)
     {
-      printf("signest_test: ERROR sched_getparam() failed\n" );
+      printf("signest_test: ERROR sched_getparam() failed\n");
+      ASSERT(false);
       param.sched_priority = PTHREAD_DEFAULT_PRIORITY;
     }
 
   /* Start waiter thread  */
 
-  prio = param.sched_priority + 1;
-  printf("signest_test: Starting signal waiter task at priority %d\n", prio);
-  waiterpid = task_create("waiter", param.sched_priority,
-                           STACKSIZE, waiter_main, NULL);
-  if (waiterpid == ERROR)
+  param.sched_priority++;
+  printf("signest_test: Starting signal waiter task at priority %d\n",
+         param.sched_priority);
+  pthread_attr_init(&attr);
+  pthread_attr_setschedparam(&attr, &param);
+  pthread_attr_setstacksize(&attr, STACKSIZE);
+  ret = pthread_create(&g_waiterpid, &attr, waiter_main, NULL);
+  if (ret != 0)
     {
       printf("signest_test: ERROR failed to start waiter_main\n");
+      ASSERT(false);
       return;
     }
 
-  printf("signest_test: Started waiter_main pid=%d\n", waiterpid);
+  printf("signest_test: Started waiter_main pid=%d\n", g_waiterpid);
 
   /* Start interfering thread  */
 
-  prio++;
-  printf("signest_test: Starting interfering task at priority %d\n", prio);
-  interferepid = task_create("interfere", param.sched_priority,
-                           STACKSIZE, interfere_main, NULL);
-  if (interferepid == ERROR)
+  param.sched_priority++;
+  printf("signest_test: Starting interfering task at priority %d\n",
+         param.sched_priority);
+  pthread_attr_setschedparam(&attr, &param);
+  ret = pthread_create(&g_interferepid, &attr, interfere_main, NULL);
+  if (ret != 0)
     {
       printf("signest_test: ERROR failed to start interfere_main\n");
+      ASSERT(false);
       goto errout_with_waiter;
     }
 
-  printf("signest_test: Started interfere_main pid=%d\n", interferepid);
+  printf("signest_test: Started interfere_main pid=%d\n", g_interferepid);
 
   /* Wait a bit */
 
   FFLUSH();
-  usleep(500*1000L);
+  sem_wait(&g_sem_thread_started);
 
-  /* Then signal the waiter thread with back-to-back signals, one masked and the other unmasked. */
+  /* Then signal the waiter thread with back-to-back signals, one masked
+   * and the other unmasked.
+   */
 
   for (i = 0; i < 10; i++)
     {
-      for (j = 1; j < MAX_SIGNO; j += 2)
+      for (j = 1; j + 1 <= MAX_SIGNO - 1; j += 2)
         {
           if (signest_catchable(j))
             {
-              kill(waiterpid, j);
+              pthread_kill(g_waiterpid, j);
               odd_signals++;
             }
 
           if (signest_catchable(j + 1))
             {
-              kill(waiterpid, j + 1);
+              pthread_kill(g_waiterpid, j + 1);
               even_signals++;
             }
 
-          usleep(10*1000L);
+          wait_finish(g_waiterpid, j);
 
           /* Even then odd */
 
           if (signest_catchable(j + 1))
             {
-              kill(waiterpid, j + 1);
+              pthread_kill(g_waiterpid, j + 1);
               even_signals++;
             }
 
           if (signest_catchable(j))
             {
-              kill(waiterpid, j);
+              pthread_kill(g_waiterpid, j);
               odd_signals++;
             }
 
-          usleep(10*1000L);
+          wait_finish(g_waiterpid, j);
         }
     }
 
@@ -339,7 +403,7 @@ void signest_test(void)
 
   for (i = 0; i < 10; i++)
     {
-      for (j = 1; j < MAX_SIGNO; j += 2)
+      for (j = 1; j + 1 <= MAX_SIGNO - 1; j += 2)
         {
           /* Odd then even */
 
@@ -347,19 +411,19 @@ void signest_test(void)
 
           if (signest_catchable(j))
             {
-              kill(waiterpid, j);
+              pthread_kill(g_waiterpid, j);
               odd_signals++;
             }
 
           if (signest_catchable(j + 1))
             {
-              kill(waiterpid, j + 1);
+              pthread_kill(g_waiterpid, j + 1);
               even_signals++;
             }
 
           sched_unlock();
 
-          usleep(10*1000L);
+          wait_finish(g_waiterpid, j);
 
           /* Even then odd */
 
@@ -367,19 +431,19 @@ void signest_test(void)
 
           if (signest_catchable(j + 1))
             {
-              kill(waiterpid, j + 1);
+              pthread_kill(g_waiterpid, j + 1);
               even_signals++;
             }
 
           if (signest_catchable(j))
             {
-              kill(waiterpid, j);
+              pthread_kill(g_waiterpid, j);
               odd_signals++;
             }
 
           sched_unlock();
 
-          usleep(10*1000L);
+          wait_finish(g_waiterpid, j);
         }
     }
 
@@ -401,15 +465,17 @@ void signest_test(void)
 
   for (i = 0; i < 10; i++)
     {
-      for (j = 1; j < MAX_SIGNO; j += 2)
+      for (j = 1; j + 1 <= MAX_SIGNO - 1; j += 2)
         {
           /* Odd then even */
 
           sched_lock();
 
+          pthread_kill(g_interferepid, MAX_SIGNO);
+
           if (signest_catchable(j))
             {
-              kill(waiterpid, j);
+              pthread_kill(g_waiterpid, j);
               odd_signals++;
             }
 
@@ -417,20 +483,20 @@ void signest_test(void)
 
           if (signest_catchable(j + 1))
             {
-              kill(waiterpid, j + 1);
+              pthread_kill(g_waiterpid, j + 1);
               even_signals++;
             }
 
           sched_unlock();
 
-          usleep(10*1000L);
+          wait_finish(g_waiterpid, j);
 
           /* Even then odd */
 
           sched_lock();
           if (signest_catchable(j + 1))
             {
-              kill(waiterpid, j + 1);
+              pthread_kill(g_waiterpid, j + 1);
               even_signals++;
             }
 
@@ -438,13 +504,13 @@ void signest_test(void)
 
           if (signest_catchable(j))
             {
-              kill(waiterpid, j);
+              pthread_kill(g_waiterpid, j);
               odd_signals++;
             }
 
           sched_unlock();
 
-          usleep(10*1000L);
+          wait_finish(g_waiterpid, j);
         }
     }
 
@@ -454,7 +520,11 @@ errout_with_waiter:
   g_done = true;
   sem_post(&g_waiter_sem);
   sem_post(&g_interferer_sem);
-  usleep(500*1000L);
+  do
+    {
+      usleep(500 * 1000L);
+    }
+  while (g_waiter_running || g_interferer_running);
 
   /* Check the final test results */
 
@@ -475,40 +545,55 @@ errout_with_waiter:
   if (g_waiter_running)
     {
       printf("signest_test: ERROR waiter is still running\n");
+      ASSERT(false);
     }
 
   if (g_interferer_running)
     {
       printf("signest_test: ERROR interferer is still running\n");
+      ASSERT(false);
     }
 
   if (total_signals != total_handled)
     {
       printf("signest_test: ERROR only %d of %d signals were handled\n",
              total_handled, total_signals);
+      ASSERT(false);
     }
 
   if (odd_signals != g_odd_handled)
     {
       printf("signest_test: ERROR only %d of %d ODD signals were handled\n",
              g_odd_handled, odd_signals);
+      ASSERT(false);
     }
 
   if (even_signals != g_even_handled)
     {
       printf("signest_test: ERROR only %d of %d EVEN signals were handled\n",
              g_even_handled, even_signals);
+      ASSERT(false);
     }
 
   if (g_odd_nested > 0)
     {
       printf("signest_test: ERROR %d ODD signals were nested\n",
              g_odd_nested);
+      ASSERT(false);
+    }
+
+  /* Unregister signal handlers */
+
+  for (i = 1; i <= MAX_SIGNO; i++)
+    {
+      signal(i, SIG_DFL);
     }
 
   sem_destroy(&g_waiter_sem);
   sem_destroy(&g_interferer_sem);
+  sem_destroy(&g_sem_thread_started);
+  sem_destroy(&g_sem_signal_finish);
 
-  printf("signest_test: done\n" );
+  printf("signest_test: done\n");
   FFLUSH();
 }

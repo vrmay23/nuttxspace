@@ -1,23 +1,12 @@
 /****************************************************************************
  * include/nuttx/net/netconfig.h
- * Configuration options for NuttX networking.
  *
- * This file is used for tweaking various configuration options for the
- * network. This is most assuring the correct default values are provided
- * and that configured options are valid.
- *
- * Note: Network configuration options the netconfig.h should not be changed,
- * but rather the per-project defconfig file.
- *
- *   Copyright (C) 2007, 2011, 2014-2015, 2017-2019 Gregory Nutt. All rights
- *     reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * This logic was leveraged from uIP which also has a BSD-style license:
- *
- *   Author: Adam Dunkels <adam@dunkels.com>
- *   Copyright (c) 2001-2003, Adam Dunkels.
- *   All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2007, 2011, 2014-2015, 2017-2019 Gregory Nutt.
+ * All rights reserved.
+ * SPDX-FileCopyrightText: 2001-2003, Adam Dunkels. All rights reserved.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-FileContributor: Adam Dunkels <adam@dunkels.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,28 +37,117 @@
 #ifndef __INCLUDE_NUTTX_NET_NETCONFG_H
 #define __INCLUDE_NUTTX_NET_NETCONFG_H
 
+/* Note: Network configuration options the netconfig.h should not be changed,
+ * but rather the per-project defconfig file.
+ */
+
 /****************************************************************************
  * Included Files
  ****************************************************************************/
 
-#include <stdint.h>
 #include <nuttx/config.h>
+
+#include <stdint.h>
+#include <sys/param.h>
+#include <sys/socket.h>
+
 #include <nuttx/net/ethernet.h>
 
 /****************************************************************************
- * Public Definitions
+ * Pre-processor Definitions
  ****************************************************************************/
 
-/****************************************************************************
- * Public Type Definitions
- ****************************************************************************/
+/* Using the following definitions, the following socket() arguments should
+ * provide a valid socket in all configurations:
+ *
+ *   ret = socket(NET_SOCK_FAMILY, NET_SOCK_TYPE,
+ *                NET_SOCK_PROTOCOL);
+ */
 
-#ifndef MAX
-#  define MAX(a,b) ((a) > (b) ? (a) : (b))
+/* The TCP/UDP stack, which is used for determining HAVE_PFINET(6)_SOCKETS */
+
+#undef NET_TCP_HAVE_STACK
+#if defined(CONFIG_NET_TCP) && !defined(CONFIG_NET_TCP_NO_STACK)
+#  define NET_TCP_HAVE_STACK 1
 #endif
 
-#ifndef MIN
-#  define MIN(a,b) ((a) < (b) ? (a) : (b))
+#undef NET_UDP_HAVE_STACK
+#if defined(CONFIG_NET_UDP) && !defined(CONFIG_NET_UDP_NO_STACK)
+#  define NET_UDP_HAVE_STACK 1
+#endif
+
+/* The address family that we used to create the socket really does not
+ * matter.  It should, however, be valid in the current configuration.
+ */
+
+#undef HAVE_INET_SOCKETS
+#undef HAVE_PFINET_SOCKETS
+#undef HAVE_PFINET6_SOCKETS
+
+#if defined(CONFIG_NET_IPv4) || defined(CONFIG_NET_IPv6)
+#  define HAVE_INET_SOCKETS
+
+#  if (defined(CONFIG_NET_IPv4) && (defined(NET_UDP_HAVE_STACK) || \
+       defined(NET_TCP_HAVE_STACK) || defined(CONFIG_NET_USRSOCK))) || \
+       defined(CONFIG_NET_ICMP_SOCKET)
+#    define HAVE_PFINET_SOCKETS
+#  endif
+
+#  if (defined(CONFIG_NET_IPv6) && (defined(NET_UDP_HAVE_STACK) || \
+       defined(NET_TCP_HAVE_STACK) || defined(CONFIG_NET_USRSOCK))) || \
+       defined(CONFIG_NET_ICMPv6_SOCKET)
+#    define HAVE_PFINET6_SOCKETS
+#  endif
+#endif
+
+#if defined(HAVE_PFINET_SOCKETS)
+#  define NET_SOCK_FAMILY  AF_INET
+#elif defined(HAVE_PFINET6_SOCKETS)
+#  define NET_SOCK_FAMILY  AF_INET6
+#elif defined(CONFIG_NET_LOCAL)
+#  define NET_SOCK_FAMILY  AF_LOCAL
+#elif defined(CONFIG_NET_PKT)
+#  define NET_SOCK_FAMILY  AF_PACKET
+#elif defined(CONFIG_NET_CAN)
+#  define NET_SOCK_FAMILY  AF_CAN
+#elif defined(CONFIG_NET_IEEE802154)
+#  define NET_SOCK_FAMILY  AF_IEEE802154
+#elif defined(CONFIG_WIRELESS_PKTRADIO)
+#  define NET_SOCK_FAMILY  AF_PKTRADIO
+#elif defined(CONFIG_NET_BLUETOOTH)
+#  define NET_SOCK_FAMILY  AF_BLUETOOTH
+#elif defined(CONFIG_NET_USRSOCK)
+#  define NET_SOCK_FAMILY  AF_INET
+#elif defined(CONFIG_NET_NETLINK)
+#  define NET_SOCK_FAMILY  AF_NETLINK
+#elif defined(CONFIG_NET_RPMSG)
+#  define NET_SOCK_FAMILY  AF_RPMSG
+#else
+#  define NET_SOCK_FAMILY  AF_UNSPEC
+#endif
+
+/* Socket protocol of zero normally works */
+
+#define NET_SOCK_PROTOCOL  0
+
+/* SOCK_CTRL is the preferred socket type to use when we just want a
+ * socket for performing driver ioctls.
+ */
+
+#define NET_SOCK_TYPE (SOCK_CTRL | SOCK_CLOEXEC)
+
+#if NET_SOCK_FAMILY == AF_INET
+#  if !defined(CONFIG_NET_UDP) && !defined(CONFIG_NET_TCP) && \
+      defined(CONFIG_NET_ICMP_SOCKET)
+#   undef NET_SOCK_PROTOCOL
+#   define NET_SOCK_PROTOCOL IPPROTO_ICMP
+#  endif
+#elif NET_SOCK_FAMILY == AF_INET6
+#  if !defined(CONFIG_NET_UDP) && !defined(CONFIG_NET_TCP) && \
+      defined(CONFIG_NET_ICMPv6_SOCKET)
+#   undef NET_SOCK_PROTOCOL
+#   define NET_SOCK_PROTOCOL IPPROTO_ICMP6
+#  endif
 #endif
 
 /* Eliminate dependencies on other header files.  This should not harm
@@ -195,10 +273,18 @@
  * packet size of all enabled link layer protocols.
  */
 
+#ifndef CONFIG_NET_LOOPBACK_PKTSIZE
+#  define CONFIG_NET_LOOPBACK_PKTSIZE 0
+#endif
+
 #if CONFIG_NET_LOOPBACK_PKTSIZE < MAX_NETDEV_PKTSIZE
 #  define NET_LO_PKTSIZE        MAX_NETDEV_PKTSIZE
 #else
 #  define NET_LO_PKTSIZE        CONFIG_NET_LOOPBACK_PKTSIZE
+#endif
+
+#ifndef CONFIG_NET_SEND_BUFSIZE
+#  define CONFIG_NET_SEND_BUFSIZE 0
 #endif
 
 /* Layer 3/4 Configuration Options ******************************************/
@@ -210,18 +296,7 @@
  * This should normally not be changed.
  */
 
-#define IP_TTL 64
-
-#ifdef CONFIG_NET_TCP_REASSEMBLY
-#  ifndef CONFIG_NET_TCP_REASS_MAXAGE
-  /* The maximum time an IP fragment should wait in the reassembly
-   * buffer before it is dropped.  Units are deci-seconds, the range
-   * of the timer is 8-bits.
-   */
-
-#    define CONFIG_NET_TCP_REASS_MAXAGE (20 * 10) /* 20 seconds */
-#  endif
-#endif
+#define IP_TTL_DEFAULT 64
 
 /* Network drivers often receive packets with garbage at the end
  * and are longer than the size of packet in the TCP header.  The
@@ -243,18 +318,8 @@
 
 /* UDP configuration options */
 
-/* The maximum amount of concurrent UDP connection, Default: 10 */
-
-#ifndef CONFIG_NET_UDP_CONNS
-#  ifdef CONFIG_NET_UDP
-#    define CONFIG_NET_UDP_CONNS 10
-#  else
-#    define CONFIG_NET_UDP_CONNS  0
-#  endif
-#endif
-
-/* The UDP maximum packet size. This is should not be to set to more
- * than NETDEV_PKTSIZE(d) - NET_LL_HDRLEN(dev) - __UDP_HDRLEN - IPv*_HDRLEN.
+/* The UDP maximum packet size. This should not be set to more than
+ * NETDEV_PKTSIZE(d) - NET_LL_HDRLEN(dev) - __UDP_HDRLEN - IPv*_HDRLEN.
  */
 
 #define UDP_MSS(d,h)               (NETDEV_PKTSIZE(d) - NET_LL_HDRLEN(d) - __UDP_HDRLEN - (h))
@@ -279,7 +344,14 @@
 #  define TUN_UDP_MSS(h)           (CONFIG_NET_TUN_PKTSIZE - __UDP_HDRLEN - (h))
 #endif
 
+#ifdef CONFIG_NET_USRSOCK
+#  define __MIN_UDP_MSS(h)         INT_MAX
+#  define __MAX_UDP_MSS(h)         0
+#endif
+
 #ifdef CONFIG_NET_ETHERNET
+#  undef  __MIN_UDP_MSS
+#  undef  __MAX_UDP_MSS
 #  define __MIN_UDP_MSS(h)         ETH_UDP_MSS(h)
 #  define __MAX_UDP_MSS(h)         ETH_UDP_MSS(h)
 #  define __ETH_MIN_UDP_MSS(h)     ETH_UDP_MSS(h)
@@ -351,7 +423,7 @@
 #  define MAX_UDP_MSS           __MAX_UDP_MSS(__IPv4_HDRLEN)
 #endif
 
-/* If IPv6 is support, it will have the smaller MSS */
+/* If IPv6 is supported, it will have the smaller MSS. */
 
 #ifdef CONFIG_NET_IPv6
 #  undef  MIN_UDP_MSS
@@ -364,21 +436,6 @@
 
 /* TCP configuration options */
 
-/* The maximum number of simultaneously open TCP connections.
- *
- * Since the TCP connections are statically allocated, turning this
- * configuration knob down results in less RAM used. Each TCP
- * connection requires approximately 30 bytes of memory.
- */
-
-#ifndef CONFIG_NET_TCP_CONNS
-#  ifdef CONFIG_NET_TCP
-#   define CONFIG_NET_TCP_CONNS 10
-#  else
-#   define CONFIG_NET_TCP_CONNS  0
-#  endif
-#endif
-
 /* The maximum number of simultaneously listening TCP ports.
  *
  * Each listening TCP port requires 2 bytes of memory.
@@ -388,21 +445,9 @@
 #  define CONFIG_NET_MAX_LISTENPORTS 20
 #endif
 
-/* Define the maximum number of concurrently active UDP and TCP
- * ports.  This number must be greater than the number of open
- * sockets in order to support multi-threaded read/write operations.
- */
-
-#ifndef CONFIG_NET_NACTIVESOCKETS
-#  define CONFIG_NET_NACTIVESOCKETS (CONFIG_NET_TCP_CONNS + CONFIG_NET_UDP_CONNS)
-#endif
-
 /* The initial retransmission timeout counted in timer pulses.
  * REVISIT:  TCP RTO really should be calculated dynamically for each TCP
- * connection:
- *
- * https://unix.stackexchange.com/questions/210367/changing-the-tcp-rto-value-in-linux
- * http://sgros.blogspot.com/2012/02/calculating-tcp-rto.html
+ * connection.
  */
 
 #ifdef CONFIG_NET_TCP_RTO
@@ -417,7 +462,11 @@
  * This should not be changed.
  */
 
-#define TCP_MAXRTX  8
+#ifdef CONFIG_NET_TCP_MAXRTX
+#  define TCP_MAXRTX CONFIG_NET_TCP_MAXRTX
+#else
+#  define TCP_MAXRTX 8
+#endif
 
 /* The maximum number of times a SYN segment should be retransmitted
  * before a connection request should be deemed to have been
@@ -426,14 +475,18 @@
  * This should not need to be changed.
  */
 
-#define TCP_MAXSYNRTX 5
+#ifdef CONFIG_NET_TCP_MAXSYNRTX
+#  define TCP_MAXSYNRTX CONFIG_NET_TCP_MAXSYNRTX
+#else
+#  define TCP_MAXSYNRTX 5
+#endif
 
-/* The TCP maximum segment size. This is should not be set to more
- * than NETDEV_PKTSIZE(dev) - NET_LL_HDRLEN(dev) - IPvN_HDRLEN - __TCP_HDRLEN.
+/* The TCP maximum segment size. This should not be set to more than
+ * NETDEV_PKTSIZE(dev) - NET_LL_HDRLEN(dev) - IPvN_HDRLEN - __TCP_HDRLEN.
  *
  * In the case where there are multiple network devices with different
- * link layer protocols, each network device may support a different UDP
- * MSS value.  Here we arbitrarily select the minimum MSS for that case.
+ * link layer protocols, each network device may support a different MSS
+ * value.  Here we arbitrarily select the minimum MSS for that case.
  *
  * REVISIT: __TCP_HDRLEN is not really a constant!
  */
@@ -462,7 +515,14 @@
 #  define TUN_TCP_MSS(h)        (CONFIG_NET_TUN_PKTSIZE - __TCP_HDRLEN - (h))
 #endif
 
+#ifdef CONFIG_NET_USRSOCK
+#  define __MIN_TCP_MSS(h)         INT_MAX
+#  define __MAX_TCP_MSS(h)         0
+#endif
+
 #ifdef CONFIG_NET_ETHERNET
+#  undef  __MIN_TCP_MSS
+#  undef  __MAX_TCP_MSS
 #  define __MIN_TCP_MSS(h)         ETH_TCP_MSS(h)
 #  define __MAX_TCP_MSS(h)         ETH_TCP_MSS(h)
 #  define __ETH_MIN_TCP_MSS(h)     ETH_TCP_MSS(h)
@@ -521,7 +581,7 @@
 #endif
 
 /* If IPv4 is supported, it will have the larger MSS.
- * NOTE: MSS calcuation excludes the __TCP_HDRLEN.
+ * NOTE: MSS calculation excludes the __TCP_HDRLEN.
  */
 
 #ifdef CONFIG_NET_IPv6
@@ -542,7 +602,7 @@
 #  define MAX_TCP_MSS           __MAX_TCP_MSS(__IPv4_HDRLEN)
 #endif
 
-/* If IPv6 is supported, it will have the smaller MSS */
+/* If IPv6 is supported, it will have the smaller MSS. */
 
 #ifdef CONFIG_NET_IPv6
 #  undef MIN_TCP_MSS
@@ -591,25 +651,13 @@
 #  define CONFIG_NET_ARP_MAXAGE 120
 #endif
 
-/* Usrsock configuration options */
-
-/* The maximum amount of concurrent usrsock connections, Default: 6 */
-
-#ifndef CONFIG_NET_USRSOCK_CONNS
-#  ifdef CONFIG_NET_USRSOCK
-#    define CONFIG_NET_USRSOCK_CONNS 6
-#  else
-#    define CONFIG_NET_USRSOCK_CONNS 0
-#  endif
-#endif
-
 /****************************************************************************
  * Public Type Definitions
  ****************************************************************************/
 
 /* Statistics datatype
  *
- * This typedef defines the dataype used for keeping statistics in
+ * This typedef defines the datatype used for keeping statistics in
  * the network.
  */
 

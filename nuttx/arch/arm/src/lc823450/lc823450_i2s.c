@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/lc823450/lc823450_i2s.c
  *
- *   Copyright 2017, 2018 Sony Video & Sound Products Inc.
- *   Author: Masayuki Ishikawa <Masayuki.Ishikawa@jp.sony.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,8 +27,10 @@
 #include <arch/board/board.h>
 #include <nuttx/config.h>
 
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
+#include <inttypes.h>
 
 #include <nuttx/sched.h>
 #include <nuttx/arch.h>
@@ -51,7 +40,7 @@
 #include <nuttx/audio/audio.h>
 #include <nuttx/audio/i2s.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "lc823450_dma.h"
 #include "lc823450_i2s.h"
 #include "lc823450_syscontrol.h"
@@ -247,12 +236,12 @@ static const struct i2s_ops_s g_i2sops =
 };
 
 static DMA_HANDLE _hrxdma;
-static sem_t      _sem_rxdma;
-static sem_t      _sem_buf_over;
+static sem_t _sem_rxdma = SEM_INITIALIZER(0);
+static sem_t _sem_buf_over = SEM_INITIALIZER(0);
 
 static DMA_HANDLE _htxdma;
-static sem_t      _sem_txdma;
-static sem_t      _sem_buf_under;
+static sem_t _sem_txdma = SEM_INITIALIZER(0);
+static sem_t _sem_buf_under = SEM_INITIALIZER(0);
 
 /****************************************************************************
  * Public Data
@@ -270,10 +259,10 @@ extern unsigned int XT1OSC_CLK;
 
 static void _setup_audio_pll(uint32_t freq)
 {
-  DEBUGASSERT(24000000 == XT1OSC_CLK);
+  uint32_t m = 0;
+  uint32_t n = 0;
 
-  uint32_t m;
-  uint32_t n;
+  DEBUGASSERT(24000000 == XT1OSC_CLK);
 
   switch (freq)
     {
@@ -288,7 +277,7 @@ static void _setup_audio_pll(uint32_t freq)
         break;
 
       default:
-        DEBUGASSERT(false);
+        DEBUGPANIC();
     }
 
   /* Set divider */
@@ -317,15 +306,6 @@ static void _setup_audio_pll(uint32_t freq)
               0x0,
               0x0200  /* AUDDIV=2 */
               );
-}
-
-/****************************************************************************
- * Name: _i2s_semtake
- ****************************************************************************/
-
-static int _i2s_semtake(FAR sem_t *sem)
-{
-  return nxsem_wait_uninterruptible(sem);
 }
 
 /****************************************************************************
@@ -382,7 +362,7 @@ static void lc823450_i2s_setchannel(char id, uint8_t ch)
         break;
 
       default:
-        DEBUGASSERT(false);
+        DEBUGPANIC();
         break;
     }
 
@@ -418,7 +398,7 @@ static void _setup_tx_threshold(uint32_t tx_th)
 static int lc823450_i2s_ioctl(struct i2s_dev_s *dev, int cmd,
                               unsigned long arg)
 {
-  FAR const struct audio_caps_desc_s *cap_desc;
+  const struct audio_caps_desc_s *cap_desc;
   uint32_t tx_th;
   uint32_t rate[2];
   uint8_t  ch[2];
@@ -427,7 +407,7 @@ static int lc823450_i2s_ioctl(struct i2s_dev_s *dev, int cmd,
   switch (cmd)
     {
       case AUDIOIOC_CONFIGURE:
-        cap_desc = (FAR const struct audio_caps_desc_s *)((uintptr_t)arg);
+        cap_desc = (const struct audio_caps_desc_s *)((uintptr_t)arg);
         DEBUGASSERT(NULL != cap_desc);
 
         tx_th   = cap_desc->caps.ac_controls.w >> 24;
@@ -446,13 +426,14 @@ static int lc823450_i2s_ioctl(struct i2s_dev_s *dev, int cmd,
 
             if (rate[0] != rate[1])
               {
-                audinfo("change output rate: %d -> %d \n", rate[0], rate[1]);
+                audinfo("change output rate: %" PRId32 " -> %" PRId32 "\n",
+                        rate[0], rate[1]);
                 lc823450_i2s_txsamplerate(dev, rate[1]);
               }
 
             if (ch[0] != ch[1])
               {
-                audinfo("change output ch: %d -> %d \n", ch[0], ch[1]);
+                audinfo("change output ch: %d -> %d\n", ch[0], ch[1]);
                 lc823450_i2s_setchannel('C', ch[1]);
               }
 
@@ -469,13 +450,14 @@ static int lc823450_i2s_ioctl(struct i2s_dev_s *dev, int cmd,
 
             if (rate[0] != rate[1])
               {
-                audinfo("change input rate: %d -> %d \n", rate[0], rate[1]);
+                audinfo("change input rate: %" PRId32 " -> %" PRId32 "\n",
+                        rate[0], rate[1]);
                 lc823450_i2s_rxsamplerate(dev, rate[1]);
               }
 
             if (ch[0] != ch[1])
               {
-                audinfo("change input ch: %d -> %d \n", ch[0], ch[1]);
+                audinfo("change input ch: %d -> %d\n", ch[0], ch[1]);
                 lc823450_i2s_setchannel('J', ch[1]);
               }
           }
@@ -532,7 +514,7 @@ static int lc823450_i2s_receive(struct i2s_dev_s *dev,
 
   /* Wait for Audio Buffer */
 
-  ret = _i2s_semtake(&_sem_buf_over);
+  ret = nxsem_wait_uninterruptible(&_sem_buf_over);
   if (ret < 0)
     {
       /* Disable J Buffer Over Level IRQ */
@@ -561,10 +543,10 @@ static int lc823450_i2s_receive(struct i2s_dev_s *dev,
                     _i2s_rxdma_callback,
                     &_sem_rxdma);
 
-  ret = _i2s_semtake(&_sem_rxdma);
+  ret = nxsem_wait_uninterruptible(&_sem_rxdma);
   if (ret < 0)
     {
-      /* Stop DMA because semtake failed */
+      /* Stop DMA because semwait failed */
 
       lc823450_dmastop(_hrxdma);
 
@@ -628,7 +610,7 @@ static uint32_t lc823450_i2s_txdatawidth(struct i2s_dev_s *dev, int bits)
  * Name: _i2s_isr
  ****************************************************************************/
 
-static int _i2s_isr(int irq, FAR void *context, FAR void *arg)
+static int _i2s_isr(int irq, void *context, void *arg)
 {
   uint32_t status = getreg32(ABUFSTS1);
   uint32_t irqen0 = getreg32(ABUFIRQEN0);
@@ -697,7 +679,7 @@ static int lc823450_i2s_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 
       /* Wait for Audio Buffer */
 
-      ret = _i2s_semtake(&_sem_buf_under);
+      ret = nxsem_wait_uninterruptible(&_sem_buf_under);
       if (ret < 0)
         {
           /* Disable C Buffer Under Level IRQ */
@@ -710,7 +692,7 @@ static int lc823450_i2s_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 
   if (0 == decsel && (n & 0x3))
     {
-      auderr("** PCM data is not word-aligned (n=%d) ** \n", n);
+      auderr("** PCM data is not word-aligned (n=%" PRId32 ") **\n", n);
 
       /* Set size to align on a word boundary */
 
@@ -745,10 +727,10 @@ static int lc823450_i2s_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
                     _i2s_txdma_callback,
                     &_sem_txdma);
 
-  ret = _i2s_semtake(&_sem_txdma);
+  ret = nxsem_wait_uninterruptible(&_sem_txdma);
   if (ret < 0)
     {
-      /* Stop DMA because semtake failed */
+      /* Stop DMA because semwait failed */
 
       lc823450_dmastop(_htxdma);
 
@@ -758,7 +740,7 @@ static int lc823450_i2s_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 #ifdef SHOW_BUFFERING
   if (0 == bufc_enabled)
     {
-      audinfo("buffering (remain=%d) \n", getreg32(BUF_DTCAP('C')));
+      audinfo("buffering (remain=%d)\n", getreg32(BUF_DTCAP('C')));
     }
 #endif
 
@@ -837,9 +819,9 @@ static void lc823450_dmic_enable(void)
            33 << 8 | 33,
            VOLSP0_CONT);
 
-  audinfo("ASRC_FSIO=%d \n",  getreg32(ASRC_FSO));
-  audinfo("DTCAP(I)=0x%x \n", getreg32(BUF_DTCAP('I')));
-  audinfo("DTCAP(J)=0x%x \n", getreg32(BUF_DTCAP('J')));
+  audinfo("ASRC_FSIO=%" PRId32 "\n",  getreg32(ASRC_FSO));
+  audinfo("DTCAP(I)=0x%" PRIx32 "\n", getreg32(BUF_DTCAP('I')));
+  audinfo("DTCAP(J)=0x%" PRIx32 "\n", getreg32(BUF_DTCAP('J')));
 
   /* Start ASRC */
 
@@ -1001,9 +983,9 @@ static int lc823450_i2s_configure(void)
   putreg32(0x1, SSRC_MODE);
   while (getreg32(SSRC_STATUS) != 0x1);
 
-  audinfo("DTCAP(C)=0x%08x \n", BUF_DTCAP('C'));
-  audinfo("DTCAP(I)=0x%08x \n", BUF_DTCAP('I'));
-  audinfo("DTCAP(J)=0x%08x \n", BUF_DTCAP('J'));
+  audinfo("DTCAP(C)=0x%08x\n", BUF_DTCAP('C'));
+  audinfo("DTCAP(I)=0x%08x\n", BUF_DTCAP('I'));
+  audinfo("DTCAP(J)=0x%08x\n", BUF_DTCAP('J'));
 
   /* Setup default tx threshold */
 
@@ -1019,20 +1001,18 @@ static int lc823450_i2s_configure(void)
  * Name: lc823450_i2sdev_initialize
  ****************************************************************************/
 
-FAR struct i2s_dev_s *lc823450_i2sdev_initialize(void)
+struct i2s_dev_s *lc823450_i2sdev_initialize(void)
 {
-  FAR struct lc823450_i2s_s *priv = NULL;
+  struct lc823450_i2s_s *priv = NULL;
 
   /* The support STM32 parts have only a single I2S port */
-
-  i2sinfo("port: %d\n", port);
 
   /* Allocate a new state structure for this chip select.  NOTE that there
    * is no protection if the same chip select is used in two different
    * chip select structures.
    */
 
-  priv = (struct lc823450_i2s_s *)zalloc(sizeof(struct lc823450_i2s_s));
+  priv = kmm_zalloc(sizeof(struct lc823450_i2s_s));
   if (!priv)
     {
       i2serr("ERROR: Failed to allocate a chip select structure\n");
@@ -1056,12 +1036,7 @@ FAR struct i2s_dev_s *lc823450_i2sdev_initialize(void)
 #endif
 
   _hrxdma = lc823450_dmachannel(DMA_CHANNEL_VIRTUAL);
-  nxsem_init(&_sem_rxdma, 0, 0);
-  nxsem_init(&_sem_buf_over, 0, 0);
-
   _htxdma = lc823450_dmachannel(DMA_CHANNEL_VIRTUAL);
-  nxsem_init(&_sem_txdma, 0, 0);
-  nxsem_init(&_sem_buf_under, 0, 0);
 
 #ifdef CONFIG_SMP
   cpu_set_t cpuset0;
@@ -1072,11 +1047,11 @@ FAR struct i2s_dev_s *lc823450_i2sdev_initialize(void)
 
   /* Backup the current affinity */
 
-  nxsched_getaffinity(getpid(), sizeof(cpuset0), &cpuset0);
+  nxsched_get_affinity(nxsched_gettid(), sizeof(cpuset0), &cpuset0);
 
   /* Set the new affinity which assigns to CPU0 */
 
-  nxsched_setaffinity(getpid(), sizeof(cpuset1), &cpuset1);
+  nxsched_set_affinity(nxsched_gettid(), sizeof(cpuset1), &cpuset1);
   nxsig_usleep(10 * 1000);
 #endif
 
@@ -1089,7 +1064,7 @@ FAR struct i2s_dev_s *lc823450_i2sdev_initialize(void)
 #ifdef CONFIG_SMP
   /* Restore the original affinity */
 
-  nxsched_setaffinity(getpid(), sizeof(cpuset0), &cpuset0);
+  nxsched_set_affinity(nxsched_gettid(), sizeof(cpuset0), &cpuset0);
   nxsig_usleep(10 * 1000);
 #endif
 

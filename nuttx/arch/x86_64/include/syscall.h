@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/x86_64/include/syscall.h
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -29,22 +31,61 @@
  * Included Files
  ****************************************************************************/
 
-/* Include x86 architecture-specific syscall macros */
-
-#ifdef CONFIG_ARCH_INTEL64
-# include <arch/intel64/syscall.h>
-#endif
+#include <nuttx/config.h>
+#include <stdint.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-/****************************************************************************
- * Public Types
- ****************************************************************************/
+/* Configuration ************************************************************/
+
+#ifndef CONFIG_BUILD_FLAT
+#  define CONFIG_SYS_RESERVED 4
+#else
+#  define CONFIG_SYS_RESERVED 0
+#endif
+
+/* system calls */
+
+#ifndef CONFIG_BUILD_FLAT
+/* SYS call 0:
+ *
+ * void up_task_start(main_t taskentry, int argc, char *argv[])
+ *        noreturn_function;
+ */
+
+#  define SYS_task_start            (0)
+
+/* SYS call 1:
+ *
+ * void up_pthread_start((pthread_startroutine_t startup,
+ *                        pthread_startroutine_t entrypt, pthread_addr_t arg)
+ *        noreturn_function
+ */
+
+#  define SYS_pthread_start         (1)
+
+/* SYS call 2:
+ *
+ * void signal_handler(_sa_sigaction_t sighand,
+ *                     int signo, siginfo_t *info,
+ *                     void *ucontext);
+ */
+
+#  define SYS_signal_handler        (2)
+
+/* SYS call 3:
+ *
+ * void signal_handler_return(void);
+ */
+
+#  define SYS_signal_handler_return (3)
+
+#endif /* !CONFIG_BUILD_FLAT */
 
 /****************************************************************************
- * Inline functions
+ * Public Types
  ****************************************************************************/
 
 /****************************************************************************
@@ -63,6 +104,95 @@ extern "C"
 #else
 #define EXTERN extern
 #endif
+
+/* SWI with SYS_ call number and six parameters */
+
+static inline uintptr_t sys_call6(unsigned int nbr, uintptr_t parm1,
+                                  uintptr_t parm2, uintptr_t parm3,
+                                  uintptr_t parm4, uintptr_t parm5,
+                                  uintptr_t parm6);
+
+/* SWI with SYS_ call number and no parameters */
+
+static inline uintptr_t sys_call0(unsigned int nbr)
+{
+  return sys_call6(nbr, 0, 0, 0, 0, 0, 0);
+}
+
+/* SWI with SYS_ call number and one parameter */
+
+static inline uintptr_t sys_call1(unsigned int nbr, uintptr_t parm1)
+{
+  return sys_call6(nbr, parm1, 0, 0, 0, 0, 0);
+}
+
+/* SWI with SYS_ call number and two parameters */
+
+static inline uintptr_t sys_call2(unsigned int nbr, uintptr_t parm1,
+                                  uintptr_t parm2)
+{
+  return sys_call6(nbr, parm1, parm2, 0, 0, 0, 0);
+}
+
+/* SWI with SYS_ call number and three parameters */
+
+static inline uintptr_t sys_call3(unsigned int nbr, uintptr_t parm1,
+                                  uintptr_t parm2, uintptr_t parm3)
+{
+  return sys_call6(nbr, parm1, parm2, parm3, 0, 0, 0);
+}
+
+/* SWI with SYS_ call number and four parameters */
+
+static inline uintptr_t sys_call4(unsigned int nbr, uintptr_t parm1,
+                                  uintptr_t parm2, uintptr_t parm3,
+                                  uintptr_t parm4)
+{
+  return sys_call6(nbr, parm1, parm2, parm3, parm4, 0, 0);
+}
+
+/* SWI with SYS_ call number and five parameters */
+
+static inline uintptr_t sys_call5(unsigned int nbr, uintptr_t parm1,
+                                  uintptr_t parm2, uintptr_t parm3,
+                                  uintptr_t parm4, uintptr_t parm5)
+{
+  return sys_call6(nbr, parm1, parm2, parm3, parm4, parm5, 0);
+}
+
+static inline uintptr_t sys_call6(unsigned int nbr, uintptr_t parm1,
+                                  uintptr_t parm2, uintptr_t parm3,
+                                  uintptr_t parm4, uintptr_t parm5,
+                                  uintptr_t parm6)
+{
+  uint64_t ret;
+
+  /* Registers modified by syscall instruction:
+   *   RCX = RIP
+   *   R11 = RFLAGS
+   *   RIP = IA32_LSTAR (x86_64_syscall_entry)
+   */
+
+  __asm__ volatile
+  (
+    "movq %1, %%rax\n"
+    "movq %2, %%rdi\n"
+    "movq %3, %%rsi\n"
+    "movq %4, %%rdx\n"
+    "movq %5, %%r10\n"
+    "movq %6, %%r8\n"
+    "movq %7, %%r9\n"
+    "syscall\n"
+    "movq %%rax, %0\n"
+    : "=r"(ret)
+    : "rm"(nbr), "rm"(parm1), "rm"(parm2),
+      "rm"(parm3), "rm"(parm4), "rm"(parm5),
+      "rm"(parm6)
+    : "memory", "rcx", "r11"
+  );
+
+  return ret;
+}
 
 #undef EXTERN
 #ifdef __cplusplus

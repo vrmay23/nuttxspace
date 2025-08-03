@@ -1,5 +1,7 @@
 /****************************************************************************
- * arch/z80/src/ez08/ez80_serial.c
+ * arch/z80/src/ez80/ez80_serial.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -28,6 +30,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -127,8 +130,6 @@ static struct ez80_dev_s g_uart0priv =
 static uart_dev_t g_uart0port =
 {
   0,                        /* open_count */
-  false,                    /* xmitwaiting */
-  false,                    /* recvwaiting */
 #ifdef CONFIG_UART0_SERIAL_CONSOLE
   true,                     /* isconsole */
 #else
@@ -154,7 +155,7 @@ static uart_dev_t g_uart0port =
   },
   &g_uart_ops,              /* ops */
   &g_uart0priv,             /* priv */
-  NULL,                     /* pollfds */
+  { },                      /* pollfds: all zero */
 };
 #endif
 
@@ -201,31 +202,31 @@ static uart_dev_t g_uart1port =
   },
   &g_uart_ops,              /* ops */
   &g_uart1priv,             /* priv */
-  NULL,                     /* pollfds */
+  { },                      /* pollfds */
 };
 #endif
 
 /* Now, which one with be tty0/console and which tty1? */
 
 #if defined(CONFIG_UART0_SERIAL_CONSOLE) && defined(CONFIG_EZ80_UART0)
-# define CONSOLE_DEV     g_uart0port
-# define TTYS0_DEV       g_uart0port
-# if defined(CONFIG_EZ80_UART1)
-#   define TTYS1_DEV     g_uart1port
-# endif
+#  define CONSOLE_DEV    g_uart0port
+#  define TTYS0_DEV      g_uart0port
+#  if defined(CONFIG_EZ80_UART1)
+#    define TTYS1_DEV    g_uart1port
+#  endif
 #elif defined(CONFIG_UART1_SERIAL_CONSOLE) && defined(CONFIG_EZ80_UART1)
-# define CONSOLE_DEV     g_uart1port
-# define TTYS0_DEV       g_uart1port
-# if defined(CONFIG_EZ80_UART0)
-#   define TTYS1_DEV     g_uart0port
-# endif
+#  define CONSOLE_DEV    g_uart1port
+#  define TTYS0_DEV      g_uart1port
+#  if defined(CONFIG_EZ80_UART0)
+#    define TTYS1_DEV    g_uart0port
+#  endif
 #elif defined(CONFIG_EZ80_UART0)
-# define TTYS0_DEV       g_uart0port
-# if defined(CONFIG_EZ80_UART1)
-#   define TTYS1_DEV     g_uart1port
-# endif
+#  define TTYS0_DEV      g_uart0port
+#  if defined(CONFIG_EZ80_UART1)
+#    define TTYS1_DEV    g_uart1port
+#  endif
 #elif defined(CONFIG_EZ80_UART0)
-# define TTYS0_DEV       g_uart1port
+#  define TTYS0_DEV      g_uart1port
 #endif
 
 /****************************************************************************
@@ -465,12 +466,11 @@ static void ez80_detach(FAR struct uart_dev_s *dev)
  * Name: ez80_interrupt
  *
  * Description:
- *   This is the UART interrupt handler.  It will be invoked
- *   when an interrupt received on the 'irq'  It should call
- *   uart_transmitchars or uart_receivechar to perform the
- *   appropriate data transfers.  The interrupt handling logic\
- *   must be able to map the 'irq' number into the appropriate
- *   uart_dev_s structure in order to call these functions.
+ *   This is the UART interrupt handler.  It will be invoked when an
+ *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
+ *   uart_recvchars to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'arg' to the
+ *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
 
@@ -673,7 +673,9 @@ void z80_serial_initialize(void)
   /* Configure pins for usage of UARTs */
 
 #ifdef CONFIG_EZ80_UART0
-  /* Set Port D, pins 0 and 1 for their alternate function (Mode 7) to enable UART0 */
+  /* Set Port D, pins 0 and 1 for their alternate function (Mode 7)
+   * to enable UART0
+   */
 
   regval  = inp(EZ80_PD_DDR);
   regval |= 3;
@@ -689,7 +691,9 @@ void z80_serial_initialize(void)
 #endif
 
 #ifdef CONFIG_EZ80_UART1
-  /* Set Port C, pins 0 and 1 for their alternate function (Mode 7) to enable UART1 */
+  /* Set Port C, pins 0 and 1 for their alternate function (Mode 7)
+   * to enable UART1
+   */
 
   regval  = inp(EZ80_PC_DDR);
   regval |= 3;
@@ -731,23 +735,13 @@ void z80_serial_initialize(void)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef CONSOLE_DEV
   FAR struct ez80_dev_s *priv = (FAR struct ez80_dev_s *)CONSOLE_DEV.priv;
   uint8_t ier = ez80_serialin(priv, EZ80_UART_IER);
 
   ez80_disableuartint(priv);
-
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Output CR before LF*/
-
-      ez80_waittxready(priv);
-      ez80_serialout(priv, EZ80_UART_THR, '\r');
-    }
 
   /* Output the character */
 
@@ -758,7 +752,6 @@ int up_putc(int ch)
 
   ez80_waittxready(priv);
   ez80_restoreuartint(priv, ier);
-  return ch;
 #endif
 }
 
@@ -769,11 +762,11 @@ int up_putc(int ch)
  ****************************************************************************/
 
 #ifdef CONFIG_UART1_SERIAL_CONSOLE
-# define ez80_inp(offs)      inp((EZ80_UART1_BASE+(offs)))
-# define ez80_outp(offs,val) outp((EZ80_UART1_BASE+(offs)), (val))
+#  define ez80_inp(offs)      inp((EZ80_UART1_BASE+(offs)))
+#  define ez80_outp(offs,val) outp((EZ80_UART1_BASE+(offs)), (val))
 #else
-# define ez80_inp(offs)      inp((EZ80_UART0_BASE+(offs)))
-# define ez80_outp(offs,val) outp((EZ80_UART0_BASE+(offs)), (val))
+#  define ez80_inp(offs)      inp((EZ80_UART0_BASE+(offs)))
+#  define ez80_outp(offs,val) outp((EZ80_UART0_BASE+(offs)), (val))
 #endif
 
 #define ez80_txready()       ((ez80_inp(EZ80_UART_LSR) & EZ80_UARTLSR_THRE) != 0)
@@ -802,21 +795,11 @@ static void ez80_putc(int ch)
  * Name: up_putc
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Output CR before LF */
-
-      ez80_putc('\r');
-    }
-
   /* Output character */
 
   ez80_putc(ch);
-  return ch;
 }
 
 #endif /* USE_SERIALDRIVER */

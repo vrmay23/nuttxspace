@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/media/hello_main.c
+ * apps/examples/media/media_main.c
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,10 +28,12 @@
 
 #include <sys/ioctl.h>
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <unistd.h>
 
 #include <nuttx/fs/fs.h>
 #include <nuttx/mtd/mtd.h>
@@ -159,21 +148,23 @@ int main(int argc, FAR char *argv[])
               devpath, errno);
       return 1;
     }
+
   /* Get the block size to use */
 
   get_blocksize(fd, &info);
 
   printf("Using:\n");
-  printf("  blocksize:    %lu\n", (unsigned long)info.blocksize);
-  printf("  nblocks:      %lu\n", (unsigned long)info.nblocks);
+  printf("  blocksize:    %ju\n", (uintmax_t)info.blocksize);
+  printf("  nblocks:      %ju\n", (uintmax_t)info.nblocks);
 
   /* Allocate I/O buffers of the correct block size */
 
   txbuffer = (FAR uint8_t *)malloc((size_t)info.blocksize);
   if (txbuffer == NULL)
     {
-      fprintf(stderr, "ERROR: failed to allocate TX I/O buffer of size %lu\n",
-              (unsigned long)info.blocksize);
+      fprintf(stderr,
+              "ERROR: failed to allocate TX I/O buffer of size %ju\n",
+              (uintmax_t)info.blocksize);
       close(fd);
       return 1;
     }
@@ -181,8 +172,9 @@ int main(int argc, FAR char *argv[])
   rxbuffer = (FAR uint8_t *)malloc((size_t)info.blocksize);
   if (rxbuffer == NULL)
     {
-      fprintf(stderr, "ERROR: failed to allocate IRX /O buffer of size %lu\n",
-              (unsigned long)info.blocksize);
+      fprintf(stderr,
+              "ERROR: failed to allocate IRX /O buffer of size %ju\n",
+              (uintmax_t)info.blocksize);
       free(txbuffer);
       close(fd);
       return 1;
@@ -196,7 +188,7 @@ int main(int argc, FAR char *argv[])
 
   for (blockno = 0; info.nblocks == 0 || blockno < info.nblocks; blockno++)
     {
-      printf("Write/Verify: Block %lu\n", (unsigned long)blockno);
+      printf("Write/Verify: Block %ju\n", (uintmax_t)blockno);
 
       /* Fill buffer with a (possibly) unique pattern */
 
@@ -214,17 +206,19 @@ int main(int argc, FAR char *argv[])
         {
           int errcode = errno;
 
-          fprintf(stderr, "ERROR: lseek to %lu failed: %d\n",
-                  (unsigned long)pos, errcode);
-          fprintf(stderr, "ERROR: Aborting at block: %lu\n", blockno);
+          fprintf(stderr, "ERROR: lseek to %ju failed: %d\n",
+                  (uintmax_t)pos, errcode);
+          fprintf(stderr, "ERROR: Aborting at block: %ju\n",
+                  (uintmax_t)blockno);
           info.nblocks = blockno;
           break;
         }
       else if (seekpos != pos)
         {
-          fprintf(stderr, "ERROR: lseek failed: %lu vs %lu\n",
-                  (unsigned)seekpos, (unsigned long) pos);
-          fprintf(stderr, "ERROR: Aborting at block: %lu\n", blockno);
+          fprintf(stderr, "ERROR: lseek failed: %ju vs %ju\n",
+                  (uintmax_t)seekpos, (uintmax_t) pos);
+          fprintf(stderr, "ERROR: Aborting at block: %ju\n",
+                  (uintmax_t)blockno);
           info.nblocks = blockno;
           break;
         }
@@ -237,16 +231,18 @@ int main(int argc, FAR char *argv[])
           fprintf(stderr, "ERROR: write failed: %d\n", errcode);
           if (errno != EINTR)
             {
-              fprintf(stderr, "ERROR: Aborting at block: %lu\n", blockno);
+              fprintf(stderr, "ERROR: Aborting at block: %ju\n",
+                      (uintmax_t)blockno);
               info.nblocks = blockno;
               break;
             }
         }
       else if (nwritten != info.blocksize)
         {
-          fprintf(stderr, "ERROR: Unexpected write size: %lu vs. %lu\n",
-                  (unsigned long)nwritten, (unsigned long)info.blocksize);
-          fprintf(stderr, "ERROR: Aborting at block: %lu\n", blockno);
+          fprintf(stderr, "ERROR: Unexpected write size: %zu vs. %ju\n",
+                  nwritten, (uintmax_t)info.blocksize);
+          fprintf(stderr, "ERROR: Aborting at block: %ju\n",
+                  (uintmax_t)blockno);
           info.nblocks = blockno;
           break;
         }
@@ -256,17 +252,19 @@ int main(int argc, FAR char *argv[])
         {
           int errcode = errno;
 
-          fprintf(stderr, "ERROR: lseek to %lu failed: %d\n",
-                  (unsigned long)pos, errcode);
-          fprintf(stderr, "ERROR: Aborting at block: %lu\n", blockno);
+          fprintf(stderr, "ERROR: lseek to %ju failed: %d\n",
+                  (uintmax_t)pos, errcode);
+          fprintf(stderr, "ERROR: Aborting at block: %ju\n",
+                  (uintmax_t)blockno);
           info.nblocks = blockno;
           break;
         }
       else if (seekpos != pos)
         {
-          fprintf(stderr, "ERROR: lseek failed: %lu vs %lu\n",
-                  (unsigned)seekpos, (unsigned long) pos);
-          fprintf(stderr, "ERROR: Aborting at block: %lu\n", blockno);
+          fprintf(stderr, "ERROR: lseek failed: %ju vs %ju\n",
+                  (uintmax_t)seekpos, (uintmax_t)pos);
+          fprintf(stderr, "ERROR: Aborting at block: %ju\n",
+                  (uintmax_t)blockno);
           info.nblocks = blockno;
           break;
         }
@@ -279,16 +277,18 @@ int main(int argc, FAR char *argv[])
           fprintf(stderr, "ERROR: read failed: %d\n", errcode);
           if (errno != EINTR)
             {
-              fprintf(stderr, "ERROR: Aborting at block: %lu\n", blockno);
+              fprintf(stderr, "ERROR: Aborting at block: %ju\n",
+                      (uintmax_t)blockno);
               info.nblocks = blockno;
               break;
             }
         }
       else if (nread != info.blocksize)
         {
-          fprintf(stderr, "ERROR: Unexpected read size: %lu vs. %lu\n",
-                  (unsigned long)nread, (unsigned long)info.blocksize);
-          fprintf(stderr, "ERROR: Aborting at block: %lu\n", blockno);
+          fprintf(stderr, "ERROR: Unexpected read size: %zu vs. %ju\n",
+                  nread, (uintmax_t)info.blocksize);
+          fprintf(stderr, "ERROR: Aborting at block: %ju\n",
+                  (uintmax_t)blockno);
           info.nblocks = blockno;
           break;
         }
@@ -299,8 +299,10 @@ int main(int argc, FAR char *argv[])
               if (txbuffer[i] != rxbuffer[i])
                 {
                   fprintf(stderr,
-                          "ERROR: block=%lu offset=%lu.  Unexpected value: %02x vs. %02x\n",
-                          blockno, i, rxbuffer[i], txbuffer[i]);
+                          "ERROR: block=%ju offset=%ju.  "
+                          "Unexpected value: %02x vs. %02x\n",
+                          (uintmax_t)blockno, (uintmax_t)i,
+                          rxbuffer[i], txbuffer[i]);
                   nerrors++;
                 }
             }
@@ -308,7 +310,8 @@ int main(int argc, FAR char *argv[])
           if (nerrors > 100)
             {
               fprintf(stderr, "ERROR: Too many errors\n");
-              fprintf(stderr, "ERROR: Aborting at block: %lu\n", blockno);
+              fprintf(stderr, "ERROR: Aborting at block: %ju\n",
+                      (uintmax_t)blockno);
               info.nblocks = blockno;
               break;
             }
@@ -335,8 +338,8 @@ int main(int argc, FAR char *argv[])
     }
   else if (seekpos != 0)
     {
-      fprintf(stderr, "ERROR: lseek to 0 failed: %lu\n",
-              (unsigned)seekpos);
+      fprintf(stderr, "ERROR: lseek to 0 failed: %ju\n",
+              (uintmax_t)seekpos);
     }
 
   /* Re-read and verify each sector */
@@ -345,7 +348,7 @@ int main(int argc, FAR char *argv[])
 
   for (blockno = 0; blockno < info.nblocks; blockno++)
     {
-      printf("Re-read/Verify: Block %lu\n", (unsigned long)blockno);
+      printf("Re-read/Verify: Block %ju\n", (uintmax_t)blockno);
 
       /* Fill buffer with a (possibly) unique pattern */
 
@@ -366,15 +369,17 @@ int main(int argc, FAR char *argv[])
           fprintf(stderr, "ERROR: read failed: %d\n", errcode);
           if (errno != EINTR)
             {
-              fprintf(stderr, "ERROR: Aborting at block: %lu\n", blockno);
+              fprintf(stderr, "ERROR: Aborting at block: %ju\n",
+                      (uintmax_t)blockno);
               break;
             }
         }
       else if (nread != info.blocksize)
         {
-          fprintf(stderr, "ERROR: Unexpected read size: %lu vs. %lu\n",
-                  (unsigned long)nread, (unsigned long)info.blocksize);
-          fprintf(stderr, "ERROR: Aborting at block: %lu\n", blockno);
+          fprintf(stderr, "ERROR: Unexpected read size: %zu vs. %ju\n",
+                  nread, (uintmax_t)info.blocksize);
+          fprintf(stderr, "ERROR: Aborting at block: %ju\n",
+                  (uintmax_t)blockno);
           break;
         }
       else
@@ -384,8 +389,10 @@ int main(int argc, FAR char *argv[])
               if (txbuffer[i] != rxbuffer[i])
                 {
                   fprintf(stderr,
-                          "ERROR: block=%lu offset=%lu.  Unexpected value: %02x vs. %02x\n",
-                          blockno, i, rxbuffer[i], txbuffer[i]);
+                          "ERROR: block=%ju offset=%ju.  "
+                          "Unexpected value: %02x vs. %02x\n",
+                          (uintmax_t)blockno, (uintmax_t)i,
+                          rxbuffer[i], txbuffer[i]);
                   nerrors++;
                 }
             }
@@ -393,7 +400,8 @@ int main(int argc, FAR char *argv[])
           if (nerrors > 100)
             {
               fprintf(stderr, "ERROR: Too many errors\n");
-              fprintf(stderr, "ERROR: Aborting at block: %lu\n", blockno);
+              fprintf(stderr, "ERROR: Aborting at block: %ju\n",
+                      (uintmax_t)blockno);
               info.nblocks = blockno;
               break;
             }

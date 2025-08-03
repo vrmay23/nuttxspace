@@ -1,6 +1,8 @@
 /****************************************************************************
  * drivers/serial/pty.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -18,56 +20,13 @@
  *
  ****************************************************************************/
 
-/* TODO:  O_NONBLOCK is not yet supported.  Currently, the source and sink
- * pipes are opened in blocking mode on both the slave and master so only
- * blocking behavior is supported.  This driver must be able to support
- * multiple slave as well as master clients that may have the PTY device
- * opened in blocking and non-blocking modes simultaneously.
- *
- * There are two different possible implementations under consideration:
- *
- * 1. Keep the pipes in blocking mode, but use a test based on FIONREAD (for
- *    the source pipe) or FIONSPACE (for the sink pipe) to determine if the
- *    read or write would block.  There is existing logic like this in
- *    pty_read() to handle the case of a single byte reads which must never
- *    block in any case:  Essentially, this logic uses FIONREAD to determine
- *    if there is anything to read before calling file_read().  Similar
- *    logic could be replicated for all read cases.
- *
- *    Analogous logic could be added for all writes using FIONSPACE to
- *    assure that there is sufficient free space in the sink pipe to write
- *    without blocking.  The write length could be adjusted, in necceary,
- *    to assure that there is no blocking.
- *
- *    Locking, perhaps via sched_lock(), would be required to assure the
- *    test via FIONREAD or FIONWRITE is atomic with respect to the
- *    file_read() or file_write() operation.
- *
- * 2. An alternative that appeals to me is to modify the contained source
- *    or sink pipe file structures before each file_read() or file_write()
- *    operation to assure that the O_NONBLOCK is set correctly when the
- *    pipe read or write operation is performed.  This might be done with
- *    file_vfcntl() (there is no file_fcntl(), yet) or directly into the
- *    source/sink file structure oflags mode settings.
- *
- *    This would require (1) the ability to lock each pipe individually,
- *    setting the blocking mode for the source or sink pipe to match the
- *    mode in the open flags of the PTY device file structure, and (2)
- *    logic to restore the default pipe mode after the file_read/write()
- *    operation and before the pipe is unlocked.
- *
- * There are existing locks to support (1) destruction of the driver
- * (pp_exclsem) and (2) slave PTY locking (pp_slavesem), as well as (3)
- * locks within the pipe implementation.  Care must be taken with any new
- * source/sink pipe locking to assure that deadlocks are not possible.
- */
-
 /****************************************************************************
  * Included Files
  ****************************************************************************/
 
 #include <nuttx/config.h>
 
+#include <ctype.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <stdbool.h>
@@ -77,24 +36,23 @@
 #include <stdio.h>
 #include <string.h>
 #include <poll.h>
+#include <fcntl.h>
 #include <assert.h>
 #include <errno.h>
 
+#include <nuttx/ascii.h>
 #include <nuttx/kmalloc.h>
+#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/fs/fs.h>
-#include <nuttx/drivers/drivers.h>
 #include <nuttx/serial/pty.h>
+#include <nuttx/signal.h>
 
 #include "pty.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-/* Should never be set... only for comparison to serial.c */
-
-#undef CONFIG_PSEUDOTERM_FULLBLOCKS
 
 /* Maximum number of threads than can be waiting for POLL events */
 
@@ -121,14 +79,13 @@ struct pty_dev_s
   struct file pd_src;           /* Provides data to read() method (pipe output) */
   struct file pd_sink;          /* Accepts data from write() method (pipe input) */
   bool pd_master;               /* True: this is the master */
-
-#ifdef CONFIG_SERIAL_TERMIOS
-  /* Terminal control flags */
-
-  tcflag_t pd_iflag;            /* Terminal nput modes */
-  tcflag_t pd_oflag;            /* Terminal output modes */
+  uint8_t pd_escape;            /* Number of the character to be escaped */
+#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGTSTP)
+  pid_t pd_pid;                 /* Thread PID to receive signals (-1 if none) */
 #endif
-
+  tcflag_t pd_iflag;            /* Terminal input modes */
+  tcflag_t pd_lflag;            /* Terminal local modes */
+  tcflag_t pd_oflag;            /* Terminal output modes */
   struct pty_poll_s pd_poll[CONFIG_DEV_PTY_NPOLLWAITERS];
 };
 
@@ -139,36 +96,30 @@ struct pty_devpair_s
   struct pty_dev_s pp_master;   /* Maseter device */
   struct pty_dev_s pp_slave;    /* Slave device */
 
+  bool pp_susv1;                /* SUSv1 or BSD style */
   bool pp_locked;               /* Slave is locked */
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
   bool pp_unlinked;             /* File has been unlinked */
   uint8_t pp_minor;             /* Minor device number */
   uint16_t pp_nopen;            /* Open file count */
-#endif
   sem_t pp_slavesem;            /* Slave lock semaphore */
-  sem_t pp_exclsem;             /* Mutual exclusion */
+  mutex_t pp_lock;              /* Mutual exclusion */
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static int     pty_semtake(FAR struct pty_devpair_s *devpair);
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
 static void    pty_destroy(FAR struct pty_devpair_s *devpair);
-#endif
-
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+static int     pty_pipe(FAR struct pty_devpair_s *devpair);
 static int     pty_open(FAR struct file *filep);
 static int     pty_close(FAR struct file *filep);
-#endif
 static ssize_t pty_read(FAR struct file *filep, FAR char *buffer,
-                 size_t buflen);
+                        size_t buflen);
 static ssize_t pty_write(FAR struct file *filep, FAR const char *buffer,
-                 size_t buflen);
+                         size_t buflen);
 static int     pty_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
 static int     pty_poll(FAR struct file *filep, FAR struct pollfd *fds,
-                 bool setup);
+                        bool setup);
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
 static int     pty_unlink(FAR struct inode *inode);
 #endif
@@ -179,18 +130,17 @@ static int     pty_unlink(FAR struct inode *inode);
 
 static const struct file_operations g_pty_fops =
 {
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
   pty_open,      /* open */
   pty_close,     /* close */
-#else
-  NULL,          /* open */
-  NULL,          /* close */
-#endif
   pty_read,      /* read */
   pty_write,     /* write */
   NULL,          /* seek */
   pty_ioctl,     /* ioctl */
-  pty_poll       /* poll */
+  NULL,          /* mmap */
+  NULL,          /* truncate */
+  pty_poll,      /* poll */
+  NULL,          /* readv */
+  NULL           /* writev */
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
   , pty_unlink   /* unlink */
 #endif
@@ -201,82 +151,107 @@ static const struct file_operations g_pty_fops =
  ****************************************************************************/
 
 /****************************************************************************
- * Name: pty_semtake
- ****************************************************************************/
-
-static int pty_semtake(FAR struct pty_devpair_s *devpair)
-{
-  return nxsem_wait_uninterruptible(&devpair->pp_exclsem);
-}
-
-/****************************************************************************
- * Name: pty_semgive
- ****************************************************************************/
-
-#define pty_semgive(c) nxsem_post(&(c)->pp_exclsem)
-
-/****************************************************************************
  * Name: pty_destroy
  ****************************************************************************/
 
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
 static void pty_destroy(FAR struct pty_devpair_s *devpair)
 {
   char devname[16];
 
-  /* Un-register the slave device */
+  if (devpair->pp_susv1)
+    {
+      /* Free this minor number so that it can be reused */
 
-#ifdef CONFIG_PSEUDOTERM_BSD
-  snprintf(devname, 16, "/dev/ttyp%d", devpair->pp_minor);
-#else
-  snprintf(devname, 16, "/dev/pts/%d", devpair->pp_minor);
-#endif
+      ptmx_minor_free(devpair->pp_minor);
+
+      /* Un-register the slave device */
+
+      snprintf(devname, sizeof(devname), "/dev/pts/%u", devpair->pp_minor);
+    }
+  else
+    {
+      /* Un-register the master device (/dev/ptyN may have already been
+       * unlinked).
+       */
+
+      snprintf(devname, sizeof(devname), "/dev/pty%u", devpair->pp_minor);
+      unregister_driver(devname);
+
+      /* Un-register the slave device */
+
+      snprintf(devname, sizeof(devname), "/dev/ttyp%u", devpair->pp_minor);
+    }
+
   unregister_driver(devname);
-
-  /* Un-register the master device (/dev/ptyN may have already been
-   * unlinked).
-   */
-
-  snprintf(devname, 16, "/dev/pty%d", (int)devpair->pp_minor);
-  unregister_driver(devname);
-
-  /* Close the contained file structures */
-
-  file_close(&devpair->pp_master.pd_src);
-  file_close(&devpair->pp_master.pd_sink);
-  file_close(&devpair->pp_slave.pd_src);
-  file_close(&devpair->pp_slave.pd_sink);
-
-#ifdef CONFIG_PSEUDOTERM_SUSV1
-  /* Free this minor number so that it can be reused */
-
-  ptmx_minor_free(devpair->pp_minor);
-#endif
 
   /* And free the device structure */
 
-  nxsem_destroy(&devpair->pp_exclsem);
+  nxmutex_destroy(&devpair->pp_lock);
+  nxsem_destroy(&devpair->pp_slavesem);
   kmm_free(devpair);
 }
-#endif
+
+/****************************************************************************
+ * Name: pty_pipe
+ ****************************************************************************/
+
+static int pty_pipe(FAR struct pty_devpair_s *devpair)
+{
+  FAR struct file *pipe_a[2];
+  FAR struct file *pipe_b[2];
+  int ret;
+
+  /* Create two pipes:
+   *
+   *   pipe_a:  Master source, slave sink (TX, slave-to-master)
+   *   pipe_b:  Master sink, slave source (RX, master-to-slave)
+   */
+
+  pipe_a[0] = &devpair->pp_master.pd_src;
+  pipe_a[1] = &devpair->pp_slave.pd_sink;
+
+  ret = file_pipe(pipe_a, CONFIG_PSEUDOTERM_TXBUFSIZE, O_CLOEXEC);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  pipe_b[0] = &devpair->pp_slave.pd_src;
+  pipe_b[1] = &devpair->pp_master.pd_sink;
+
+  ret = file_pipe(pipe_b, CONFIG_PSEUDOTERM_RXBUFSIZE, O_CLOEXEC);
+  if (ret < 0)
+    {
+      file_close(pipe_a[0]);
+      file_close(pipe_a[1]);
+    }
+
+  return ret;
+}
 
 /****************************************************************************
  * Name: pty_open
  ****************************************************************************/
 
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
 static int pty_open(FAR struct file *filep)
 {
   FAR struct inode *inode;
   FAR struct pty_dev_s *dev;
   FAR struct pty_devpair_s *devpair;
-  int ret;
+  int ret = OK;
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
   inode   = filep->f_inode;
   dev     = inode->i_private;
   DEBUGASSERT(dev != NULL && dev->pd_devpair != NULL);
   devpair = dev->pd_devpair;
+
+  /* Get exclusive access to the device structure */
+
+  ret = nxmutex_lock(&devpair->pp_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   /* Wait if this is an attempt to open the slave device and the slave
    * device is locked.
@@ -284,15 +259,17 @@ static int pty_open(FAR struct file *filep)
 
   if (!dev->pd_master)
     {
-      /* Slave... Check if the slave driver is locked.  We need to lock the
-       * scheduler while we are running to prevent asyncrhonous modification
-       * of pp_locked by pty_ioctl().
-       */
+      /* Slave... Check if the slave driver is locked. */
 
-      sched_lock();
       while (devpair->pp_locked)
         {
-          /* Wait until unlocked.  We will also most certainly suspend here. */
+          /* Release the exclusive access before wait */
+
+          nxmutex_unlock(&devpair->pp_lock);
+
+          /* Wait until unlocked.
+           * We will also most certainly suspend here.
+           */
 
           ret = nxsem_wait(&devpair->pp_slavesem);
           if (ret < 0)
@@ -300,78 +277,47 @@ static int pty_open(FAR struct file *filep)
               return ret;
             }
 
+          /* Restore the semaphore count */
+
+          DEBUGVERIFY(nxsem_post(&devpair->pp_slavesem));
+
           /* Get exclusive access to the device structure.  This might also
            * cause suspension.
            */
 
-          ret = pty_semtake(devpair);
+          ret = nxmutex_lock(&devpair->pp_lock);
           if (ret < 0)
             {
               return ret;
             }
-
-          /* Check again in case something happened asynchronously while we
-           * were suspended.
-           */
-
-          if (devpair->pp_locked)
-            {
-              /* This cannot suspend because we have the scheduler locked.
-               * So pp_locked cannot change asyncrhonously between this test
-               * and the redundant test at the top of the loop.
-               */
-
-              pty_semgive(devpair);
-            }
-        }
-
-      sched_unlock();
-    }
-  else
-    {
-      /* Master ... Get exclusive access to the device structure */
-
-      ret = pty_semtake(devpair);
-      if (ret < 0)
-        {
-          goto errout_with_sem;
         }
     }
 
-#ifndef CONFIG_PSEUDOTERM_SUSV1
-  /* If one side of the driver has been unlinked, then refuse further
-   * opens.
-   *
-   * NOTE: We ignore this case in the SUSv1 case.  In the SUSv1 case, the
-   * master side is always unlinked.
-   */
+  /* First open? */
 
-  if (devpair->pp_unlinked)
+  if (devpair->pp_nopen == 0)
     {
-      ret = -EIDRM;
+      /* Yes, create the internal pipe */
+
+      ret = pty_pipe(devpair);
     }
-  else
-#endif
-    {
-      /* Increment the count of open references on the driver */
 
+  /* Increment the count of open references on the driver */
+
+  if (ret >= 0)
+    {
       devpair->pp_nopen++;
       DEBUGASSERT(devpair->pp_nopen > 0);
-
-      ret = OK;
     }
 
-errout_with_sem:
-  pty_semgive(devpair);
+  nxmutex_unlock(&devpair->pp_lock);
   return ret;
 }
-#endif
 
 /****************************************************************************
- * Name: pty_open
+ * Name: pty_close
  ****************************************************************************/
 
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
 static int pty_close(FAR struct file *filep)
 {
   FAR struct inode *inode;
@@ -379,33 +325,40 @@ static int pty_close(FAR struct file *filep)
   FAR struct pty_devpair_s *devpair;
   int ret;
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
-  inode     = filep->f_inode;
-  dev       = inode->i_private;
+  inode   = filep->f_inode;
+  dev     = inode->i_private;
   DEBUGASSERT(dev != NULL && dev->pd_devpair != NULL);
-  devpair   = dev->pd_devpair;
+  devpair = dev->pd_devpair;
 
   /* Get exclusive access */
 
-  ret = pty_semtake(devpair);
+  ret = nxmutex_lock(&devpair->pp_lock);
   if (ret < 0)
     {
       return ret;
     }
 
-#ifdef CONFIG_PSEUDOTERM_SUSV1
-  /* Did the (single) master just close its reference? */
+  /* Check if the decremented inode reference count would go to zero */
 
-  if (dev->pd_master)
+  if (atomic_read(&inode->i_crefs) == 1)
     {
-      /* Yes, then we are essentially unlinked and when all of the
-       * slaves close there references, then the PTY should be
-       * destroyed.
-       */
+      /* Did the (single) master just close its reference? */
 
-      devpair->pp_unlinked = true;
+      if (dev->pd_master && devpair->pp_susv1)
+        {
+          /* Yes, then we are essentially unlinked and when all of the
+           * slaves close there references, then the PTY should be
+           * destroyed.
+           */
+
+          devpair->pp_unlinked = true;
+        }
+
+      /* Close the contained file structures */
+
+      file_close(&dev->pd_src);
+      file_close(&dev->pd_sink);
     }
-#endif
 
   /* Is this the last open reference?  If so, was the driver previously
    * unlinked?
@@ -416,6 +369,7 @@ static int pty_close(FAR struct file *filep)
     {
       /* Yes.. Free the device pair now (without freeing the semaphore) */
 
+      nxmutex_unlock(&devpair->pp_lock);
       pty_destroy(devpair);
       return OK;
     }
@@ -426,10 +380,9 @@ static int pty_close(FAR struct file *filep)
       devpair->pp_nopen--;
     }
 
-  pty_semgive(devpair);
+  nxmutex_unlock(&devpair->pp_lock);
   return OK;
 }
-#endif
 
 /****************************************************************************
  * Name: pty_read
@@ -440,19 +393,14 @@ static ssize_t pty_read(FAR struct file *filep, FAR char *buffer, size_t len)
   FAR struct inode *inode;
   FAR struct pty_dev_s *dev;
   ssize_t ntotal;
-#ifdef CONFIG_SERIAL_TERMIOS
-  ssize_t nread;
-  size_t i;
+  ssize_t i;
+  ssize_t j;
   char ch;
-  int ret;
-#endif
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
   inode = filep->f_inode;
   dev   = inode->i_private;
   DEBUGASSERT(dev != NULL);
 
-#ifdef CONFIG_SERIAL_TERMIOS
   /* Do input processing if any is enabled
    *
    * Specifically not handled:
@@ -466,133 +414,47 @@ static ssize_t pty_read(FAR struct file *filep, FAR char *buffer, size_t len)
 
   if (dev->pd_iflag & (INLCR | IGNCR | ICRNL))
     {
-      /* We will transfer one byte at a time, making the appropriate
-       * translations.
-       */
-
-      ntotal = 0;
-      for (i = 0; i < len; i++)
+      while ((ntotal = file_read(&dev->pd_src, buffer, len)) > 0)
         {
-#ifndef CONFIG_PSEUDOTERM_FULLBLOCKS
-          /* This logic should return if the pipe becomes empty after some
-           * bytes were read from the pipe.  If we have already read some
-           * data, we use the FIONREAD ioctl to test if there are more bytes
-           * in the pipe.
-           *
-           * REVISIT:  An alternative design might be to (1) configure the
-           * source file as non-blocking, then (2) wait using poll() for the
-           * first byte to be received.  (3) Subsequent bytes would
-           * use file_read() without polling and would (4) terminate when no
-           * data is returned.
-           */
-
-          if (ntotal > 0)
+          for (i = j = 0; i < ntotal; i++)
             {
-              int nsrc;
+              /* Perform input processing */
 
-              /* There are inherent race conditions in this test.  We lock
-               * the scheduler before the test and after the file_read()
-               * below to eliminate one race:  (a) We detect that there is
-               * data in the source file, (b) we are suspended and another
-               * thread reads the data, emptying the fifo, then (c) we
-               * resume and call file_read(), blocking indefinitely.
-               */
+              ch = buffer[i];
 
-              sched_lock();
+              /* \n -> \r or \r -> \n translation? */
 
-              /* Check how many bytes are waiting in the pipe */
-
-              ret = file_ioctl(&dev->pd_src, FIONREAD,
-                               (unsigned long)((uintptr_t)&nsrc));
-              if (ret < 0)
+              if (ch == '\n' && (dev->pd_iflag & INLCR) != 0)
                 {
-                  sched_unlock();
-                  ntotal = ret;
-                  break;
+                  ch = '\r';
+                }
+              else if (ch == '\r' && (dev->pd_iflag & ICRNL) != 0)
+                {
+                  ch = '\n';
                 }
 
-              /* Break out of the loop and return ntotal if the pipe is
-               * empty.  This is another race:  There fifo was empty when we
-               * called file_ioctl() above, but it might not be empty right
-               * now.  Losing that race should not lead to any bad behaviors,
-               * however, we the caller will get those bytes on the next
-               * read.
+              /* Discarding \r ?  Print character if (1) character is not \r
+               * or if (2) we were not asked to ignore \r.
                */
 
-              if (nsrc < 1)
+              if (ch != '\r' || (dev->pd_iflag & IGNCR) == 0)
                 {
-                  sched_unlock();
-                  break;
+                  buffer[j++] = ch;
                 }
-
-              /* Read one byte from the source the byte.  This should not
-               * block.
-               */
-
-              nread = file_read(&dev->pd_src, &ch, 1);
-              sched_unlock();
-            }
-          else
-#else
-          /* If we wanted to return full blocks of data, then file_read()
-           * may need to be called repeatedly.  That is because the pipe
-           * read() method will return early if the fifo becomes empty
-           * after any data has been read.
-           */
-
-# error Missing logic
-#endif
-            {
-              /* Read one byte from the source the byte.  This call will
-               * block if the source pipe is empty.
-               *
-               * REVISIT: Should not block if the oflags include O_NONBLOCK.
-               * How would we ripple the O_NONBLOCK characteristic to the
-               * contained source pipe?  file_vfcntl()?  Or FIONREAD? See the
-               * TODO comment at the top of this file.
-               */
-
-              nread = file_read(&dev->pd_src, &ch, 1);
             }
 
-          /* Check if file_read was successful */
+          /* Is the buffer not empty after process? */
 
-          if (nread < 0)
+          if (j != 0)
             {
-              ntotal = nread;
+              /* Yes, we are done. */
+
+              ntotal = j;
               break;
-            }
-
-          /* Perform input processing */
-
-          /* \n -> \r or \r -> \n translation? */
-
-          if (ch == '\n' && (dev->pd_iflag & INLCR) != 0)
-            {
-               ch = '\r';
-            }
-          else if (ch == '\r' && (dev->pd_iflag & ICRNL) != 0)
-            {
-              ch = '\n';
-            }
-
-          /* Discarding \r ?  Print character if (1) character is not \r or
-           * if (2) we were not asked to ignore \r.
-           */
-
-          if (ch != '\r' || (dev->pd_iflag & IGNCR) == 0)
-            {
-              /* Transfer the (possibly translated) character and update the
-               * count of bytes transferred.
-               */
-
-              *buffer++ = ch;
-              ntotal++;
             }
         }
     }
   else
-#endif
     {
       /* NOTE: the source pipe will block if no data is available in
        * the pipe.   Otherwise, it will return data from the pipe.  If
@@ -601,11 +463,75 @@ static ssize_t pty_read(FAR struct file *filep, FAR char *buffer, size_t len)
        *
        * REVISIT: Should not block if the oflags include O_NONBLOCK.
        * How would we ripple the O_NONBLOCK characteristic to the
-       * contained source pipe? file_vfcntl()?  Or FIONREAD?  See the
+       * contained source pipe? file_fcntl()?  Or FIONREAD?  See the
        * TODO comment at the top of this file.
        */
 
       ntotal = file_read(&dev->pd_src, buffer, len);
+    }
+
+  if ((dev->pd_lflag & ECHO) && (ntotal > 0))
+    {
+      size_t n = 0;
+
+      for (i = j = 0; i < ntotal; i++)
+        {
+          ch = buffer[i];
+
+          /* Check for the beginning of a VT100 escape sequence, 3 byte */
+
+          if (ch == ASCII_ESC)
+            {
+              /* Mark that we should skip 2 more bytes */
+
+              dev->pd_escape = 2;
+              continue;
+            }
+          else if (dev->pd_escape == 2 && ch != ASCII_LBRACKET)
+            {
+              /* It's not an <esc>[x 3 byte sequence, show it */
+
+              dev->pd_escape = 0;
+            }
+          else if (dev->pd_escape > 0)
+            {
+              /* Skipping character count down */
+
+              if (--dev->pd_escape > 0)
+                {
+                  continue;
+                }
+            }
+
+          /* Echo if the character in batch */
+
+          if (ch == '\n' || (n != 0 && j + n != i))
+            {
+              if (n != 0)
+                {
+                  pty_write(filep, buffer + j, n);
+                  n = 0;
+                }
+
+              if (ch == '\n')
+                {
+                  pty_write(filep, "\r\n", 2);
+                  continue;
+                }
+            }
+
+          /* Record the character can be echo */
+
+          if (!iscntrl(ch & 0xff) && n++ == 0)
+            {
+              j = i;
+            }
+        }
+
+      if (n != 0)
+        {
+          pty_write(filep, buffer + j, n);
+        }
     }
 
   return ntotal;
@@ -621,18 +547,25 @@ static ssize_t pty_write(FAR struct file *filep,
   FAR struct inode *inode;
   FAR struct pty_dev_s *dev;
   ssize_t ntotal;
-#ifdef CONFIG_SERIAL_TERMIOS
   ssize_t nwritten;
+#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGTSTP)
+  pid_t pid;
+#endif
   size_t i;
   char ch;
-#endif
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
   inode = filep->f_inode;
   dev   = inode->i_private;
   DEBUGASSERT(dev != NULL);
 
-#ifdef CONFIG_SERIAL_TERMIOS
+#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGTSTP)
+  pid = dev->pd_devpair->pp_master.pd_pid;
+  if (dev->pd_master)
+    {
+      pid = dev->pd_devpair->pp_slave.pd_pid;
+    }
+#endif
+
   /* Do output post-processing */
 
   if ((dev->pd_oflag & OPOST) != 0)
@@ -669,8 +602,12 @@ static ssize_t pty_write(FAR struct file *filep,
                *
                * REVISIT: Should not block if the oflags include O_NONBLOCK.
                * How would we ripple the O_NONBLOCK characteristic to the
-               * contained sink pipe?  file_vfcntl()?  Or FIONSPACE?  See the
+               * contained sink pipe?  file_fcntl()?  Or FIONSPACE?  See the
                * TODO comment at the top of this file.
+               *
+               * NOTE: The newline is not included in total number of bytes
+               * written.  Otherwise, we would return more than the
+               * requested number of bytes.
                */
 
               nwritten = file_write(&dev->pd_sink, &cr, 1);
@@ -679,18 +616,30 @@ static ssize_t pty_write(FAR struct file *filep,
                   ntotal = nwritten;
                   break;
                 }
-
-              /* Update the count of bytes transferred */
-
-              ntotal++;
             }
+
+#ifdef CONFIG_TTY_SIGINT
+          if (pid > 0 && ch == CONFIG_TTY_SIGINT_CHAR)
+            {
+              nxsig_kill(pid, SIGINT);
+              return 1;
+            }
+#endif
+
+#ifdef CONFIG_TTY_SIGTSTP
+          if (pid > 0 && ch == CONFIG_TTY_SIGTSTP_CHAR)
+            {
+              nxsig_kill(pid, SIGTSTP);
+              return 1;
+            }
+#endif
 
           /* Transfer the (possibly translated) character..  This will block
            * if the sink pipe is full
            *
            * REVISIT: Should not block if the oflags include O_NONBLOCK.
            * How would we ripple the O_NONBLOCK characteristic to the
-           * contained sink pipe?  file_vfcntl()?  Or FIONSPACe?  See the
+           * contained sink pipe?  file_fcntl()?  Or FIONSPACe?  See the
            * TODO comment at the top of this file.
            */
 
@@ -707,14 +656,13 @@ static ssize_t pty_write(FAR struct file *filep,
         }
     }
   else
-#endif
     {
       /* Write the 'len' bytes to the sink pipe.  This will block until all
        * 'len' bytes have been written to the pipe.
        *
        * REVISIT: Should not block if the oflags include O_NONBLOCK.
        * How would we ripple the O_NONBLOCK characteristic to the
-       * contained sink pipe?  file_vfcntl()?  Or FIONSPACE?  See the
+       * contained sink pipe?  file_fcntl()?  Or FIONSPACE?  See the
        * TODO comment at the top of this file.
        */
 
@@ -739,7 +687,6 @@ static int pty_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   FAR struct pty_devpair_s *devpair;
   int ret;
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
   inode   = filep->f_inode;
   dev     = inode->i_private;
   DEBUGASSERT(dev != NULL && dev->pd_devpair != NULL);
@@ -747,7 +694,7 @@ static int pty_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Get exclusive access */
 
-  ret = pty_semtake(devpair);
+  ret = nxmutex_lock(&devpair->pp_lock);
   if (ret < 0)
     {
       return ret;
@@ -761,9 +708,6 @@ static int pty_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
       case TIOCGPTN:    /* Get Pty Number (of pty-mux device): FAR int* */
         {
-#ifdef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-          ret = -ENOSYS;
-#else
           FAR int *ptyno = (FAR int *)((uintptr_t)arg);
           if (ptyno == NULL)
             {
@@ -771,10 +715,9 @@ static int pty_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
             }
           else
             {
-              *ptyno = (int)devpair->pp_minor;
+              *ptyno = devpair->pp_minor;
               ret = OK;
             }
-#endif
         }
         break;
 
@@ -782,34 +725,26 @@ static int pty_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         {
           if (arg == 0)
             {
-               int sval;
+              if (devpair->pp_locked)
+                {
+                  /* Release any waiting threads */
 
-               /* Unlocking */
-
-               sched_lock();
-               devpair->pp_locked = false;
-
-               /* Release any waiting threads */
-
-               do
-                 {
-                   DEBUGVERIFY(nxsem_getvalue(&devpair->pp_slavesem, &sval));
-                   if (sval < 0)
-                     {
-                       nxsem_post(&devpair->pp_slavesem);
-                     }
-                 }
-               while (sval < 0);
-
-               sched_unlock();
-               ret = OK;
+                  ret = nxsem_post(&devpair->pp_slavesem);
+                  if (ret >= 0)
+                    {
+                      devpair->pp_locked = false;
+                    }
+                }
             }
-          else
+          else if (!devpair->pp_locked)
             {
               /* Locking */
 
-               devpair->pp_locked = true;
-               ret = OK;
+              ret = nxsem_wait(&devpair->pp_slavesem);
+              if (ret >= 0)
+                {
+                  devpair->pp_locked = true;
+                }
             }
         }
         break;
@@ -823,13 +758,12 @@ static int pty_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
             }
           else
             {
-              *ptr = (int)devpair->pp_locked;
+              *ptr = devpair->pp_locked;
               ret = OK;
             }
         }
         break;
 
-#ifdef CONFIG_SERIAL_TERMIOS
       case TCGETS:
         {
           FAR struct termios *termiosp = (FAR struct termios *)arg;
@@ -844,7 +778,7 @@ static int pty_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
           termiosp->c_iflag = dev->pd_iflag;
           termiosp->c_oflag = dev->pd_oflag;
-          termiosp->c_lflag = 0;
+          termiosp->c_lflag = dev->pd_lflag;
           ret = OK;
         }
         break;
@@ -863,10 +797,10 @@ static int pty_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
           dev->pd_iflag = termiosp->c_iflag;
           dev->pd_oflag = termiosp->c_oflag;
+          dev->pd_lflag = termiosp->c_lflag;
           ret = OK;
         }
         break;
-#endif
 
       /* Get the number of bytes that are immediately available for reading
        * from the source pipe.
@@ -889,6 +823,43 @@ static int pty_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         }
         break;
 
+      case FIONBIO:
+        {
+          ret = file_ioctl(&dev->pd_src, cmd, arg);
+          if (ret >= 0)
+            {
+              ret = file_ioctl(&dev->pd_sink, cmd, arg);
+            }
+        }
+        break;
+
+#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGTSTP)
+      /* Make the controlling terminal of the calling process */
+
+      case TIOCSCTTY:
+        {
+          /* Save the PID of the recipient of the SIGINT signal. */
+
+          if ((int)arg < 0 || dev->pd_pid >= 0)
+            {
+              ret = -EINVAL;
+            }
+          else
+            {
+              dev->pd_pid = (pid_t)arg;
+              ret = 0;
+            }
+        }
+        break;
+
+      case TIOCNOTTY:
+        {
+          dev->pd_pid = INVALID_PROCESS_ID;
+          ret = 0;
+        }
+        break;
+#endif
+
       /* Any unrecognized IOCTL commands will be passed to the contained
        * pipe driver.
        *
@@ -907,13 +878,13 @@ static int pty_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
               ret = file_ioctl(&dev->pd_sink, cmd, arg);
             }
 #else
-          ret = ENOTTY;
+          ret = -ENOTTY;
 #endif
         }
         break;
     }
 
-  pty_semgive(devpair);
+  nxmutex_unlock(&devpair->pp_lock);
   return ret;
 }
 
@@ -931,18 +902,15 @@ static int pty_poll(FAR struct file *filep, FAR struct pollfd *fds,
   int ret;
   int i;
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
   inode   = filep->f_inode;
   dev     = inode->i_private;
   devpair = dev->pd_devpair;
 
-  ret = pty_semtake(devpair);
+  ret = nxmutex_lock(&devpair->pp_lock);
   if (ret < 0)
     {
       return ret;
     }
-
-  ret = -ENOSYS;
 
   if (setup)
     {
@@ -966,7 +934,7 @@ static int pty_poll(FAR struct file *filep, FAR struct pollfd *fds,
       pollp = (FAR struct pty_poll_s *)fds->priv;
     }
 
-  /* POLLIN: Data other than high-priority data may be read without blocking. */
+  /* POLLIN: Data may be read without blocking. */
 
   if ((fds->events & POLLIN) != 0)
     {
@@ -1007,7 +975,7 @@ static int pty_poll(FAR struct file *filep, FAR struct pollfd *fds,
     }
 
 errout:
-  pty_semgive(devpair);
+  nxmutex_unlock(&devpair->pp_lock);
   return ret;
 }
 
@@ -1022,14 +990,14 @@ static int pty_unlink(FAR struct inode *inode)
   FAR struct pty_devpair_s *devpair;
   int ret;
 
-  DEBUGASSERT(inode != NULL && inode->i_private != NULL);
-  dev       = inode->i_private;
-  devpair   = dev->pd_devpair;
+  DEBUGASSERT(inode->i_private != NULL);
+  dev     = inode->i_private;
+  devpair = dev->pd_devpair;
   DEBUGASSERT(dev->pd_devpair != NULL);
 
   /* Get exclusive access */
 
-  ret = pty_semtake(devpair);
+  ret = nxmutex_lock(&devpair->pp_lock);
   if (ret < 0)
     {
       return ret;
@@ -1045,11 +1013,12 @@ static int pty_unlink(FAR struct inode *inode)
 
   if (devpair->pp_nopen == 0)
     {
+      nxmutex_unlock(&devpair->pp_lock);
       pty_destroy(devpair);
       return OK;
     }
 
-  pty_semgive(devpair);
+  nxmutex_unlock(&devpair->pp_lock);
   return OK;
 }
 #endif
@@ -1059,12 +1028,126 @@ static int pty_unlink(FAR struct inode *inode)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: pty_register
+ * Name: pty_register2
  *
  * Description:
  *   Create and register PTY master and slave devices.  The slave side of
  *   the interface is always locked initially.  The master must call
  *   unlockpt() before the slave device can be opened.
+ *
+ * Input Parameters:
+ *   minor - The number that qualifies the naming of the created devices.
+ *   susv1 - select SUSv1 or BSD behaviour
+ *
+ * Returned Value:
+ *   0 is returned on success; otherwise, the negative error code return
+ *   appropriately.
+ *
+ ****************************************************************************/
+
+int pty_register2(int minor, bool susv1)
+{
+  FAR struct pty_devpair_s *devpair;
+  char devname[16];
+  int ret;
+
+  /* Allocate a device instance */
+
+  devpair = kmm_zalloc(sizeof(struct pty_devpair_s));
+  if (devpair == NULL)
+    {
+      return -ENOMEM;
+    }
+
+  /* Initialize semaphores & mutex */
+
+  nxsem_init(&devpair->pp_slavesem, 0, 0);
+  nxmutex_init(&devpair->pp_lock);
+
+  /* Map CR -> NL from terminal input (master)
+   * For some usage like adb shell:
+   *   adb shell write \r -> nsh read \n and echo input
+   *   nsh write \n -> adb shell read \r\n
+   */
+
+  devpair->pp_susv1             = susv1;
+  devpair->pp_minor             = minor;
+  devpair->pp_locked            = true;
+  devpair->pp_master.pd_devpair = devpair;
+  devpair->pp_master.pd_master  = true;
+  devpair->pp_master.pd_oflag   = OPOST | OCRNL;
+  devpair->pp_slave.pd_devpair  = devpair;
+  devpair->pp_slave.pd_oflag    = OPOST | ONLCR;
+  devpair->pp_slave.pd_lflag    = ECHO | ICANON;
+#if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGTSTP)
+  /* Initialize  of the task that will receive SIGINT signals. */
+
+  devpair->pp_master.pd_pid = INVALID_PROCESS_ID;
+  devpair->pp_slave.pd_pid = INVALID_PROCESS_ID;
+#endif
+
+  /* Register the master device
+   *
+   * BSD style (deprecated): /dev/ptyN
+   * SUSv1 style: Master: /dev/ptmx (multiplexor, see ptmx.c)
+   *
+   * Where N is the minor number
+   */
+
+  snprintf(devname, sizeof(devname), "/dev/pty%d", minor);
+
+  ret = register_driver(devname, &g_pty_fops, 0666, &devpair->pp_master);
+  if (ret < 0)
+    {
+      goto errout_with_devpair;
+    }
+
+  /* Register the slave device
+   *
+   * BSD style (deprecated): /dev/ttypN
+   * SUSv1 style: /dev/pts/N
+   *
+   * Where N is the minor number
+   */
+
+  if (susv1)
+    {
+      snprintf(devname, sizeof(devname), "/dev/pts/%d", minor);
+    }
+  else
+    {
+      snprintf(devname, sizeof(devname), "/dev/ttyp%d", minor);
+    }
+
+  ret = register_driver(devname, &g_pty_fops, 0666, &devpair->pp_slave);
+  if (ret < 0)
+    {
+      goto errout_with_master;
+    }
+
+  return OK;
+
+errout_with_master:
+  snprintf(devname, sizeof(devname), "/dev/pty%d", minor);
+  unregister_driver(devname);
+
+errout_with_devpair:
+  nxmutex_destroy(&devpair->pp_lock);
+  nxsem_destroy(&devpair->pp_slavesem);
+  kmm_free(devpair);
+  return ret;
+}
+
+/****************************************************************************
+ * Name: pty_register
+ *
+ * Description:
+ *   Create and register PTY master and slave devices.  The master device
+ *   will be registered at /dev/ptyN and slave at /dev/ttypN where N is
+ *   the provided minor number.
+ *
+ *   The slave side of the interface is always locked initially.  The
+ *   master must call unlockpt() before the slave device can be opened.
  *
  * Input Parameters:
  *   minor - The number that qualifies the naming of the created devices.
@@ -1077,182 +1160,5 @@ static int pty_unlink(FAR struct inode *inode)
 
 int pty_register(int minor)
 {
-  FAR struct pty_devpair_s *devpair;
-  int pipe_a[2];
-  int pipe_b[2];
-  char devname[16];
-  int ret;
-
-  /* Allocate a device instance */
-
-  devpair = kmm_zalloc(sizeof(struct pty_devpair_s));
-  if (devpair == NULL)
-    {
-      return -ENOMEM;
-    }
-
-  /* Initialize semaphores */
-
-  nxsem_init(&devpair->pp_slavesem, 0, 0);
-  nxsem_init(&devpair->pp_exclsem, 0, 1);
-
-  /* The pp_slavesem semaphore is used for signaling and, hence, should not
-   * have priority inheritance enabled.
-   */
-
-  nxsem_setprotocol(&devpair->pp_slavesem, SEM_PRIO_NONE);
-
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  devpair->pp_minor             = minor;
-#endif
-  devpair->pp_locked            = true;
-  devpair->pp_master.pd_devpair = devpair;
-  devpair->pp_master.pd_master  = true;
-  devpair->pp_slave.pd_devpair  = devpair;
-
-  /* Create two pipes:
-   *
-   *   pipe_a:  Master source, slave sink (TX, slave-to-master)
-   *   pipe_b:  Master sink, slave source (RX, master-to-slave)
-   */
-
-  ret = pipe2(pipe_a, CONFIG_PSEUDOTERM_TXBUFSIZE);
-  if (ret < 0)
-    {
-      goto errout_with_devpair;
-    }
-
-  ret = pipe2(pipe_b, CONFIG_PSEUDOTERM_RXBUFSIZE);
-  if (ret < 0)
-    {
-      goto errout_with_pipea;
-    }
-
-  /* Detach the pipe file descriptors (closing them in the process)
-   *
-   *  fd[0] is for reading;
-   *  fd[1] is for writing.
-   */
-
-  ret = file_detach(pipe_a[0], &devpair->pp_master.pd_src);
-  if (ret < 0)
-    {
-      goto errout_with_pipeb;
-    }
-
-  pipe_a[0] = -1;
-
-  ret = file_detach(pipe_a[1], &devpair->pp_slave.pd_sink);
-  if (ret < 0)
-    {
-      goto errout_with_pipeb;
-    }
-
-  pipe_a[1] = -1;
-
-  ret = file_detach(pipe_b[0], &devpair->pp_slave.pd_src);
-  if (ret < 0)
-    {
-      goto errout_with_pipeb;
-    }
-
-  pipe_b[0] = -1;
-
-  ret = file_detach(pipe_b[1], &devpair->pp_master.pd_sink);
-  if (ret < 0)
-    {
-      goto errout_with_pipeb;
-    }
-
-  pipe_b[1] = -1;
-
-  /* Register the slave device
-   *
-   * BSD style (deprecated): /dev/ttypN
-   * SUSv1 style:  /dev/pts/N
-   *
-   * Where N is the minor number
-   */
-
-#ifdef CONFIG_PSEUDOTERM_BSD
-  snprintf(devname, 16, "/dev/ttyp%d", minor);
-#else
-  snprintf(devname, 16, "/dev/pts/%d", minor);
-#endif
-
-  ret = register_driver(devname, &g_pty_fops, 0666, &devpair->pp_slave);
-  if (ret < 0)
-    {
-      goto errout_with_pipeb;
-    }
-
-  /* Register the master device
-   *
-   * BSD style (deprecated):  /dev/ptyN
-   * SUSv1 style: Master: /dev/ptmx (multiplexor, see ptmx.c)
-   *
-   * Where N is the minor number
-   */
-
-  snprintf(devname, 16, "/dev/pty%d", minor);
-
-  ret = register_driver(devname, &g_pty_fops, 0666, &devpair->pp_master);
-  if (ret < 0)
-    {
-      goto errout_with_slave;
-    }
-
-  return OK;
-
-errout_with_slave:
-#ifdef CONFIG_PSEUDOTERM_BSD
-  snprintf(devname, 16, "/dev/ttyp%d", minor);
-#else
-  snprintf(devname, 16, "/dev/pts/%d", minor);
-#endif
-  unregister_driver(devname);
-
-errout_with_pipeb:
-  if (pipe_b[0] >= 0)
-    {
-      close(pipe_b[0]);
-    }
-  else
-    {
-      file_close(&devpair->pp_master.pd_src);
-    }
-
-  if (pipe_b[1] >= 0)
-    {
-      close(pipe_b[1]);
-    }
-  else
-    {
-      file_close(&devpair->pp_slave.pd_sink);
-    }
-
-errout_with_pipea:
-  if (pipe_a[0] >= 0)
-    {
-      close(pipe_a[0]);
-    }
-  else
-    {
-      file_close(&devpair->pp_slave.pd_src);
-    }
-
-  if (pipe_a[1] >= 0)
-    {
-      close(pipe_a[1]);
-    }
-  else
-    {
-      file_close(&devpair->pp_master.pd_sink);
-    }
-
-errout_with_devpair:
-  nxsem_destroy(&devpair->pp_exclsem);
-  nxsem_destroy(&devpair->pp_slavesem);
-  kmm_free(devpair);
-  return ret;
+  return pty_register2(minor, false);
 }

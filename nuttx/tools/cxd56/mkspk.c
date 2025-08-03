@@ -1,35 +1,24 @@
 /****************************************************************************
  * tools/cxd56/mkspk.c
  *
- * Copyright (C) 2007, 2008 Sony Corporation
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *****************************************************************************/
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
 
 /****************************************************************************
  * Included Files
@@ -133,7 +122,7 @@ static struct args *parse_args(int argc, char **argv)
   if (show_help == 1)
     {
       fprintf(stderr,
-              "mkspk [-c <number>] <filename> <save name> [<output file>]\n");
+        "mkspk [-c <number>] <filename> <save name> [<output file>]\n");
       exit(EXIT_FAILURE);
     }
 
@@ -169,7 +158,7 @@ static struct elf_file *load_elf(const char *filename)
       return NULL;
     }
 
-  ef = (struct elf_file *)malloc(sizeof(*ef));
+  ef = malloc(sizeof(*ef));
   if (!ef)
     {
       return NULL;
@@ -179,7 +168,7 @@ static struct elf_file *load_elf(const char *filename)
   fsize = (size_t) ftell(fp);
   fseek(fp, pos, SEEK_SET);
 
-  buf = (char *)malloc(fsize);
+  buf = malloc(fsize);
   if (!buf)
     {
       return NULL;
@@ -242,7 +231,9 @@ static void *create_image(struct elf_file *elf, int core, char *savename,
   Elf32_Sym *sym;
   char *name;
   int snlen;
-  int nphs, psize, imgsize;
+  int nphs;
+  int psize;
+  int imgsize;
   int i;
   int j;
   uint32_t offset;
@@ -254,7 +245,7 @@ static void *create_image(struct elf_file *elf, int core, char *savename,
   psize = 0;
   for (i = 0, ph = elf->phdr; i < elf->ehdr->e_phnum; i++, ph++)
     {
-      if (ph->p_type != PT_LOAD || ph->p_filesz == 0)
+      if (ph->p_type != PT_LOAD || ph->p_memsz == 0)
         {
           continue;
         }
@@ -265,7 +256,7 @@ static void *create_image(struct elf_file *elf, int core, char *savename,
 
   imgsize = sizeof(*header) + snlen + (nphs * 16) + psize;
 
-  img = (char *)malloc(imgsize + 32);
+  img = malloc(imgsize + 32);
   if (!img)
     {
       return NULL;
@@ -308,7 +299,7 @@ static void *create_image(struct elf_file *elf, int core, char *savename,
   offset = ((char *)pi - img) + (nphs * sizeof(*pi));
   for (i = 0; i < elf->ehdr->e_phnum; i++, ph++)
     {
-      if (ph->p_type != PT_LOAD || ph->p_filesz == 0)
+      if (ph->p_type != PT_LOAD || ph->p_memsz == 0)
         continue;
       pi->load_address = ph->p_paddr;
       pi->offset = offset;
@@ -357,7 +348,7 @@ int main(int argc, char **argv)
 
   size += 16;                   /* Extend CMAC size */
 
-  snprintf(footer, 16, "MKSPK_BN_HOOTER");
+  snprintf(footer, 16, "MKSPK_BN_FOOTER");
   footer[15] = '\0';
 
   fp = fopen(args->outputfile, "wb");

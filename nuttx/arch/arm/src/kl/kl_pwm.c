@@ -1,36 +1,22 @@
 /****************************************************************************
  * arch/arm/src/kl/kl_pwm.c
  *
- *   Copyright (C) 2013, 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *           Alan Carvalho de Assis <acassis@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,6 +26,7 @@
 
 #include <nuttx/config.h>
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <assert.h>
@@ -51,9 +38,7 @@
 #include <nuttx/timers/pwm.h>
 #include <arch/board/board.h>
 
-#include "up_internal.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "chip.h"
 #include "kl_pwm.h"
 #include "kl_gpio.h"
@@ -70,6 +55,7 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
 /* PWM/Timer Definitions ****************************************************/
 
 /* Debug ********************************************************************/
@@ -83,53 +69,59 @@
 /****************************************************************************
  * Private Types
  ****************************************************************************/
+
 /* This structure represents the state of one PWM timer */
 
 struct kl_pwmtimer_s
 {
-  FAR const struct pwm_ops_s *ops;     /* PWM operations */
-  uint8_t                     tpmid;   /* Timer/PWM Module ID {0,..,2} */
-  uint8_t                     channel; /* Timer/PWM Module channel: {0,..5} */
-  uint32_t                    base;    /* The base address of the timer */
-  uint32_t                    pincfg;  /* Output pin configuration */
-  uint32_t                    pclk;    /* The frequency of the peripheral clock */
+  const struct pwm_ops_s *ops;     /* PWM operations */
+  uint8_t                 tpmid;   /* Timer/PWM Module ID {0,..,2} */
+  uint8_t                 channel; /* Timer/PWM Module channel: {0,..5} */
+  uint32_t                base;    /* The base address of the timer */
+  uint32_t                pincfg;  /* Output pin configuration */
+  uint32_t                pclk;    /* The frequency of the peripheral clock */
 };
 
 /****************************************************************************
  * Static Function Prototypes
  ****************************************************************************/
+
 /* Register access */
 
 static uint32_t pwm_getreg(struct kl_pwmtimer_s *priv, int offset);
-static void pwm_putreg(struct kl_pwmtimer_s *priv, int offset, uint32_t value);
+static void pwm_putreg(struct kl_pwmtimer_s *priv, int offset,
+                       uint32_t value);
 
 #ifdef CONFIG_DEBUG_PWM_INFO
-static void pwm_dumpregs(struct kl_pwmtimer_s *priv, FAR const char *msg);
+static void pwm_dumpregs(struct kl_pwmtimer_s *priv, const char *msg);
 #else
 #  define pwm_dumpregs(priv,msg)
 #endif
 
 /* Timer management */
 
-static int pwm_timer(FAR struct kl_pwmtimer_s *priv,
-                     FAR const struct pwm_info_s *info);
+static int pwm_timer(struct kl_pwmtimer_s *priv,
+                     const struct pwm_info_s *info);
 
 /* PWM driver methods */
 
-static int pwm_setup(FAR struct pwm_lowerhalf_s *dev);
-static int pwm_shutdown(FAR struct pwm_lowerhalf_s *dev);
+static int pwm_setup(struct pwm_lowerhalf_s *dev);
+static int pwm_shutdown(struct pwm_lowerhalf_s *dev);
 
-static int pwm_start(FAR struct pwm_lowerhalf_s *dev,
-                     FAR const struct pwm_info_s *info);
+static int pwm_start(struct pwm_lowerhalf_s *dev,
+                     const struct pwm_info_s *info);
 
-static int pwm_stop(FAR struct pwm_lowerhalf_s *dev);
-static int pwm_ioctl(FAR struct pwm_lowerhalf_s *dev,
+static int pwm_stop(struct pwm_lowerhalf_s *dev);
+static int pwm_ioctl(struct pwm_lowerhalf_s *dev,
                      int cmd, unsigned long arg);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-/* This is the list of lower half PWM driver methods used by the upper half driver */
+
+/* This is the list of lower half PWM driver methods used by the upper half
+ * driver
+ */
 
 static const struct pwm_ops_s g_pwmops =
 {
@@ -215,7 +207,8 @@ static uint32_t pwm_getreg(struct kl_pwmtimer_s *priv, int offset)
  *
  ****************************************************************************/
 
-static void pwm_putreg(struct kl_pwmtimer_s *priv, int offset, uint32_t value)
+static void pwm_putreg(struct kl_pwmtimer_s *priv, int offset,
+                       uint32_t value)
 {
   putreg32(value, priv->base + offset);
 }
@@ -235,7 +228,7 @@ static void pwm_putreg(struct kl_pwmtimer_s *priv, int offset, uint32_t value)
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_PWM_INFO
-static void pwm_dumpregs(struct kl_pwmtimer_s *priv, FAR const char *msg)
+static void pwm_dumpregs(struct kl_pwmtimer_s *priv, const char *msg)
 {
   int nchannels = (priv->tpmid == 0) ? 6 : 2;
 
@@ -316,8 +309,8 @@ static void pwm_dumpregs(struct kl_pwmtimer_s *priv, FAR const char *msg)
  *
  ****************************************************************************/
 
-static int pwm_timer(FAR struct kl_pwmtimer_s *priv,
-                     FAR const struct pwm_info_s *info)
+static int pwm_timer(struct kl_pwmtimer_s *priv,
+                     const struct pwm_info_s *info)
 {
   /* Calculated values */
 
@@ -328,20 +321,23 @@ static int pwm_timer(FAR struct kl_pwmtimer_s *priv,
   uint32_t cv;
   uint8_t i;
 
-  static const uint8_t presc_values[8] = {1, 2, 4, 8, 16, 32, 64, 128};
+  static const uint8_t presc_values[8] =
+    {
+      1, 2, 4, 8, 16, 32, 64, 128
+    };
 
   /* Register contents */
 
   DEBUGASSERT(priv != NULL && info != NULL);
 
-  pwminfo("TPM%d channel: %d frequency: %d duty: %08x\n",
+  pwminfo("TPM%d channel: %d frequency: %" PRId32 " duty: %08" PRIx32 "\n",
           priv->tpmid, priv->channel, info->frequency, info->duty);
 
   DEBUGASSERT(info->frequency > 0 && info->duty > 0 &&
               info->duty < uitoub16(100));
 
-  /* Calculate optimal values for the timer prescaler and for the timer modulo
-   * register.  If' frequency' is the desired frequency, then
+  /* Calculate optimal values for the timer prescaler and for the timer
+   * modulo register.  If' frequency' is the desired frequency, then
    *
    *   modulo = tpmclk / frequency
    *   tpmclk = pclk / presc
@@ -404,7 +400,8 @@ static int pwm_timer(FAR struct kl_pwmtimer_s *priv,
 
   cv = b16toi(info->duty * modulo + b16HALF);
 
-  pwminfo("TPM%d PCLK: %d frequency: %d TPMCLK: %d prescaler: %d modulo: %d c0v: %d\n",
+  pwminfo("TPM%d PCLK: %" PRId32 " frequency: %" PRId32 " TPMCLK: %" PRId32
+          " prescaler: %d modulo: %" PRId32 " c0v: %" PRId32 "\n",
           priv->tpmid, priv->pclk, info->frequency, tpmclk,
           presc_values[prescaler], modulo, cv);
 
@@ -423,42 +420,42 @@ static int pwm_timer(FAR struct kl_pwmtimer_s *priv,
     {
       case 0:  /* PWM Mode configuration: Channel 0 */
         {
-          pwm_putreg(priv, TPM_C0SC_OFFSET, TPM_CnSC_MSB | TPM_CnSC_ELSB);
+          pwm_putreg(priv, TPM_C0SC_OFFSET, TPM_CNSC_MSB | TPM_CNSC_ELSB);
           pwm_putreg(priv, TPM_C0V_OFFSET, (uint16_t) cv);
         }
         break;
 
       case 1:  /* PWM Mode configuration: Channel 1 */
         {
-          pwm_putreg(priv, TPM_C1SC_OFFSET, TPM_CnSC_MSB | TPM_CnSC_ELSB);
+          pwm_putreg(priv, TPM_C1SC_OFFSET, TPM_CNSC_MSB | TPM_CNSC_ELSB);
           pwm_putreg(priv, TPM_C1V_OFFSET, (uint16_t) cv);
         }
         break;
 
       case 2:  /* PWM Mode configuration: Channel 2 */
         {
-          pwm_putreg(priv, TPM_C2SC_OFFSET, TPM_CnSC_MSB | TPM_CnSC_ELSB);
+          pwm_putreg(priv, TPM_C2SC_OFFSET, TPM_CNSC_MSB | TPM_CNSC_ELSB);
           pwm_putreg(priv, TPM_C2V_OFFSET, (uint16_t) cv);
         }
         break;
 
       case 3:  /* PWM Mode configuration: Channel 3 */
         {
-          pwm_putreg(priv, TPM_C3SC_OFFSET, TPM_CnSC_MSB | TPM_CnSC_ELSB);
+          pwm_putreg(priv, TPM_C3SC_OFFSET, TPM_CNSC_MSB | TPM_CNSC_ELSB);
           pwm_putreg(priv, TPM_C3V_OFFSET, (uint16_t) cv);
         }
         break;
 
       case 4:  /* PWM Mode configuration: Channel 4 */
         {
-          pwm_putreg(priv, TPM_C4SC_OFFSET, TPM_CnSC_MSB | TPM_CnSC_ELSB);
+          pwm_putreg(priv, TPM_C4SC_OFFSET, TPM_CNSC_MSB | TPM_CNSC_ELSB);
           pwm_putreg(priv, TPM_C4V_OFFSET, (uint16_t) cv);
         }
         break;
 
       case 5:  /* PWM Mode configuration: Channel 5 */
         {
-          pwm_putreg(priv, TPM_C5SC_OFFSET, TPM_CnSC_MSB | TPM_CnSC_ELSB);
+          pwm_putreg(priv, TPM_C5SC_OFFSET, TPM_CNSC_MSB | TPM_CNSC_ELSB);
           pwm_putreg(priv, TPM_C5V_OFFSET, (uint16_t) cv);
         }
         break;
@@ -500,10 +497,10 @@ static int pwm_timer(FAR struct kl_pwmtimer_s *priv,
  *
  ****************************************************************************/
 
-static int pwm_setup(FAR struct pwm_lowerhalf_s *dev)
+static int pwm_setup(struct pwm_lowerhalf_s *dev)
 {
   uint32_t regval;
-  FAR struct kl_pwmtimer_s *priv = (FAR struct kl_pwmtimer_s *)dev;
+  struct kl_pwmtimer_s *priv = (struct kl_pwmtimer_s *)dev;
 
   /* Enable access to TPM modules */
 
@@ -511,7 +508,7 @@ static int pwm_setup(FAR struct pwm_lowerhalf_s *dev)
   regval |= SIM_SCGC6_TPM0 | SIM_SCGC6_TPM1 | SIM_SCGC6_TPM2;
   putreg32(regval, KL_SIM_SCGC6);
 
-  pwminfo("TPM%d pincfg: %08x\n", priv->tpmid, priv->pincfg);
+  pwminfo("TPM%d pincfg: %08" PRIx32 "\n", priv->tpmid, priv->pincfg);
   pwm_dumpregs(priv, "Initially");
 
   /* Configure the PWM output pin, but do not start the timer yet */
@@ -537,12 +534,12 @@ static int pwm_setup(FAR struct pwm_lowerhalf_s *dev)
  *
  ****************************************************************************/
 
-static int pwm_shutdown(FAR struct pwm_lowerhalf_s *dev)
+static int pwm_shutdown(struct pwm_lowerhalf_s *dev)
 {
-  FAR struct kl_pwmtimer_s *priv = (FAR struct kl_pwmtimer_s *)dev;
+  struct kl_pwmtimer_s *priv = (struct kl_pwmtimer_s *)dev;
   uint32_t pincfg;
 
-  pwminfo("TPM%d pincfg: %08x\n", priv->tpmid, priv->pincfg);
+  pwminfo("TPM%d pincfg: %08" PRIx32 "\n", priv->tpmid, priv->pincfg);
 
   /* Make sure that the output has been stopped */
 
@@ -571,10 +568,10 @@ static int pwm_shutdown(FAR struct pwm_lowerhalf_s *dev)
  *
  ****************************************************************************/
 
-static int pwm_start(FAR struct pwm_lowerhalf_s *dev,
-                     FAR const struct pwm_info_s *info)
+static int pwm_start(struct pwm_lowerhalf_s *dev,
+                     const struct pwm_info_s *info)
 {
-  FAR struct kl_pwmtimer_s *priv = (FAR struct kl_pwmtimer_s *)dev;
+  struct kl_pwmtimer_s *priv = (struct kl_pwmtimer_s *)dev;
   return pwm_timer(priv, info);
 }
 
@@ -597,16 +594,16 @@ static int pwm_start(FAR struct pwm_lowerhalf_s *dev,
  *
  ****************************************************************************/
 
-static int pwm_stop(FAR struct pwm_lowerhalf_s *dev)
+static int pwm_stop(struct pwm_lowerhalf_s *dev)
 {
-  FAR struct kl_pwmtimer_s *priv = (FAR struct kl_pwmtimer_s *)dev;
+  struct kl_pwmtimer_s *priv = (struct kl_pwmtimer_s *)dev;
   irqstate_t flags;
 
   pwminfo("TPM%d\n", priv->tpmid);
 
   /* Disable interrupts momentary to stop any ongoing timer processing and
    * to prevent any concurrent access to the reset register.
-  */
+   */
 
   flags = enter_critical_section();
 
@@ -645,6 +642,7 @@ static int pwm_stop(FAR struct pwm_lowerhalf_s *dev)
 
       default:
         pwmerr("ERROR: No such channel: %d\n", priv->channel);
+        leave_critical_section(flags);
         return -EINVAL;
     }
 
@@ -670,10 +668,11 @@ static int pwm_stop(FAR struct pwm_lowerhalf_s *dev)
  *
  ****************************************************************************/
 
-static int pwm_ioctl(FAR struct pwm_lowerhalf_s *dev, int cmd, unsigned long arg)
+static int pwm_ioctl(struct pwm_lowerhalf_s *dev, int cmd,
+                     unsigned long arg)
 {
 #ifdef CONFIG_DEBUG_PWM_INFO
-  FAR struct kl_pwmtimer_s *priv = (FAR struct kl_pwmtimer_s *)dev;
+  struct kl_pwmtimer_s *priv = (struct kl_pwmtimer_s *)dev;
 
   /* There are no platform-specific ioctl commands */
 
@@ -701,9 +700,9 @@ static int pwm_ioctl(FAR struct pwm_lowerhalf_s *dev, int cmd, unsigned long arg
  *
  ****************************************************************************/
 
-FAR struct pwm_lowerhalf_s *kl_pwminitialize(int timer)
+struct pwm_lowerhalf_s *kl_pwminitialize(int timer)
 {
-  FAR struct kl_pwmtimer_s *lower;
+  struct kl_pwmtimer_s *lower;
 
   pwminfo("TPM%d\n", timer);
 
@@ -735,7 +734,7 @@ FAR struct pwm_lowerhalf_s *kl_pwminitialize(int timer)
         return NULL;
     }
 
-  return (FAR struct pwm_lowerhalf_s *)lower;
+  return (struct pwm_lowerhalf_s *)lower;
 }
 
 #endif /* CONFIG_KL_TPMn_PWM, n = 0,...,2 */

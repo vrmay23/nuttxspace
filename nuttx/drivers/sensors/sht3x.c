@@ -1,37 +1,22 @@
 /****************************************************************************
  * drivers/sensors/sht3x.c
- * Driver for the Sensirion SHT3x temperature and humidity sensors
  *
- *   Copyright (C) 2019 Haltian Ltd, Hexagon AB. All rights reserved.
- *   Author: Jussi Kivilinna <jussi.kivilinna@haltian.com>,
- *           Markus Bernet <markus.bernet@hexagon.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,11 +27,13 @@
 #include <nuttx/config.h>
 
 #include <stdio.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <time.h>
 
 #include <nuttx/kmalloc.h>
+#include <nuttx/mutex.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/sensors/sht3x.h>
@@ -62,10 +49,6 @@
 #  define sht3x_dbg(x, ...)    _info(x, ##__VA_ARGS__)
 #else
 #  define sht3x_dbg(x, ...)    sninfo(x, ##__VA_ARGS__)
-#endif
-
-#ifndef CONFIG_SHT3X_I2C_FREQUENCY
-#  define CONFIG_SHT3X_I2C_FREQUENCY 400000
 #endif
 
 /* Commands */
@@ -111,7 +94,7 @@
 #define SHT3X_DEFAULT_MEAS_MODE SHT3X_MEAS_PERI_1_H
 
 /****************************************************************************
- * Private
+ * Private Types
  ****************************************************************************/
 
 struct sht3x_dev_s
@@ -127,7 +110,7 @@ struct sht3x_dev_s
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
   int16_t crefs;                 /* Number of open references */
 #endif
-  sem_t devsem;
+  mutex_t devlock;
 };
 
 struct sht3x_word_s
@@ -184,12 +167,14 @@ static const struct file_operations g_sht3xfops =
   sht3x_read,     /* read */
   sht3x_write,    /* write */
   NULL,           /* seek */
-  sht3x_ioctl     /* ioctl */
-#ifndef CONFIG_DISABLE_POLL
-  , NULL          /* poll */
-#endif
+  sht3x_ioctl,    /* ioctl */
+  NULL,           /* mmap */
+  NULL,           /* truncate */
+  NULL,           /* poll */
+  NULL,           /* readv */
+  NULL            /* writev */
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , sht3x_unlink /* unlink */
+  , sht3x_unlink  /* unlink */
 #endif
 };
 
@@ -409,7 +394,7 @@ static int sht3x_read_values(FAR struct sht3x_dev_s *priv,
   struct timespec ts;
   int ret;
 
-  clock_gettime(CLOCK_REALTIME, &ts);
+  clock_systime_timespec(&ts);
 
   /* Read the raw data */
 
@@ -457,7 +442,7 @@ static int sht3x_open(FAR struct file *filep)
 
   /* Get exclusive access */
 
-  ret = nxsem_wait_uninterruptible(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
@@ -468,7 +453,7 @@ static int sht3x_open(FAR struct file *filep)
   priv->crefs++;
   DEBUGASSERT(priv->crefs > 0);
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return OK;
 }
 #endif
@@ -490,7 +475,7 @@ static int sht3x_close(FAR struct file *filep)
 
   /* Get exclusive access */
 
-  ret = nxsem_wait_uninterruptible(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
@@ -507,12 +492,12 @@ static int sht3x_close(FAR struct file *filep)
 
   if (priv->crefs <= 0 && priv->unlinked)
     {
-      nxsem_destroy(&priv->devsem);
+      nxmutex_destroy(&priv->devlock);
       kmm_free(priv);
       return OK;
     }
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return OK;
 }
 #endif
@@ -551,7 +536,7 @@ static int sht3x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Get exclusive access */
 
-  ret = nxsem_wait_uninterruptible(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
@@ -564,7 +549,7 @@ static int sht3x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
        * sensor use on hot swappable I2C bus.
        */
 
-      nxsem_post(&priv->devsem);
+      nxmutex_unlock(&priv->devlock);
       return -ENODEV;
     }
 #endif
@@ -611,7 +596,7 @@ static int sht3x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         break;
     }
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return ret;
 }
 
@@ -625,12 +610,12 @@ static int sht3x_unlink(FAR struct inode *inode)
   FAR struct sht3x_dev_s *priv;
   int ret;
 
-  DEBUGASSERT(inode != NULL && inode->i_private != NULL);
-  priv = (FAR struct sht3x_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private != NULL);
+  priv = inode->i_private;
 
   /* Get exclusive access */
 
-  ret = nxsem_wait_uninterruptible(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
@@ -640,7 +625,7 @@ static int sht3x_unlink(FAR struct inode *inode)
 
   if (priv->crefs <= 0)
     {
-      nxsem_destroy(&priv->devsem);
+      nxmutex_destroy(&priv->devlock);
       kmm_free(priv);
       return OK;
     }
@@ -650,7 +635,7 @@ static int sht3x_unlink(FAR struct inode *inode)
    */
 
   priv->unlinked = true;
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return OK;
 }
 #endif
@@ -686,7 +671,7 @@ int sht3x_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
 
   /* Initialize the device structure */
 
-  priv = (FAR struct sht3x_dev_s *)kmm_zalloc(sizeof(struct sht3x_dev_s));
+  priv = kmm_zalloc(sizeof(struct sht3x_dev_s));
   if (priv == NULL)
     {
       snerr("ERROR: Failed to allocate instance\n");
@@ -696,7 +681,7 @@ int sht3x_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   priv->i2c  = i2c;
   priv->addr = addr;
 
-  nxsem_init(&priv->devsem, 0, 1);
+  nxmutex_init(&priv->devlock);
 
   /* Register the character driver */
 
@@ -704,6 +689,7 @@ int sht3x_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   if (ret < 0)
     {
       snerr("ERROR: Failed to register driver: %d\n", ret);
+      nxmutex_destroy(&priv->devlock);
       kmm_free(priv);
     }
 

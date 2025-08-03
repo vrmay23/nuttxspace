@@ -1,5 +1,7 @@
-/********************************************************************************
+/****************************************************************************
  * include/sys/file.h
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -16,16 +18,35 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  *
- ********************************************************************************/
+ ****************************************************************************/
 
 #ifndef __INCLUDE_SYS_FILE_H
 #define __INCLUDE_SYS_FILE_H
 
-/********************************************************************************
+/****************************************************************************
  * Included Files
- ********************************************************************************/
+ ****************************************************************************/
 
 #include <unistd.h>
 #include <fcntl.h>
+
+/****************************************************************************
+ * Public Function Prototypes
+ ****************************************************************************/
+
+#ifdef __cplusplus
+#define EXTERN extern "C"
+extern "C"
+{
+#else
+#define EXTERN extern
+#endif
+
+int flock(int fd, int cmd);
+
+#undef EXTERN
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __INCLUDE_SYS_FILE_H */

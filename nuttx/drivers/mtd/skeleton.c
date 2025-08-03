@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/mtd/skeleton.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -90,6 +77,7 @@ static int     skel_ioctl(FAR struct mtd_dev_s *dev, int cmd,
 /****************************************************************************
  * Private Data
  ****************************************************************************/
+
 /* This structure holds the state of the MTD driver */
 
 static struct skel_dev_s g_skeldev =
@@ -255,13 +243,16 @@ static int skel_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg)
           FAR struct mtd_geometry_s *geo = (FAR struct mtd_geometry_s *)arg;
           if (geo)
             {
-              /* Populate the geometry structure with information needed to know
-               * the capacity and how to access the device.
+              memset(geo, 0, sizeof(*geo));
+
+              /* Populate the geometry structure with information needed to
+               * know the capacity and how to access the device.
                *
-               * NOTE: that the device is treated as though it where just an array
-               * of fixed size blocks.  That is most likely not true, but the client
-               * will expect the device logic to do whatever is necessary to make it
-               * appear so.
+               * NOTE:
+               * that the device is treated as though it where just an array
+               * of fixed size blocks. That is most likely not true, but the
+               * client will expect the device logic to do whatever is
+               * necessary to make it appear so.
                */
 
               geo->blocksize    = 512;  /* Size of one read/write block */
@@ -272,7 +263,22 @@ static int skel_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg)
         }
         break;
 
-      case MTDIOC_XIPBASE:
+      case BIOC_PARTINFO:
+        {
+          FAR struct partition_info_s *info =
+            (FAR struct partition_info_s *)arg;
+          if (info != NULL)
+            {
+              info->numsectors  = 8192;
+              info->sectorsize  = 512;
+              info->startsector = 0;
+              info->parent[0]   = '\0';
+              ret               = OK;
+            }
+        }
+        break;
+
+      case BIOC_XIPBASE:
         {
           FAR void **ppv = (FAR void**)arg;
 

@@ -1,15 +1,10 @@
 /****************************************************************************
  * arch/arm/src/am335x/am335x_lcdc.h
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * The LCD driver derives from the LPC54xx LCD driver but also includes
- * information from the FreeBSD AM335x LCD driver which was released under
- * a two-clause BSD license:
- *
- *   Copyright 2013 Oleksandr Tymoshenko <gonzo@freebsd.org>
- *   All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2019 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2013 Oleksandr Tymoshenko <gonzo@freebsd.org>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -73,7 +68,9 @@
 #  define CONFIG_AM335X_LCDC_BACKCOLOR 0  /* Initial background color */
 #endif
 
-/* Default characteristics (may be overridden via struct am335x_panel_info_s */
+/* Default characteristics
+ * (may be overridden via struct am335x_panel_info_s
+ */
 
 /* Bits per pixel / color format */
 
@@ -176,7 +173,7 @@ struct am335x_panel_info_s
 };
 
 /****************************************************************************
- * Public Functions
+ * Public Functions Prototypes
  ****************************************************************************/
 
 /****************************************************************************
@@ -218,7 +215,7 @@ struct am335x_panel_info_s
  *
  ****************************************************************************/
 
-int am335x_lcd_initialize(FAR const struct am335x_panel_info_s *panel);
+int am335x_lcd_initialize(const struct am335x_panel_info_s *panel);
 
 /****************************************************************************
  * Name:  am335x_lcdclear
@@ -253,8 +250,8 @@ void am335x_lcdclear(nxgl_mxpixel_t color);
 
 struct videomode_s; /* Forward reference */
 
-void am335x_lcd_videomode(FAR const struct videomode_s *videomode,
-                          FAR struct am335x_panel_info_s *panel);
+void am335x_lcd_videomode(const struct videomode_s *videomode,
+                          struct am335x_panel_info_s *panel);
 
 /****************************************************************************
  * Name: am335x_lcd_edid
@@ -279,9 +276,9 @@ void am335x_lcd_videomode(FAR const struct videomode_s *videomode,
  *
  ****************************************************************************/
 
-void am335x_lcd_edid(FAR const uint8_t *edid, size_t edid_len,
-                     FAR struct am335x_panel_info_s *panel,
-                     FAR const struct videomode_s **selected);
+void am335x_lcd_edid(const uint8_t *edid, size_t edid_len,
+                     struct am335x_panel_info_s *panel,
+                     const struct videomode_s **selected);
 
 /****************************************************************************
  * Name: am335x_backlight

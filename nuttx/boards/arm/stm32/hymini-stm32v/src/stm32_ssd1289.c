@@ -1,45 +1,37 @@
 /****************************************************************************
  * boards/arm/stm32/hymini-stm32v/src/stm32_ssd1289.c
  *
- *   Copyright (C) 2009, 2011, 2013 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *           Laurent Latil <laurent@latil.nom.fr>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Included Files
  ****************************************************************************/
 
 #include <nuttx/config.h>
 
 #include <sys/types.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -48,7 +40,7 @@
 #include <nuttx/lcd/lcd.h>
 #include <nuttx/lcd/ssd1289.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "stm32.h"
 #include "hymini-stm32v.h"
 
@@ -60,7 +52,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Configuration **********************************************************************/
+/* Configuration ************************************************************/
 
 #ifndef CONFIG_STM32_FSMC
 #  error "CONFIG_STM32_FSMC is required to use the LCD"
@@ -83,7 +75,10 @@
 
 #define LCD_BL_TIMER_PERIOD 8999
 
-/* LCD is connected to the FSMC_Bank1_NOR/SRAM1 and NE1 is used as ship select signal */
+/* LCD is connected to the FSMC_Bank1_NOR/SRAM1 and NE1 is used as ship
+ * select signal
+ */
+
 /* RS <==> A16 */
 
 #define LCD_INDEX        0x60000000  /* RS = 0 */
@@ -95,14 +90,14 @@
 
 /* Low Level LCD access */
 
-static void stm32_select(FAR struct ssd1289_lcd_s *dev);
-static void stm32_deselect(FAR struct ssd1289_lcd_s *dev);
-static void stm32_index(FAR struct ssd1289_lcd_s *dev, uint8_t index);
+static void stm32_select(struct ssd1289_lcd_s *dev);
+static void stm32_deselect(struct ssd1289_lcd_s *dev);
+static void stm32_index(struct ssd1289_lcd_s *dev, uint8_t index);
 #ifndef CONFIG_SSD1289_WRONLY
-static uint16_t stm32_read(FAR struct ssd1289_lcd_s *dev);
+static uint16_t stm32_read(struct ssd1289_lcd_s *dev);
 #endif
-static void stm32_write(FAR struct ssd1289_lcd_s *dev, uint16_t data);
-static void stm32_backlight(FAR struct ssd1289_lcd_s *dev, int power);
+static void stm32_write(struct ssd1289_lcd_s *dev, uint16_t data);
+static void stm32_backlight(struct ssd1289_lcd_s *dev, int power);
 
 static void stm32_extmemgpios(const uint16_t *gpios, int ngpios);
 
@@ -151,7 +146,7 @@ static struct ssd1289_lcd_s g_ssd1289 =
 
 /* The saved instance of the LCD driver */
 
-static FAR struct lcd_dev_s *g_ssd1289drvr;
+static struct lcd_dev_s *g_ssd1289drvr;
 
 /****************************************************************************
  * Private Functions
@@ -165,7 +160,7 @@ static FAR struct lcd_dev_s *g_ssd1289drvr;
  *
  ****************************************************************************/
 
-static void stm32_select(FAR struct ssd1289_lcd_s *dev)
+static void stm32_select(struct ssd1289_lcd_s *dev)
 {
   /* Does not apply to this hardware */
 }
@@ -178,7 +173,7 @@ static void stm32_select(FAR struct ssd1289_lcd_s *dev)
  *
  ****************************************************************************/
 
-static void stm32_deselect(FAR struct ssd1289_lcd_s *dev)
+static void stm32_deselect(struct ssd1289_lcd_s *dev)
 {
   /* Does not apply to this hardware */
 }
@@ -191,7 +186,7 @@ static void stm32_deselect(FAR struct ssd1289_lcd_s *dev)
  *
  ****************************************************************************/
 
-static void stm32_index(FAR struct ssd1289_lcd_s *dev, uint8_t index)
+static void stm32_index(struct ssd1289_lcd_s *dev, uint8_t index)
 {
   putreg16((uint16_t)index, LCD_INDEX);
 }
@@ -205,7 +200,7 @@ static void stm32_index(FAR struct ssd1289_lcd_s *dev, uint8_t index)
  ****************************************************************************/
 
 #ifndef CONFIG_SSD1289_WRONLY
-static uint16_t stm32_read(FAR struct ssd1289_lcd_s *dev)
+static uint16_t stm32_read(struct ssd1289_lcd_s *dev)
 {
   return getreg16(LCD_DATA);
 }
@@ -219,7 +214,7 @@ static uint16_t stm32_read(FAR struct ssd1289_lcd_s *dev)
  *
  ****************************************************************************/
 
-static void stm32_write(FAR struct ssd1289_lcd_s *dev, uint16_t data)
+static void stm32_write(struct ssd1289_lcd_s *dev, uint16_t data)
 {
   putreg16((uint16_t)data, LCD_DATA);
 }
@@ -228,12 +223,13 @@ static void stm32_write(FAR struct ssd1289_lcd_s *dev, uint16_t data)
  * Name: stm32_backlight
  *
  * Description:
- *   Enable/disable LCD panel power (0: full off - CONFIG_LCD_MAXPOWER: full on).
+ *   Enable/disable LCD panel power (0: full off - CONFIG_LCD_MAXPOWER:
+ *   full on).
  *   Used here to set pwm duty on timer used for backlight.
  *
  ****************************************************************************/
 
-static void stm32_backlight(FAR struct ssd1289_lcd_s *dev, int power)
+static void stm32_backlight(struct ssd1289_lcd_s *dev, int power)
 {
   DEBUGASSERT(power <= CONFIG_LCD_MAXPOWER);
 
@@ -248,7 +244,8 @@ static void stm32_backlight(FAR struct ssd1289_lcd_s *dev, int power)
        * maximum power setting.
        */
 
-      duty = ((uint32_t)LCD_BL_TIMER_PERIOD * (uint32_t)power) / CONFIG_LCD_MAXPOWER;
+      duty = ((uint32_t)LCD_BL_TIMER_PERIOD * (uint32_t)power) /
+             CONFIG_LCD_MAXPOWER;
       if (duty >= LCD_BL_TIMER_PERIOD)
         {
           duty = LCD_BL_TIMER_PERIOD - 1;
@@ -312,9 +309,9 @@ static void init_lcd_backlight(void)
 
   /* Select the output polarity level == HIGH */
 
-  ccer &= !ATIM_CCER_CC2P;
+  ccer &= ~ATIM_CCER_CC2P;
 
-  /* Enable channel 2*/
+  /* Enable channel 2 */
 
   ccer |= ATIM_CCER_CC2E;
 
@@ -327,32 +324,32 @@ static void init_lcd_backlight(void)
 
   modifyreg16(STM32_TIM3_CR1, 0, ATIM_CR1_ARPE);
 
-  /* Enable Backlight Timer !!!!*/
+  /* Enable Backlight Timer !!!! */
 
   modifyreg16(STM32_TIM3_CR1, 0, ATIM_CR1_CEN);
 
   /* Dump timer3 registers */
 
-  lcdinfo("APB1ENR: %08x\n", getreg32(STM32_RCC_APB1ENR));
-  lcdinfo("CR1:     %04x\n", getreg32(STM32_TIM3_CR1));
-  lcdinfo("CR2:     %04x\n", getreg32(STM32_TIM3_CR2));
-  lcdinfo("SMCR:    %04x\n", getreg32(STM32_TIM3_SMCR));
-  lcdinfo("DIER:    %04x\n", getreg32(STM32_TIM3_DIER));
-  lcdinfo("SR:      %04x\n", getreg32(STM32_TIM3_SR));
-  lcdinfo("EGR:     %04x\n", getreg32(STM32_TIM3_EGR));
-  lcdinfo("CCMR1:   %04x\n", getreg32(STM32_TIM3_CCMR1));
-  lcdinfo("CCMR2:   %04x\n", getreg32(STM32_TIM3_CCMR2));
-  lcdinfo("CCER:    %04x\n", getreg32(STM32_TIM3_CCER));
-  lcdinfo("CNT:     %04x\n", getreg32(STM32_TIM3_CNT));
-  lcdinfo("PSC:     %04x\n", getreg32(STM32_TIM3_PSC));
-  lcdinfo("ARR:     %04x\n", getreg32(STM32_TIM3_ARR));
-  lcdinfo("CCR1:    %04x\n", getreg32(STM32_TIM3_CCR1));
-  lcdinfo("CCR2:    %04x\n", getreg32(STM32_TIM3_CCR2));
-  lcdinfo("CCR3:    %04x\n", getreg32(STM32_TIM3_CCR3));
-  lcdinfo("CCR4:    %04x\n", getreg32(STM32_TIM3_CCR4));
-  lcdinfo("CCR4:    %04x\n", getreg32(STM32_TIM3_CCR4));
-  lcdinfo("CCR4:    %04x\n", getreg32(STM32_TIM3_CCR4));
-  lcdinfo("DMAR:    %04x\n", getreg32(STM32_TIM3_DMAR));
+  lcdinfo("APB1ENR: %08" PRIx32 "\n", getreg32(STM32_RCC_APB1ENR));
+  lcdinfo("CR1:     %04" PRIx32 "\n", getreg32(STM32_TIM3_CR1));
+  lcdinfo("CR2:     %04" PRIx32 "\n", getreg32(STM32_TIM3_CR2));
+  lcdinfo("SMCR:    %04" PRIx32 "\n", getreg32(STM32_TIM3_SMCR));
+  lcdinfo("DIER:    %04" PRIx32 "\n", getreg32(STM32_TIM3_DIER));
+  lcdinfo("SR:      %04" PRIx32 "\n", getreg32(STM32_TIM3_SR));
+  lcdinfo("EGR:     %04" PRIx32 "\n", getreg32(STM32_TIM3_EGR));
+  lcdinfo("CCMR1:   %04" PRIx32 "\n", getreg32(STM32_TIM3_CCMR1));
+  lcdinfo("CCMR2:   %04" PRIx32 "\n", getreg32(STM32_TIM3_CCMR2));
+  lcdinfo("CCER:    %04" PRIx32 "\n", getreg32(STM32_TIM3_CCER));
+  lcdinfo("CNT:     %04" PRIx32 "\n", getreg32(STM32_TIM3_CNT));
+  lcdinfo("PSC:     %04" PRIx32 "\n", getreg32(STM32_TIM3_PSC));
+  lcdinfo("ARR:     %04" PRIx32 "\n", getreg32(STM32_TIM3_ARR));
+  lcdinfo("CCR1:    %04" PRIx32 "\n", getreg32(STM32_TIM3_CCR1));
+  lcdinfo("CCR2:    %04" PRIx32 "\n", getreg32(STM32_TIM3_CCR2));
+  lcdinfo("CCR3:    %04" PRIx32 "\n", getreg32(STM32_TIM3_CCR3));
+  lcdinfo("CCR4:    %04" PRIx32 "\n", getreg32(STM32_TIM3_CCR4));
+  lcdinfo("CCR4:    %04" PRIx32 "\n", getreg32(STM32_TIM3_CCR4));
+  lcdinfo("CCR4:    %04" PRIx32 "\n", getreg32(STM32_TIM3_CCR4));
+  lcdinfo("DMAR:    %04" PRIx32 "\n", getreg32(STM32_TIM3_DMAR));
 }
 
 /****************************************************************************
@@ -379,8 +376,8 @@ static void stm32_selectlcd(void)
 
   /* Bank1 NOR/SRAM timing register configuration */
 
-  putreg32(FSMC_BTR_ADDSET(1)  | FSMC_BTR_ADDHLD(0) | FSMC_BTR_DATAST(2) |
-           FSMC_BTR_BUSTURN(0) | FSMC_BTR_CLKDIV(0) | FSMC_BTR_DATLAT(0) |
+  putreg32(FSMC_BTR_ADDSET(1)  | FSMC_BTR_ADDHLD(1) | FSMC_BTR_DATAST(2) |
+           FSMC_BTR_BUSTURN(1) | FSMC_BTR_CLKDIV(1) | FSMC_BTR_DATLAT(2) |
            FSMC_BTR_ACCMODA,
            STM32_FSMC_BTR1);
 
@@ -409,9 +406,9 @@ static void stm32_extmemgpios(const uint16_t *gpios, int ngpios)
   /* Configure GPIOs */
 
   for (i = 0; i < ngpios; i++)
-  {
-    stm32_configgpio(gpios[i]);
-  }
+    {
+      stm32_configgpio(gpios[i]);
+    }
 }
 
 /****************************************************************************
@@ -422,9 +419,9 @@ static void stm32_extmemgpios(const uint16_t *gpios, int ngpios)
  * Name:  board_lcd_initialize
  *
  * Description:
- *   Initialize the LCD video hardware.  The initial state of the LCD is fully
- *   initialized, display memory cleared, and the LCD ready to use, but with the power
- *   setting at 0 (full off).
+ *   Initialize the LCD video hardware.  The initial state of the LCD is
+ *   fully initialized, display memory cleared, and the LCD ready to use,
+ *   but with the power setting at 0 (full off).
  *
  ****************************************************************************/
 
@@ -463,12 +460,12 @@ int board_lcd_initialize(void)
  * Name:  board_lcd_getdev
  *
  * Description:
- *   Return a a reference to the LCD object for the specified LCD.  This allows support
- *   for multiple LCD devices.
+ *   Return a a reference to the LCD object for the specified LCD.  This
+ *   allows support for multiple LCD devices.
  *
  ****************************************************************************/
 
-FAR struct lcd_dev_s *board_lcd_getdev(int lcddev)
+struct lcd_dev_s *board_lcd_getdev(int lcddev)
 {
   DEBUGASSERT(lcddev == 0);
   return g_ssd1289drvr;

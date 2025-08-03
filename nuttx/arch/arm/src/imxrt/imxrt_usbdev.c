@@ -1,5 +1,7 @@
 /****************************************************************************
- * boards/arm/imxrt/imxrt1060-evk/src/imxrt_usbdev.c
+ * arch/arm/src/imxrt/imxrt_usbdev.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -19,27 +21,6 @@
  ****************************************************************************/
 
 /****************************************************************************
- * IMXRT USB Device Driver
- *
- *   Authors: Thomas Axelsson <thomas.axelsson@actia.se>
- *            Simon Åström <simon.astrom@actia.se>
- *
- * Part of the NuttX OS and based, mostly, on the LPC43xx USB driver:
- *
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * Which, in turn, was based on the LPC31xx USB driver:
- *
- *   Authors: David Hewson
- *            Gregory Nutt <gnutt@nuttx.org>
- *
- * Which, in turn, was based on the LPC2148 USB driver:
- *
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- ****************************************************************************/
-
-/****************************************************************************
  * Included Files
  ****************************************************************************/
 
@@ -50,6 +31,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -63,12 +45,12 @@
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "up_arch.h"
-#include "up_internal.h"
-
+#include "arm_internal.h"
 #include "hardware/imxrt_usbotg.h"
 #include "hardware/imxrt_usbphy.h"
-#include "hardware/rt106x/imxrt106x_ccm.h"
+#ifdef CONFIG_ARCH_FAMILY_IMXRT106x
+#  include "hardware/rt106x/imxrt106x_ccm.h"
+#endif
 #include "imxrt_periphclks.h"
 
 /****************************************************************************
@@ -224,6 +206,14 @@ const struct trace_msg_t g_usb_trace_strings_intdecode[] =
 };
 #endif
 
+#if defined(CONFIG_ARMV7M_DCACHE)
+#  define cache_aligned_alloc(s) kmm_memalign(ARMV7M_DCACHE_LINESIZE,(s))
+#  define CACHE_ALIGNED_DATA     aligned_data(ARMV7M_DCACHE_LINESIZE)
+#else
+#  define cache_aligned_alloc kmm_malloc
+#  define CACHE_ALIGNED_DATA
+#endif
+
 /* Hardware interface *******************************************************/
 
 /* This represents a Endpoint Transfer Descriptor - note these must be 32
@@ -232,7 +222,7 @@ const struct trace_msg_t g_usb_trace_strings_intdecode[] =
 
 struct imxrt_dtd_s
 {
-  volatile uint32_t       nextdesc;      /* Address of the next DMA descripto in RAM */
+  volatile uint32_t       nextdesc;      /* Address of the next DMA descriptor in RAM */
   volatile uint32_t       config;        /* Misc. bit encoded configuration information */
   uint32_t                buffer0;       /* Buffer start address */
   uint32_t                buffer1;       /* Buffer start address */
@@ -257,7 +247,9 @@ struct imxrt_dtd_s
 #define DTD_CONFIG_BUFFER_ERROR      (1 << 5)    /* Bit 6      : Status Buffer Error */
 #define DTD_CONFIG_TRANSACTION_ERROR (1 << 3)    /* Bit 3      : Status Transaction Error */
 
-/* This represents a queue head  - not these must be aligned to a 2048 byte boundary */
+/* This represents a queue head  - note these must be aligned to a 2048 byte
+ * boundary
+ */
 
 struct imxrt_dqh_s
 {
@@ -302,18 +294,20 @@ struct imxrt_dqh_s
 #define IMXRT_EPOUTSET               (0x5555)       /* Even phy endpoint numbers are OUT EPs */
 #define IMXRT_EPINSET                (0xaaaa)       /* Odd endpoint numbers are IN EPs */
 #define IMXRT_EPCTRLSET              (0x0003)       /* EP0 IN/OUT are control endpoints */
-#define IMXRT_EPINTRSET              (0xfffc)       /* Interrupt endpoints */
-#define IMXRT_EPBULKSET              (0xfffc)       /* Bulk endpoints */
-#define IMXRT_EPISOCSET              (0xfffc)       /* Isochronous endpoints */
+#define IMXRT_EPINTRSET              (0x000c)       /* Interrupt endpoints */
+#define IMXRT_EPBULKSET              (0x0ff0)       /* Bulk endpoints */
+#define IMXRT_EPISOCSET              (0xf000)       /* Isochronous endpoints */
 
 /* Maximum packet sizes for endpoints */
 
 #define IMXRT_EP0MAXPACKET           (64)         /* EP0 max packet size (1-64) */
 #define IMXRT_BULKMAXPACKET          (512)        /* Bulk endpoint max packet (8/16/32/64/512) */
 #define IMXRT_INTRMAXPACKET          (1024)       /* Interrupt endpoint max packet (1 to 1024) */
-#define IMXRT_ISOCMAXPACKET          (512)        /* Acutally 1..1023 */
+#define IMXRT_ISOCMAXPACKET          (512)        /* Actually 1..1023 */
 
-/* Endpoint bit position in SETUPSTAT, PRIME, FLUSH, STAT, COMPLETE registers */
+/* Endpoint bit position in SETUPSTAT, PRIME, FLUSH, STAT, COMPLETE
+ * registers
+ */
 
 #define IMXRT_ENDPTSHIFT(epphy)      (IMXRT_EPPHYIN(epphy) ? (16 + ((epphy) >> 1)) : ((epphy) >> 1))
 #define IMXRT_ENDPTMASK(epphy)       (1 << IMXRT_ENDPTSHIFT(epphy))
@@ -374,7 +368,8 @@ struct imxrt_usbdev_s
   /* IMXRTXX-specific fields */
 
   uint8_t                 ep0state;      /* State of certain EP0 operations */
-  uint8_t                 ep0buf[64];    /* buffer for EP0 short transfers */
+                                         /* buffer for EP0 short transfers */
+  uint8_t                 ep0buf[64] CACHE_ALIGNED_DATA;
   uint8_t                 paddr;         /* Address assigned by SETADDRESS */
   uint8_t                 stalled:1;     /* 1: Protocol stalled */
   uint8_t                 selfpowered:1; /* 1: Device is self powered */
@@ -417,8 +412,8 @@ struct imxrt_usbdev_s
 static uint32_t imxrt_getreg(uint32_t addr);
 static void imxrt_putreg(uint32_t val, uint32_t addr);
 #else
-# define imxrt_getreg(addr)     getreg32(addr)
-# define imxrt_putreg(val,addr) putreg32(val,addr)
+#  define imxrt_getreg(addr)     getreg32(addr)
+#  define imxrt_putreg(val,addr) putreg32(val,addr)
 #endif
 
 static inline void imxrt_clrbits(uint32_t mask, uint32_t addr);
@@ -427,10 +422,10 @@ static inline void imxrt_chgbits(uint32_t mask, uint32_t val, uint32_t addr);
 
 /* Request queue operations *************************************************/
 
-static FAR struct imxrt_req_s *imxrt_rqdequeue(
-    FAR struct imxrt_ep_s *privep);
-static bool       imxrt_rqenqueue(FAR struct imxrt_ep_s *privep,
-                    FAR struct imxrt_req_s *req);
+static struct imxrt_req_s *imxrt_rqdequeue(
+    struct imxrt_ep_s *privep);
+static bool       imxrt_rqenqueue(struct imxrt_ep_s *privep,
+                    struct imxrt_req_s *req);
 
 /* Low level data transfers and request operations **************************/
 
@@ -474,35 +469,35 @@ static void        imxrt_ep0nak(struct imxrt_usbdev_s *priv, uint8_t epphy);
 static bool        imxrt_epcomplete(struct imxrt_usbdev_s *priv,
                                     uint8_t epphy);
 
-static int         imxrt_usbinterrupt(int irq, FAR void *context,
-                                      FAR void *arg);
+static int         imxrt_usbinterrupt(int irq, void *context,
+                                      void *arg);
 
 /* Endpoint operations ******************************************************/
 
 /* USB device controller operations *****************************************/
 
-static int         imxrt_epconfigure(FAR struct usbdev_ep_s *ep,
+static int         imxrt_epconfigure(struct usbdev_ep_s *ep,
                      const struct usb_epdesc_s *desc, bool last);
-static int         imxrt_epdisable(FAR struct usbdev_ep_s *ep);
-static FAR struct usbdev_req_s *imxrt_epallocreq(FAR struct usbdev_ep_s *ep);
-static void        imxrt_epfreereq(FAR struct usbdev_ep_s *ep,
-                     FAR struct usbdev_req_s *);
+static int         imxrt_epdisable(struct usbdev_ep_s *ep);
+static struct usbdev_req_s *imxrt_epallocreq(struct usbdev_ep_s *ep);
+static void        imxrt_epfreereq(struct usbdev_ep_s *ep,
+                     struct usbdev_req_s *);
 #ifdef CONFIG_USBDEV_DMA
-static void       *imxrt_epallocbuffer(FAR struct usbdev_ep_s *ep,
+static void       *imxrt_epallocbuffer(struct usbdev_ep_s *ep,
                      uint16_t bytes);
-static void        imxrt_epfreebuffer(FAR struct usbdev_ep_s *ep,
-                     FAR void *buf);
+static void        imxrt_epfreebuffer(struct usbdev_ep_s *ep,
+                     void *buf);
 #endif
-static int         imxrt_epsubmit(FAR struct usbdev_ep_s *ep,
+static int         imxrt_epsubmit(struct usbdev_ep_s *ep,
                      struct usbdev_req_s *req);
-static int         imxrt_epcancel(FAR struct usbdev_ep_s *ep,
+static int         imxrt_epcancel(struct usbdev_ep_s *ep,
                      struct usbdev_req_s *req);
-static int         imxrt_epstall(FAR struct usbdev_ep_s *ep, bool resume);
+static int         imxrt_epstall(struct usbdev_ep_s *ep, bool resume);
 
-static FAR struct usbdev_ep_s *imxrt_allocep(FAR struct usbdev_s *dev,
+static struct usbdev_ep_s *imxrt_allocep(struct usbdev_s *dev,
                      uint8_t epno, bool in, uint8_t eptype);
-static void        imxrt_freeep(FAR struct usbdev_s *dev,
-                                FAR struct usbdev_ep_s *ep);
+static void        imxrt_freeep(struct usbdev_s *dev,
+                                struct usbdev_ep_s *ep);
 static int         imxrt_getframe(struct usbdev_s *dev);
 static int         imxrt_wakeup(struct usbdev_s *dev);
 static int         imxrt_selfpowered(struct usbdev_s *dev, bool selfpowered);
@@ -519,10 +514,10 @@ static int         imxrt_pullup(struct usbdev_s *dev, bool enable);
 static struct imxrt_usbdev_s g_usbdev;
 
 static struct imxrt_dqh_s g_qh[IMXRT_NPHYSENDPOINTS]
-                               __attribute__((aligned(2048)));
+                               aligned_data(2048);
 
 static struct imxrt_dtd_s g_td[IMXRT_NPHYSENDPOINTS]
-                               __attribute__((aligned(32)));
+                               aligned_data(32);
 
 static const struct usbdev_epops_s g_epops =
 {
@@ -695,9 +690,9 @@ static inline void imxrt_chgbits(uint32_t mask, uint32_t val, uint32_t addr)
  *
  ****************************************************************************/
 
-static FAR struct imxrt_req_s *imxrt_rqdequeue(FAR struct imxrt_ep_s *privep)
+static struct imxrt_req_s *imxrt_rqdequeue(struct imxrt_ep_s *privep)
 {
-  FAR struct imxrt_req_s *ret = privep->head;
+  struct imxrt_req_s *ret = privep->head;
 
   if (ret)
     {
@@ -721,8 +716,8 @@ static FAR struct imxrt_req_s *imxrt_rqdequeue(FAR struct imxrt_ep_s *privep)
  *
  ****************************************************************************/
 
-static bool imxrt_rqenqueue(FAR struct imxrt_ep_s *privep,
-                            FAR struct imxrt_req_s *req)
+static bool imxrt_rqenqueue(struct imxrt_ep_s *privep,
+                            struct imxrt_req_s *req)
 {
   bool is_empty = !privep->head;
 
@@ -796,9 +791,9 @@ static void imxrt_queuedtd(uint8_t epphy, struct imxrt_dtd_s *dtd)
 
   uint32_t bit = IMXRT_ENDPTMASK(epphy);
 
-  imxrt_setbits (bit, IMXRT_USBDEV_ENDPTPRIME);
+  imxrt_setbits(bit, IMXRT_USBDEV_ENDPTPRIME);
 
-  while (imxrt_getreg (IMXRT_USBDEV_ENDPTPRIME) & bit)
+  while (imxrt_getreg(IMXRT_USBDEV_ENDPTPRIME) & bit)
     ;
 }
 
@@ -857,7 +852,7 @@ static void imxrt_readsetup(uint8_t epphy, struct usb_ctrlreq_s *ctrl)
 
   /* Clear the Setup Interrupt */
 
-  imxrt_putreg (IMXRT_ENDPTMASK(IMXRT_EP0_OUT), IMXRT_USBDEV_ENDPTSETUPSTAT);
+  imxrt_putreg(IMXRT_ENDPTMASK(IMXRT_EP0_OUT), IMXRT_USBDEV_ENDPTSETUPSTAT);
 }
 
 /****************************************************************************
@@ -892,7 +887,7 @@ static void imxrt_flushep(struct imxrt_ep_s *privep)
   uint32_t mask = IMXRT_ENDPTMASK(privep->epphy);
   do
     {
-      imxrt_putreg (mask, IMXRT_USBDEV_ENDPTFLUSH);
+      imxrt_putreg(mask, IMXRT_USBDEV_ENDPTFLUSH);
       while ((imxrt_getreg(IMXRT_USBDEV_ENDPTFLUSH) & mask) != 0)
       ;
     }
@@ -926,13 +921,13 @@ static int imxrt_progressep(struct imxrt_ep_s *privep)
   if (privreq->req.len == 0)
     {
       /* If the class driver is responding to a setup packet, then wait for
-       * the host to illicit thr response
+       * the host to illicit the response
        */
 
       if (privep->epphy == IMXRT_EP0_IN &&
           privep->dev->ep0state == EP0STATE_SETUP_OUT)
         {
-          imxrt_ep0state (privep->dev, EP0STATE_WAIT_NAK_IN);
+          imxrt_ep0state(privep->dev, EP0STATE_WAIT_NAK_IN);
         }
       else
         {
@@ -952,11 +947,11 @@ static int imxrt_progressep(struct imxrt_ep_s *privep)
 
   if (privep->epphy == IMXRT_EP0_IN)
     {
-      imxrt_ep0state (privep->dev,  EP0STATE_DATA_IN);
+      imxrt_ep0state(privep->dev,  EP0STATE_DATA_IN);
     }
   else if (privep->epphy == IMXRT_EP0_OUT)
     {
-      imxrt_ep0state (privep->dev, EP0STATE_DATA_OUT);
+      imxrt_ep0state(privep->dev, EP0STATE_DATA_OUT);
     }
 
   int bytesleft = privreq->req.len - privreq->req.xfrd;
@@ -972,7 +967,7 @@ static int imxrt_progressep(struct imxrt_ep_s *privep)
 
   /* Initialise the DTD to transfer the next chunk */
 
-  imxrt_writedtd (dtd, privreq->req.buf + privreq->req.xfrd, bytesleft);
+  imxrt_writedtd(dtd, privreq->req.buf + privreq->req.xfrd, bytesleft);
 
   /* Then queue onto the DQH */
 
@@ -1137,13 +1132,13 @@ static void imxrt_ep0configure(struct imxrt_usbdev_s *priv)
   g_qh[IMXRT_EP0_OUT].currdesc = DTD_NEXTDESC_INVALID;
   g_qh[IMXRT_EP0_IN].currdesc = DTD_NEXTDESC_INVALID;
 
-  up_flush_dcache((uintptr_t)g_qh,
+  up_clean_dcache((uintptr_t)g_qh,
                   (uintptr_t)g_qh + (sizeof(struct imxrt_dqh_s) * 2));
 
   /* Enable EP0 */
 
-  imxrt_setbits (USBDEV_ENDPTCTRL0_RXE | USBDEV_ENDPTCTRL0_TXE,
-                 IMXRT_USBDEV_ENDPTCTRL0);
+  imxrt_setbits(USBDEV_ENDPTCTRL0_RXE | USBDEV_ENDPTCTRL0_TXE,
+                IMXRT_USBDEV_ENDPTCTRL0);
 }
 
 /****************************************************************************
@@ -1160,32 +1155,34 @@ static void imxrt_usbreset(struct imxrt_usbdev_s *priv)
 
   /* Disable all endpoints. Control endpoint 0 is always enabled */
 
-  imxrt_clrbits (USBDEV_ENDPTCTRL_RXE | USBDEV_ENDPTCTRL_TXE,
-                 IMXRT_USBDEV_ENDPTCTRL1);
-  imxrt_clrbits (USBDEV_ENDPTCTRL_RXE | USBDEV_ENDPTCTRL_TXE,
-                 IMXRT_USBDEV_ENDPTCTRL2);
-  imxrt_clrbits (USBDEV_ENDPTCTRL_RXE | USBDEV_ENDPTCTRL_TXE,
-                 IMXRT_USBDEV_ENDPTCTRL3);
-  imxrt_clrbits (USBDEV_ENDPTCTRL_RXE | USBDEV_ENDPTCTRL_TXE,
-                 IMXRT_USBDEV_ENDPTCTRL4);
-  imxrt_clrbits (USBDEV_ENDPTCTRL_RXE | USBDEV_ENDPTCTRL_TXE,
-                 IMXRT_USBDEV_ENDPTCTRL5);
+  imxrt_clrbits(USBDEV_ENDPTCTRL_RXE | USBDEV_ENDPTCTRL_TXE,
+                IMXRT_USBDEV_ENDPTCTRL1);
+  imxrt_clrbits(USBDEV_ENDPTCTRL_RXE | USBDEV_ENDPTCTRL_TXE,
+                IMXRT_USBDEV_ENDPTCTRL2);
+  imxrt_clrbits(USBDEV_ENDPTCTRL_RXE | USBDEV_ENDPTCTRL_TXE,
+                IMXRT_USBDEV_ENDPTCTRL3);
+  imxrt_clrbits(USBDEV_ENDPTCTRL_RXE | USBDEV_ENDPTCTRL_TXE,
+                IMXRT_USBDEV_ENDPTCTRL4);
+  imxrt_clrbits(USBDEV_ENDPTCTRL_RXE | USBDEV_ENDPTCTRL_TXE,
+                IMXRT_USBDEV_ENDPTCTRL5);
 
   /* Clear all pending interrupts */
 
-  imxrt_putreg (imxrt_getreg(IMXRT_USBDEV_ENDPTNAK),
-                IMXRT_USBDEV_ENDPTNAK);
-  imxrt_putreg (imxrt_getreg(IMXRT_USBDEV_ENDPTSETUPSTAT),
-                IMXRT_USBDEV_ENDPTSETUPSTAT);
-  imxrt_putreg (imxrt_getreg(IMXRT_USBDEV_ENDPTCOMPLETE),
-                IMXRT_USBDEV_ENDPTCOMPLETE);
+  imxrt_putreg(imxrt_getreg(IMXRT_USBDEV_ENDPTNAK),
+               IMXRT_USBDEV_ENDPTNAK);
+  imxrt_putreg(imxrt_getreg(IMXRT_USBDEV_ENDPTSETUPSTAT),
+               IMXRT_USBDEV_ENDPTSETUPSTAT);
+  imxrt_putreg(imxrt_getreg(IMXRT_USBDEV_ENDPTCOMPLETE),
+               IMXRT_USBDEV_ENDPTCOMPLETE);
 
-  /* Wait for all prime operations to have completed and then flush all DTDs */
+  /* Wait for all prime operations to have completed and then flush all
+   * DTDs
+   */
 
-  while (imxrt_getreg (IMXRT_USBDEV_ENDPTPRIME) != 0)
+  while (imxrt_getreg(IMXRT_USBDEV_ENDPTPRIME) != 0)
     ;
-  imxrt_putreg (IMXRT_ENDPTMASK_ALL, IMXRT_USBDEV_ENDPTFLUSH);
-  while (imxrt_getreg (IMXRT_USBDEV_ENDPTFLUSH))
+  imxrt_putreg(IMXRT_ENDPTMASK_ALL, IMXRT_USBDEV_ENDPTFLUSH);
+  while (imxrt_getreg(IMXRT_USBDEV_ENDPTFLUSH))
     ;
 
   /* Reset endpoints */
@@ -1194,7 +1191,7 @@ static void imxrt_usbreset(struct imxrt_usbdev_s *priv)
     {
       struct imxrt_ep_s *privep = &priv->eplist[epphy];
 
-      imxrt_cancelrequests (privep, -ESHUTDOWN);
+      imxrt_cancelrequests(privep, -ESHUTDOWN);
 
       /* Reset endpoint status */
 
@@ -1220,16 +1217,16 @@ static void imxrt_usbreset(struct imxrt_usbdev_s *priv)
   memset ((void *) g_qh, 0, sizeof (g_qh));
   memset ((void *) g_td, 0, sizeof (g_td));
 
-  up_flush_dcache((uintptr_t)g_qh, (uintptr_t)g_qh + sizeof(g_qh));
-  up_flush_dcache((uintptr_t)g_td, (uintptr_t)g_td + sizeof(g_td));
+  up_clean_dcache((uintptr_t)g_qh, (uintptr_t)g_qh + sizeof(g_qh));
+  up_clean_dcache((uintptr_t)g_td, (uintptr_t)g_td + sizeof(g_td));
 
   /* Set USB address to 0 */
 
-  imxrt_set_address (priv, 0);
+  imxrt_set_address(priv, 0);
 
-  /* Initialise the Enpoint List Address */
+  /* Initialise the Endpoint List Address */
 
-  imxrt_putreg ((uint32_t)g_qh, IMXRT_USBDEV_ENDPOINTLIST);
+  imxrt_putreg((uint32_t)g_qh, IMXRT_USBDEV_ENDPOINTLIST);
 
   /* EndPoint 0 initialization */
 
@@ -1258,11 +1255,11 @@ static inline void imxrt_ep0state(struct imxrt_usbdev_s *priv,
   switch (state)
     {
     case EP0STATE_WAIT_NAK_IN:
-      imxrt_putreg (IMXRT_ENDPTMASK(IMXRT_EP0_IN), IMXRT_USBDEV_ENDPTNAKEN);
+      imxrt_putreg(IMXRT_ENDPTMASK(IMXRT_EP0_IN), IMXRT_USBDEV_ENDPTNAKEN);
       break;
 
     case EP0STATE_WAIT_NAK_OUT:
-      imxrt_putreg (IMXRT_ENDPTMASK(IMXRT_EP0_OUT), IMXRT_USBDEV_ENDPTNAKEN);
+      imxrt_putreg(IMXRT_ENDPTMASK(IMXRT_EP0_OUT), IMXRT_USBDEV_ENDPTNAKEN);
       break;
 
     default:
@@ -1322,11 +1319,11 @@ static inline void imxrt_ep0setup(struct imxrt_usbdev_s *priv)
 
   if (ctrl->type & USB_REQ_DIR_IN)
     {
-      imxrt_ep0state (priv, EP0STATE_SETUP_IN);
+      imxrt_ep0state(priv, EP0STATE_SETUP_IN);
     }
   else
     {
-      imxrt_ep0state (priv, EP0STATE_SETUP_OUT);
+      imxrt_ep0state(priv, EP0STATE_SETUP_OUT);
 
       if (len > 0)
         {
@@ -1393,8 +1390,8 @@ static inline void imxrt_ep0setup(struct imxrt_usbdev_s *priv)
 
                           priv->ep0buf[1] = 0;
 
-                          imxrt_ep0xfer (IMXRT_EP0_IN, priv->ep0buf, 2);
-                          imxrt_ep0state (priv, EP0STATE_SHORTWRITE);
+                          imxrt_ep0xfer(IMXRT_EP0_IN, priv->ep0buf, 2);
+                          imxrt_ep0state(priv, EP0STATE_SHORTWRITE);
                         }
                     }
                     break;
@@ -1416,7 +1413,7 @@ static inline void imxrt_ep0setup(struct imxrt_usbdev_s *priv)
                           priv->ep0buf[1] = 0;
 
                           imxrt_ep0xfer(IMXRT_EP0_IN, priv->ep0buf, 2);
-                          imxrt_ep0state (priv, EP0STATE_SHORTWRITE);
+                          imxrt_ep0state(priv, EP0STATE_SHORTWRITE);
                         }
                       else
                         {
@@ -1436,7 +1433,7 @@ static inline void imxrt_ep0setup(struct imxrt_usbdev_s *priv)
                       priv->ep0buf[1] = 0;
 
                       imxrt_ep0xfer(IMXRT_EP0_IN, priv->ep0buf, 2);
-                      imxrt_ep0state (priv, EP0STATE_SHORTWRITE);
+                      imxrt_ep0state(priv, EP0STATE_SHORTWRITE);
                     }
                     break;
 
@@ -1471,7 +1468,7 @@ static inline void imxrt_ep0setup(struct imxrt_usbdev_s *priv)
               len == 0 && (privep = imxrt_epfindbyaddr(priv, index)) != NULL)
             {
               imxrt_epstall(&privep->ep, true);
-              imxrt_ep0state (priv, EP0STATE_WAIT_NAK_IN);
+              imxrt_ep0state(priv, EP0STATE_WAIT_NAK_IN);
             }
           else
             {
@@ -1505,7 +1502,7 @@ static inline void imxrt_ep0setup(struct imxrt_usbdev_s *priv)
               len == 0 && (privep = imxrt_epfindbyaddr(priv, index)) != NULL)
             {
               imxrt_epstall(&privep->ep, false);
-              imxrt_ep0state (priv, EP0STATE_WAIT_NAK_IN);
+              imxrt_ep0state(priv, EP0STATE_WAIT_NAK_IN);
             }
           else
             {
@@ -1535,7 +1532,7 @@ static inline void imxrt_ep0setup(struct imxrt_usbdev_s *priv)
 
               priv->paddr = ctrl->value[0];
               priv->paddrset = false;
-              imxrt_ep0state (priv, EP0STATE_WAIT_NAK_IN);
+              imxrt_ep0state(priv, EP0STATE_WAIT_NAK_IN);
             }
           else
             {
@@ -1693,9 +1690,9 @@ static void imxrt_ep0complete(struct imxrt_usbdev_s *priv, uint8_t epphy)
           return;
         }
 
-      if (imxrt_epcomplete (priv, epphy))
+      if (imxrt_epcomplete(priv, epphy))
         {
-          imxrt_ep0state (priv, EP0STATE_WAIT_NAK_OUT);
+          imxrt_ep0state(priv, EP0STATE_WAIT_NAK_OUT);
         }
       break;
 
@@ -1705,9 +1702,9 @@ static void imxrt_ep0complete(struct imxrt_usbdev_s *priv, uint8_t epphy)
           return;
         }
 
-      if (imxrt_epcomplete (priv, epphy))
+      if (imxrt_epcomplete(priv, epphy))
         {
-          imxrt_ep0state (priv, EP0STATE_WAIT_NAK_IN);
+          imxrt_ep0state(priv, EP0STATE_WAIT_NAK_IN);
         }
       break;
 
@@ -1721,15 +1718,15 @@ static void imxrt_ep0complete(struct imxrt_usbdev_s *priv, uint8_t epphy)
                            (uintptr_t)priv->ep0buf + sizeof(priv->ep0buf));
 
       imxrt_dispatchrequest(priv, &priv->ep0ctrl);
-      imxrt_ep0state (priv, EP0STATE_WAIT_NAK_IN);
+      imxrt_ep0state(priv, EP0STATE_WAIT_NAK_IN);
       break;
 
     case EP0STATE_SHORTWRITE:
-      imxrt_ep0state (priv, EP0STATE_WAIT_NAK_OUT);
+      imxrt_ep0state(priv, EP0STATE_WAIT_NAK_OUT);
       break;
 
     case EP0STATE_WAIT_STATUS_IN:
-      imxrt_ep0state (priv, EP0STATE_IDLE);
+      imxrt_ep0state(priv, EP0STATE_IDLE);
 
       /* If we've received a SETADDRESS packet, then we set the address
        * now that the status phase has completed
@@ -1739,13 +1736,13 @@ static void imxrt_ep0complete(struct imxrt_usbdev_s *priv, uint8_t epphy)
         {
           usbtrace(TRACE_INTDECODE(IMXRT_TRACEINTID_EP0INSETADDRESS),
                    (uint16_t)priv->paddr);
-          imxrt_set_address (priv, priv->paddr);
+          imxrt_set_address(priv, priv->paddr);
         }
 
       break;
 
     case EP0STATE_WAIT_STATUS_OUT:
-      imxrt_ep0state (priv, EP0STATE_IDLE);
+      imxrt_ep0state(priv, EP0STATE_IDLE);
       break;
 
     default:
@@ -1785,13 +1782,13 @@ static void imxrt_ep0nak(struct imxrt_usbdev_s *priv, uint8_t epphy)
   switch (priv->ep0state)
     {
     case EP0STATE_WAIT_NAK_IN:
-      imxrt_ep0xfer (IMXRT_EP0_IN, NULL, 0);
-      imxrt_ep0state (priv, EP0STATE_WAIT_STATUS_IN);
+      imxrt_ep0xfer(IMXRT_EP0_IN, NULL, 0);
+      imxrt_ep0state(priv, EP0STATE_WAIT_STATUS_IN);
       break;
 
     case EP0STATE_WAIT_NAK_OUT:
-      imxrt_ep0xfer (IMXRT_EP0_OUT, NULL, 0);
-      imxrt_ep0state (priv, EP0STATE_WAIT_STATUS_OUT);
+      imxrt_ep0xfer(IMXRT_EP0_OUT, NULL, 0);
+      imxrt_ep0state(priv, EP0STATE_WAIT_STATUS_OUT);
       break;
 
     default:
@@ -1857,13 +1854,17 @@ bool imxrt_epcomplete(struct imxrt_usbdev_s *priv, uint8_t epphy)
   bool complete = true;
   if (IMXRT_EPPHYOUT(privep->epphy))
     {
-      /* read(OUT) completes when request filled, or a short transfer is received */
+      /* read(OUT) completes when request filled, or a short transfer is
+       * received
+       */
 
       usbtrace(TRACE_INTDECODE(IMXRT_TRACEINTID_EPIN), complete);
     }
   else
     {
-      /* write(IN) completes when request finished, unless we need to terminate with a ZLP */
+      /* write(IN) completes when request finished, unless we need to
+       * terminate with a ZLP
+       */
 
       bool need_zlp = (xfrd == privep->ep.maxpacket) &&
           ((privreq->req.flags & USBDEV_REQFLAGS_NULLPKT) != 0);
@@ -1873,11 +1874,13 @@ bool imxrt_epcomplete(struct imxrt_usbdev_s *priv, uint8_t epphy)
       usbtrace(TRACE_INTDECODE(IMXRT_TRACEINTID_EPOUT), complete);
     }
 
-  /* If the transfer is complete, then dequeue and progress any further queued requests */
+  /* If the transfer is complete, then dequeue and progress any further
+   * queued requests
+   */
 
   if (complete)
     {
-      privreq = imxrt_rqdequeue (privep);
+      privreq = imxrt_rqdequeue(privep);
     }
 
   if (!imxrt_rqempty(privep))
@@ -1885,7 +1888,9 @@ bool imxrt_epcomplete(struct imxrt_usbdev_s *priv, uint8_t epphy)
       imxrt_progressep(privep);
     }
 
-  /* Now it's safe to call the completion callback as it may well submit a new request */
+  /* Now it's safe to call the completion callback as it may well submit a
+   * new request
+   */
 
   if (complete)
     {
@@ -1904,7 +1909,7 @@ bool imxrt_epcomplete(struct imxrt_usbdev_s *priv, uint8_t epphy)
  *
  ****************************************************************************/
 
-static int imxrt_usbinterrupt(int irq, FAR void *context, FAR void *arg)
+static int imxrt_usbinterrupt(int irq, void *context, void *arg)
 {
   struct imxrt_usbdev_s *priv = &g_usbdev;
   uint32_t disr;
@@ -2011,14 +2016,14 @@ static int imxrt_usbinterrupt(int irq, FAR void *context, FAR void *arg)
     {
       /* Handle completion interrupts */
 
-      uint32_t mask = imxrt_getreg (IMXRT_USBDEV_ENDPTCOMPLETE);
+      uint32_t mask = imxrt_getreg(IMXRT_USBDEV_ENDPTCOMPLETE);
 
       if (mask)
         {
           /* Clear any NAK interrupt and completion interrupts */
 
-          imxrt_putreg (mask, IMXRT_USBDEV_ENDPTNAK);
-          imxrt_putreg (mask, IMXRT_USBDEV_ENDPTCOMPLETE);
+          imxrt_putreg(mask, IMXRT_USBDEV_ENDPTNAK);
+          imxrt_putreg(mask, IMXRT_USBDEV_ENDPTCOMPLETE);
 
           if (mask & IMXRT_ENDPTMASK(0))
             {
@@ -2034,7 +2039,7 @@ static int imxrt_usbinterrupt(int irq, FAR void *context, FAR void *arg)
             {
               if (mask & IMXRT_ENDPTMASK((n << 1)))
                 {
-                  imxrt_epcomplete (priv, (n << 1));
+                  imxrt_epcomplete(priv, (n << 1));
                 }
 
               if (mask & IMXRT_ENDPTMASK((n << 1)+1))
@@ -2049,7 +2054,9 @@ static int imxrt_usbinterrupt(int irq, FAR void *context, FAR void *arg)
       uint32_t setupstat = imxrt_getreg(IMXRT_USBDEV_ENDPTSETUPSTAT);
       if (setupstat)
         {
-          /* Clear the endpoint complete CTRL OUT and IN when a Setup is received */
+          /* Clear the endpoint complete CTRL OUT and IN when a Setup is
+           * received
+           */
 
           imxrt_putreg(IMXRT_ENDPTMASK(IMXRT_EP0_IN) |
                        IMXRT_ENDPTMASK(IMXRT_EP0_OUT),
@@ -2105,17 +2112,17 @@ static int imxrt_usbinterrupt(int irq, FAR void *context, FAR void *arg)
  * Input Parameters:
  *   ep   - the struct usbdev_ep_s instance obtained from allocep()
  *   desc - A struct usb_epdesc_s instance describing the endpoint
- *   last - true if this this last endpoint to be configured.  Some hardware
- *          needs to take special action when all of the endpoints have been
- *          configured.
+ *   last - true if this is the last endpoint to be configured.  Some
+ *          hardware needs to take special action when all of the endpoints
+ *          have been configured.
  *
  ****************************************************************************/
 
-static int imxrt_epconfigure(FAR struct usbdev_ep_s *ep,
-                               FAR const struct usb_epdesc_s *desc,
-                               bool last)
+static int imxrt_epconfigure(struct usbdev_ep_s *ep,
+                             const struct usb_epdesc_s *desc,
+                             bool last)
 {
-  FAR struct imxrt_ep_s *privep = (FAR struct imxrt_ep_s *)ep;
+  struct imxrt_ep_s *privep = (struct imxrt_ep_s *)ep;
   struct imxrt_dqh_s *dqh = &g_qh[privep->epphy];
 
   usbtrace(TRACE_EPCONFIGURE, privep->epphy);
@@ -2136,7 +2143,7 @@ static int imxrt_epconfigure(FAR struct usbdev_ep_s *ep,
                     DQH_CAPABILITY_ZLT);
     }
 
-  up_flush_dcache((uintptr_t)dqh,
+  up_clean_dcache((uintptr_t)dqh,
                   (uintptr_t)dqh + sizeof(struct imxrt_dqh_s));
 
   /* Setup Endpoint Control Register */
@@ -2161,8 +2168,8 @@ static int imxrt_epconfigure(FAR struct usbdev_ep_s *ep,
             cfg |= USBDEV_ENDPTCTRL_TXT_INTR; break;
         }
 
-      imxrt_chgbits (0xffff0000, cfg,
-                     IMXRT_USBDEV_ENDPTCTRL(privep->epphy >> 1));
+      imxrt_chgbits(0xffff0000, cfg,
+                    IMXRT_USBDEV_ENDPTCTRL(privep->epphy >> 1));
     }
   else
     {
@@ -2184,8 +2191,8 @@ static int imxrt_epconfigure(FAR struct usbdev_ep_s *ep,
             cfg |= USBDEV_ENDPTCTRL_RXT_INTR; break;
         }
 
-      imxrt_chgbits (0x0000ffff, cfg,
-                     IMXRT_USBDEV_ENDPTCTRL(privep->epphy >> 1));
+      imxrt_chgbits(0x0000ffff, cfg,
+                    IMXRT_USBDEV_ENDPTCTRL(privep->epphy >> 1));
     }
 
   /* Reset endpoint status */
@@ -2196,13 +2203,13 @@ static int imxrt_epconfigure(FAR struct usbdev_ep_s *ep,
 
   if (IMXRT_EPPHYIN(privep->epphy))
     {
-      imxrt_setbits (USBDEV_ENDPTCTRL_TXE,
-                     IMXRT_USBDEV_ENDPTCTRL(privep->epphy >> 1));
+      imxrt_setbits(USBDEV_ENDPTCTRL_TXE,
+                    IMXRT_USBDEV_ENDPTCTRL(privep->epphy >> 1));
     }
   else
     {
-      imxrt_setbits (USBDEV_ENDPTCTRL_RXE,
-                     IMXRT_USBDEV_ENDPTCTRL(privep->epphy >> 1));
+      imxrt_setbits(USBDEV_ENDPTCTRL_RXE,
+                    IMXRT_USBDEV_ENDPTCTRL(privep->epphy >> 1));
     }
 
   return OK;
@@ -2216,9 +2223,9 @@ static int imxrt_epconfigure(FAR struct usbdev_ep_s *ep,
  *
  ****************************************************************************/
 
-static int imxrt_epdisable(FAR struct usbdev_ep_s *ep)
+static int imxrt_epdisable(struct usbdev_ep_s *ep)
 {
-  FAR struct imxrt_ep_s *privep = (FAR struct imxrt_ep_s *)ep;
+  struct imxrt_ep_s *privep = (struct imxrt_ep_s *)ep;
   irqstate_t flags;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -2237,13 +2244,13 @@ static int imxrt_epdisable(FAR struct usbdev_ep_s *ep)
 
   if (IMXRT_EPPHYIN(privep->epphy))
     {
-      imxrt_clrbits (USBDEV_ENDPTCTRL_TXE,
-                     IMXRT_USBDEV_ENDPTCTRL(privep->epphy >> 1));
+      imxrt_clrbits(USBDEV_ENDPTCTRL_TXE,
+                    IMXRT_USBDEV_ENDPTCTRL(privep->epphy >> 1));
     }
   else
     {
-      imxrt_clrbits (USBDEV_ENDPTCTRL_RXE,
-                     IMXRT_USBDEV_ENDPTCTRL(privep->epphy >> 1));
+      imxrt_clrbits(USBDEV_ENDPTCTRL_RXE,
+                    IMXRT_USBDEV_ENDPTCTRL(privep->epphy >> 1));
     }
 
   privep->stalled = true;
@@ -2264,9 +2271,9 @@ static int imxrt_epdisable(FAR struct usbdev_ep_s *ep)
  *
  ****************************************************************************/
 
-static FAR struct usbdev_req_s *imxrt_epallocreq(FAR struct usbdev_ep_s *ep)
+static struct usbdev_req_s *imxrt_epallocreq(struct usbdev_ep_s *ep)
 {
-  FAR struct imxrt_req_s *privreq;
+  struct imxrt_req_s *privreq;
 
 #ifdef CONFIG_DEBUG_FEATURES
   if (!ep)
@@ -2276,9 +2283,9 @@ static FAR struct usbdev_req_s *imxrt_epallocreq(FAR struct usbdev_ep_s *ep)
     }
 #endif
 
-  usbtrace(TRACE_EPALLOCREQ, ((FAR struct imxrt_ep_s *)ep)->epphy);
+  usbtrace(TRACE_EPALLOCREQ, ((struct imxrt_ep_s *)ep)->epphy);
 
-  privreq = (FAR struct imxrt_req_s *)kmm_malloc(sizeof(struct imxrt_req_s));
+  privreq = kmm_malloc(sizeof(struct imxrt_req_s));
   if (!privreq)
     {
       usbtrace(TRACE_DEVERROR(IMXRT_TRACEERR_ALLOCFAIL), 0);
@@ -2297,10 +2304,10 @@ static FAR struct usbdev_req_s *imxrt_epallocreq(FAR struct usbdev_ep_s *ep)
  *
  ****************************************************************************/
 
-static void imxrt_epfreereq(FAR struct usbdev_ep_s *ep,
-                            FAR struct usbdev_req_s *req)
+static void imxrt_epfreereq(struct usbdev_ep_s *ep,
+                            struct usbdev_req_s *req)
 {
-  FAR struct imxrt_req_s *privreq = (FAR struct imxrt_req_s *)req;
+  struct imxrt_req_s *privreq = (struct imxrt_req_s *)req;
 
 #ifdef CONFIG_DEBUG_FEATURES
   if (!ep || !req)
@@ -2310,7 +2317,7 @@ static void imxrt_epfreereq(FAR struct usbdev_ep_s *ep,
     }
 #endif
 
-  usbtrace(TRACE_EPFREEREQ, ((FAR struct imxrt_ep_s *)ep)->epphy);
+  usbtrace(TRACE_EPFREEREQ, ((struct imxrt_ep_s *)ep)->epphy);
   kmm_free(privreq);
 }
 
@@ -2323,20 +2330,20 @@ static void imxrt_epfreereq(FAR struct usbdev_ep_s *ep,
  ****************************************************************************/
 
 #ifdef CONFIG_USBDEV_DMA
-static void *imxrt_epallocbuffer(FAR struct usbdev_ep_s *ep, uint16_t bytes)
+static void *imxrt_epallocbuffer(struct usbdev_ep_s *ep, uint16_t bytes)
 {
   /* The USB peripheral DMA is very forgiving, as the dTD allows the buffer
    * to start at any address. Hence, no need for alignment.
    */
 
-  FAR struct imxrt_ep_s *privep = (FAR struct imxrt_ep_s *)ep;
+  struct imxrt_ep_s *privep = (struct imxrt_ep_s *)ep;
+  UNUSED(privep);
 
   usbtrace(TRACE_EPALLOCBUFFER, privep->epphy);
-
 #ifdef CONFIG_USBDEV_DMAMEMORY
   return usbdev_dma_alloc(bytes);
 #else
-  return kmm_malloc(bytes);
+  return cache_aligned_alloc(bytes);
 #endif
 }
 #endif
@@ -2350,9 +2357,10 @@ static void *imxrt_epallocbuffer(FAR struct usbdev_ep_s *ep, uint16_t bytes)
  ****************************************************************************/
 
 #ifdef CONFIG_USBDEV_DMA
-static void imxrt_epfreebuffer(FAR struct usbdev_ep_s *ep, FAR void *buf)
+static void imxrt_epfreebuffer(struct usbdev_ep_s *ep, void *buf)
 {
-  FAR struct imxrt_ep_s *privep = (FAR struct imxrt_ep_s *)ep;
+  struct imxrt_ep_s *privep = (struct imxrt_ep_s *)ep;
+  UNUSED(privep);
 
   usbtrace(TRACE_EPFREEBUFFER, privep->epphy);
 
@@ -2372,12 +2380,12 @@ static void imxrt_epfreebuffer(FAR struct usbdev_ep_s *ep, FAR void *buf)
  *
  ****************************************************************************/
 
-static int imxrt_epsubmit(FAR struct usbdev_ep_s *ep,
-                          FAR struct usbdev_req_s *req)
+static int imxrt_epsubmit(struct usbdev_ep_s *ep,
+                          struct usbdev_req_s *req)
 {
-  FAR struct imxrt_req_s *privreq = (FAR struct imxrt_req_s *)req;
-  FAR struct imxrt_ep_s *privep = (FAR struct imxrt_ep_s *)ep;
-  FAR struct imxrt_usbdev_s *priv;
+  struct imxrt_req_s *privreq = (struct imxrt_req_s *)req;
+  struct imxrt_ep_s *privep = (struct imxrt_ep_s *)ep;
+  struct imxrt_usbdev_s *priv;
   irqstate_t flags;
   int ret = OK;
 
@@ -2447,10 +2455,10 @@ static int imxrt_epsubmit(FAR struct usbdev_ep_s *ep,
  *
  ****************************************************************************/
 
-static int imxrt_epcancel(FAR struct usbdev_ep_s *ep,
-                          FAR struct usbdev_req_s *req)
+static int imxrt_epcancel(struct usbdev_ep_s *ep,
+                          struct usbdev_req_s *req)
 {
-  FAR struct imxrt_ep_s *privep = (FAR struct imxrt_ep_s *)ep;
+  struct imxrt_ep_s *privep = (struct imxrt_ep_s *)ep;
   irqstate_t flags;
 
 #ifdef CONFIG_DEBUG_FEATURES
@@ -2484,9 +2492,9 @@ static int imxrt_epcancel(FAR struct usbdev_ep_s *ep,
  *
  ****************************************************************************/
 
-static int imxrt_epstall(FAR struct usbdev_ep_s *ep, bool resume)
+static int imxrt_epstall(struct usbdev_ep_s *ep, bool resume)
 {
-  FAR struct imxrt_ep_s *privep = (FAR struct imxrt_ep_s *)ep;
+  struct imxrt_ep_s *privep = (struct imxrt_ep_s *)ep;
   irqstate_t flags;
 
   /* STALL or RESUME the endpoint */
@@ -2506,13 +2514,13 @@ static int imxrt_epstall(FAR struct usbdev_ep_s *ep, bool resume)
 
       /* Clear stall and reset the data toggle */
 
-      imxrt_chgbits (ctrl_xs | ctrl_xr, ctrl_xr, addr);
+      imxrt_chgbits(ctrl_xs | ctrl_xr, ctrl_xr, addr);
     }
   else
     {
       privep->stalled = true;
 
-      imxrt_setbits (ctrl_xs, addr);
+      imxrt_setbits(ctrl_xs, addr);
     }
 
   leave_critical_section(flags);
@@ -2539,11 +2547,11 @@ static int imxrt_epstall(FAR struct usbdev_ep_s *ep, bool resume)
  *
  ****************************************************************************/
 
-static FAR struct usbdev_ep_s *imxrt_allocep(FAR struct usbdev_s *dev,
-                                             uint8_t eplog,
-                                             bool in, uint8_t eptype)
+static struct usbdev_ep_s *imxrt_allocep(struct usbdev_s *dev,
+                                         uint8_t eplog,
+                                         bool in, uint8_t eptype)
 {
-  FAR struct imxrt_usbdev_s *priv = (FAR struct imxrt_usbdev_s *)dev;
+  struct imxrt_usbdev_s *priv = (struct imxrt_usbdev_s *)dev;
   uint32_t epset = IMXRT_EPALLSET & ~IMXRT_EPCTRLSET;
   irqstate_t flags;
   int epndx = 0;
@@ -2623,7 +2631,9 @@ static FAR struct usbdev_ep_s *imxrt_allocep(FAR struct usbdev_s *dev,
       epset &= priv->epavail;
       if (epset)
         {
-          /* Select the lowest bit in the set of matching, available endpoints */
+          /* Select the lowest bit in the set of matching, available
+           * endpoints
+           */
 
           for (epndx = 2; epndx < IMXRT_NPHYSENDPOINTS; epndx++)
             {
@@ -2635,7 +2645,9 @@ static FAR struct usbdev_ep_s *imxrt_allocep(FAR struct usbdev_s *dev,
                   priv->epavail &= ~bit;
                   leave_critical_section(flags);
 
-                  /* And return the pointer to the standard endpoint structure */
+                  /* And return the pointer to the standard endpoint
+                   * structure
+                   */
 
                   return &priv->eplist[epndx].ep;
                 }
@@ -2659,11 +2671,11 @@ static FAR struct usbdev_ep_s *imxrt_allocep(FAR struct usbdev_s *dev,
  *
  ****************************************************************************/
 
-static void imxrt_freeep(FAR struct usbdev_s *dev,
-                         FAR struct usbdev_ep_s *ep)
+static void imxrt_freeep(struct usbdev_s *dev,
+                         struct usbdev_ep_s *ep)
 {
-  FAR struct imxrt_usbdev_s *priv = (FAR struct imxrt_usbdev_s *)dev;
-  FAR struct imxrt_ep_s *privep = (FAR struct imxrt_ep_s *)ep;
+  struct imxrt_usbdev_s *priv = (struct imxrt_usbdev_s *)dev;
+  struct imxrt_ep_s *privep = (struct imxrt_ep_s *)ep;
   irqstate_t flags;
 
   usbtrace(TRACE_DEVFREEEP, (uint16_t)privep->epphy);
@@ -2689,7 +2701,7 @@ static void imxrt_freeep(FAR struct usbdev_s *dev,
 static int imxrt_getframe(struct usbdev_s *dev)
 {
 #ifdef CONFIG_IMXRT_USBDEV_FRAME_INTERRUPT
-  FAR struct imxrt_usbdev_s *priv = (FAR struct imxrt_usbdev_s *)dev;
+  struct imxrt_usbdev_s *priv = (struct imxrt_usbdev_s *)dev;
 
   /* Return last valid value of SOF read by the interrupt handler */
 
@@ -2738,7 +2750,7 @@ static int imxrt_wakeup(struct usbdev_s *dev)
 
 static int imxrt_selfpowered(struct usbdev_s *dev, bool selfpowered)
 {
-  FAR struct imxrt_usbdev_s *priv = (FAR struct imxrt_usbdev_s *)dev;
+  struct imxrt_usbdev_s *priv = (struct imxrt_usbdev_s *)dev;
 
   usbtrace(TRACE_DEVSELFPOWERED, (uint16_t)selfpowered);
 
@@ -2769,18 +2781,18 @@ static int imxrt_pullup(struct usbdev_s *dev, bool enable)
   irqstate_t flags = enter_critical_section();
   if (enable)
     {
-      imxrt_setbits (USBDEV_USBCMD_RS, IMXRT_USBDEV_USBCMD);
+      imxrt_setbits(USBDEV_USBCMD_RS, IMXRT_USBDEV_USBCMD);
 
 #ifdef CONFIG_IMXRT_USB0DEV_NOVBUS
       /* Create a 'false' power event on the USB port so the MAC connects */
 
-      imxrt_clrbits (USBOTG_OTGSC_VD, IMXRT_USBOTG_OTGSC);
-      imxrt_setbits (USBOTG_OTGSC_VC, IMXRT_USBOTG_OTGSC);
+      imxrt_clrbits(USBOTG_OTGSC_VD, IMXRT_USBOTG_OTGSC);
+      imxrt_setbits(USBOTG_OTGSC_VC, IMXRT_USBOTG_OTGSC);
 #endif
     }
   else
     {
-      imxrt_clrbits (USBDEV_USBCMD_RS, IMXRT_USBDEV_USBCMD);
+      imxrt_clrbits(USBDEV_USBCMD_RS, IMXRT_USBDEV_USBCMD);
     }
 
   leave_critical_section(flags);
@@ -2792,7 +2804,7 @@ static int imxrt_pullup(struct usbdev_s *dev, bool enable)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: up_usbinitialize
+ * Name: arm_usbinitialize
  *
  * Description:
  *   Initialize USB hardware.
@@ -2805,7 +2817,7 @@ static int imxrt_pullup(struct usbdev_s *dev, bool enable)
  *
  ****************************************************************************/
 
-void up_usbinitialize(void)
+void arm_usbinitialize(void)
 {
   struct imxrt_usbdev_s *priv = &g_usbdev;
   int i;
@@ -2873,6 +2885,32 @@ void up_usbinitialize(void)
 
   imxrt_clockall_usboh3();
 
+#ifdef CONFIG_ARCH_FAMILY_IMXRT117x
+  up_mdelay(1);
+
+  putreg32(USBPHY1_PLL_SIC_PLL_POWER |
+           USBPHY1_PLL_SIC_PLL_REG_ENABLE,
+           IMXRT_USBPHY1_PLL_SIC_SET);
+
+  putreg32(USBPHY1_PLL_SIC_PLL_DIV_SEL_MASK,
+           IMXRT_USBPHY1_PLL_SIC_CLR);
+
+  putreg32(USBPHY1_PLL_SIC_PLL_DIV_SEL(3),
+           IMXRT_USBPHY1_PLL_SIC_SET);
+
+  putreg32(USBPHY1_PLL_SIC_PLL_BYPASS,
+           IMXRT_USBPHY1_PLL_SIC_CLR);
+
+  putreg32(USBPHY1_PLL_SIC_PLL_EN_USB_CLKS,
+           IMXRT_USBPHY1_PLL_SIC_SET);
+
+  putreg32(USBPHY_CTRL_CLKGATE,
+           IMXRT_USBPHY1_CTRL_CLR);
+
+  while ((getreg32(IMXRT_USBPHY1_PLL_SIC) & USBPHY1_PLL_SIC_PLL_LOCK) == 0);
+
+#endif
+
   /* Disable USB interrupts */
 
   imxrt_putreg(0, IMXRT_USBDEV_USBINTR);
@@ -2887,8 +2925,8 @@ void up_usbinitialize(void)
 
   /* Reset the controller */
 
-  imxrt_setbits (USBDEV_USBCMD_RST, IMXRT_USBDEV_USBCMD);
-  while (imxrt_getreg (IMXRT_USBDEV_USBCMD) & USBDEV_USBCMD_RST)
+  imxrt_setbits(USBDEV_USBCMD_RST, IMXRT_USBDEV_USBCMD);
+  while (imxrt_getreg(IMXRT_USBDEV_USBCMD) & USBDEV_USBCMD_RST)
       ;
 
   /* Power up the PHY (turn off power disable) - USBPHYx_PWDn
@@ -2902,7 +2940,7 @@ void up_usbinitialize(void)
 
   /* Program the controller to be the USB device controller */
 
-  imxrt_putreg (USBDEV_USBMODE_SDIS | USBDEV_USBMODE_SLOM |
+  imxrt_putreg(USBDEV_USBMODE_SDIS | USBDEV_USBMODE_SLOM |
                 USBDEV_USBMODE_CM_DEVICE, IMXRT_USBDEV_USBMODE);
 
   /* Attach USB controller interrupt handler */
@@ -2915,15 +2953,13 @@ void up_usbinitialize(void)
   /* Reset/Re-initialize the USB hardware */
 
   imxrt_usbreset(priv);
-
-  return;
 }
 
 /****************************************************************************
- * Name: up_usbuninitialize
+ * Name: arm_usbuninitialize
  ****************************************************************************/
 
-void up_usbuninitialize(void)
+void arm_usbuninitialize(void)
 {
   struct imxrt_usbdev_s *priv = &g_usbdev;
   irqstate_t flags;
@@ -2950,8 +2986,8 @@ void up_usbuninitialize(void)
 
   /* Reset the controller */
 
-  imxrt_setbits (USBDEV_USBCMD_RST, IMXRT_USBDEV_USBCMD);
-  while (imxrt_getreg (IMXRT_USBDEV_USBCMD) & USBDEV_USBCMD_RST)
+  imxrt_setbits(USBDEV_USBCMD_RST, IMXRT_USBDEV_USBCMD);
+  while (imxrt_getreg(IMXRT_USBDEV_USBCMD) & USBDEV_USBCMD_RST)
       ;
 
   /* Turn off USB power and clocking */

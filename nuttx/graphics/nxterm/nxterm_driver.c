@@ -1,35 +1,22 @@
 /****************************************************************************
- * nuttx/graphics/nxterm/nxterm_driver.c
+ * graphics/nxterm/nxterm_driver.c
  *
- *   Copyright (C) 2012, 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -58,7 +45,7 @@
 static int     nxterm_open(FAR struct file *filep);
 static int     nxterm_close(FAR struct file *filep);
 static ssize_t nxterm_write(FAR struct file *filep, FAR const char *buffer,
-                 size_t buflen);
+                            size_t buflen);
 static int     nxterm_ioctl(FAR struct file *filep, int cmd,
                             unsigned long arg);
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
@@ -75,16 +62,19 @@ static int     nxterm_unlink(FAR struct inode *inode);
 
 const struct file_operations g_nxterm_drvrops =
 {
-  nxterm_open,  /* open */
-  nxterm_close, /* close */
-  nxterm_read,  /* read */
-  nxterm_write, /* write */
-  NULL,         /* seek */
-  nxterm_ioctl, /* ioctl */
-  nxterm_poll   /* poll */
+  nxterm_open,    /* open */
+  nxterm_close,   /* close */
+  nxterm_read,    /* read */
+  nxterm_write,   /* write */
+  NULL,           /* seek */
+  nxterm_ioctl,   /* ioctl */
+  NULL,           /* mmap */
+  NULL,           /* truncate */
+  nxterm_poll,    /* poll */
+  NULL,           /* readv */
+  NULL            /* writev */
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  ,
-  nxterm_unlink /* unlink */
+  , nxterm_unlink /* unlink */
 #endif
 };
 
@@ -92,16 +82,19 @@ const struct file_operations g_nxterm_drvrops =
 
 const struct file_operations g_nxterm_drvrops =
 {
-  nxterm_open,  /* open */
-  nxterm_close, /* close */
-  NULL,         /* read */
-  nxterm_write, /* write */
-  NULL,         /* seek */
-  nxterm_ioctl, /* ioctl */
-  NULL          /* poll */
+  nxterm_open,    /* open */
+  nxterm_close,   /* close */
+  NULL,           /* read */
+  nxterm_write,   /* write */
+  NULL,           /* seek */
+  nxterm_ioctl,   /* ioctl */
+  NULL,           /* mmap */
+  NULL,           /* truncate */
+  NULL,           /* poll */
+  NULL,           /* readv */
+  NULL            /* writev */
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  ,
-  nxterm_unlink /* unlink */
+  , nxterm_unlink /* unlink */
 #endif
 };
 
@@ -118,14 +111,12 @@ const struct file_operations g_nxterm_drvrops =
 static int nxterm_open(FAR struct file *filep)
 {
   FAR struct inode         *inode = filep->f_inode;
-  FAR struct nxterm_state_s *priv  = inode->i_private;
-
-  DEBUGASSERT(filep && filep->f_inode);
+  FAR struct nxterm_state_s *priv = inode->i_private;
 
   /* Get the driver structure from the inode */
 
   inode = filep->f_inode;
-  priv  = (FAR struct nxterm_state_s *)inode->i_private;
+  priv  = inode->i_private;
   DEBUGASSERT(priv);
 
   /* Verify that the driver is opened for write-only access */
@@ -163,12 +154,12 @@ static int nxterm_close(FAR struct file *filep)
 
   /* Recover our private state structure */
 
-  DEBUGASSERT(filep != NULL && filep->f_priv != NULL);
+  DEBUGASSERT(filep->f_priv != NULL);
   priv = (FAR struct nxterm_state_s *)filep->f_priv;
 
   /* Get exclusive access */
 
-  ret = nxterm_semwait(priv);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -183,7 +174,9 @@ static int nxterm_close(FAR struct file *filep)
     {
       /* Yes.. Unregister the terminal device */
 
+      nxmutex_unlock(&priv->lock);
       nxterm_unregister(priv);
+      return OK;
     }
   else
     {
@@ -192,7 +185,7 @@ static int nxterm_close(FAR struct file *filep)
       priv->orefs--;
     }
 
-  nxterm_sempost(priv);
+  nxmutex_unlock(&priv->lock);
 #endif
 
   return OK;
@@ -213,12 +206,12 @@ static ssize_t nxterm_write(FAR struct file *filep, FAR const char *buffer,
 
   /* Recover our private state structure */
 
-  DEBUGASSERT(filep != NULL && filep->f_priv != NULL);
+  DEBUGASSERT(filep->f_priv != NULL);
   priv = (FAR struct nxterm_state_s *)filep->f_priv;
 
   /* Get exclusive access */
 
-  ret = nxterm_semwait(priv);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -240,7 +233,7 @@ static ssize_t nxterm_write(FAR struct file *filep, FAR const char *buffer,
 
       do
         {
-          /* Is the character part of a VT100 escape sequnce? */
+          /* Is the character part of a VT100 escape sequence? */
 
           state = nxterm_vt100(priv, ch);
           switch (state)
@@ -288,7 +281,7 @@ static ssize_t nxterm_write(FAR struct file *filep, FAR const char *buffer,
 
                 for (i = 1; i < priv->nseq; i++)
                   {
-                    priv->seq[i-1] = priv->seq[i];
+                    priv->seq[i - 1] = priv->seq[i];
                   }
 
                 priv->nseq--;
@@ -307,7 +300,7 @@ static ssize_t nxterm_write(FAR struct file *filep, FAR const char *buffer,
   /* Show the cursor at its new position */
 
   nxterm_showcursor(priv);
-  nxterm_sempost(priv);
+  nxmutex_unlock(&priv->lock);
   return (ssize_t)buflen;
 }
 
@@ -319,7 +312,7 @@ static int nxterm_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
   /* NOTE:  We don't need driver context here because the NXTERM handle
    * provided within each of the NXTERM IOCTL command data.  Mutual
-   * exclusion is similar managed by the IOCTL cmmand handler.
+   * exclusion is similar managed by the IOCTL command handler.
    *
    * This permits the IOCTL to be called in abnormal context (such as
    * from boardctl())
@@ -338,12 +331,12 @@ static int nxterm_unlink(FAR struct inode *inode)
   FAR struct nxterm_state_s *priv;
   int ret;
 
-  DEBUGASSERT(inode != NULL && inode->i_private != NULL);
+  DEBUGASSERT(inode->i_private != NULL);
   priv = inode->i_private;
 
   /* Get exclusive access */
 
-  ret = nxterm_semwait(priv);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -363,10 +356,12 @@ static int nxterm_unlink(FAR struct inode *inode)
     {
       /* No.. Unregister the terminal device now */
 
+      nxmutex_unlock(&priv->lock);
       nxterm_unregister(priv);
+      return OK;
     }
 
-  nxterm_sempost(priv);
+  nxmutex_unlock(&priv->lock);
   return OK;
 }
 #endif
@@ -383,7 +378,7 @@ static int nxterm_unlink(FAR struct inode *inode)
  *
  * NOTE:  We don't need driver context here because the NXTERM handle
  * provided within each of the NXTERM IOCTL command data.  Mutual
- * exclusion is similar managed by the IOCTL cmmand handler.
+ * exclusion is similar managed by the IOCTL command handler.
  *
  * This permits the IOCTL to be called in abnormal context (such as
  * from boardctl())
@@ -439,7 +434,8 @@ int nxterm_ioctl_tap(int cmd, uintptr_t arg)
       /* CMD:           NXTERMIOC_NXTERM_RESIZE
        * DESCRIPTION:   Inform NxTerm keyboard the the size of the window has
        *                changed
-       * ARG:           A reference readable instance of struct nxtermioc_resize_s
+       * ARG:           A reference readable instance of struct
+       *                nxtermioc_resize_s
        * CONFIGURATION: CONFIG_NXTERM
        */
 

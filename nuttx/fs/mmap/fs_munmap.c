@@ -1,35 +1,22 @@
 /****************************************************************************
  * fs/mmap/fs_munmap.c
  *
- *   Copyright (C) 2011, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -38,6 +25,7 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <nuttx/mm/map.h>
 
 #include <sys/types.h>
 #include <sys/mman.h>
@@ -47,16 +35,77 @@
 #include <assert.h>
 #include <debug.h>
 
+#include <nuttx/sched.h>
 #include <nuttx/kmalloc.h>
 
 #include "inode/inode.h"
 #include "fs_rammap.h"
+#include "sched/sched.h"
 
-#ifdef CONFIG_FS_RAMMAP
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
+
+static int file_munmap_(FAR void *start, size_t length,
+                        enum mm_map_type_e type)
+{
+  FAR struct tcb_s *tcb = this_task();
+  FAR struct task_group_s *group = tcb->group;
+  FAR struct mm_map_entry_s *entry = NULL;
+  FAR struct mm_map_s *mm = get_current_mm();
+  int ret = OK;
+
+  /* Iterate through all the mappings and call the underlying
+   * unmap for every mapping where "start" lies
+   * break loop on any errors.
+   *
+   * Get exclusive access to mm_map for this
+   */
+
+  ret = mm_map_lock();
+  if (ret == OK)
+    {
+      entry = mm_map_find(mm, start, length);
+
+      /* If entry don't find, the start and length is invalid. */
+
+      if (entry == NULL)
+        {
+          ret = -EINVAL;
+          goto unlock;
+        }
+
+      do
+        {
+          DEBUGASSERT(entry->munmap);
+          ret = entry->munmap(group, entry, start, length);
+        }
+      while (ret == OK && (entry = mm_map_find(mm, start, length)));
+
+unlock:
+      mm_map_unlock();
+    }
+
+  return ret;
+}
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: file_mummap
+ *
+ * Description:
+ *   Equivalent to the standard file_mummap() function except it does not set
+ *   the errno variable.
+ *
+ ****************************************************************************/
+
+int file_munmap(FAR void *start, size_t length)
+{
+  return file_munmap_(start, length, MAP_KERNEL);
+}
 
 /****************************************************************************
  * Name: munmap
@@ -74,19 +123,19 @@
  *   1. mmap() is the API that is used to support direct access to random
  *     access media under the following very restrictive conditions:
  *
- *     a. The filesystem supports the FIOC_MMAP ioctl command.  Any file
+ *     a. The filesystem implements the mmap file operation.  Any file
  *        system that maps files contiguously on the media should support
  *        this ioctl. (vs. file system that scatter files over the media
  *        in non-contiguous sectors).  As of this writing, ROMFS is the
  *        only file system that meets this requirement.
  *     b. The underlying block driver supports the BIOC_XIPBASE ioctl
  *        command that maps the underlying media to a randomly accessible
- *        address. At  present, only the RAM/ROM disk driver does this.
+ *        address. At present, only the RAM/ROM disk driver does this.
  *
- *     munmap() is still not required in this first case.  In this first
- *     The mapped address is a static address in the MCUs address space
- *     does not need to be munmapped.  Support for munmap() in this case
- *     provided by the simple definition in sys/mman.h:
+ *     munmap() is still not required in this first case. The mapped address
+ *     is a static address in the MCUs address space does not need to be
+ *     munmapped.  Support for munmap() in this case provided by the simple
+ *     definition in sys/mman.h:
  *
  *        #define munmap(start, length)
  *
@@ -97,10 +146,10 @@
  *
  * Input Parameters:
  *   start   The start address of the mapping to delete.  For this
- *           simplified munmap() implementation, the *must* be the start
+ *           simplified munmap() implementation, the must be the start
  *           address of the memory region (the same address returned by
  *           mmap()).
- *   length  The length region to be umapped.
+ *   length  The length region to be unmapped.
  *
  * Returned Value:
  *   On success, munmap() returns 0, on failure -1, and errno is set
@@ -110,107 +159,14 @@
 
 int munmap(FAR void *start, size_t length)
 {
-  FAR struct fs_rammap_s *prev;
-  FAR struct fs_rammap_s *curr;
-  FAR void *newaddr;
-  unsigned int offset;
   int ret;
-  int errcode;
 
-  /* Find a region containing this start and length in the list of regions */
-
-  rammap_initialize();
-  ret = nxsem_wait(&g_rammaps.exclsem);
+  ret = file_munmap_(start, length, MAP_USER);
   if (ret < 0)
     {
-      errcode = ret;
-      goto errout;
+      set_errno(-ret);
+      ret = ERROR;
     }
 
-  /* Search the list of regions */
-
-  for (prev = NULL, curr = g_rammaps.head; curr; prev = curr, curr = curr->flink)
-    {
-      /* Does this region include any part of the specified range? */
-
-      if ((uintptr_t)start < (uintptr_t)curr->addr + curr->length &&
-          (uintptr_t)start + length >= (uintptr_t)curr->addr)
-        {
-          break;
-        }
-    }
-
-  /* Did we find the region */
-
-  if (!curr)
-    {
-      ferr("ERROR: Region not found\n");
-      errcode = EINVAL;
-      goto errout_with_semaphore;
-    }
-
-  /* Get the offset from the beginning of the region and the actual number
-   * of bytes to "unmap".  All mappings must extend to the end of the region.
-   * There is no support for free a block of memory but leaving a block of
-   * memory at the end.  This is a consequence of using kumm_realloc() to
-   * simulate the unmapping.
-   */
-
-  offset = start - curr->addr;
-  if (offset + length < curr->length)
-    {
-      ferr("ERROR: Cannot umap without unmapping to the end\n");
-      errcode = ENOSYS;
-      goto errout_with_semaphore;
-    }
-
-  /* Okay.. the region is beging umapped to the end.  Make sure the length
-   * indicates that.
-   */
-
-  length = curr->length - offset;
-
-  /* Are we unmapping the entire region (offset == 0)? */
-
-  if (length >= curr->length)
-    {
-      /* Yes.. remove the mapping from the list */
-
-      if (prev)
-        {
-          prev->flink = curr->flink;
-        }
-      else
-        {
-          g_rammaps.head = curr->flink;
-        }
-
-      /* Then free the region */
-
-      kumm_free(curr);
-    }
-
-  /* No.. We have been asked to "unmap' only a portion of the memory
-   * (offset > 0).
-   */
-
-  else
-    {
-      newaddr = kumm_realloc(curr->addr, sizeof(struct fs_rammap_s) + length);
-      DEBUGASSERT(newaddr == (FAR void *)(curr->addr));
-      UNUSED(newaddr); /* May not be used */
-      curr->length = length;
-    }
-
-  nxsem_post(&g_rammaps.exclsem);
-  return OK;
-
-errout_with_semaphore:
-  nxsem_post(&g_rammaps.exclsem);
-
-errout:
-  set_errno(errcode);
-  return ERROR;
+  return ret;
 }
-
-#endif /* CONFIG_FS_RAMMAP */

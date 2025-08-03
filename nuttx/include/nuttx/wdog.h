@@ -1,6 +1,8 @@
 /****************************************************************************
  * include/nuttx/wdog.h
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -27,63 +29,30 @@
 
 #include <nuttx/config.h>
 
+#include <nuttx/compiler.h>
+#include <nuttx/clock.h>
+#include <errno.h>
 #include <stdint.h>
-#include <queue.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Configuration ************************************************************/
+#define WDOG_ISACTIVE(w)   ((w)->func != NULL)
 
-#ifndef CONFIG_PREALLOC_WDOGS
-#  define CONFIG_PREALLOC_WDOGS 32
-#endif
+/* The maximum delay tick are supposed to be CLOCK_MAX >> 1.
+ * However, if there are expired wdog timers in the wdog queue,
+ * clock_compare might be incorrect when the delay is CLOCK_MAX >> 1.
+ * e.g. Current tick is 123, and there is an expired wdog timer with the
+ * expired ticks 100. If we insert a wdog timer with delay CLOCK_MAX >> 1,
+ * Then clock_compare(100, 123 + CLOCK_MAX >> 1) will return false, leading
+ * to the new wdog timer queued before the expired wdog timer.
+ * So we limited the delay to CLOCK_MAX >> 2, which is 2^30 - 1 or 2^62 - 1.
+ * Assuming all expired wdog timer can be processed within WDOG_MAX_DELAY
+ * ticks, this ensure the correct enqueue of the wdog timer.
+ */
 
-#ifndef CONFIG_WDOG_INTRESERVE
-#  if CONFIG_PREALLOC_WDOGS > 16
-#    define CONFIG_WDOG_INTRESERVE 4
-#  elif  CONFIG_PREALLOC_WDOGS > 8
-#    define CONFIG_WDOG_INTRESERVE 2
-#  else
-#    define CONFIG_WDOG_INTRESERVE 1
-#  endif
-#endif
-
-#if CONFIG_WDOG_INTRESERVE >= CONFIG_PREALLOC_WDOGS
-#  error CONFIG_WDOG_INTRESERVE >= CONFIG_PREALLOC_WDOGS
-#endif
-
-/* Watchdog Definitions *****************************************************/
-
-/* Flag bits for the flags field of struct wdog_s */
-
-#define WDOGF_ACTIVE       (1 << 0) /* Bit 0: 1=Watchdog is actively timing */
-#define WDOGF_ALLOCED      (1 << 1) /* Bit 1: 0=Pre-allocated, 1=Allocated */
-#define WDOGF_STATIC       (1 << 2) /* Bit 2: 0=[Pre-]allocated, 1=Static */
-
-#define WDOG_SETACTIVE(w)  do { (w)->flags |= WDOGF_ACTIVE; } while (0)
-#define WDOG_SETALLOCED(w) do { (w)->flags |= WDOGF_ALLOCED; } while (0)
-#define WDOG_SETSTATIC(w)  do { (w)->flags |= WDOGF_STATIC; } while (0)
-
-#define WDOG_CLRACTIVE(w)  do { (w)->flags &= ~WDOGF_ACTIVE; } while (0)
-#define WDOG_CLRALLOCED(w) do { (w)->flags &= ~WDOGF_ALLOCED; } while (0)
-#define WDOG_CLRSTATIC(w)  do { (w)->flags &= ~WDOGF_STATIC; } while (0)
-
-#define WDOG_ISACTIVE(w)   (((w)->flags & WDOGF_ACTIVE) != 0)
-#define WDOG_ISALLOCED(w)  (((w)->flags & WDOGF_ALLOCED) != 0)
-#define WDOG_ISSTATIC(w)   (((w)->flags & WDOGF_STATIC) != 0)
-
-/* Initialization of statically allocated timers ****************************/
-
-#define wd_static(w) \
-  do { (w)->next = NULL; (w)->flags = WDOGF_STATIC; } while (0)
-
-#ifdef CONFIG_PIC
-#  define WDOG_INITIAILIZER { NULL, NULL, NULL, 0, WDOGF_STATIC, 0 }
-#else
-#  define WDOG_INITIAILIZER { NULL, NULL, 0, WDOGF_STATIC, 0 }
-#endif
+#define WDOG_MAX_DELAY     (CLOCK_MAX >> 2)
 
 /****************************************************************************
  * Public Type Declarations
@@ -97,13 +66,6 @@
  * We always have sizeof(pointer) <= sizeof(uintptr_t) by definition.
  */
 
-union wdparm_u
-{
-  FAR void     *pvarg; /* The size one generic point */
-  uint32_t      dwarg; /* Big enough for a 32-bit value in any case */
-  uintptr_t     uiarg; /* sizeof(uintptr_t) >= sizeof(pointer) */
-};
-
 #if UINTPTR_MAX >= UINT32_MAX
 typedef uintptr_t wdparm_t;
 #else
@@ -111,35 +73,31 @@ typedef uint32_t  wdparm_t;
 #endif
 
 /* This is the form of the function that is called when the
- * watchdog function expires.  Up to four parameters may be passed.
+ * watchdog function expires.
  */
 
-typedef CODE void (*wdentry_t)(int argc, wdparm_t arg1, ...);
+typedef CODE void (*wdentry_t)(wdparm_t arg);
 
-/* This is the internal representation of the watchdog timer structure.  The
- * WDOG_ID is a pointer to a watchdog structure.
- */
+/* Avoid the inclusion of nuttx/list.h */
+
+struct wdlist_node
+{
+  FAR struct wdlist_node *prev;
+  FAR struct wdlist_node *next;
+};
+
+/* Support a doubly linked list of watchdog timers */
 
 struct wdog_s
 {
-  FAR struct wdog_s *next;       /* Support for singly linked lists. */
+  struct wdlist_node node;       /* Supports a doubly linked list */
+  wdparm_t           arg;        /* Callback argument */
   wdentry_t          func;       /* Function to execute when delay expires */
 #ifdef CONFIG_PIC
   FAR void          *picbase;    /* PIC base address */
 #endif
-  int                lag;        /* Timer associated with the delay */
-  uint8_t            flags;      /* See WDOGF_* definitions above */
-  uint8_t            argc;       /* The number of parameters to pass */
-  wdparm_t           parm[CONFIG_MAX_WDOGPARMS];
+  clock_t            expired;    /* Timer associated with the absolute time */
 };
-
-/* Watchdog 'handle' */
-
-typedef FAR struct wdog_s *WDOG_ID;
-
-/****************************************************************************
- * Public Data
- ****************************************************************************/
 
 /****************************************************************************
  * Pubic Function Prototypes
@@ -154,51 +112,10 @@ extern "C"
 #endif
 
 /****************************************************************************
- * Name: wd_create
- *
- * Description:
- *   The wd_create function will create a watchdog timer by allocating one
- *   from the list of free watchdog timers.
- *
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   Pointer to watchdog (i.e., the watchdog ID), or NULL if insufficient
- *   watchdogs are available.
- *
- ****************************************************************************/
-
-WDOG_ID wd_create(void);
-
-/****************************************************************************
- * Name: wd_delete
- *
- * Description:
- *   The wd_delete() function will deallocate a watchdog timer by returning
- *   it to the free pool of watchdog timers.  The watchdog timer will be
- *   removed from the active timer queue if had been started.
- *
- * Input Parameters:
- *   wdog - The watchdog ID to delete.  This is actually a pointer to a
- *          watchdog structure.
- *
- * Returned Value:
- *   Zero (OK) is returned on success; a negated errno value is return to
- *   indicate the nature of any failure.
- *
- * Assumptions:
- *   The caller has assured that the watchdog is no longer in use.
- *
- ****************************************************************************/
-
-int wd_delete(WDOG_ID wdog);
-
-/****************************************************************************
  * Name: wd_start
  *
  * Description:
- *   This function adds a watchdog timer to the actuve timer queue.  The
+ *   This function adds a watchdog timer to the active timer queue.  The
  *   specified watchdog function at 'wdentry' will be called from the
  *   interrupt level after the specified number of ticks has elapsed.
  *   Watchdog timers may be started from the interrupt level.
@@ -216,9 +133,9 @@ int wd_delete(WDOG_ID wdog);
  *   wdog     - Watchdog ID
  *   delay    - Delay count in clock ticks
  *   wdentry  - Function to call on timeout
- *   parm1..4 - Parameters to pass to wdentry.
+ *   arg      - Parameter to pass to wdentry.
  *
- *   NOTE:  All parameters must be of type wdparm_t.
+ *   NOTE:  The parameter must be of type wdparm_t.
  *
  * Returned Value:
  *   Zero (OK) is returned on success; a negated errno value is return to
@@ -230,7 +147,190 @@ int wd_delete(WDOG_ID wdog);
  *
  ****************************************************************************/
 
-int wd_start(WDOG_ID wdog, int32_t delay, wdentry_t wdentry, int argc, ...);
+int wd_start(FAR struct wdog_s *wdog, clock_t delay,
+             wdentry_t wdentry, wdparm_t arg);
+
+/****************************************************************************
+ * Name: wd_start_abstick
+ *
+ * Description:
+ *   This function adds a watchdog timer to the active timer queue.  The
+ *   specified watchdog function at 'wdentry' will be called from the
+ *   interrupt level after the specified number of ticks has reached.
+ *   Watchdog timers may be started from the interrupt level.
+ *
+ *   Watchdog timers execute in the address environment that was in effect
+ *   when wd_start() is called.
+ *
+ *   Watchdog timers execute only once.
+ *
+ *   To replace either the timeout delay or the function to be executed,
+ *   call wd_start again with the same wdog; only the most recent wdStart()
+ *   on a given watchdog ID has any effect.
+ *
+ * Input Parameters:
+ *   wdog     - Watchdog ID
+ *   ticks    - Absolute time in clock ticks
+ *   wdentry  - Function to call on timeout
+ *   arg      - Parameter to pass to wdentry.
+ *
+ *   NOTE:  The parameter must be of type wdparm_t.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is return to
+ *   indicate the nature of any failure.
+ *
+ * Assumptions:
+ *   The watchdog routine runs in the context of the timer interrupt handler
+ *   and is subject to all ISR restrictions.
+ *
+ ****************************************************************************/
+
+int wd_start_abstick(FAR struct wdog_s *wdog, clock_t ticks,
+                     wdentry_t wdentry, wdparm_t arg);
+
+/****************************************************************************
+ * Name: wd_start_abstime
+ *
+ * Description:
+ *   This function adds a watchdog timer to the active timer queue.  The
+ *   specified watchdog function at 'wdentry' will be called from the
+ *   interrupt level after the specified number of ticks has reached.
+ *   Watchdog timers may be started from the interrupt level.
+ *
+ *   Watchdog timers execute in the address environment that was in effect
+ *   when wd_start() is called.
+ *
+ *   Watchdog timers execute only once.
+ *
+ *   To replace either the timeout delay or the function to be executed,
+ *   call wd_start again with the same wdog; only the most recent wdStart()
+ *   on a given watchdog ID has any effect.
+ *
+ * Input Parameters:
+ *   wdog     - Watchdog ID
+ *   abstime  - Absolute time with struct timespec
+ *   wdentry  - Function to call on timeout
+ *   arg      - Parameter to pass to wdentry.
+ *
+ *   NOTE:  The parameter must be of type wdparm_t.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is return to
+ *   indicate the nature of any failure.
+ *
+ * Assumptions:
+ *   The watchdog routine runs in the context of the timer interrupt handler
+ *   and is subject to all ISR restrictions.
+ *
+ ****************************************************************************/
+
+#define wd_start_abstime(wdog, abstime, wdentry, arg) \
+        wd_start_abstick(wdog, clock_time2ticks(abstime), wdentry, arg)
+
+/****************************************************************************
+ * Name: wd_start_realtime
+ *
+ * Description:
+ *   This function adds a watchdog timer to the active timer queue.  The
+ *   specified watchdog function at 'wdentry' will be called from the
+ *   interrupt level after the specified number of ticks has reached.
+ *   Watchdog timers may be started from the interrupt level.
+ *
+ *   Watchdog timers execute in the address environment that was in effect
+ *   when wd_start() is called.
+ *
+ *   Watchdog timers execute only once.
+ *
+ *   To replace either the timeout delay or the function to be executed,
+ *   call wd_start again with the same wdog; only the most recent wdStart()
+ *   on a given watchdog ID has any effect.
+ *
+ * Input Parameters:
+ *   wdog     - Watchdog ID
+ *   realtime - Realtime with struct timespec
+ *   wdentry  - Function to call on timeout
+ *   arg      - Parameter to pass to wdentry.
+ *
+ *   NOTE:  The parameter must be of type wdparm_t.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is return to
+ *   indicate the nature of any failure.
+ *
+ * Assumptions:
+ *   The watchdog routine runs in the context of the timer interrupt handler
+ *   and is subject to all ISR restrictions.
+ *
+ ****************************************************************************/
+
+static inline_function
+int wd_start_realtime(FAR struct wdog_s *wdog,
+                      FAR const struct timespec *realtime,
+                      wdentry_t wdentry,
+                      wdparm_t arg)
+{
+#ifdef CONFIG_CLOCK_TIMEKEEPING
+  irqstate_t flags;
+  clock_t ticks;
+  int ret;
+
+  flags = enter_critical_section();
+  clock_abstime2ticks(CLOCK_REALTIME, realtime, &ticks);
+  ret = wd_start(wdog, ticks, wdentry, arg);
+  leave_critical_section(flags);
+
+  return ret;
+#else
+  clock_t absticks;
+
+  clock_realtime2absticks(realtime, &absticks);
+  return wd_start_abstick(wdog, absticks, wdentry, arg);
+#endif
+}
+
+/****************************************************************************
+ * Name: wd_start_next
+ *
+ * Description:
+ *   This function restart watchdog timer based on the last expiration time.
+ *   It can be used to implement a periodic watchdog timer. E.g, Call this
+ *   function instead of wd_start in the watchdog callback to restart the
+ *   next timer for better timing accuracy.
+ *   Note that calling this function outside the watchdog callback requires
+ *   the wdog->expired being set.
+ *
+ * Input Parameters:
+ *   wdog     - Pointer of the periodic watchdog.
+ *   delay    - Delayed time in system ticks.
+ *   wdentry  - Function to call on timeout.
+ *   arg      - Parameter to pass to wdentry.
+ *
+ *   NOTE:  The parameter must be of type wdparm_t.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is return to
+ *   indicate the nature of any failure.
+ *
+ * Assumptions:
+ *   The watchdog routine runs in the context of the timer interrupt handler
+ *   and is subject to all ISR restrictions.
+ *
+ ****************************************************************************/
+
+static inline_function
+int wd_start_next(FAR struct wdog_s *wdog, clock_t delay,
+                  wdentry_t wdentry, wdparm_t arg)
+{
+  /* Ensure delay is within the range the wdog can handle. */
+
+  if (delay > WDOG_MAX_DELAY)
+    {
+      return -EINVAL;
+    }
+
+  return wd_start_abstick(wdog, wdog->expired + delay, wdentry, arg);
+}
 
 /****************************************************************************
  * Name: wd_cancel
@@ -248,7 +348,7 @@ int wd_start(WDOG_ID wdog, int32_t delay, wdentry_t wdentry, int argc, ...);
  *
  ****************************************************************************/
 
-int wd_cancel(WDOG_ID wdog);
+int wd_cancel(FAR struct wdog_s *wdog);
 
 /****************************************************************************
  * Name: wd_gettime
@@ -267,7 +367,7 @@ int wd_cancel(WDOG_ID wdog);
  *
  ****************************************************************************/
 
-int wd_gettime(WDOG_ID wdog);
+sclock_t wd_gettime(FAR struct wdog_s *wdog);
 
 #undef EXTERN
 #ifdef __cplusplus

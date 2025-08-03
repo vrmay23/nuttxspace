@@ -1,35 +1,22 @@
 /****************************************************************************
  * libs/libc/pwd/lib_find_pwdfile.c
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *   Author:  Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -52,7 +39,7 @@
  ****************************************************************************/
 
 typedef CODE int (pwd_foreach_match_t)(FAR const struct passwd *entry,
-                                       uintptr_t arg);
+                                       uintptr_t index, uintptr_t arg);
 
 /****************************************************************************
  * Private Functions
@@ -67,6 +54,7 @@ typedef CODE int (pwd_foreach_match_t)(FAR const struct passwd *entry,
  *
  * Input Parameters:
  *   entry  - The parsed passwd file record
+ *   index  - The index of record in passwd file
  *   arg    - A pointer to the user name to match
  *
  * Returned Value:
@@ -76,8 +64,11 @@ typedef CODE int (pwd_foreach_match_t)(FAR const struct passwd *entry,
  *
  ****************************************************************************/
 
-static int pwd_match_name(FAR const struct passwd *entry, uintptr_t arg)
+static int pwd_match_name(FAR const struct passwd *entry,
+                          uintptr_t index, uintptr_t arg)
 {
+  UNUSED(index);
+
   FAR const char *uname = (FAR const char *)arg;
   return strcmp(entry->pw_name, uname) == 0 ? 1 : 0;
 }
@@ -91,6 +82,7 @@ static int pwd_match_name(FAR const struct passwd *entry, uintptr_t arg)
  *
  * Input Parameters:
  *   entry  - The parsed passwd file record
+ *   index  - The index of record in passwd file
  *   arg    - The user ID to match
  *
  * Returned Value:
@@ -100,10 +92,39 @@ static int pwd_match_name(FAR const struct passwd *entry, uintptr_t arg)
  *
  ****************************************************************************/
 
-static int pwd_match_uid(FAR const struct passwd *entry, uintptr_t arg)
+static int pwd_match_uid(FAR const struct passwd *entry,
+                         uintptr_t index, uintptr_t arg)
 {
+  UNUSED(index);
+
   int match_uid = (int)arg;
   return match_uid == entry->pw_uid ? 1 : 0;
+}
+
+/****************************************************************************
+ * Name: pwd_match_index
+ *
+ * Description:
+ *   Called for each record in the passwd file.  Returns "1" if the record
+ *   matches the index (passed as arg)
+ *
+ * Input Parameters:
+ *   entry  - The parsed passwd file record
+ *   index  - The index of record in passwd file
+ *   arg    - The index to match
+ *
+ * Returned Value:
+ *   = 0 :  No entry name does not match.
+ *   = 1 :  The entry name matches
+ *
+ ****************************************************************************/
+
+static int pwd_match_index(FAR const struct passwd *entry,
+                           uintptr_t index, uintptr_t arg)
+{
+  UNUSED(entry);
+
+  return index == arg;
 }
 
 /****************************************************************************
@@ -133,13 +154,14 @@ static int pwd_foreach(pwd_foreach_match_t match, uintptr_t arg,
   FAR FILE *stream;
   FAR char *ptr;
   FAR char *save;
+  int index = 0;
   int ret;
 
   stream = fopen(CONFIG_LIBC_PASSWD_FILEPATH, "r");
   if (stream == NULL)
     {
-      int errcode = errno;
-      DEBUGASSERT(errno > 0);
+      int errcode = get_errno();
+      DEBUGASSERT(errcode > 0);
       return -errcode;
     }
 
@@ -148,13 +170,14 @@ static int pwd_foreach(pwd_foreach_match_t match, uintptr_t arg,
    *
    * The format of the password file is:
    *
-   *   user:x:uid:uid:home
+   *   user:x:uid:uid:geos:home
    *
    * Where:
    *   user:  User name
    *   x:     Encrypted password
    *   uid:   User ID
    *   uid:   Group ID
+   *   geos:  User information
    *   home:  Login directory
    */
 
@@ -234,7 +257,27 @@ static int pwd_foreach(pwd_foreach_match_t match, uintptr_t arg,
 
       *ptr++        = '\0';
       entry->pw_gid = (gid_t)atoi(save);
-      entry->pw_dir = ptr;
+      save          = ptr;
+
+      /* Skip to the end of the user information and properly terminate it.
+       * The user information must be terminated with the field delimiter
+       * ':'.
+       */
+
+      for (; *ptr != '\n' && *ptr != '\0' && *ptr != ':'; ptr++)
+        {
+        }
+
+      if (*ptr == '\n' || *ptr == '\0')
+        {
+          /* Bad line format? */
+
+          continue;
+        }
+
+      *ptr++          = '\0';
+      entry->pw_gecos = save;
+      entry->pw_dir   = ptr;
 
       /* Skip to the end of the home directory and properly terminate it.
        * The home directory must be the last thing on the line.
@@ -246,10 +289,11 @@ static int pwd_foreach(pwd_foreach_match_t match, uintptr_t arg,
 
       *ptr++ = '\0';
       entry->pw_shell = ROOT_SHELL;
+      entry->pw_passwd = ROOT_PASSWD;
 
       /* Check for a match */
 
-      ret = match(entry, arg);
+      ret = match(entry, (uintptr_t)index++, arg);
       if (ret != 0)
         {
           /* We either have the match or an error occurred. */
@@ -289,7 +333,8 @@ static int pwd_foreach(pwd_foreach_match_t match, uintptr_t arg,
 int pwd_findby_name(FAR const char *uname, FAR struct passwd *entry,
                     FAR char *buffer, size_t buflen)
 {
-  return pwd_foreach(pwd_match_name, (uintptr_t)uname, entry, buffer, buflen);
+  return pwd_foreach(pwd_match_name, (uintptr_t)uname,
+                     entry, buffer, buflen);
 }
 
 /****************************************************************************
@@ -325,4 +370,30 @@ int pwd_findby_uid(uid_t uid, FAR struct passwd *entry, FAR char *buffer,
     }
 
   return pwd_foreach(pwd_match_uid, (uintptr_t)uid, entry, buffer, buflen);
+}
+
+/****************************************************************************
+ * Name: pwd_findby_index
+ *
+ * Description:
+ *   Find passwd file entry using the index.
+ *
+ * Input Parameters:
+ *   index  - The index of entry
+ *   entry  - Location to return the parsed passwd file entry
+ *   buffer - I/O buffer used to access the passwd file
+ *   buflen - The size of the I/O buffer in bytes
+ *
+ * Returned Value:
+ *   < 0 :  An error has occurred.
+ *   = 0 :  No entry with this name was found.
+ *   = 1 :  The entry with this name was found.
+ *
+ ****************************************************************************/
+
+int pwd_findby_index(int index, FAR struct passwd *entry,
+                     FAR char *buffer, size_t buflen)
+{
+  return pwd_foreach(pwd_match_index, (uintptr_t)index,
+                     entry, buffer, buflen);
 }

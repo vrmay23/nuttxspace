@@ -1,19 +1,12 @@
 /****************************************************************************
  * arch/arm/src/lpc43xx/lpc43_adc.c
  *
- *   Copyright(C) 2012, 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * Ported from the LPC17 version:
- *
- *   Copyright(C) 2011 Li Zhuoyi. All rights reserved.
- *   Copyright(C) 2016 Gregory Nutt. All rights reserved.
- *   Author: Li Zhuoyi <lzyy.cn@gmail.com>
- *           Gregory Nutt
- *
- * This file is a part of NuttX:
- *
- *   Copyright(C) 2010-2012, 2015 Gregory Nutt. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2015,2016 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2010-2012 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2011 Li Zhuoyi. All rights reserved.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-FileContributor: Li Zhuoyi <lzyy.cn@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -62,9 +55,7 @@
 #include <nuttx/arch.h>
 #include <nuttx/analog/adc.h>
 
-#include "up_internal.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "chip.h"
 
 #include "lpc43_adc.h"
@@ -118,7 +109,7 @@
 
 struct up_dev_s
 {
-  FAR const struct adc_callback_s *cb;
+  const struct adc_callback_s *cb;
   uint8_t  mask;
   uint8_t  mask_int;
   uint32_t freq;
@@ -133,14 +124,14 @@ struct up_dev_s
 
 /* ADC methods */
 
-static int  adc_bind(FAR struct adc_dev_s *dev,
-                     FAR const struct adc_callback_s *callback);
-static void adc_reset(FAR struct adc_dev_s *dev);
-static int  adc_setup(FAR struct adc_dev_s *dev);
-static void adc_shutdown(FAR struct adc_dev_s *dev);
-static void adc_rxint(FAR struct adc_dev_s *dev, bool enable);
-static int  adc_ioctl(FAR struct adc_dev_s *dev, int cmd, unsigned long arg);
-static int  adc_interrupt(int irq, void *context, FAR void *arg);
+static int  adc_bind(struct adc_dev_s *dev,
+                     const struct adc_callback_s *callback);
+static void adc_reset(struct adc_dev_s *dev);
+static int  adc_setup(struct adc_dev_s *dev);
+static void adc_shutdown(struct adc_dev_s *dev);
+static void adc_rxint(struct adc_dev_s *dev, bool enable);
+static int  adc_ioctl(struct adc_dev_s *dev, int cmd, unsigned long arg);
+static int  adc_interrupt(int irq, void *context, void *arg);
 
 /****************************************************************************
  * Private Data
@@ -186,10 +177,10 @@ static struct adc_dev_s g_adcdev =
  *
  ****************************************************************************/
 
-static int adc_bind(FAR struct adc_dev_s *dev,
-                    FAR const struct adc_callback_s *callback)
+static int adc_bind(struct adc_dev_s *dev,
+                    const struct adc_callback_s *callback)
 {
-  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->ad_priv;
+  struct up_dev_s *priv = (struct up_dev_s *)dev->ad_priv;
 
   DEBUGASSERT(priv != NULL);
   priv->cb = callback;
@@ -205,9 +196,9 @@ static int adc_bind(FAR struct adc_dev_s *dev,
  *
  ****************************************************************************/
 
-static void adc_reset(FAR struct adc_dev_s *dev)
+static void adc_reset(struct adc_dev_s *dev)
 {
-  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->ad_priv;
+  struct up_dev_s *priv = (struct up_dev_s *)dev->ad_priv;
   irqstate_t flags;
   uint32_t regval;
 
@@ -257,13 +248,16 @@ static void adc_reset(FAR struct adc_dev_s *dev)
           regval_timer |= CCU_CLK_CFG_RUN;
           putreg32(regval_timer, LPC43_CCU1_M4_TIMER2_CFG);
 
-          putreg32(0, LPC43_TIMER2_BASE+LPC43_TMR_TCR_OFFSET); /* disable */
-          putreg32(TMR_MCR_MR0R, LPC43_TIMER2_BASE+LPC43_TMR_MCR_OFFSET); /* reset on match only */
-          putreg32(0, LPC43_TIMER2_BASE+LPC43_TMR_CCR_OFFSET); /* do not use capture */
-          putreg32(TMR_EMR_EMC0_SET, LPC43_TIMER2_BASE+LPC43_TMR_EMR_OFFSET); /* external match */
-          putreg32(0, LPC43_TIMER2_BASE+LPC43_TMR_CTCR_OFFSET); /* counter/timer mode */
+          putreg32(0, LPC43_TIMER2_BASE + LPC43_TMR_TCR_OFFSET); /* disable */
+          putreg32(TMR_MCR_MR0R,
+                   LPC43_TIMER2_BASE + LPC43_TMR_MCR_OFFSET);    /* reset on match only */
+          putreg32(0, LPC43_TIMER2_BASE + LPC43_TMR_CCR_OFFSET); /* do not use capture */
+          putreg32(TMR_EMR_EMC0_SET,
+                   LPC43_TIMER2_BASE + LPC43_TMR_EMR_OFFSET);     /* external match */
+          putreg32(0, LPC43_TIMER2_BASE + LPC43_TMR_CTCR_OFFSET); /* counter/timer mode */
 
-          putreg32(LPC43_CCLK/priv->freq/2-1, LPC43_TIMER2_BASE+LPC43_TMR_PR_OFFSET); /* set clock, divide by 2 - bug in chip */
+          putreg32(LPC43_CCLK / priv->freq / 2 - 1,
+                   LPC43_TIMER2_BASE + LPC43_TMR_PR_OFFSET); /* set clock, divide by 2 - bug in chip */
 
           putreg32(1, LPC43_TMR2_MR0); /* set match on 1 */
         }
@@ -344,14 +338,14 @@ static void adc_reset(FAR struct adc_dev_s *dev)
  * Description:
  *   Configure the ADC. This method is called the first time that the ADC
  *   device is opened.  This will occur when the port is first opened.
- *   This setup includes configuring and attaching ADC interrupts.  Interrupts
- *   are all disabled upon return.
+ *   This setup includes configuring and attaching ADC interrupts.
+ *   Interrupts are all disabled upon return.
  *
  ****************************************************************************/
 
-static int adc_setup(FAR struct adc_dev_s *dev)
+static int adc_setup(struct adc_dev_s *dev)
 {
-  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->ad_priv;
+  struct up_dev_s *priv = (struct up_dev_s *)dev->ad_priv;
 
   int ret = irq_attach(priv->irq, adc_interrupt, NULL);
   if (ret == OK)
@@ -371,13 +365,13 @@ static int adc_setup(FAR struct adc_dev_s *dev)
  *
  ****************************************************************************/
 
-static void adc_shutdown(FAR struct adc_dev_s *dev)
+static void adc_shutdown(struct adc_dev_s *dev)
 {
-  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->ad_priv;
+  struct up_dev_s *priv = (struct up_dev_s *)dev->ad_priv;
 
   if (priv->timer)
     {
-      putreg32(0, LPC43_TIMER2_BASE+LPC43_TMR_TCR_OFFSET); /* disable the timer */
+      putreg32(0, LPC43_TIMER2_BASE + LPC43_TMR_TCR_OFFSET); /* disable the timer */
     }
 
   /* Disable ADC interrupts, both at the level of the ADC device and at the
@@ -400,9 +394,9 @@ static void adc_shutdown(FAR struct adc_dev_s *dev)
  *
  ****************************************************************************/
 
-static void adc_rxint(FAR struct adc_dev_s *dev, bool enable)
+static void adc_rxint(struct adc_dev_s *dev, bool enable)
 {
-  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)dev->ad_priv;
+  struct up_dev_s *priv = (struct up_dev_s *)dev->ad_priv;
 
   if (enable)
     {
@@ -410,9 +404,9 @@ static void adc_rxint(FAR struct adc_dev_s *dev, bool enable)
 
       if (priv->timer)
         {
-          putreg32(0, LPC43_TIMER2_BASE+LPC43_TMR_PC_OFFSET); /* reset prescale counter */
-          putreg32(0, LPC43_TIMER2_BASE+LPC43_TMR_TC_OFFSET); /* reset timer counter */
-          putreg32(TMR_TCR_EN, LPC43_TIMER2_BASE+LPC43_TMR_TCR_OFFSET); /* enable the timer */
+          putreg32(0, LPC43_TIMER2_BASE + LPC43_TMR_PC_OFFSET);           /* reset prescale counter */
+          putreg32(0, LPC43_TIMER2_BASE + LPC43_TMR_TC_OFFSET);           /* reset timer counter */
+          putreg32(TMR_TCR_EN, LPC43_TIMER2_BASE + LPC43_TMR_TCR_OFFSET); /* enable the timer */
         }
       else
         {
@@ -444,7 +438,7 @@ static void adc_rxint(FAR struct adc_dev_s *dev, bool enable)
  *
  ****************************************************************************/
 
-static int adc_ioctl(FAR struct adc_dev_s *dev, int cmd, unsigned long arg)
+static int adc_ioctl(struct adc_dev_s *dev, int cmd, unsigned long arg)
 {
   /* No ioctl commands supported */
 
@@ -459,16 +453,16 @@ static int adc_ioctl(FAR struct adc_dev_s *dev, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int adc_interrupt(int irq, void *context, FAR void *arg)
+static int adc_interrupt(int irq, void *context, void *arg)
 {
-
-  FAR struct up_dev_s *priv = (FAR struct up_dev_s *)g_adcdev.ad_priv;
+  struct up_dev_s *priv = (struct up_dev_s *)g_adcdev.ad_priv;
   uint32_t regval;
   int i;
 
   if (priv->timer)
     {
-      putreg32(TMR_EMR_EMC0_SET, LPC43_TIMER2_BASE+LPC43_TMR_EMR_OFFSET); /* put match to low */
+      putreg32(TMR_EMR_EMC0_SET,
+               LPC43_TIMER2_BASE + LPC43_TMR_EMR_OFFSET); /* put match to low */
     }
   else
     {
@@ -491,7 +485,9 @@ static int adc_interrupt(int irq, void *context, FAR void *arg)
           regval = getreg32(LPC43_ADC0_DR(i));
           data   = (regval & ADC_DR_VVREF_MASK) >> ADC_DR_VVREF_SHIFT;
 
-          /* Verify that the upper-half driver has bound its callback functions */
+          /* Verify that the upper-half driver has bound its callback
+           * functions
+           */
 
           if (priv->cb != NULL)
             {
@@ -521,7 +517,7 @@ static int adc_interrupt(int irq, void *context, FAR void *arg)
  *
  ****************************************************************************/
 
-FAR struct adc_dev_s *lpc43_adcinitialize(void)
+struct adc_dev_s *lpc43_adcinitialize(void)
 {
   return &g_adcdev;
 }

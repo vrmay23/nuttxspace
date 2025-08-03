@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/stm32/stm32f4discovery/src/stm32_bringup.c
  *
- *   Copyright (C) 2012, 2014-2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,11 +26,12 @@
 
 #include <nuttx/config.h>
 
-#include <sys/mount.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <debug.h>
 #include <errno.h>
+
+#include <nuttx/fs/fs.h>
 
 #ifdef CONFIG_USBMONITOR
 #  include <nuttx/usb/usbmonitor.h>
@@ -56,7 +44,7 @@
 #  include "stm32_usbhost.h"
 #endif
 
-#ifdef CONFIG_BUTTONS
+#ifdef CONFIG_INPUT_BUTTONS
 #  include <nuttx/input/buttons.h>
 #endif
 
@@ -66,6 +54,14 @@
 
 #ifdef CONFIG_RNDIS
 #  include <nuttx/usb/rndis.h>
+#endif
+
+#ifdef CONFIG_SENSORS_APDS9960
+#include "stm32_apds9960.h"
+#endif
+
+#ifdef CONFIG_CL_MFRC522
+#include "stm32_mfrc522.h"
 #endif
 
 #include "stm32f4discovery.h"
@@ -78,6 +74,68 @@
 #ifdef HAVE_RTC_DRIVER
 #  include <nuttx/timers/rtc.h>
 #  include "stm32_rtc.h"
+#endif
+
+/* The following are includes from board-common logic */
+
+#ifdef CONFIG_SENSORS_BMP180
+#include "stm32_bmp180.h"
+#endif
+
+#ifdef CONFIG_RTC_DS1307
+#include "stm32_ds1307.h"
+#endif
+
+#ifdef CONFIG_SENSORS_MS56XX
+#include "stm32_ms5611.h"
+#endif
+
+#ifdef CONFIG_SENSORS_MAX6675
+#include "stm32_max6675.h"
+#endif
+
+#ifdef CONFIG_INPUT_NUNCHUCK
+#include "stm32_nunchuck.h"
+#endif
+
+#ifdef CONFIG_INPUT_SBUTTON
+#include "board_sbutton.h"
+#endif
+
+#ifdef CONFIG_SENSORS_ZEROCROSS
+#include "stm32_zerocross.h"
+#endif
+
+#ifdef CONFIG_SENSORS_QENCODER
+#include "board_qencoder.h"
+#endif
+
+#ifdef CONFIG_SENSORS_BH1750FVI
+#include "stm32_bh1750.h"
+#endif
+
+#ifdef CONFIG_LIS3DSH
+#include "stm32_lis3dsh.h"
+#endif
+
+#ifdef CONFIG_LCD_BACKPACK
+#include "stm32_lcd_backpack.h"
+#endif
+
+#ifdef CONFIG_SENSORS_MAX31855
+#include "stm32_max31855.h"
+#endif
+
+#ifdef CONFIG_SENSORS_MLX90614
+#include "stm32_mlx90614.h"
+#endif
+
+#ifdef CONFIG_SENSORS_XEN1210
+#include "stm32_xen1210.h"
+#endif
+
+#ifdef CONFIG_USBADB
+#  include <nuttx/usb/adb.h>
 #endif
 
 /****************************************************************************
@@ -95,7 +153,7 @@
 #if defined(CONFIG_I2C) && defined(CONFIG_SYSTEM_I2CTOOL)
 static void stm32_i2c_register(int bus)
 {
-  FAR struct i2c_master_s *i2c;
+  struct i2c_master_s *i2c;
   int ret;
 
   i2c = stm32_i2cbus_initialize(bus);
@@ -146,7 +204,7 @@ static void stm32_i2ctool(void)
  *   CONFIG_BOARD_LATE_INITIALIZE=y :
  *     Called from board_late_initialize().
  *
- *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_LIB_BOARDCTL=y :
+ *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_BOARDCTL=y :
  *     Called from the NSH library
  *
  ****************************************************************************/
@@ -154,7 +212,7 @@ static void stm32_i2ctool(void)
 int stm32_bringup(void)
 {
 #ifdef HAVE_RTC_DRIVER
-  FAR struct rtc_lowerhalf_s *lower;
+  struct rtc_lowerhalf_s *lower;
 #endif
   int ret = OK;
 
@@ -163,11 +221,29 @@ int stm32_bringup(void)
 #endif
 
 #ifdef CONFIG_SENSORS_BMP180
-  stm32_bmp180initialize("/dev/press0");
+  /* Initialize the BMP180 pressure sensor. */
+
+  ret = board_bmp180_initialize(0, 1);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to initialize BMP180, error %d\n", ret);
+      return ret;
+    }
+#endif
+
+#ifdef CONFIG_SENSORS_MS56XX
+  /* Initialize the MS5611 pressure sensor. */
+
+  ret = board_ms5611_initialize(0, 1);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to initialize MS5611, error %d\n", ret);
+      return ret;
+    }
 #endif
 
 #ifdef CONFIG_SENSORS_BH1750FVI
-  ret = stm32_bh1750initialize("/dev/light0");
+  ret = board_bh1750_initialize(0, 1);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: stm32_bh1750initialize() failed: %d\n", ret);
@@ -177,7 +253,7 @@ int stm32_bringup(void)
 #ifdef CONFIG_SENSORS_ZEROCROSS
   /* Configure the zero-crossing driver */
 
-  stm32_zerocross_initialize();
+  board_zerocross_initialize(0);
 #endif
 
 #ifdef CONFIG_LEDS_MAX7219
@@ -219,6 +295,17 @@ int stm32_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: fb_register() failed: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_LCD_BACKPACK
+  /* slcd:0, i2c:1, rows=2, cols=16 */
+
+  ret = board_lcd_backpack_init(0, 1, 2, 16);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to initialize PCF8574 LCD, error %d\n", ret);
+      return ret;
     }
 #endif
 
@@ -278,7 +365,28 @@ int stm32_bringup(void)
     }
 #endif
 
-#ifdef CONFIG_CAN
+#ifdef CONFIG_TIMER
+  /* Initialize TIMER and register the TIMER device. */
+
+  ret = stm32_timer_driver_setup("/dev/timer0", CONFIG_STM32F4DISCO_TIMER);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: stm32_timer_driver_setup() failed: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_CAPTURE
+  /* Initialize Capture and register the Capture driver. */
+
+  ret = stm32_capture_setup("/dev/capture0");
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: stm32_capture_setup failed: %d\n", ret);
+      return ret;
+    }
+#endif
+
+#ifdef CONFIG_STM32_CAN_CHARDRIVER
   /* Initialize CAN and register the CAN driver. */
 
   ret = stm32_can_setup();
@@ -288,7 +396,7 @@ int stm32_bringup(void)
     }
 #endif
 
-#ifdef CONFIG_BUTTONS
+#ifdef CONFIG_INPUT_BUTTONS
   /* Register the BUTTON driver */
 
   ret = btn_lower_initialize("/dev/buttons");
@@ -298,10 +406,18 @@ int stm32_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_INPUT_DJOYSTICK
+  ret = stm32_djoy_initialize();
+  if (ret != OK)
+    {
+      syslog(LOG_ERR, "Failed to register djoystick driver: %d\n", ret);
+    }
+#endif
+
 #ifdef CONFIG_INPUT_NUNCHUCK
   /* Register the Nunchuck driver */
 
-  ret = nunchuck_initialize("/dev/nunchuck0");
+  ret = board_nunchuck_initialize(0, 1);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: nunchuck_initialize() failed: %d\n", ret);
@@ -309,7 +425,7 @@ int stm32_bringup(void)
 #endif
 
 #ifdef CONFIG_SENSORS_MLX90614
-  ret = stm32_mlx90614init("/dev/therm0");
+  ret = board_mlx90614_initialize(0, 1);
   if (ret < 0)
     {
       syslog(LOG_ERR, "Failed to initialize MLX90614, error %d\n", ret);
@@ -320,7 +436,7 @@ int stm32_bringup(void)
 #ifdef CONFIG_SENSORS_QENCODER
   /* Initialize and register the qencoder driver */
 
-  ret = stm32_qencoder_initialize("/dev/qe0", CONFIG_STM32F4DISCO_QETIMER);
+  ret = board_qencoder_initialize(0, CONFIG_STM32F4DISCO_QETIMER);
   if (ret != OK)
     {
       syslog(LOG_ERR,
@@ -340,8 +456,29 @@ int stm32_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_INPUT_SBUTTON
+  /* Register the Single Button Dual Action driver */
+
+  ret = board_sbutton_initialize(0);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: board_sbtn_initialize() failed: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_SENSORS_APDS9960
+  /* Register the APDS-9960 gesture sensor */
+
+  ret = board_apds9960_initialize(0, 1);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: board_apds9960_initialize() failed: %d\n",
+             ret);
+    }
+#endif
+
 #ifdef CONFIG_RTC_DS1307
-  ret = stm32_ds1307_init();
+  ret = board_ds1307_initialize(1);
   if (ret < 0)
     {
       syslog(LOG_ERR, "Failed to initialize DS1307 RTC driver: %d\n", ret);
@@ -386,7 +523,7 @@ int stm32_bringup(void)
 #ifdef CONFIG_SENSORS_MAX31855
   /* Register device 0 on spi channel 2 */
 
-  ret = stm32_max31855initialize("/dev/temp0", 2, 0);
+  ret = board_max31855_initialize(0, 2);
   if (ret < 0)
     {
       serr("ERROR:  stm32_max31855initialize failed: %d\n", ret);
@@ -394,7 +531,7 @@ int stm32_bringup(void)
 #endif
 
 #ifdef CONFIG_SENSORS_MAX6675
-  ret = stm32_max6675initialize("/dev/temp0");
+  ret = board_max6675_initialize(0, 2);
   if (ret < 0)
     {
       serr("ERROR:  stm32_max6675initialize failed: %d\n", ret);
@@ -404,11 +541,22 @@ int stm32_bringup(void)
 #ifdef CONFIG_FS_PROCFS
   /* Mount the procfs file system */
 
-  ret = mount(NULL, STM32_PROCFS_MOUNTPOINT, "procfs", 0, NULL);
+  ret = nx_mount(NULL, STM32_PROCFS_MOUNTPOINT, "procfs", 0, NULL);
   if (ret < 0)
     {
       serr("ERROR: Failed to mount procfs at %s: %d\n",
            STM32_PROCFS_MOUNTPOINT, ret);
+    }
+#endif
+
+#ifdef CONFIG_FS_TMPFS
+  /* Mount the tmpfs file system */
+
+  ret = nx_mount(NULL, CONFIG_LIBC_TMPDIR, "tmpfs", 0, NULL);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to mount tmpfs at %s: %d\n",
+             CONFIG_LIBC_TMPDIR, ret);
     }
 #endif
 
@@ -422,17 +570,19 @@ int stm32_bringup(void)
 #endif
 
 #ifdef CONFIG_SENSORS_XEN1210
-  ret = xen1210_archinitialize(0);
+  ret = board_xen1210_initialize(0, 1);
   if (ret < 0)
     {
       serr("ERROR:  xen1210_archinitialize failed: %d\n", ret);
     }
 #endif
 
-#ifdef CONFIG_STM32F4DISCO_LIS3DSH
-  /* Create a lis3dsh driver instance fitting the chip built into stm32f4discovery */
+#ifdef CONFIG_LIS3DSH
+  /* Create a lis3dsh driver instance fitting the chip built into
+   * stm32f4discovery
+   */
 
-  ret = stm32_lis3dshinitialize("/dev/acc0");
+  ret = board_lis3dsh_initialize(0, 1);
   if (ret < 0)
     {
       serr("ERROR: Failed to initialize LIS3DSH driver: %d\n", ret);
@@ -447,7 +597,7 @@ int stm32_bringup(void)
     }
 #endif
 
-#if defined(CONFIG_RNDIS)
+#if defined(CONFIG_RNDIS) && !defined(CONFIG_RNDIS_COMPOSITE)
   uint8_t mac[6];
   mac[0] = 0xa0; /* TODO */
   mac[1] = (CONFIG_NETINIT_MACADDR_2 >> (8 * 0)) & 0xff;
@@ -462,7 +612,7 @@ int stm32_bringup(void)
   ret = stm32_gs2200m_initialize("/dev/gs2200m", 3);
   if (ret < 0)
     {
-      serr("ERROR: Failed to initialize GS2200M: %d \n", ret);
+      serr("ERROR: Failed to initialize GS2200M: %d\n", ret);
     }
 #endif
 
@@ -470,9 +620,30 @@ int stm32_bringup(void)
   ret = stm32_lpwaninitialize();
   if (ret < 0)
     {
-      syslog(LOG_ERR, "ERROR: Failed to initialize wireless driver: %d\n", ret);
+      syslog(LOG_ERR, "ERROR: Failed to initialize wireless driver:"
+                      " %d\n", ret);
     }
 #endif /* CONFIG_LPWAN_SX127X */
+
+#ifdef CONFIG_USBADB
+  usbdev_adb_initialize();
+#endif
+
+#ifdef CONFIG_CL_MFRC522
+  ret = stm32_mfrc522initialize("/dev/rfid0");
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: stm32_mfrc522initialize() failed: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_ADC_HX711
+  ret = stm32_hx711_initialize();
+  if (ret != OK)
+    {
+      aerr("ERROR: Failed to initialize hx711: %d\n", ret);
+    }
+#endif
 
   return ret;
 }

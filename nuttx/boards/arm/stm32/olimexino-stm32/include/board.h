@@ -1,36 +1,22 @@
 /****************************************************************************
  * boards/arm/stm32/olimexino-stm32/include/board.h
  *
- *   Copyright (C) 2015-2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *           David Sidrane <david_s5@nscdg.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,16 +30,14 @@
 #include <nuttx/config.h>
 
 #ifndef __ASSEMBLY__
-# include <stdint.h>
+#  include <stdint.h>
 #endif
-#include "stm32_rcc.h"
-#include "stm32_sdio.h"
-#include "stm32.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-/* Clocking *************************************************************************/
+
+/* Clocking *****************************************************************/
 
 /* HSI - 8 MHz RC factory-trimmed
  * LSI - 40 KHz RC (30-60KHz, uncalibrated)
@@ -68,7 +52,10 @@
 #define STM32_HSE_FREQUENCY     STM32_BOARD_XTAL
 #define STM32_LSE_FREQUENCY     32768
 
-/* PLL source is HSE/1, PLL multipler is 9: PLL frequency is 8MHz (XTAL) x 9 = 72MHz */
+/* PLL source is HSE/1,
+ * PLL multiplier is 9:
+ * PLL frequency is 8MHz (XTAL) x 9 = 72MHz
+ */
 
 #define STM32_CFGR_PLLSRC       RCC_CFGR_PLLSRC
 #define STM32_CFGR_PLLXTPRE     0
@@ -85,7 +72,6 @@
 
 #define STM32_RCC_CFGR_HPRE     RCC_CFGR_HPRE_SYSCLK
 #define STM32_HCLK_FREQUENCY    STM32_PLL_FREQUENCY
-#define STM32_BOARD_HCLK        STM32_HCLK_FREQUENCY    /* same as above, to satisfy compiler */
 
 /* APB2 clock (PCLK2) is HCLK (72MHz) */
 
@@ -117,7 +103,8 @@
 
 /* Timer Frequencies, if APBx is set to 1, frequency is same to APBx
  * otherwise frequency is 2xAPBx.
- * Note: TIM1,8 are on APB2, others on APB1 */
+ * Note: TIM1,8 are on APB2, others on APB1
+ */
 
 #define BOARD_TIM1_FREQUENCY    STM32_HCLK_FREQUENCY
 #define BOARD_TIM2_FREQUENCY    STM32_HCLK_FREQUENCY
@@ -128,12 +115,12 @@
 #define BOARD_TIM7_FREQUENCY    STM32_HCLK_FREQUENCY
 #define BOARD_TIM8_FREQUENCY    STM32_HCLK_FREQUENCY
 
-/* Buttons *************************************************************************/
+/* Buttons ******************************************************************/
 
 #define BUTTON_BOOT0_BIT  (0)
 #define BUTTON_BOOT0_MASK (1<<BUTTON_BOOT0_BIT)
 
-/* Leds *************************************************************************/
+/* Leds *********************************************************************/
 
 /* LED index values for use with board_userled() */
 
@@ -153,7 +140,8 @@
  *
  *   SYMBOL                     Meaning                      LED state
  *                                                         Green  Yellow
- *   ------------------------  --------------------------  ------ ------ */
+ *   ------------------------  --------------------------  ------ ------
+ */
 
 #define LED_STARTED          0 /* NuttX has been started   OFF    OFF    */
 #define LED_HEAPALLOCATE     1 /* Heap has been allocated  OFF    OFF    */
@@ -163,7 +151,7 @@
 #define LED_SIGNAL           5 /* In a signal handler      N/C    ON     */
 #define LED_ASSERTION        6 /* An assertion failed      N/C    ON     */
 #define LED_PANIC            7 /* The system has crashed   N/C  Blinking */
-#define LED_IDLE             8  /* MCU is is sleep mode    OFF    N/C    */
+#define LED_IDLE             8 /* MCU is is sleep mode    OFF    N/C    */
 
 /* Thus if the Green is statically on, NuttX has successfully booted and is,
  * apparently, running normally.  If the YellowLED is flashing at
@@ -173,5 +161,92 @@
  * NOTE: That the Yellow is not used after completion of booting and may
  * be used by other board-specific logic.
  */
+
+/* ADC1 */
+
+#define GPIO_ADC123_IN0      GPIO_ADC123_IN0_0  /* PA0 */
+#define GPIO_ADC123_IN1      GPIO_ADC123_IN1_0  /* PA1 */
+#define GPIO_ADC123_IN2      GPIO_ADC123_IN2_0  /* PA2 */
+#define GPIO_ADC123_IN3      GPIO_ADC123_IN3_0  /* PA3 */
+#define GPIO_ADC123_IN10     GPIO_ADC123_IN10_0 /* PC0 */
+#define GPIO_ADC123_IN11     GPIO_ADC123_IN11_0 /* PC1 */
+#define GPIO_ADC123_IN12     GPIO_ADC123_IN12_0 /* PC2 */
+#define GPIO_ADC123_IN13     GPIO_ADC123_IN13_0 /* PC3 */
+
+/* ADC1 */
+
+#define GPIO_ADC12_IN4       GPIO_ADC12_IN4_0  /* PA4 */
+#define GPIO_ADC12_IN5       GPIO_ADC12_IN5_0  /* PA5 */
+#define GPIO_ADC12_IN6       GPIO_ADC12_IN6_0  /* PA6 */
+#define GPIO_ADC12_IN7       GPIO_ADC12_IN7_0  /* PA7 */
+#define GPIO_ADC12_IN8       GPIO_ADC12_IN8_0  /* PB0 */
+#define GPIO_ADC12_IN9       GPIO_ADC12_IN9_0  /* PB1 */
+#define GPIO_ADC12_IN14      GPIO_ADC12_IN14_0 /* PC4 */
+#define GPIO_ADC12_IN15      GPIO_ADC12_IN15_0 /* PC5 */
+
+/* TIM1 */
+
+#define GPIO_TIM1_ETR        GPIO_TIM1_ETR_0                                        /* PA12 */
+#define GPIO_TIM1_CH1IN      GPIO_TIM1_CH1IN_0                                      /* PA8 */
+#define GPIO_TIM1_CH1OUT     GPIO_ADJUST_MODE(GPIO_TIM1_CH1OUT_0, GPIO_MODE_50MHz)  /* PA8 */
+#define GPIO_TIM1_CH2IN      GPIO_TIM1_CH2IN_0                                      /* PA9 */
+#define GPIO_TIM1_CH2OUT     GPIO_ADJUST_MODE(GPIO_TIM1_CH2OUT_0, GPIO_MODE_50MHz)  /* PA9 */
+#define GPIO_TIM1_CH3IN      GPIO_TIM1_CH3IN_0                                      /* PA10 */
+#define GPIO_TIM1_CH3OUT     GPIO_ADJUST_MODE(GPIO_TIM1_CH3OUT_0, GPIO_MODE_50MHz)  /* PA10 */
+#define GPIO_TIM1_CH4IN      GPIO_TIM1_CH4IN_0                                      /* PA11 */
+#define GPIO_TIM1_CH4OUT     GPIO_ADJUST_MODE(GPIO_TIM1_CH4OUT_0, GPIO_MODE_50MHz)  /* PA11 */
+#define GPIO_TIM1_BKIN       GPIO_TIM1_BKIN_0                                       /* PA6 */
+#define GPIO_TIM1_CH1NOUT    GPIO_ADJUST_MODE(GPIO_TIM1_CH1NOUT_0, GPIO_MODE_50MHz) /* PA7 */
+#define GPIO_TIM1_CH2NOUT    GPIO_ADJUST_MODE(GPIO_TIM1_CH2NOUT_0, GPIO_MODE_50MHz) /* PB0 */
+#define GPIO_TIM1_CH3NOUT    GPIO_ADJUST_MODE(GPIO_TIM1_CH3NOUT_0, GPIO_MODE_50MHz) /* PB1 */
+
+/* TIM3 */
+
+#define GPIO_TIM3_CH1IN      GPIO_TIM3_CH1IN_0                                     /* PB4 */
+#define GPIO_TIM3_CH1OUT     GPIO_ADJUST_MODE(GPIO_TIM3_CH1OUT_0, GPIO_MODE_50MHz) /* PB4 */
+#define GPIO_TIM3_CH2IN      GPIO_TIM3_CH2IN_0                                     /* PB5 */
+#define GPIO_TIM3_CH2OUT     GPIO_ADJUST_MODE(GPIO_TIM3_CH2OUT_0, GPIO_MODE_50MHz) /* PB5 */
+#define GPIO_TIM3_CH3IN      GPIO_TIM3_CH3IN_0                                     /* PB0 */
+#define GPIO_TIM3_CH3OUT     GPIO_ADJUST_MODE(GPIO_TIM3_CH3OUT_0, GPIO_MODE_50MHz) /* PB0 */
+#define GPIO_TIM3_CH4IN      GPIO_TIM3_CH4IN_0                                     /* PB1 */
+#define GPIO_TIM3_CH4OUT     GPIO_ADJUST_MODE(GPIO_TIM3_CH4OUT_0, GPIO_MODE_50MHz) /* PB1 */
+
+/* USART1 */
+
+#define GPIO_USART1_TX       GPIO_ADJUST_MODE(GPIO_USART1_TX_0, GPIO_MODE_50MHz) /* PA9 */
+#define GPIO_USART1_RX       GPIO_USART1_RX_0                                    /* PA10 */
+
+/* USART2 */
+
+#define GPIO_USART2_CTS      GPIO_USART2_CTS_0                                    /* PA0 */
+#define GPIO_USART2_RTS      GPIO_ADJUST_MODE(GPIO_USART2_RTS_0, GPIO_MODE_50MHz) /* PA1 */
+#define GPIO_USART2_TX       GPIO_ADJUST_MODE(GPIO_USART2_TX_0, GPIO_MODE_50MHz)  /* PA2 */
+#define GPIO_USART2_RX       GPIO_USART2_RX_0                                     /* PA3 */
+#define GPIO_USART2_CK       GPIO_ADJUST_MODE(GPIO_USART2_CK_0, GPIO_MODE_50MHz)  /* PA4 */
+
+/* SPI1 */
+
+#define GPIO_SPI1_NSS        GPIO_ADJUST_MODE(GPIO_SPI1_NSS_0, GPIO_MODE_50MHz)  /* PA4 */
+#define GPIO_SPI1_SCK        GPIO_ADJUST_MODE(GPIO_SPI1_SCK_0, GPIO_MODE_50MHz)  /* PA5 */
+#define GPIO_SPI1_MISO       GPIO_ADJUST_MODE(GPIO_SPI1_MISO_0, GPIO_MODE_50MHz) /* PA6 */
+#define GPIO_SPI1_MOSI       GPIO_ADJUST_MODE(GPIO_SPI1_MOSI_0, GPIO_MODE_50MHz) /* PA7 */
+
+/* SPI2 */
+
+#define GPIO_SPI2_NSS        GPIO_ADJUST_MODE(GPIO_SPI2_NSS_0, GPIO_MODE_50MHz)  /* PB12 */
+#define GPIO_SPI2_SCK        GPIO_ADJUST_MODE(GPIO_SPI2_SCK_0, GPIO_MODE_50MHz)  /* PB13 */
+#define GPIO_SPI2_MISO       GPIO_ADJUST_MODE(GPIO_SPI2_MISO_0, GPIO_MODE_50MHz) /* PB14 */
+#define GPIO_SPI2_MOSI       GPIO_ADJUST_MODE(GPIO_SPI2_MOSI_0, GPIO_MODE_50MHz) /* PB15 */
+
+/* I2C2 */
+
+#define GPIO_I2C2_SCL        GPIO_ADJUST_MODE(GPIO_I2C2_SCL_0, GPIO_MODE_50MHz)  /* PB10 */
+#define GPIO_I2C2_SDA        GPIO_ADJUST_MODE(GPIO_I2C2_SDA_0, GPIO_MODE_50MHz)  /* PB11 */
+#define GPIO_I2C2_SMBA       GPIO_ADJUST_MODE(GPIO_I2C2_SMBA_0, GPIO_MODE_50MHz) /* PB12 */
+
+/* CAN1 */
+
+#define GPIO_CAN1_RX         GPIO_CAN1_RX_0                                    /* PB8 */
+#define GPIO_CAN1_TX         GPIO_ADJUST_MODE(GPIO_CAN1_TX_0, GPIO_MODE_50MHz) /* PB9 */
 
 #endif /* __BOARDS_ARM_STM32_OLIMEXINO_STM32_INCLUDE_BOARD_H */

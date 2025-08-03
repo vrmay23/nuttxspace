@@ -1,39 +1,22 @@
 /****************************************************************************
- * arch/drivers/analog/ltc1867l.c
+ * drivers/analog/ltc1867l.c
  *
- *   Copyright (C) 2017 DS-Automotion GmbH. All rights reserved.
- *   Author: Martin Lederhilger <m.lederhilger@ds-automotion.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * This file is a part of NuttX:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -57,7 +40,7 @@
 #include <nuttx/analog/adc.h>
 #include <nuttx/analog/ioctl.h>
 #include <nuttx/analog/ltc1867l.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 
 #if defined(CONFIG_ADC_LTC1867L)
 
@@ -80,7 +63,7 @@ struct ltc1867l_dev_s
   unsigned int devno;
   FAR struct ltc1867l_channel_config_s *channel_config;
   int channel_config_count;
-  sem_t sem;
+  mutex_t lock;
 };
 
 /****************************************************************************
@@ -106,12 +89,12 @@ static int  adc_ioctl(FAR struct adc_dev_s *dev, int cmd, unsigned long arg);
 
 static const struct adc_ops_s g_adcops =
 {
-  .ao_bind     = adc_bind,      /* ao_bind */
-  .ao_reset    = adc_reset,     /* ao_reset */
-  .ao_setup    = adc_setup,     /* ao_setup */
-  .ao_shutdown = adc_shutdown,  /* ao_shutdown */
-  .ao_rxint    = adc_rxint,     /* ao_rxint */
-  .ao_ioctl    = adc_ioctl      /* ao_read */
+  adc_bind,      /* ao_bind */
+  adc_reset,     /* ao_reset */
+  adc_setup,     /* ao_setup */
+  adc_shutdown,  /* ao_shutdown */
+  adc_rxint,     /* ao_rxint */
+  adc_ioctl      /* ao_read */
 };
 
 /****************************************************************************
@@ -241,7 +224,7 @@ static int adc_ioctl(FAR struct adc_dev_s *dev, int cmd, unsigned long arg)
 
   if (cmd == ANIOC_TRIGGER)
     {
-      while (nxsem_wait(&priv->sem) < 0);
+      while (nxmutex_lock(&priv->lock) < 0);
 
       adc_lock(spi);
 
@@ -286,7 +269,7 @@ static int adc_ioctl(FAR struct adc_dev_s *dev, int cmd, unsigned long arg)
         }
 
       adc_unlock(spi);
-      nxsem_post(&priv->sem);
+      nxmutex_unlock(&priv->lock);
     }
   else
     {
@@ -337,8 +320,7 @@ int ltc1867l_register(FAR const char *devpath, FAR struct spi_dev_s *spi,
 
   /* Initialize the LTC1867L device structure */
 
-  adcpriv =
-    (FAR struct ltc1867l_dev_s *)kmm_malloc(sizeof(struct ltc1867l_dev_s));
+  adcpriv = kmm_malloc(sizeof(struct ltc1867l_dev_s));
   if (adcpriv == NULL)
     {
       aerr("ERROR: Failed to allocate ltc1867l_dev_s instance\n");
@@ -350,18 +332,13 @@ int ltc1867l_register(FAR const char *devpath, FAR struct spi_dev_s *spi,
   adcpriv->channel_config = channel_config;
   adcpriv->channel_config_count = channel_config_count;
 
-  ret = nxsem_init(&adcpriv->sem, 1, 1);
-  if (ret < 0)
-    {
-      kmm_free(adcpriv);
-      return ret;
-    }
+  nxmutex_init(&adcpriv->lock);
 
-  adcdev = (FAR struct adc_dev_s *)kmm_malloc(sizeof(struct adc_dev_s));
+  adcdev = kmm_malloc(sizeof(struct adc_dev_s));
   if (adcdev == NULL)
     {
       aerr("ERROR: Failed to allocate adc_dev_s instance\n");
-      nxsem_destroy(&adcpriv->sem);
+      nxmutex_destroy(&adcpriv->lock);
       kmm_free(adcpriv);
       return -ENOMEM;
     }
@@ -377,7 +354,7 @@ int ltc1867l_register(FAR const char *devpath, FAR struct spi_dev_s *spi,
     {
       aerr("ERROR: Failed to register adc driver: %d\n", ret);
       kmm_free(adcdev);
-      nxsem_destroy(&adcpriv->sem);
+      nxmutex_destroy(&adcpriv->lock);
       kmm_free(adcpriv);
     }
 

@@ -1,6 +1,8 @@
 /****************************************************************************
  * libs/libc/netdb/lib_gethostentbynamer.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -32,6 +34,7 @@
 #include <netdb.h>
 #include <errno.h>
 #include <assert.h>
+#include <debug.h>
 
 #include <arpa/inet.h>
 
@@ -41,10 +44,8 @@
 #include "netdb/lib_dns.h"
 #include "netdb/lib_netdb.h"
 
-#ifdef CONFIG_LIBC_NETDB
-
 /****************************************************************************
- * Private Type Definitions
+ * Private Types
  ****************************************************************************/
 
 /* This is the layout of the caller provided memory area */
@@ -88,7 +89,7 @@ static int lib_numeric_address(FAR const char *name,
   FAR struct hostent_info_s *info;
   FAR char *ptr;
   socklen_t addrlen;
-  int namelen;
+  size_t namelen;
   int ret;
 
   /* Verify that we have a buffer big enough to get started (it still may not
@@ -194,7 +195,7 @@ static int lib_numeric_address(FAR const char *name,
       return -ERANGE;
     }
 
-  strncpy(ptr, name, buflen);
+  strlcpy(ptr, name, buflen);
 
   /* Set the address to h_name */
 
@@ -227,7 +228,10 @@ static int lib_localhost(FAR const char *name, FAR struct hostent_s *host,
   FAR struct hostent_info_s *info;
   FAR char *dest;
   int namelen;
+
+#if defined(CONFIG_NET_IPv4) || defined(CONFIG_NET_IPv6)
   int i = 0;
+#endif
 
   if (strcmp(name, g_lo_hostname) == 0)
     {
@@ -277,7 +281,7 @@ static int lib_localhost(FAR const char *name, FAR struct hostent_s *host,
           return -ERANGE;
         }
 
-      strncpy(dest, name, buflen);
+      strlcpy(dest, name, buflen);
 
       /* Set the address to h_name */
 
@@ -319,7 +323,7 @@ static int lib_find_answer(FAR const char *name, FAR struct hostent_s *host,
   socklen_t addrlen;
   int naddr;
   int addrtype;
-  int namelen;
+  size_t namelen;
   int ret;
   int i;
 
@@ -407,7 +411,7 @@ static int lib_find_answer(FAR const char *name, FAR struct hostent_s *host,
       return -ERANGE;
     }
 
-  strncpy(ptr, name, buflen);
+  strlcpy(ptr, name, buflen);
 
   /* Set the address to h_name */
 
@@ -429,27 +433,11 @@ static int lib_find_answer(FAR const char *name, FAR struct hostent_s *host,
 
 #ifdef CONFIG_NETDB_DNSCLIENT
 static int lib_dns_query(FAR const char *hostname,
-                         FAR union dns_addr_u *addr, int *naddr)
+                         FAR union dns_addr_u *addr, FAR int *naddr)
 {
-  int sd;
-  int ret;
-
-  /* Create and bind a socket to the DNS server */
-
-  sd = dns_bind();
-  if (sd < 0)
-    {
-      return sd;
-    }
-
   /* Perform the query to get the IP address */
 
-  ret = dns_query(sd, hostname, addr, naddr);
-
-  /* Release the socket */
-
-  close(sd);
-  return ret;
+  return dns_query(hostname, addr, naddr);
 }
 #endif /* CONFIG_NETDB_DNSCLIENT */
 
@@ -481,15 +469,18 @@ static int lib_dns_lookup(FAR const char *name, FAR struct hostent_s *host,
   socklen_t addrlen;
   int naddr;
   int addrtype;
-  int namelen;
+  size_t namelen;
   int ret;
   int i;
 
   /* Verify that we have a buffer big enough to get started (it still may not
    * be big enough).
+   * Verify that there is space for at least one address.
    */
 
-  if (buflen <= sizeof(struct hostent_info_s))
+  namelen = strlen(name);
+  if (buflen < sizeof(struct hostent_info_s) - 1 + sizeof(union dns_addr_u) +
+      namelen + 1)
     {
       return -ERANGE;
     }
@@ -500,13 +491,6 @@ static int lib_dns_lookup(FAR const char *name, FAR struct hostent_s *host,
   ptr     = info->hi_data;
   buflen -= (sizeof(struct hostent_info_s) - 1);
 
-  /* Verify again that there is space for at least one address. */
-
-  if (buflen < sizeof(union dns_addr_u))
-    {
-      return -ERANGE;
-    }
-
   memset(host, 0, sizeof(struct hostent_s));
   memset(info, 0, sizeof(struct hostent_info_s));
 
@@ -516,16 +500,17 @@ static int lib_dns_lookup(FAR const char *name, FAR struct hostent_s *host,
 
   /* Try to get the host address using the DNS name server */
 
-  naddr = buflen / sizeof(union dns_addr_u);
+  naddr = (buflen - (namelen + 1)) / sizeof(union dns_addr_u);
+  DEBUGASSERT(naddr >= 1);
+
+  /* We can read more than maximum, limit here. */
+
+  naddr = MIN(naddr, CONFIG_NETDB_MAX_IPADDR);
   ret = lib_dns_query(name, (FAR union dns_addr_u *)ptr, &naddr);
   if (ret < 0)
     {
       return ret;
     }
-
-  /* We can read more than maximum, limit here. */
-
-  naddr = MIN(naddr, CONFIG_NETDB_MAX_IPADDR);
 
   for (i = 0; i < naddr; i++)
     {
@@ -555,19 +540,15 @@ static int lib_dns_lookup(FAR const char *name, FAR struct hostent_s *host,
       info->hi_lengths[i]   = addrlen;
       info->hi_addrlist[i]  = addrdata;
 
+      DEBUGASSERT(buflen >= namelen + 1 + sizeof(union dns_addr_u));
       ptr    += sizeof(union dns_addr_u);
       buflen -= sizeof(union dns_addr_u);
     }
 
   /* And copy name */
 
-  namelen = strlen(name);
-  if ((namelen + 1) > buflen)
-    {
-      return -ERANGE;
-    }
-
-  strncpy(ptr, name, buflen);
+  DEBUGASSERT(buflen >= namelen + 1);
+  strlcpy(ptr, name, buflen);
 
   /* Set the address to h_name */
 
@@ -598,10 +579,9 @@ static int lib_dns_lookup(FAR const char *name, FAR struct hostent_s *host,
 #ifdef CONFIG_NETDB_HOSTFILE
 static int lib_hostfile_lookup(FAR const char *name,
                                FAR struct hostent_s *host, FAR char *buf,
-                               size_t buflen, FAR int *h_errnop)
+                               size_t buflen)
 {
   FAR FILE *stream;
-  int herrnocode;
   int nread;
 
   /* Search the hosts file for a match */
@@ -609,14 +589,12 @@ static int lib_hostfile_lookup(FAR const char *name,
   stream = fopen(CONFIG_NETDB_HOSTCONF_PATH, "r");
   if (stream == NULL)
     {
-      int errcode = -errno;
+      int errcode = -get_errno();
 
       nerr("ERROR:  Failed to open the hosts file %s: %d\n",
            CONFIG_NETDB_HOSTCONF_PATH, errcode);
-      UNUSED(errcode);
 
-      herrnocode = NO_RECOVERY;
-      goto errorout_with_herrnocode;
+      return errcode;
     }
 
   /* Loop reading entries from the hosts file until a match is found or
@@ -642,8 +620,8 @@ static int lib_hostfile_lookup(FAR const char *name,
             }
           else if (nread != -EAGAIN)
             {
-              herrnocode = NO_RECOVERY;
-              goto errorout_with_stream;
+              fclose(stream);
+              return nread;
             }
         }
       else if (nread > 0)
@@ -686,21 +664,11 @@ static int lib_hostfile_lookup(FAR const char *name,
   while (nread != 0);
 
   /* We get here when the end of the hosts file is encountered without
-   * finding the hostname.
+   * finding the hostname.  Return 1 meaning that we have no errors but
+   * no match either.
    */
 
-  herrnocode = HOST_NOT_FOUND;
-
-errorout_with_stream:
-  fclose(stream);
-
-errorout_with_herrnocode:
-  if (h_errnop)
-    {
-      *h_errnop = herrnocode;
-    }
-
-  return ERROR;
+  return 1;
 }
 #endif /* CONFIG_NETDB_HOSTFILE */
 
@@ -738,7 +706,7 @@ errorout_with_herrnocode:
 
 int gethostentbyname_r(FAR const char *name,
                        FAR struct hostent_s *host, FAR char *buf,
-                       size_t buflen, FAR int *h_errnop)
+                       size_t buflen, FAR int *h_errnop, int flags)
 {
   DEBUGASSERT(name != NULL && host != NULL && buf != NULL);
 
@@ -757,6 +725,15 @@ int gethostentbyname_r(FAR const char *name,
 
       return OK;
     }
+  else if ((flags & AI_NUMERICHOST) != 0)
+    {
+      if (h_errnop)
+        {
+          *h_errnop = EAI_NONAME;
+        }
+
+      return ERROR;
+    }
 
 #ifdef CONFIG_NET_LOOPBACK
   /* Check for the local loopback host name */
@@ -764,6 +741,17 @@ int gethostentbyname_r(FAR const char *name,
   if (lib_localhost(name, host, buf, buflen) == 0)
     {
       /* Yes.. we are done */
+
+      return OK;
+    }
+#endif
+
+#ifdef CONFIG_NETDB_HOSTFILE
+  /* Search the hosts file for a match */
+
+  if (lib_hostfile_lookup(name, host, buf, buflen) == 0)
+    {
+      /* Found the host in hosts file */
 
       return OK;
     }
@@ -793,23 +781,11 @@ int gethostentbyname_r(FAR const char *name,
     }
 #endif /* CONFIG_NETDB_DNSCLIENT */
 
-#ifdef CONFIG_NETDB_HOSTFILE
-  /* Search the hosts file for a match */
-
-  return lib_hostfile_lookup(name, host, buf, buflen, h_errnop);
-
-#else
-  /* The host file file is not supported.  The host name mapping was not
-   * found from any lookup heuristic
-   */
-
   if (h_errnop)
     {
       *h_errnop = HOST_NOT_FOUND;
     }
 
   return ERROR;
-#endif
 }
 
-#endif /* CONFIG_LIBC_NETDB */

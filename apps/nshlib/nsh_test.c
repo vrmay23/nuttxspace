@@ -1,35 +1,22 @@
 /****************************************************************************
  * apps/nshlib/nsh_test.c
  *
- *   Copyright (C) 2008, 2011-2012, 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -89,9 +76,12 @@
  * Name: binaryexpression
  ****************************************************************************/
 
-static inline int binaryexpression(FAR struct nsh_vtbl_s *vtbl, char **argv)
+static inline int binaryexpression(FAR struct nsh_vtbl_s *vtbl,
+                                   FAR char **argv)
 {
-  char *endptr;
+  UNUSED(vtbl);
+
+  FAR char *endptr;
   long integer1;
   long integer2;
 
@@ -188,11 +178,12 @@ static inline int binaryexpression(FAR struct nsh_vtbl_s *vtbl, char **argv)
  * Name: unaryexpression
  ****************************************************************************/
 
-static inline int unaryexpression(FAR struct nsh_vtbl_s *vtbl, char **argv)
+static inline int unaryexpression(FAR struct nsh_vtbl_s *vtbl,
+                                  FAR char **argv)
 {
   struct stat buf;
-  char *fullpath;
-  int   ret;
+  FAR char *fullpath;
+  int ret = TEST_ERROR;
 
   /* -n STRING */
 
@@ -217,21 +208,18 @@ static inline int unaryexpression(FAR struct nsh_vtbl_s *vtbl, char **argv)
    */
 
   fullpath = nsh_getfullpath(vtbl, argv[1]);
-  if (!fullpath)
+  if (fullpath)
     {
-       return TEST_FALSE;
+      ret = stat(fullpath, &buf);
+      nsh_freefullpath(fullpath);
     }
-
-  ret = stat(fullpath, &buf);
-  nsh_freefullpath(fullpath);
 
   if (ret != 0)
     {
-       /* The file does not exist (or another error occurred) -- return
-        * FALSE.
-        */
+      /* The file does not exist (or another error occurred)
+       */
 
-       return TEST_FALSE;
+      memset(&buf, 0, sizeof(struct stat));
     }
 
   /* -b FILE */
@@ -267,7 +255,7 @@ static inline int unaryexpression(FAR struct nsh_vtbl_s *vtbl, char **argv)
     {
       /* Return true if the file exists */
 
-      return TEST_TRUE;
+      return ret == 0 ? TEST_TRUE : TEST_FALSE;
     }
 
   /* -f FILE */
@@ -285,7 +273,7 @@ static inline int unaryexpression(FAR struct nsh_vtbl_s *vtbl, char **argv)
     {
       /* Return true if the file is readable */
 
-      return (buf.st_mode & (S_IRUSR|S_IRGRP|S_IROTH)) != 0 ?
+      return (buf.st_mode & (S_IRUSR | S_IRGRP | S_IROTH)) != 0 ?
              TEST_TRUE : TEST_FALSE;
     }
 
@@ -304,7 +292,7 @@ static inline int unaryexpression(FAR struct nsh_vtbl_s *vtbl, char **argv)
     {
       /* Return true if the file is write-able */
 
-      return (buf.st_mode & (S_IWUSR|S_IWGRP|S_IWOTH)) != 0 ?
+      return (buf.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)) != 0 ?
              TEST_TRUE : TEST_FALSE;
     }
 
@@ -317,7 +305,7 @@ static inline int unaryexpression(FAR struct nsh_vtbl_s *vtbl, char **argv)
  * Name: expression
  ****************************************************************************/
 
-static int expression(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
+static int expression(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
   int value;
   int i = 0;
@@ -331,7 +319,7 @@ static int expression(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
           goto errout_syntax;
         }
 
-      return expression(vtbl, argc-1, &argv[1]) == TEST_TRUE ?
+      return expression(vtbl, argc - 1, &argv[1]) == TEST_TRUE ?
              TEST_FALSE : TEST_TRUE;
     }
 
@@ -344,14 +332,20 @@ static int expression(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
           goto errout_syntax;
         }
 
-      i += 2;
       value = unaryexpression(vtbl, argv);
+      if (value == TEST_ERROR)
+        {
+          goto do_binary;
+        }
+
+      i += 2;
     }
 
   /* Check for binary operations on simple, typed arguments */
 
   else
     {
+do_binary:
       if (argc < 3)
         {
           goto errout_syntax;
@@ -374,37 +368,37 @@ static int expression(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
     {
       /* EXPRESSION -a EXPRESSION */
 
-       if (strcmp(argv[i], "-a") == 0)
-         {
-            if (value != TEST_TRUE)
-              {
-                 return TEST_FALSE;
-              }
-            else
-              {
-                 i++;
-                 return expression(vtbl, argc-i, &argv[i]);
-              }
-         }
+      if (strcmp(argv[i], "-a") == 0)
+        {
+          if (value != TEST_TRUE)
+            {
+              return TEST_FALSE;
+            }
+          else
+            {
+              i++;
+              return expression(vtbl, argc - i, &argv[i]);
+            }
+        }
 
-       /* EXPRESSION -o EXPRESSION */
+      /* EXPRESSION -o EXPRESSION */
 
-       else if (strcmp(argv[i], "-o") == 0)
-         {
-           if (value == TEST_TRUE)
-             {
-                return TEST_TRUE;
-             }
-           else
-             {
-                i++;
-                return expression(vtbl, argc-i, &argv[i]);
-             }
-         }
-       else
-         {
-           goto errout_syntax;
-         }
+      else if (strcmp(argv[i], "-o") == 0)
+        {
+          if (value == TEST_TRUE)
+            {
+              return TEST_TRUE;
+            }
+          else
+            {
+              i++;
+              return expression(vtbl, argc - i, &argv[i]);
+            }
+        }
+      else
+        {
+          goto errout_syntax;
+        }
     }
 
   return value;
@@ -422,16 +416,16 @@ errout_syntax:
  * Name: cmd_test
  ****************************************************************************/
 
-int cmd_test(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
+int cmd_test(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
-  return expression(vtbl, argc-1, &argv[1]);
+  return expression(vtbl, argc - 1, &argv[1]);
 }
 
 /****************************************************************************
  * Name: cmd_lbracket
  ****************************************************************************/
 
-int cmd_lbracket(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
+int cmd_lbracket(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
   /* Verify that the closing right bracket is the last thing on the command
    * line.

@@ -1,36 +1,22 @@
 /****************************************************************************
  * arch/arm/src/stm32f7/stm32_serial.c
  *
- *   Copyright (C) 2015-2019 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *            David Sidrane <david.sidrane@nscdg.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -45,6 +31,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -52,15 +39,14 @@
 #include <nuttx/arch.h>
 #include <nuttx/fs/ioctl.h>
 #include <nuttx/serial/serial.h>
+#include <nuttx/spinlock.h>
 #include <nuttx/power/pm.h>
 
 #ifdef CONFIG_SERIAL_TERMIOS
 #  include <termios.h>
 #endif
 
-#include "up_arch.h"
-#include "up_internal.h"
-
+#include "arm_internal.h"
 #include "chip.h"
 #include "stm32_gpio.h"
 #include "hardware/stm32_pinmap.h"
@@ -105,8 +91,8 @@
 #    endif
 #  endif
 
-/* Currently RS-485 support cannot be enabled when RXDMA is in use due to lack
- * of testing - RS-485 support was developed on STM32F1x
+/* Currently RS-485 support cannot be enabled when RXDMA is in use due to
+ * lack of testing - RS-485 support was developed on STM32F1x
  */
 
 #  if (defined(CONFIG_USART1_RXDMA) && defined(CONFIG_USART1_RS485)) || \
@@ -199,8 +185,8 @@
 #  endif
 #endif
 
-/* Currently RS-485 support cannot be enabled when TXDMA is in use due to lack
- * of testing - RS-485 support was developed on STM32F1x
+/* Currently RS-485 support cannot be enabled when TXDMA is in use due to
+ * lack of testing - RS-485 support was developed on STM32F1x
  */
 
 #if (defined(CONFIG_USART1_TXDMA) && defined(CONFIG_USART1_RS485)) || \
@@ -228,8 +214,9 @@
 
 /* The DMA buffer size when using TX DMA.
  *
- * This TX buffer size should be an even multiple of the Cortex-M7 D-Cache line
- * size, ARMV7M_DCACHE_LINESIZE, so that it can be individually invalidated.
+ * This TX buffer size should be an even multiple of the Cortex-M7 D-Cache
+ * line size, ARMV7M_DCACHE_LINESIZE, so that it can be individually
+ * invalidated.
  *
  * Should there be a Cortex-M7 without a D-Cache, ARMV7M_DCACHE_LINESIZE
  * would be zero!
@@ -244,13 +231,13 @@
 #define TXDMA_BUFFER_SIZE   ((CONFIG_STM32F7_SERIAL_RXDMA_BUFFER_SIZE \
                               + RXDMA_BUFFER_MASK) & ~RXDMA_BUFFER_MASK)
 
-/* If built with CONFIG_ARMV7M_DCACHE Buffers need to be aligned and multiples
- * of ARMV7M_DCACHE_LINESIZE
+/* If built with CONFIG_ARMV7M_DCACHE Buffers need to be aligned and
+ * multiples of ARMV7M_DCACHE_LINESIZE
  */
 
 #if defined(CONFIG_ARMV7M_DCACHE)
 #  define TXDMA_BUF_SIZE(b) (((b) + TXDMA_BUFFER_MASK) & ~TXDMA_BUFFER_MASK)
-#  define TXDMA_BUF_ALIGN   aligned_data(ARMV7M_DCACHE_LINESIZE);
+#  define TXDMA_BUF_ALIGN   aligned_data(ARMV7M_DCACHE_LINESIZE)
 #else
 #  define TXDMA_BUF_SIZE(b)  (b)
 #  define TXDMA_BUF_ALIGN
@@ -347,9 +334,6 @@
 #if defined(CONFIG_PM) && !defined(CONFIG_STM32F7_PM_SERIAL_ACTIVITY)
 #  define CONFIG_STM32F7_PM_SERIAL_ACTIVITY 10
 #endif
-#if defined(CONFIG_PM)
-#  define PM_IDLE_DOMAIN             0 /* Revisit */
-#endif
 
 /* Since RX DMA or TX DMA or both may be enabled for a given U[S]ART.
  * We need runtime detection in up_dma_setup and up_dma_shutdown
@@ -400,7 +384,7 @@
  * blocked.
  */
 
-# if defined(CONFIG_USART1_RXDMA) && defined(CONFIG_USART1_IFLOWCONTROL)
+#  if defined(CONFIG_USART1_RXDMA) && defined(CONFIG_USART1_IFLOWCONTROL)
 #    warning "RXDMA and IFLOWCONTROL both enabled for USART1. \
               This combination can lead to data loss."
 #  endif
@@ -497,24 +481,24 @@ struct up_dev_s
 
 #ifdef SERIAL_HAVE_TXDMA
   const unsigned int txdma_channel; /* DMA channel assigned */
-  DMA_HANDLE        txdma;      /* currently-open trasnmit DMA stream */
+  DMA_HANDLE        txdma;          /* currently-open transmit DMA stream */
 #endif
 
   /* RX DMA state */
 
 #ifdef SERIAL_HAVE_RXDMA
   const unsigned int rxdma_channel; /* DMA channel assigned */
-  DMA_HANDLE        rxdma;      /* currently-open receive DMA stream */
-  bool              rxenable;   /* DMA-based reception en/disable */
+  DMA_HANDLE        rxdma;          /* currently-open receive DMA stream */
+  bool              rxenable;       /* DMA-based reception en/disable */
 #ifdef CONFIG_PM
-  bool              rxdmasusp;  /* Rx DMA suspended */
+  bool              rxdmasusp;      /* Rx DMA suspended */
 #endif
-  uint32_t          rxdmanext;  /* Next byte in the DMA buffer to be read */
+  uint32_t          rxdmanext;      /* Next byte in the DMA buffer to be read */
 #ifdef CONFIG_ARMV7M_DCACHE
-  uint32_t          rxdmaavail; /* Number of bytes available without need to
-                                 * to invalidate the data cache */
+  uint32_t          rxdmaavail;     /* Number of bytes available without need to
+                                     * to invalidate the data cache */
 #endif
-  char      *const  rxfifo;     /* Receive DMA buffer */
+  char      *const  rxfifo;         /* Receive DMA buffer */
 #endif
 
 #ifdef HAVE_RS485
@@ -523,6 +507,7 @@ struct up_dev_s
   const bool        rs485_dir_polarity; /* U[S]ART RS-485 DIR pin state for
                                          * TX enabled */
 #endif
+  spinlock_t        lock;
 };
 
 #ifdef CONFIG_PM
@@ -544,7 +529,7 @@ static int  up_setup(struct uart_dev_s *dev);
 static void up_shutdown(struct uart_dev_s *dev);
 static int  up_attach(struct uart_dev_s *dev);
 static void up_detach(struct uart_dev_s *dev);
-static int  up_interrupt(int irq, void *context, FAR void *arg);
+static int  up_interrupt(int irq, void *context, void *arg);
 static int  up_ioctl(struct file *filep, int cmd, unsigned long arg);
 #if !defined(SERIAL_HAVE_ONLY_DMA)
 static int  up_receive(struct uart_dev_s *dev, unsigned int *status);
@@ -848,6 +833,7 @@ static struct up_dev_s g_usart1priv =
   .rs485_dir_polarity = true,
 #  endif
 #endif
+  .lock               = SP_UNLOCKED,
 };
 #endif
 
@@ -916,6 +902,7 @@ static struct up_dev_s g_usart2priv =
   .rs485_dir_polarity = true,
 #  endif
 #endif
+  .lock               = SP_UNLOCKED,
 };
 #endif
 
@@ -984,6 +971,7 @@ static struct up_dev_s g_usart3priv =
   .rs485_dir_polarity = true,
 #  endif
 #endif
+  .lock               = SP_UNLOCKED,
 };
 #endif
 
@@ -1052,6 +1040,7 @@ static struct up_dev_s g_uart4priv =
   .rs485_dir_polarity = true,
 #  endif
 #endif
+  .lock               = SP_UNLOCKED,
 };
 #endif
 
@@ -1067,12 +1056,12 @@ static struct up_dev_s g_uart5priv =
 #endif
       .recv     =
       {
-        .size   = CONFIG_UART5_RXBUFSIZE,
+        .size   = sizeof(g_uart5rxbuffer),
         .buffer = g_uart5rxbuffer,
       },
       .xmit     =
       {
-        .size   = CONFIG_UART5_TXBUFSIZE,
+        .size   = sizeof(g_uart5txbuffer),
         .buffer = g_uart5txbuffer,
       },
 #if defined(CONFIG_UART5_RXDMA) && defined(CONFIG_UART5_TXDMA)
@@ -1120,6 +1109,7 @@ static struct up_dev_s g_uart5priv =
   .rs485_dir_polarity = true,
 #  endif
 #endif
+  .lock               = SP_UNLOCKED,
 };
 #endif
 
@@ -1188,6 +1178,7 @@ static struct up_dev_s g_usart6priv =
   .rs485_dir_polarity = true,
 #  endif
 #endif
+  .lock               = SP_UNLOCKED,
 };
 #endif
 
@@ -1256,6 +1247,7 @@ static struct up_dev_s g_uart7priv =
   .rs485_dir_polarity = true,
 #  endif
 #endif
+  .lock               = SP_UNLOCKED,
 };
 #endif
 
@@ -1324,6 +1316,7 @@ static struct up_dev_s g_uart8priv =
   .rs485_dir_polarity = true,
 #  endif
 #endif
+  .lock               = SP_UNLOCKED,
 };
 #endif
 
@@ -1401,7 +1394,9 @@ static inline void up_setusartint(struct up_dev_s *priv, uint16_t ie)
 
   priv->ie = ie;
 
-  /* And restore the interrupt state (see the interrupt enable/usage table above) */
+  /* And restore the interrupt state
+   * (see the interrupt enable/usage table above)
+   */
 
   cr = up_serialin(priv, STM32_USART_CR1_OFFSET);
   cr &= ~(USART_CR1_USED_INTS);
@@ -1422,11 +1417,11 @@ static void up_restoreusartint(struct up_dev_s *priv, uint16_t ie)
 {
   irqstate_t flags;
 
-  flags = enter_critical_section();
+  flags = spin_lock_irqsave(&priv->lock);
 
   up_setusartint(priv, ie);
 
-  leave_critical_section(flags);
+  spin_unlock_irqrestore(&priv->lock, flags);
 }
 
 /****************************************************************************
@@ -1437,7 +1432,7 @@ static void up_disableusartint(struct up_dev_s *priv, uint16_t *ie)
 {
   irqstate_t flags;
 
-  flags = enter_critical_section();
+  flags = spin_lock_irqsave(&priv->lock);
 
   if (ie)
     {
@@ -1446,20 +1441,23 @@ static void up_disableusartint(struct up_dev_s *priv, uint16_t *ie)
 
       /* USART interrupts:
        *
-       * Enable             Status          Meaning                        Usage
-       * ------------------ --------------- ------------------------------ ----------
-       * USART_CR1_IDLEIE   USART_ISR_IDLE  Idle Line Detected             (not used)
-       * USART_CR1_RXNEIE   USART_ISR_RXNE  Received Data Ready to be Read
-       * "              "   USART_ISR_ORE   Overrun Error Detected
-       * USART_CR1_TCIE     USART_ISR_TC    Transmission Complete          (used only for RS-485)
-       * USART_CR1_TXEIE    USART_ISR_TXE   Transmit Data Register Empty
-       * USART_CR1_PEIE     USART_ISR_PE    Parity Error
+       * Enable           Status         Meaning                Usage
+       * ---------------- -------------- ---------------------- ----------
+       * USART_CR1_IDLEIE USART_ISR_IDLE Idle Line Detected     (not used)
+       * USART_CR1_RXNEIE USART_ISR_RXNE Received Data Ready
+       *                                     to be Read
+       * "              " USART_ISR_ORE  Overrun Error Detected
+       * USART_CR1_TCIE   USART_ISR_TC   Transmission Complete  (used only
+       *                                                          for RS-485)
+       * USART_CR1_TXEIE  USART_ISR_TXE  Transmit Data Register
+       *                                      Empty
+       * USART_CR1_PEIE   USART_ISR_PE   Parity Error
        *
-       * USART_CR2_LBDIE    USART_ISR_LBD   Break Flag                     (not used)
-       * USART_CR3_EIE      USART_ISR_FE    Framing Error
-       * "           "      USART_ISR_NF    Noise Error
-       * "           "      USART_ISR_ORE   Overrun Error Detected
-       * USART_CR3_CTSIE    USART_ISR_CTS   CTS flag                       (not used)
+       * USART_CR2_LBDIE  USART_ISR_LBD  Break Flag              (not used)
+       * USART_CR3_EIE    USART_ISR_FE   Framing Error
+       * "           "    USART_ISR_NF   Noise Error
+       * "           "    USART_ISR_ORE  Overrun Error Detected
+       * USART_CR3_CTSIE  USART_ISR_CTS  CTS flag                 (not used)
        */
 
       cr1 = up_serialin(priv, STM32_USART_CR1_OFFSET);
@@ -1478,7 +1476,7 @@ static void up_disableusartint(struct up_dev_s *priv, uint16_t *ie)
 
   up_setusartint(priv, 0);
 
-  leave_critical_section(flags);
+  spin_unlock_irqrestore(&priv->lock, flags);
 }
 
 /****************************************************************************
@@ -1703,14 +1701,15 @@ static void up_setsuspend(struct uart_dev_s *dev, bool suspend)
 
       for (passes = 0; passes < 256; passes++)
         {
-          if ((up_serialin(priv, STM32_USART_ISR_OFFSET) & USART_ISR_TC) != 0)
+          if ((up_serialin(priv,
+                           STM32_USART_ISR_OFFSET) & USART_ISR_TC) != 0)
             {
               break;
             }
         }
 
 #ifdef SERIAL_HAVE_RXDMA
-      if (priv->dev.ops == &g_uart_dma_ops && !priv->rxdmasusp)
+      if (priv->dev.ops == &g_uart_rxdma_ops && !priv->rxdmasusp)
         {
           /* Suspend Rx DMA. */
 
@@ -1722,7 +1721,7 @@ static void up_setsuspend(struct uart_dev_s *dev, bool suspend)
   else
     {
 #ifdef SERIAL_HAVE_RXDMA
-      if (priv->dev.ops == &g_uart_dma_ops && priv->rxdmasusp)
+      if (priv->dev.ops == &g_uart_rxdma_ops && priv->rxdmasusp)
         {
           /* Re-enable DMA. */
 
@@ -2043,7 +2042,8 @@ static int up_dma_setup(struct uart_dev_s *dev)
 
       /* Enable receive Tx DMA for the UART */
 
-      modifyreg32(priv->usartbase + STM32_USART_CR3_OFFSET, 0, USART_CR3_DMAT);
+      modifyreg32(priv->usartbase + STM32_USART_CR3_OFFSET,
+                  0, USART_CR3_DMAT);
     }
 #endif
 
@@ -2062,8 +2062,8 @@ static int up_dma_setup(struct uart_dev_s *dev)
                      RXDMA_BUFFER_SIZE,
                      SERIAL_RXDMA_CONTROL_WORD);
 
-      /* Reset our DMA shadow pointer and Rx data availability count to match
-       * the address just programmed above.
+      /* Reset our DMA shadow pointer and Rx data availability count to
+       * match the address just programmed above.
        */
 
       priv->rxdmanext = 0;
@@ -2073,7 +2073,8 @@ static int up_dma_setup(struct uart_dev_s *dev)
 
       /* Enable receive Rx DMA for the UART */
 
-      modifyreg32(priv->usartbase + STM32_USART_CR3_OFFSET, 0, USART_CR3_DMAR);
+      modifyreg32(priv->usartbase + STM32_USART_CR3_OFFSET,
+                  0, USART_CR3_DMAR);
 
       /* Start the DMA channel, and arrange for callbacks at the half and
        * full points in the FIFO.  This ensures that we have half a FIFO
@@ -2205,15 +2206,15 @@ static void up_dma_shutdown(struct uart_dev_s *dev)
  * Name: up_attach
  *
  * Description:
- *   Configure the USART to operation in interrupt driven mode.  This method is
- *   called when the serial port is opened.  Normally, this is just after the
- *   the setup() method is called, however, the serial console may operate in
- *   a non-interrupt driven mode during the boot phase.
+ *   Configure the USART to operation in interrupt driven mode.  This method
+ *   is called when the serial port is opened.  Normally, this is just after
+ *   the the setup() method is called, however, the serial console may
+ *   operate in a non-interrupt driven mode during the boot phase.
  *
- *   RX and TX interrupts are not enabled when by the attach method (unless the
- *   hardware supports multiple levels of interrupt enabling).  The RX and TX
- *   interrupts are not enabled until the txint() and rxint() methods are
- *   called.
+ *   RX and TX interrupts are not enabled when by the attach method (unless
+ *   the hardware supports multiple levels of interrupt enabling).  The RX
+ *   and TX interrupts are not enabled until the txint() and rxint() methods
+ *   are called.
  *
  ****************************************************************************/
 
@@ -2242,8 +2243,8 @@ static int up_attach(struct uart_dev_s *dev)
  *
  * Description:
  *   Detach USART interrupts.  This method is called when the serial port is
- *   closed normally just before the shutdown method is called.  The exception
- *   is the serial console which is never shutdown.
+ *   closed normally just before the shutdown method is called.
+ *   The exception is the serial console which is never shutdown.
  *
  ****************************************************************************/
 
@@ -2259,14 +2260,14 @@ static void up_detach(struct uart_dev_s *dev)
  *
  * Description:
  *   This is the USART interrupt handler.  It will be invoked when an
- *   interrupt received on the 'irq'  It should call uart_transmitchars or
- *   uart_receivechar to perform the appropriate data transfers.  The
- *   interrupt handling logic must be able to map the 'irq' number into the
+ *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
+ *   uart_recvchars to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'arg' to the
  *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
 
-static int up_interrupt(int irq, void *context, FAR void *arg)
+static int up_interrupt(int irq, void *context, void *arg)
 {
   struct up_dev_s *priv = (struct up_dev_s *)arg;
   int  passes;
@@ -2295,34 +2296,39 @@ static int up_interrupt(int irq, void *context, FAR void *arg)
 
       /* USART interrupts:
        *
-       * Enable             Status          Meaning                         Usage
-       * ------------------ --------------- ------------------------------- ----------
-       * USART_CR1_IDLEIE   USART_ISR_IDLE  Idle Line Detected              (not used)
-       * USART_CR1_RXNEIE   USART_ISR_RXNE  Received Data Ready to be Read
-       * "              "   USART_ISR_ORE   Overrun Error Detected
-       * USART_CR1_TCIE     USART_ISR_TC    Transmission Complete           (used only for RS-485)
-       * USART_CR1_TXEIE    USART_ISR_TXE   Transmit Data Register Empty
-       * USART_CR1_PEIE     USART_ISR_PE    Parity Error
+       * Enable           Status          Meaning                Usage
+       * ---------------- -------------- ----------------------- ----------
+       * USART_CR1_IDLEIE USART_ISR_IDLE Idle Line Detected      (not used)
+       * USART_CR1_RXNEIE USART_ISR_RXNE Received Data Ready
+       *                                    to be Read
+       * "              " USART_ISR_ORE  Overrun Error Detected
+       * USART_CR1_TCIE   USART_ISR_TC   Transmission Complete   (used only
+       *                                                         for RS-485)
+       * USART_CR1_TXEIE  USART_ISR_TXE  Transmit Data Register
+       *                                     Empty
+       * USART_CR1_PEIE   USART_ISR_PE   Parity Error
        *
-       * USART_CR2_LBDIE    USART_ISR_LBD   Break Flag                      (not used)
-       * USART_CR3_EIE      USART_ISR_FE    Framing Error
-       * "           "      USART_ISR_NF    Noise Error
-       * "           "      USART_ISR_ORE   Overrun Error Detected
-       * USART_CR3_CTSIE    USART_ISR_CTS   CTS flag                        (not used)
+       * USART_CR2_LBDIE  USART_ISR_LBD  Break Flag               (not used)
+       * USART_CR3_EIE    USART_ISR_FE   Framing Error
+       * "           "    USART_ISR_NF   Noise Error
+       * "           "    USART_ISR_ORE  Overrun Error Detected
+       * USART_CR3_CTSIE  USART_ISR_CTS  CTS flag                 (not used)
        *
-       * NOTE: Some of these status bits must be cleared by explicitly writing
+       * NOTE:
+       * Some of these status bits must be cleared by explicitly writing
        * zero to the SR register: USART_ISR_CTS, USART_ISR_LBD. Note of those
        * are currently being used.
        */
 
 #ifdef HAVE_RS485
       /* Transmission of whole buffer is over - TC is set, TXEIE is cleared.
-       * Note - this should be first, to have the most recent TC bit value from
-       * SR register - sending data affects TC, but without refresh we will not
-       * know that...
+       * Note - this should be first, to have the most recent TC bit value
+       * from SR register - sending data affects TC, but without refresh we
+       * will not know that...
        */
 
-      if ((priv->sr & USART_ISR_TC) != 0 && (priv->ie & USART_CR1_TCIE) != 0 &&
+      if ((priv->sr & USART_ISR_TC) != 0 &&
+          (priv->ie & USART_CR1_TCIE) != 0 &&
           (priv->ie & USART_CR1_TXEIE) == 0)
         {
           stm32_gpiowrite(priv->rs485_dir_gpio, !priv->rs485_dir_polarity);
@@ -2335,9 +2341,9 @@ static int up_interrupt(int irq, void *context, FAR void *arg)
       if ((priv->sr & USART_ISR_RXNE) != 0 &&
           (priv->ie & USART_CR1_RXNEIE) != 0)
         {
-          /* Received data ready... process incoming bytes.  NOTE the check for
-           * RXNEIE:  We cannot call uart_recvchards of RX interrupts are
-           * disabled.
+          /* Received data ready... process incoming bytes.
+           * NOTE the check for  RXNEIE:  We cannot call
+           * uart_recvchards of RX interrupts are disabled.
            */
 
           uart_recvchars(&priv->dev);
@@ -2348,7 +2354,8 @@ static int up_interrupt(int irq, void *context, FAR void *arg)
        * error conditions.
        */
 
-      else if ((priv->sr & (USART_ISR_ORE | USART_ISR_NF | USART_ISR_FE)) != 0)
+      else if ((priv->sr &
+               (USART_ISR_ORE | USART_ISR_NF | USART_ISR_FE)) != 0)
         {
           /* These errors are cleared by writing the corresponding bit to the
            * interrupt clear register (ICR).
@@ -2360,7 +2367,8 @@ static int up_interrupt(int irq, void *context, FAR void *arg)
 
       /* Handle outgoing, transmit bytes */
 
-      if ((priv->sr & USART_ISR_TXE) != 0 && (priv->ie & USART_CR1_TXEIE) != 0)
+      if ((priv->sr & USART_ISR_TXE) != 0 &&
+          (priv->ie & USART_CR1_TXEIE) != 0)
         {
           /* Transmit data register empty ... process outgoing bytes */
 
@@ -2390,7 +2398,7 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
 #if defined(CONFIG_SERIAL_TERMIOS) || defined(CONFIG_STM32F7_SERIALBRK_BSDCOMPAT)
   struct up_dev_s   *priv  = (struct up_dev_s *)dev->priv;
 #endif
-  int                ret    = OK;
+  int                ret   = OK;
 
   switch (cmd)
     {
@@ -2437,13 +2445,17 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
 
         if ((arg & SER_SINGLEWIRE_ENABLED) != 0)
           {
-            uint32_t gpio_val = GPIO_OPENDRAIN;
+            uint32_t gpio_val = (arg & SER_SINGLEWIRE_PUSHPULL) ==
+                               SER_SINGLEWIRE_PUSHPULL ?
+                               GPIO_PUSHPULL : GPIO_OPENDRAIN;
             gpio_val |= (arg & SER_SINGLEWIRE_PULL_MASK) ==
-                         SER_SINGLEWIRE_PULLUP ? GPIO_PULLUP : GPIO_FLOAT;
+                               SER_SINGLEWIRE_PULLUP ?
+                               GPIO_PULLUP : GPIO_FLOAT;
             gpio_val |= (arg & SER_SINGLEWIRE_PULL_MASK) ==
-                         SER_SINGLEWIRE_PULLDOWN ? GPIO_PULLDOWN : GPIO_FLOAT;
+                               SER_SINGLEWIRE_PULLDOWN ?
+                               GPIO_PULLDOWN : GPIO_FLOAT;
             stm32_configgpio((priv->tx_gpio &
-                             ~(GPIO_PUPD_MASK | GPIO_OPENDRAIN)) | gpio_val);
+                            ~(GPIO_PUPD_MASK | GPIO_OPENDRAIN)) | gpio_val);
             cr |= USART_CR3_HDSEL;
           }
         else
@@ -2568,8 +2580,6 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
             break;
           }
 
-        cfsetispeed(termiosp, priv->baud);
-
         /* Note that since we only support 8/9 bit modes and
          * there is no way to report 9-bit mode, we always claim 8.
          */
@@ -2586,7 +2596,9 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
 #endif
           CS8;
 
-        /* TODO: CCTS_IFLOW, CCTS_OFLOW */
+        cfsetispeed(termiosp, priv->baud);
+
+        /* TODO: CRTS_IFLOW, CCTS_OFLOW */
       }
       break;
 
@@ -2779,17 +2791,18 @@ static void up_rxint(struct uart_dev_s *dev, bool enable)
 
   /* USART receive interrupts:
    *
-   * Enable             Status          Meaning                         Usage
-   * ------------------ --------------- ------------------------------- ----------
-   * USART_CR1_IDLEIE   USART_ISR_IDLE  Idle Line Detected              (not used)
-   * USART_CR1_RXNEIE   USART_ISR_RXNE  Received Data Ready to be Read
-   * "              "   USART_ISR_ORE   Overrun Error Detected
-   * USART_CR1_PEIE     USART_ISR_PE    Parity Error
+   * Enable           Status         Meaning                   Usage
+   * ---------------- -------------- ----------------------- ----------
+   * USART_CR1_IDLEIE USART_ISR_IDLE Idle Line Detected       (not used)
+   * USART_CR1_RXNEIE USART_ISR_RXNE Received Data Ready
+   *                                     to be Read
+   * "              " USART_ISR_ORE  Overrun Error Detected
+   * USART_CR1_PEIE   USART_ISR_PE   Parity Error
    *
-   * USART_CR2_LBDIE    USART_ISR_LBD   Break Flag                      (not used)
-   * USART_CR3_EIE      USART_ISR_FE    Framing Error
-   * "           "      USART_ISR_NF    Noise Error
-   * "           "      USART_ISR_ORE   Overrun Error Detected
+   * USART_CR2_LBDIE  USART_ISR_LBD  Break Flag               (not used)
+   * USART_CR3_EIE    USART_ISR_FE   Framing Error
+   * "           "    USART_ISR_NF   Noise Error
+   * "           "    USART_ISR_ORE  Overrun Error Detected
    */
 
   flags = enter_critical_section();
@@ -3124,20 +3137,38 @@ static void up_dma_txcallback(DMA_HANDLE handle, uint8_t status, void *arg)
 
   if (status & DMA_SCR_HTIE)
     {
-      priv->dev.dmatx.nbytes = priv->dev.dmatx.length / 2;
+      priv->dev.dmatx.nbytes += priv->dev.dmatx.length / 2;
     }
   else if (status & DMA_SCR_TCIE)
     {
-      priv->dev.dmatx.nbytes = priv->dev.dmatx.length;
+      priv->dev.dmatx.nbytes += priv->dev.dmatx.length;
+      if (priv->dev.dmatx.nlength)
+        {
+          /* Set up DMA on next buffer */
+
+          stm32_dmasetup(priv->txdma,
+                         priv->usartbase + STM32_USART_TDR_OFFSET,
+                         (uint32_t) priv->dev.dmatx.nbuffer,
+                         (size_t) priv->dev.dmatx.nlength,
+                         SERIAL_TXDMA_CONTROL_WORD);
+
+          /* Set length for next next completion */
+
+          priv->dev.dmatx.length  = priv->dev.dmatx.nlength;
+          priv->dev.dmatx.nlength = 0;
+
+          /* Start transmission with the callback on DMA completion */
+
+          stm32_dmastart(priv->txdma, up_dma_txcallback,
+                        (void *)priv, false);
+
+          return;
+        }
     }
 
   /* Adjust the pointers */
 
   uart_xmitchars_done(&priv->dev);
-
-  /* Kick off the next DMA to keep the channel as busy as possible */
-
-  uart_xmitchars_dma(&priv->dev);
 }
 #endif
 
@@ -3181,16 +3212,28 @@ static void up_dma_send(struct uart_dev_s *dev)
 
   stm32_dmastop(priv->txdma);
 
-  /* Wait until TX UART is ready for new transfer it should be */
+  /* Reset the number sent */
 
-  while (!up_txready(dev));
+  dev->dmatx.nbytes = 0;
 
   /* Flush the contents of the TX buffer into physical memory */
 
   up_clean_dcache((uintptr_t)dev->dmatx.buffer,
                   (uintptr_t)dev->dmatx.buffer + dev->dmatx.length);
 
-  /* Make use of setup function to update buffer and its length for next transfer */
+  /* Is this a split transfer */
+
+  if (dev->dmatx.nbuffer)
+    {
+      /* Flush the contents of the next TX buffer into physical memory */
+
+      up_clean_dcache((uintptr_t)dev->dmatx.nbuffer,
+                      (uintptr_t)dev->dmatx.nbuffer + dev->dmatx.nlength);
+    }
+
+  /* Make use of setup function to update buffer and its length for next
+   * transfer
+   */
 
   stm32_dmasetup(priv->txdma,
                  priv->usartbase + STM32_USART_TDR_OFFSET,
@@ -3263,11 +3306,13 @@ static void up_txint(struct uart_dev_s *dev, bool enable)
 
   /* USART transmit interrupts:
    *
-   * Enable             Status          Meaning                      Usage
-   * ------------------ --------------- ---------------------------- ----------
-   * USART_CR1_TCIE     USART_ISR_TC    Transmission Complete        (used only for RS-485)
-   * USART_CR1_TXEIE    USART_ISR_TXE   Transmit Data Register Empty
-   * USART_CR3_CTSIE    USART_ISR_CTS   CTS flag                     (not used)
+   * Enable          Status         Meaning              Usage
+   * --------------- ------------- --------------------- ----------
+   * USART_CR1_TCIE  USART_ISR_TC  Transmission Complete (used only
+   *                                                      for RS-485)
+   * USART_CR1_TXEIE USART_ISR_TXE Transmit Data
+   *                                   Register Empty
+   * USART_CR3_CTSIE USART_ISR_CTS CTS flag               (not used)
    */
 
   flags = enter_critical_section();
@@ -3292,12 +3337,14 @@ static void up_txint(struct uart_dev_s *dev, bool enable)
 #  ifdef CONFIG_STM32_SERIALBRK_BSDCOMPAT
       if (priv->ie & USART_CR1_IE_BREAK_INPROGRESS)
         {
+          leave_critical_section(flags);
           return;
         }
 #  endif
 
       up_restoreusartint(priv, ie);
 
+#else
       /* Fake a TX interrupt here by just calling uart_xmitchars() with
        * interrupts disabled (note this may recurse).
        */
@@ -3350,10 +3397,9 @@ static void up_dma_rxcallback(DMA_HANDLE handle, uint8_t status, void *arg)
 
   /* Get the masked USART status word to check and clear error flags.
    *
-   * When wake-up from low power mode was not fast enough, UART is resumed too
-   * late and sometimes exactly when character was coming over UART, resulting
-   * to frame error.
-
+   * When wake-up from low power mode was not fast enough, UART is resumed
+   * too late and sometimes exactly when character was coming over UART,
+   * resulting to frame error.
    * If error flag is not cleared, Rx DMA will be stuck. Clearing errors
    * will release Rx DMA.
    */
@@ -3550,17 +3596,17 @@ static int up_pm_prepare(struct pm_callback_s *cb, int domain,
 #ifdef USE_SERIALDRIVER
 
 /****************************************************************************
- * Name: up_earlyserialinit
+ * Name: arm_earlyserialinit
  *
  * Description:
  *   Performs the low level USART initialization early in debug so that the
- *   serial console will be available during bootup.  This must be called
- *   before up_serialinit.
+ *   serial console will be available during boot up.  This must be called
+ *   before arm_serialinit.
  *
  ****************************************************************************/
 
 #ifdef USE_EARLYSERIALINIT
-void up_earlyserialinit(void)
+void arm_earlyserialinit(void)
 {
 #ifdef HAVE_UART
   unsigned i;
@@ -3585,15 +3631,15 @@ void up_earlyserialinit(void)
 #endif
 
 /****************************************************************************
- * Name: up_serialinit
+ * Name: arm_serialinit
  *
  * Description:
  *   Register serial console and serial ports.  This assumes
- *   that up_earlyserialinit was called previously.
+ *   that arm_earlyserialinit was called previously.
  *
  ****************************************************************************/
 
-void up_serialinit(void)
+void arm_serialinit(void)
 {
 #ifdef HAVE_UART
   char devname[16];
@@ -3634,7 +3680,7 @@ void up_serialinit(void)
   minor = 1;
 #endif
 
-#ifdef SERIAL_HAVE_CONSOLE_DMA
+#if defined(SERIAL_HAVE_CONSOLE_RXDMA) || defined(SERIAL_HAVE_CONSOLE_TXDMA)
   /* If we need to re-initialise the console to enable DMA do that here. */
 
   up_dma_setup(&g_uart_devs[CONSOLE_UART - 1]->dev);
@@ -3643,7 +3689,7 @@ void up_serialinit(void)
 
   /* Register all remaining USARTs */
 
-  strcpy(devname, "/dev/ttySx");
+  strlcpy(devname, "/dev/ttySx", sizeof(devname));
 
   for (i = 0; i < STM32_NSERIAL; i++)
     {
@@ -3757,27 +3803,16 @@ void stm32_serial_dma_poll(void)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #if CONSOLE_UART > 0
   struct up_dev_s *priv = g_uart_devs[CONSOLE_UART - 1];
   uint16_t ie;
 
   up_disableusartint(priv, &ie);
-
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      up_lowputc('\r');
-    }
-
-  up_lowputc(ch);
+  arm_lowputc(ch);
   up_restoreusartint(priv, ie);
 #endif
-  return ch;
 }
 
 #else /* USE_SERIALDRIVER */
@@ -3790,21 +3825,11 @@ int up_putc(int ch)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #if CONSOLE_UART > 0
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      up_lowputc('\r');
-    }
-
-  up_lowputc(ch);
+  arm_lowputc(ch);
 #endif
-  return ch;
 }
 
 #endif /* USE_SERIALDRIVER */

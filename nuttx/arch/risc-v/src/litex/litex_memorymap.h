@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/risc-v/src/litex/litex_memorymap.h
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -18,13 +20,14 @@
  *
  ****************************************************************************/
 
-#ifndef _ARCH_RISCV_SRC_LITEX_LITEX_MEMORYMAP_H
-#define _ARCH_RISCV_SRC_LITEX_LITEX_MEMORYMAP_H
+#ifndef __ARCH_RISCV_SRC_LITEX_LITEX_MEMORYMAP_H
+#define __ARCH_RISCV_SRC_LITEX_LITEX_MEMORYMAP_H
 
 /****************************************************************************
  * Included Files
  ****************************************************************************/
 
+#include "riscv_common_memorymap.h"
 #include "hardware/litex_memorymap.h"
 #include "hardware/litex_uart.h"
 #include "hardware/litex_clint.h"
@@ -37,12 +40,11 @@
 /* Idle thread stack starts from _ebss */
 
 #ifndef __ASSEMBLY__
-#define LITEX_IDLESTACK_BASE  (uint32_t)&_ebss
+#define LITEX_IDLESTACK_BASE  (uint32_t)_ebss
 #else
 #define LITEX_IDLESTACK_BASE  _ebss
 #endif
 
-#define LITEX_IDLESTACK_SIZE (CONFIG_IDLETHREAD_STACKSIZE & ~3)
-#define LITEX_IDLESTACK_TOP  (LITEX_IDLESTACK_BASE + LITEX_IDLESTACK_SIZE)
+#define LITEX_IDLESTACK_TOP  (LITEX_IDLESTACK_BASE + SMP_STACK_SIZE)
 
-#endif /* _ARCH_RISCV_SRC_LITEX_LITEX_MEMORYMAP_H */
+#endif /* __ARCH_RISCV_SRC_LITEX_LITEX_MEMORYMAP_H */

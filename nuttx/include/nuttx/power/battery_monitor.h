@@ -1,6 +1,7 @@
 /****************************************************************************
  * include/nuttx/power/battery_monitor.h
- * NuttX Battery battery manager & monitor interfaces
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -28,11 +29,13 @@
 
 #include <nuttx/config.h>
 #include <nuttx/fs/ioctl.h>
+#include <nuttx/list.h>
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <semaphore.h>
 #include <fixedmath.h>
+
+#include <nuttx/mutex.h>
 
 #ifdef CONFIG_BATTERY_MONITOR
 
@@ -61,10 +64,10 @@
  * lower half as summarized below:
  *
  * BATIOC_STATE - Return the current state of the battery (see
- *   enum battery_monitor_status_e).
+ *   enum battery_status_e).
  *   Input value:  A pointer to type int.
  * BATIOC_HEALTH - Return the current health of the battery (see
- *   enum battery_monitor_health_e).
+ *   enum battery_health_e).
  *   Input value:  A pointer to type int.
  * BATIOC_ONLINE - Return 1 if the battery is online; 0 if offline.
  *   Input value:  A pointer to type bool.
@@ -98,47 +101,13 @@
  * BATIOC_OPERATE - Perform miscellaneous, device-specific charger operation.
  *   Input value:  An uintptr_t that can hold a pointer to struct
  *   batio_operate_msg_s.
+ * BATIOC_CHIPID -Get the chip id.
+ *   Input value:  A pointer to type unsigned int.
  */
-
-/* Special input values for BATIOC_INPUT_CURRENT that may optionally
- * be supported by lower-half driver:
- */
-
-#define BATTERY_INPUT_CURRENT_EXT_LIM   (-1) /* External input current limit */
 
 /****************************************************************************
  * Public Types
  ****************************************************************************/
-
-/* Battery status */
-
-enum battery_monitor_status_e
-{
-  BATTERY_UNKNOWN = 0, /* Battery state is not known */
-  BATTERY_FAULT,       /* Charger reported a fault, get health for more info */
-  BATTERY_IDLE,        /* Not full, not charging, not discharging */
-  BATTERY_FULL,        /* Full, not discharging */
-  BATTERY_CHARGING,    /* Not full, charging */
-  BATTERY_DISCHARGING  /* Probably not full, discharging */
-};
-
-/* Battery Health status */
-
-enum battery_monitor_health_e
-{
-  BATTERY_HEALTH_UNKNOWN = 0,   /* Battery health state is not known */
-  BATTERY_HEALTH_GOOD,          /* Battery is in good condition */
-  BATTERY_HEALTH_DEAD,          /* Battery is dead, nothing we can do */
-  BATTERY_HEALTH_OVERHEAT,      /* Battery is over recommended temperature */
-  BATTERY_HEALTH_OVERVOLTAGE,   /* Battery voltage is over recommended level */
-  BATTERY_HEALTH_UNDERVOLTAGE,  /* Battery monitor reported an unspecified failure */
-  BATTERY_HEALTH_OVERCURRENT,   /* Battery monitor reported an overcurrent event */
-  BATTERY_HEALTH_SHORT_CIRCUIT, /* Battery monitor reported a short circuit event */
-  BATTERY_HEALTH_UNSPEC_FAIL,   /* Battery monitor reported an unspecified failure */
-  BATTERY_HEALTH_COLD,          /* Battery is under recommended temperature */
-  BATTERY_HEALTH_WD_TMR_EXP,    /* Battery WatchDog Timer Expired */
-  BATTERY_HEALTH_DISCONNECTED   /* Battery is not connected */
-};
 
 struct battery_monitor_voltage_s
 {
@@ -153,11 +122,11 @@ struct battery_monitor_voltage_s
    * Cell voltages are stored in microvolts (uV)
    * Cell voltages in this array should be ordered according to the
    * physical layout of cells in the system.  Driver should rearrange
-   * voltage values as necssary to present the user with a contiguous
+   * voltage values as necessary to present the user with a contiguous
    * list of cell voltages in the expected order.
    */
 
-  uint32_t *cell_voltages;
+  FAR uint32_t *cell_voltages;
 };
 
 struct battery_monitor_temperature_s
@@ -178,7 +147,7 @@ struct battery_monitor_temperature_s
    * and current.
    */
 
-  uint32_t *temperatures;
+  FAR uint32_t *temperatures;
 };
 
 struct battery_monitor_balance_s
@@ -193,7 +162,7 @@ struct battery_monitor_balance_s
    * necessary to make this happen.
    */
 
-  bool *balance;
+  FAR bool *balance;
 };
 
 struct battery_monitor_limits_s
@@ -253,71 +222,83 @@ struct battery_monitor_dev_s;
 
 struct battery_monitor_operations_s
 {
-  /* Return the current battery state (see enum battery_monitor_status_e) */
+  /* Return the current battery state (see enum battery_status_e) */
 
-  int (*state)(struct battery_monitor_dev_s *dev, int *status);
+  CODE int (*state)(FAR struct battery_monitor_dev_s *dev, FAR int *status);
 
-  /* Return the current battery health (see enum battery_monitor_health_e) */
+  /* Return the current battery health (see enum battery_health_e) */
 
-  int (*health)(struct battery_monitor_dev_s *dev, int *health);
+  CODE int (*health)(FAR struct battery_monitor_dev_s *dev, FAR int *health);
 
   /* Return true if the battery is online */
 
-  int (*online)(struct battery_monitor_dev_s *dev, bool *status);
+  CODE int (*online)(FAR struct battery_monitor_dev_s *dev,
+                     FAR bool *status);
 
   /* Get the battery pack voltage */
 
-  int (*voltage)(struct battery_monitor_dev_s *dev, int *value);
+  CODE int (*voltage)(FAR struct battery_monitor_dev_s *dev, FAR int *value);
 
   /* Get the battery cell voltages */
 
-  int (*cell_voltage)(struct battery_monitor_dev_s *dev,
-      struct battery_monitor_voltage_s *cellv);
+  CODE int (*cell_voltage)(FAR struct battery_monitor_dev_s *dev,
+                           FAR struct battery_monitor_voltage_s *cellv);
 
   /* Get the battery pack current */
 
-  int (*current)(struct battery_monitor_dev_s *dev,
-      struct battery_monitor_current_s *current);
+  CODE int (*current)(FAR struct battery_monitor_dev_s *dev,
+                      FAR struct battery_monitor_current_s *current);
 
   /* Get the battery pack state of charge */
 
-  int (*soc)(struct battery_monitor_dev_s *dev, b16_t *value);
+  CODE int (*soc)(FAR struct battery_monitor_dev_s *dev, FAR b16_t *value);
 
-  /* Get the battery pack Couloumb count value*/
+  /* Get the battery pack Coulomb count value */
 
-  int (*coulombs)(struct battery_monitor_dev_s *dev, int *value);
+  CODE int (*coulombs)(FAR struct battery_monitor_dev_s *dev,
+                       FAR int *value);
 
   /* Read battery pack temperature sensor(s) */
 
-  int (*temperature)(struct battery_monitor_dev_s *dev,
-      struct battery_monitor_temperature_s *temps);
+  CODE int (*temperature)(FAR struct battery_monitor_dev_s *dev,
+                          FAR struct battery_monitor_temperature_s *temps);
 
   /* Set balance switches on battery cells */
 
-  int (*balance)(struct battery_monitor_dev_s *dev,
-      struct battery_monitor_balance_s *bal);
+  CODE int (*balance)(FAR struct battery_monitor_dev_s *dev,
+                      FAR struct battery_monitor_balance_s *bal);
 
   /* Put monitor device into low-power shutdown mode */
 
-  int (*shutdown)(struct battery_monitor_dev_s *dev, uintptr_t param);
+  CODE int (*shutdown)(FAR struct battery_monitor_dev_s *dev,
+                       uintptr_t param);
 
   /* Configure safety limits for the device */
 
-  int (*setlimits)(struct battery_monitor_dev_s *dev,
-      struct battery_monitor_limits_s *limits);
+  CODE int (*setlimits)(FAR struct battery_monitor_dev_s *dev,
+                        FAR struct battery_monitor_limits_s *limits);
 
-  /* Set the state of charge/discharge switches to allow battery to source/sink power */
+  /* Set the state of charge/discharge switches to allow battery to
+   * source/sink power
+   */
 
-  int (*chgdsg)(struct battery_monitor_dev_s *dev,
-      struct battery_monitor_switches_s *sw);
+  CODE int (*chgdsg)(FAR struct battery_monitor_dev_s *dev,
+                     FAR struct battery_monitor_switches_s *sw);
 
   /* Clear battery monitor faults */
 
-  int (*clearfaults)(struct battery_monitor_dev_s *dev, uintptr_t param);
+  CODE int (*clearfaults)(FAR struct battery_monitor_dev_s *dev,
+                          uintptr_t param);
 
   /* Do device specific operation */
 
-  int (*operate)(struct battery_monitor_dev_s *dev, uintptr_t param);
+  CODE int (*operate)(FAR struct battery_monitor_dev_s *dev,
+                      uintptr_t param);
+
+  /* Get chip id */
+
+  CODE int (*chipid)(FAR struct battery_monitor_dev_s *dev,
+                     FAR unsigned int *value);
 };
 
 /* This structure defines the battery driver state structure */
@@ -327,7 +308,11 @@ struct battery_monitor_dev_s
   /* Fields required by the upper-half driver */
 
   FAR const struct battery_monitor_operations_s *ops; /* Battery operations */
-  sem_t batsem;  /* Enforce mutually exclusive access */
+  mutex_t batlock;                                    /* Enforce mutually exclusive access */
+
+  struct list_node flist;
+
+  uint32_t mask;  /* record drive support features */
 
   /* Data fields specific to the lower-half driver may follow */
 };
@@ -349,6 +334,13 @@ extern "C"
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: battery_monitor_changed
+ ****************************************************************************/
+
+int battery_monitor_changed(FAR struct battery_monitor_dev_s *dev,
+                            uint32_t mask);
 
 /****************************************************************************
  * Name: battery_monitor_register
@@ -386,7 +378,7 @@ int battery_monitor_register(FAR const char *devpath,
  *
  *   CONFIG_BATTERY_MONITOR - Upper half battery monitor driver support
  *   CONFIG_I2C - I2C support
- *   CONFIG_I2C_BQ769X0 - And the driver must be explictly selected.
+ *   CONFIG_I2C_BQ769X0 - And the driver must be explicitly selected.
  *
  * Input Parameters:
  *   i2c       - An instance of the I2C interface to use to communicate with
@@ -412,13 +404,10 @@ int battery_monitor_register(FAR const char *devpath,
 #if defined(CONFIG_I2C) && defined(CONFIG_I2C_BQ769X0)
 
 struct i2c_master_s;
-FAR struct battery_monitor_dev_s *bq769x0_initialize(FAR struct i2c_master_s *i2c,
-                                                     uint8_t addr,
-                                                     uint32_t frequency,
-                                                     bool crc,
-                                                     uint8_t cellcount,
-                                                     uint8_t chip,
-                                                     uint32_t sense_r);
+FAR struct battery_monitor_dev_s *
+bq769x0_initialize(FAR struct i2c_master_s *i2c,
+                   uint8_t addr, uint32_t frequency, bool crc,
+                   uint8_t cellcount, uint8_t chip, uint32_t sense_r);
 #endif
 
 #undef EXTERN

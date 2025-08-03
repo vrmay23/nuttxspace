@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/eeprom/i2c_xx24xx.c
  *
- *   Copyright (C) 2018 Sebastien Lorquet. All rights reserved.
- *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -92,12 +79,15 @@
 
 #include <stdbool.h>
 #include <sys/types.h>
+#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 #include <string.h>
+#include <inttypes.h>
 #include <nuttx/fs/fs.h>
 
 #include <nuttx/kmalloc.h>
+#include <nuttx/mutex.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/eeprom/i2c_xx24xx.h>
 
@@ -133,23 +123,23 @@ struct ee24xx_dev_s
 {
   /* Bus management */
 
-  struct i2c_master_s *i2c;      /* I2C device where the EEPROM is attached */
-  uint32_t             freq;     /* I2C bus speed */
-  uint8_t              addr;     /* 7-bit unshifted I2C device address */
+  FAR struct i2c_master_s *i2c;      /* I2C device where the EEPROM is attached */
+  uint32_t                 freq;     /* I2C bus speed */
+  uint8_t                  addr;     /* 7-bit unshifted I2C device address */
 
   /* Driver management */
 
-  sem_t                sem;      /* file write access serialization */
-  uint8_t              refs;     /* Nr of times the device has been opened */
-  bool                 readonly; /* Flags */
+  mutex_t                  lock;     /* file write access serialization */
+  uint8_t                  refs;     /* Nr of times the device has been opened */
+  bool                     readonly; /* Flags */
 
   /* Expanded from geometry */
 
-  uint32_t             size;       /* total bytes in device */
-  uint16_t             pgsize;     /* write block size, in bytes */
-  uint16_t             addrlen;    /* number of bytes in data addresses */
-  uint16_t             haddrbits;  /* Number of bits in high address part */
-  uint16_t             haddrshift; /* bit-shift of high address part */
+  uint32_t                 size;       /* total bytes in device */
+  uint16_t                 pgsize;     /* write block size, in bytes */
+  uint16_t                 addrlen;    /* number of bytes in data addresses */
+  uint16_t                 haddrbits;  /* Number of bits in high address part */
+  uint16_t                 haddrshift; /* bit-shift of high address part */
 };
 
 /****************************************************************************
@@ -244,7 +234,7 @@ static const struct ee24xx_geom_s g_ee24xx_devices[] =
 
 /* Driver operations */
 
-static const struct file_operations ee24xx_fops =
+static const struct file_operations g_ee24xx_fops =
 {
   ee24xx_open,  /* open */
   ee24xx_close, /* close */
@@ -252,19 +242,14 @@ static const struct file_operations ee24xx_fops =
   ee24xx_write, /* write */
   ee24xx_seek,  /* seek */
   ee24xx_ioctl, /* ioctl */
-  NULL          /* poll */
 };
 
 #ifdef CONFIG_AT24CS_UUID
-static const struct file_operations at24cs_uuid_fops =
+static const struct file_operations g_at24cs_uuid_fops =
 {
   ee24xx_open,      /* piggyback on the ee24xx_open */
   ee24xx_close,     /* piggyback on the ee24xx_close */
   at24cs_read_uuid, /* read */
-  NULL,             /* write */
-  NULL,             /* seek */
-  NULL,             /* ioctl */
-  NULL              /* poll */
 };
 #endif
 
@@ -339,36 +324,10 @@ static int ee24xx_writepage(FAR struct ee24xx_dev_s *eedev, uint32_t memaddr,
   msgs[1].frequency = msgs[0].frequency;
   msgs[1].addr      = msgs[0].addr;
   msgs[1].flags     = I2C_M_NOSTART;
-  msgs[1].buffer    = (uint8_t *)buffer;
+  msgs[1].buffer    = (FAR uint8_t *)buffer;
   msgs[1].length    = len;
 
   return I2C_TRANSFER(eedev->i2c, msgs, 2);
-}
-
-/****************************************************************************
- * Name: ee24xx_semtake
- *
- * Acquire a resource to access the device.
- * The purpose of the semaphore is to block tasks that try to access the
- * EEPROM while another task is actively using it.
- *
- ****************************************************************************/
-
-static int ee24xx_semtake(FAR struct ee24xx_dev_s *eedev)
-{
-  return nxsem_wait_uninterruptible(&eedev->sem);
-}
-
-/****************************************************************************
- * Name: ee24xx_semgive
- *
- * Release a resource to access the device.
- *
- ****************************************************************************/
-
-static inline void ee24xx_semgive(FAR struct ee24xx_dev_s *eedev)
-{
-  nxsem_post(&eedev->sem);
 }
 
 /****************************************************************************
@@ -388,10 +347,10 @@ static int ee24xx_open(FAR struct file *filep)
   FAR struct ee24xx_dev_s *eedev;
   int ret = OK;
 
-  DEBUGASSERT(inode && inode->i_private);
-  eedev = (FAR struct ee24xx_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  eedev = inode->i_private;
 
-  ret = ee24xx_semtake(eedev);
+  ret = nxmutex_lock(&eedev->lock);
   if (ret < 0)
     {
       return ret;
@@ -408,7 +367,7 @@ static int ee24xx_open(FAR struct file *filep)
       eedev->refs += 1;
     }
 
-  ee24xx_semgive(eedev);
+  nxmutex_unlock(&eedev->lock);
   return ret;
 }
 
@@ -425,10 +384,10 @@ static int ee24xx_close(FAR struct file *filep)
   FAR struct ee24xx_dev_s *eedev;
   int ret = OK;
 
-  DEBUGASSERT(inode && inode->i_private);
-  eedev = (FAR struct ee24xx_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  eedev = inode->i_private;
 
-  ret = ee24xx_semtake(eedev);
+  ret = nxmutex_lock(&eedev->lock);
   if (ret < 0)
     {
       return ret;
@@ -447,7 +406,7 @@ static int ee24xx_close(FAR struct file *filep)
       eedev->refs -= 1;
     }
 
-  ee24xx_semgive(eedev);
+  nxmutex_unlock(&eedev->lock);
   return ret;
 }
 
@@ -465,10 +424,10 @@ static off_t ee24xx_seek(FAR struct file *filep, off_t offset, int whence)
   int                     ret;
   FAR struct inode        *inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  eedev = (FAR struct ee24xx_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  eedev = inode->i_private;
 
-  ret = ee24xx_semtake(eedev);
+  ret = nxmutex_lock(&eedev->lock);
   if (ret < 0)
     {
       return ret;
@@ -494,7 +453,7 @@ static off_t ee24xx_seek(FAR struct file *filep, off_t offset, int whence)
 
       /* Return EINVAL if the whence argument is invalid */
 
-      ee24xx_semgive(eedev);
+      nxmutex_unlock(&eedev->lock);
       return -EINVAL;
     }
 
@@ -505,7 +464,7 @@ static off_t ee24xx_seek(FAR struct file *filep, off_t offset, int whence)
    *   this point, subsequent reads of data in the gap shall return bytes
    *   with the value 0 until data is actually written into the gap."
    *
-   * We can conform to the first part, but not the second.  But return EINVAL
+   * We can conform to the first part, but not the second. But return -EINVAL
    * if
    *
    *  "...the resulting file offset would be negative for a regular file,
@@ -516,14 +475,14 @@ static off_t ee24xx_seek(FAR struct file *filep, off_t offset, int whence)
     {
       filep->f_pos = newpos;
       ret = newpos;
-      finfo("SEEK newpos %d\n", newpos);
+      finfo("SEEK newpos %" PRIdOFF "\n", newpos);
     }
   else
     {
       ret = -EINVAL;
     }
 
-  ee24xx_semgive(eedev);
+  nxmutex_unlock(&eedev->lock);
   return ret;
 }
 
@@ -541,10 +500,10 @@ static ssize_t ee24xx_read(FAR struct file *filep, FAR char *buffer,
   uint32_t                 addr_hi;
   int                      ret;
 
-  DEBUGASSERT(inode && inode->i_private);
-  eedev = (FAR struct ee24xx_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  eedev = inode->i_private;
 
-  ret = ee24xx_semtake(eedev);
+  ret = nxmutex_lock(&eedev->lock);
   if (ret < 0)
     {
       return ret;
@@ -567,7 +526,7 @@ static ssize_t ee24xx_read(FAR struct file *filep, FAR char *buffer,
 
   /* Write data address */
 
-  finfo("READ %d bytes at pos %d\n", len, filep->f_pos);
+  finfo("READ %zu bytes at pos %" PRIdOFF "\n", len, filep->f_pos);
 
   addr_hi           = (filep->f_pos >> (eedev->addrlen << 3));
 
@@ -586,7 +545,7 @@ static ssize_t ee24xx_read(FAR struct file *filep, FAR char *buffer,
   msgs[1].frequency = msgs[0].frequency;
   msgs[1].addr      = msgs[0].addr;
   msgs[1].flags     = I2C_M_READ;
-  msgs[1].buffer    = (uint8_t *)buffer;
+  msgs[1].buffer    = (FAR uint8_t *)buffer;
   msgs[1].length    = len;
 
   ret = I2C_TRANSFER(eedev->i2c, msgs, 2);
@@ -602,7 +561,7 @@ static ssize_t ee24xx_read(FAR struct file *filep, FAR char *buffer,
   filep->f_pos += len;
 
 done:
-  ee24xx_semgive(eedev);
+  nxmutex_unlock(&eedev->lock);
   return ret;
 }
 
@@ -620,10 +579,10 @@ static ssize_t at24cs_read_uuid(FAR struct file *filep, FAR char *buffer,
   uint8_t                  regindx;
   int                      ret;
 
-  DEBUGASSERT(inode && inode->i_private);
-  eedev = (FAR struct ee24xx_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  eedev = inode->i_private;
 
-  ret = ee24xx_semtake(eedev);
+  ret = nxmutex_lock(&eedev->lock);
   if (ret < 0)
     {
       return ret;
@@ -661,7 +620,7 @@ static ssize_t at24cs_read_uuid(FAR struct file *filep, FAR char *buffer,
   msgs[1].frequency = msgs[0].frequency;
   msgs[1].addr      = msgs[0].addr;
   msgs[1].flags     = I2C_M_READ;
-  msgs[1].buffer    = (uint8_t *)buffer;
+  msgs[1].buffer    = (FAR uint8_t *)buffer;
   msgs[1].length    = len;
 
   ret = I2C_TRANSFER(eedev->i2c, msgs, 2);
@@ -677,7 +636,7 @@ static ssize_t at24cs_read_uuid(FAR struct file *filep, FAR char *buffer,
   filep->f_pos += len;
 
 done:
-  ee24xx_semgive(eedev);
+  nxmutex_unlock(&eedev->lock);
   return ret;
 }
 #endif
@@ -696,8 +655,8 @@ static ssize_t ee24xx_write(FAR struct file *filep, FAR const char *buffer,
   int                      ret   = -EACCES;
   int                      savelen;
 
-  DEBUGASSERT(inode && inode->i_private);
-  eedev = (FAR struct ee24xx_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  eedev = inode->i_private;
 
   if (eedev->readonly)
     {
@@ -711,19 +670,19 @@ static ssize_t ee24xx_write(FAR struct file *filep, FAR const char *buffer,
       return -EFBIG;
     }
 
-  finfo("Entering with len=%d\n", len);
+  finfo("Entering with len=%zu\n", len);
 
   /* Clamp len to avoid crossing the end of the memory */
 
   if ((len + filep->f_pos) > eedev->size)
     {
       len = eedev->size - filep->f_pos;
-      finfo("Len clamped to %d\n", len);
+      finfo("Len clamped to %zu\n", len);
     }
 
   savelen = len; /* save number of bytes written */
 
-  ret = ee24xx_semtake(eedev);
+  ret = nxmutex_lock(&eedev->lock);
   if (ret < 0)
     {
       return ret;
@@ -747,7 +706,7 @@ static ssize_t ee24xx_write(FAR struct file *filep, FAR const char *buffer,
 
   if (pageoff > 0)
     {
-      finfo("First %d unaligned bytes at %d (pageoff %d)\n",
+      finfo("First %zu unaligned bytes at %" PRIdOFF " (pageoff %d)\n",
             cnt, filep->f_pos, pageoff);
 
       ret = ee24xx_writepage(eedev, filep->f_pos, buffer, cnt);
@@ -779,7 +738,8 @@ static ssize_t ee24xx_write(FAR struct file *filep, FAR const char *buffer,
           cnt = eedev->pgsize;
         }
 
-      finfo("Aligned page write for %d bytes at %d\n", cnt, filep->f_pos);
+      finfo("Aligned page write for %zu bytes at %" PRIdOFF "\n",
+            cnt, filep->f_pos);
 
       ret = ee24xx_writepage(eedev, filep->f_pos, buffer, cnt);
       if (ret < 0)
@@ -803,7 +763,7 @@ static ssize_t ee24xx_write(FAR struct file *filep, FAR const char *buffer,
   ret = savelen;
 
 done:
-  ee24xx_semgive(eedev);
+  nxmutex_unlock(&eedev->lock);
   return ret;
 }
 
@@ -821,14 +781,14 @@ static int ee24xx_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   FAR struct inode        *inode = filep->f_inode;
   int                      ret   = 0;
 
-  DEBUGASSERT(inode && inode->i_private);
-  eedev = (FAR struct ee24xx_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  eedev = inode->i_private;
   UNUSED(eedev);
 
   switch (cmd)
     {
       default:
-        ret = -EINVAL;
+        ret = -ENOTTY;
     }
 
   return ret;
@@ -853,6 +813,7 @@ int ee24xx_initialize(FAR struct i2c_master_s *bus, uint8_t devaddr,
   FAR struct ee24xx_dev_s *eedev;
 #ifdef CONFIG_AT24CS_UUID
   FAR char                *uuidname;
+  size_t                  size;
   int                     ret;
 #endif
 
@@ -871,7 +832,7 @@ int ee24xx_initialize(FAR struct i2c_master_s *bus, uint8_t devaddr,
       return -ENOMEM;
     }
 
-  nxsem_init(&eedev->sem, 0, 1);
+  nxmutex_init(&eedev->lock);
 
   eedev->freq     = CONFIG_EE24XX_FREQUENCY;
   eedev->i2c      = bus;
@@ -914,12 +875,13 @@ int ee24xx_initialize(FAR struct i2c_master_s *bus, uint8_t devaddr,
         }
     }
 
-  finfo("EEPROM device %s, %d bytes, %d per page, addrlen %d, %s\n",
+  finfo("EEPROM device %s, %" PRIu32 " bytes, %d per page, addrlen %d, %s\n",
         devname, eedev->size, eedev->pgsize, eedev->addrlen,
         eedev->readonly ? "readonly" : "");
 
 #ifdef CONFIG_AT24CS_UUID
-  uuidname = kmm_zalloc(strlen(devname) + 8);
+  size = strlen(devname) + 8;
+  uuidname = kmm_zalloc(size);
   if (!uuidname)
     {
       return -ENOMEM;
@@ -929,9 +891,9 @@ int ee24xx_initialize(FAR struct i2c_master_s *bus, uint8_t devaddr,
    * EEPROM chip, but with the ".uuid" suffix
    */
 
-  strcpy(uuidname, devname);
-  strcat(uuidname, ".uuid");
-  ret = register_driver(uuidname, &at24cs_uuid_fops, 0444, eedev);
+  strlcpy(uuidname, devname, size);
+  strlcat(uuidname, ".uuid", size);
+  ret = register_driver(uuidname, &g_at24cs_uuid_fops, 0444, eedev);
 
   kmm_free(uuidname);
 
@@ -942,5 +904,5 @@ int ee24xx_initialize(FAR struct i2c_master_s *bus, uint8_t devaddr,
     }
 #endif
 
-  return register_driver(devname, &ee24xx_fops, 0666, eedev);
+  return register_driver(devname, &g_ee24xx_fops, 0666, eedev);
 }

@@ -1,36 +1,22 @@
 /****************************************************************************
  * include/nuttx/cancelpt.h
- * Definitions related to cancellation points
  *
- *   Copyright (C) 2016-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -48,20 +34,20 @@
  * clock_nanosleep() msgsnd()                 read()          sigwaitinfo()
  * close()           msync()                  readv()         sleep()
  * connect()         nanosleep()              recv()          system()
- * creat()           open()                   recvfrom()      tcdrain()
- * fcntl()           pause()                  recvmsg()       usleep()
- * fdatasync()       poll()                   select()        wait()
- * fsync()           pread()                  sem_timedwait() waitid()
- * getmsg()          pselect()                sem_wait()      waitpid()
- * getpmsg()         pthread_cond_timedwait() send()          write()
- * lockf()           pthread_cond_wait()      sendmsg()       writev()
- * mq_receive()      pthread_join()           sendto()
+ * creat()           open()                   recvfrom()      syncfs()
+ * fcntl()           pause()                  recvmsg()       tcdrain()
+ * fdatasync()       poll()                   select()        usleep()
+ * fsync()           pread()                  sem_timedwait() wait()
+ * getmsg()          pselect()                sem_wait()      waitid()
+ * getpmsg()         pthread_cond_timedwait() send()          waitpid()
+ * lockf()           pthread_cond_wait()      sendmsg()       write()
+ * mq_receive()      pthread_join()           sendto()        writev()
  * mq_send()         pthread_testcancel()     sigpause()
  * mq_timedreceive() putmsg()                 sigsuspend()
  *
  * Each of the above function must call enter_cancellation_point() on entry
- * in order to establish the cancellation point and leave_cancellation_point()
- * on exit.  These functions are described below.
+ * in order to establish the cancellation point and
+ * leave_cancellation_point() on exit. These functions are described below.
  *
  ****************************************************************************/
 
@@ -72,6 +58,14 @@
 #include <nuttx/config.h>
 
 #include <stdbool.h>
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#define CANCEL_FLAG_NONCANCELABLE   (1 << 0) /* Pthread is non-cancelable */
+#define CANCEL_FLAG_CANCEL_ASYNC    (1 << 1) /* Async (vs deferred) cancellation type */
+#define CANCEL_FLAG_CANCEL_PENDING  (1 << 2) /* Pthread cancel is pending */
 
 /****************************************************************************
  * Public Function Prototypes

@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/nrf52/nrf52_i2c.c
  *
- *   Copyright (C) 2020 Gregory Nutt. All rights reserved.
- *   Author: Mateusz Szafoni <raiden00@railab.me>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,28 +26,22 @@
 
 #include <nuttx/config.h>
 
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
+#include <nuttx/kmalloc.h>
 #include <arch/board/board.h>
 
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "nrf52_gpio.h"
 #include "nrf52_i2c.h"
 
 #include "hardware/nrf52_twi.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-/* I2C errors not functional yet */
-
-#undef CONFIG_NRF52_I2C_ERRORS
+#include "hardware/nrf52_utils.h"
 
 /****************************************************************************
  * Private Types
@@ -82,13 +63,18 @@ struct nrf52_i2c_priv_s
   uint8_t                 msgc;     /* Message count */
   struct i2c_msg_s       *msgv;     /* Message list */
   uint8_t                *ptr;      /* Current message buffer */
-  uint32_t                freq;     /* Current I2C frequency */
-  int                     dcnt;     /* Current message length */
-  uint16_t                flags;    /* Current message flags */
-  uint16_t                addr;     /* Current I2C address */
-  sem_t                   sem_excl; /* Mutual exclusion semaphore */
+#ifdef CONFIG_NRF52_I2C_MASTER_COPY_BUF_SIZE
+  /* Static buffer used for continued messages */
+
+  uint8_t                 copy_buf[CONFIG_NRF52_I2C_MASTER_COPY_BUF_SIZE];
+#endif
+  uint32_t                freq;      /* Current I2C frequency */
+  int                     dcnt;      /* Current message length */
+  uint16_t                flags;     /* Current message flags */
+  uint16_t                addr;      /* Current I2C address */
+  mutex_t                 lock;      /* Mutual exclusion mutex */
 #ifndef CONFIG_I2C_POLLED
-  sem_t sem_isr;                    /* Interrupt wait semaphore */
+  sem_t                   sem_isr;   /* Interrupt wait semaphore */
 #endif
 };
 
@@ -96,22 +82,22 @@ struct nrf52_i2c_priv_s
  * Private Function Prototypes
  ****************************************************************************/
 
-static inline void nrf52_i2c_putreg(FAR struct nrf52_i2c_priv_s *priv,
+static inline void nrf52_i2c_putreg(struct nrf52_i2c_priv_s *priv,
                                     uint32_t offset,
                                     uint32_t value);
-static inline uint32_t nrf52_i2c_getreg(FAR struct nrf52_i2c_priv_s *priv,
+static inline uint32_t nrf52_i2c_getreg(struct nrf52_i2c_priv_s *priv,
                                         uint32_t offset);
-static int nrf52_i2c_transfer(FAR struct i2c_master_s *dev,
-                              FAR struct i2c_msg_s *msgs,
+static int nrf52_i2c_transfer(struct i2c_master_s *dev,
+                              struct i2c_msg_s *msgs,
                               int count);
 #ifdef CONFIG_I2C_RESET
-static int nrf52_i2c_reset(FAR struct i2c_master_s *dev);
+static int nrf52_i2c_reset(struct i2c_master_s *dev);
 #endif
 #ifndef CONFIG_I2C_POLLED
-static int nrf52_i2c_isr(int irq, void *context, FAR void *arg);
+static int nrf52_i2c_isr(int irq, void *context, void *arg);
 #endif
-static int nrf52_i2c_deinit(FAR struct nrf52_i2c_priv_s *priv);
-static int nrf52_i2c_init(FAR struct nrf52_i2c_priv_s *priv);
+static int nrf52_i2c_deinit(struct nrf52_i2c_priv_s *priv);
+static int nrf52_i2c_init(struct nrf52_i2c_priv_s *priv);
 
 /****************************************************************************
  * Private Data
@@ -138,7 +124,9 @@ static struct nrf52_i2c_priv_s g_nrf52_i2c0_priv =
   .scl_pin = BOARD_I2C0_SCL_PIN,
   .sda_pin = BOARD_I2C0_SDA_PIN,
   .refs    = 0,
+  .lock    = NXMUTEX_INITIALIZER,
 #ifndef CONFIG_I2C_POLLED
+  .sem_isr = SEM_INITIALIZER(0),
   .irq     = NRF52_IRQ_SPI_TWI_0,
 #endif
   .msgc    = 0,
@@ -157,11 +145,13 @@ static struct nrf52_i2c_priv_s g_nrf52_i2c0_priv =
 static struct nrf52_i2c_priv_s g_nrf52_i2c1_priv =
 {
   .ops     = &g_nrf52_i2c_ops,
-  .base    = NRF52_TWIM0_BASE,
+  .base    = NRF52_TWIM1_BASE,
   .scl_pin = BOARD_I2C1_SCL_PIN,
   .sda_pin = BOARD_I2C1_SDA_PIN,
   .refs    = 0,
+  .lock    = NXMUTEX_INITIALIZER,
 #ifndef CONFIG_I2C_POLLED
+  .sem_isr = SEM_INITIALIZER(0),
   .irq     = NRF52_IRQ_SPI_TWI_1,
 #endif
   .msgc    = 0,
@@ -186,7 +176,7 @@ static struct nrf52_i2c_priv_s g_nrf52_i2c1_priv =
  *
  ****************************************************************************/
 
-static inline void nrf52_i2c_putreg(FAR struct nrf52_i2c_priv_s *priv,
+static inline void nrf52_i2c_putreg(struct nrf52_i2c_priv_s *priv,
                                     uint32_t offset,
                                     uint32_t value)
 {
@@ -201,7 +191,7 @@ static inline void nrf52_i2c_putreg(FAR struct nrf52_i2c_priv_s *priv,
  *
  ****************************************************************************/
 
-static inline uint32_t nrf52_i2c_getreg(FAR struct nrf52_i2c_priv_s *priv,
+static inline uint32_t nrf52_i2c_getreg(struct nrf52_i2c_priv_s *priv,
                                         uint32_t offset)
 {
   return getreg32(priv->base + offset);
@@ -215,15 +205,18 @@ static inline uint32_t nrf52_i2c_getreg(FAR struct nrf52_i2c_priv_s *priv,
  *
  ****************************************************************************/
 
-static int nrf52_i2c_transfer(FAR struct i2c_master_s *dev,
-                              FAR struct i2c_msg_s *msgs,
+static int nrf52_i2c_transfer(struct i2c_master_s *dev,
+                              struct i2c_msg_s *msgs,
                               int count)
 {
-  FAR struct nrf52_i2c_priv_s *priv = (FAR struct nrf52_i2c_priv_s *)dev;
+  struct nrf52_i2c_priv_s *priv = (struct nrf52_i2c_priv_s *)dev;
   uint32_t regval = 0;
   int      ret = OK;
+#ifndef CONFIG_NRF52_I2C_MASTER_DISABLE_NOSTART
+  uint8_t *pack_buf = NULL;
+#endif
 
-  ret = nxsem_wait(&priv->sem_excl);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -306,15 +299,75 @@ static int nrf52_i2c_transfer(FAR struct i2c_master_s *dev,
 
       if ((priv->flags & I2C_M_READ) == 0)
         {
+#ifndef CONFIG_NRF52_I2C_MASTER_DISABLE_NOSTART
+          /* Check if we need to combine messages */
+
+          if (priv->msgc > 1)
+            {
+              if (priv->msgv[1].flags & I2C_M_NOSTART)
+                {
+                  /* More than 2 messages not supported */
+
+                  DEBUGASSERT(priv->msgc < 3);
+
+                  /* Combine buffers */
+
+                  if ((priv->msgv[0].length +
+                       priv->msgv[1].length) <=
+                      CONFIG_NRF52_I2C_MASTER_COPY_BUF_SIZE)
+                    {
+                      pack_buf = priv->copy_buf;
+                    }
+                  else
+                    {
+                      pack_buf = kmm_malloc(priv->msgv[0].length +
+                                            priv->msgv[1].length);
+                      if (pack_buf == NULL)
+                        {
+                          return -ENOMEM;
+                        }
+                    }
+
+                  /* Combine messages */
+
+                  memcpy(pack_buf, priv->msgv[0].buffer,
+                         priv->msgv[0].length);
+                  memcpy(pack_buf + priv->msgv[0].length,
+                         priv->msgv[1].buffer, priv->msgv[1].length);
+
+                  /* Use new buffer to transmit data */
+
+                  priv->ptr  = pack_buf;
+                  priv->dcnt = priv->msgv[0].length + priv->msgv[1].length;
+
+                  /* Next message */
+
+                  priv->msgc -= 1;
+                  priv->msgv += 1;
+                }
+            }
+#else
+          if (priv->msgc > 1)
+            {
+              if (priv->msgv[1].flags & I2C_M_NOSTART)
+                {
+                  /* Not supported */
+
+                  DEBUGPANIC();
+                }
+            }
+#endif
+
           /* Write TXD data pointer */
 
           regval = (uint32_t)priv->ptr;
+          DEBUGASSERT(nrf52_easydma_valid(regval));
           nrf52_i2c_putreg(priv, NRF52_TWIM_TXDPTR_OFFSET, regval);
 
           /* Write number of bytes in TXD buffer */
 
           regval = priv->dcnt;
-          nrf52_i2c_putreg(priv, NRF52_TWIM_TXMAXCNT_OFFSET, regval);
+          nrf52_i2c_putreg(priv, NRF52_TWIM_TXDMAXCNT_OFFSET, regval);
 
           /* Start TX sequence */
 
@@ -325,6 +378,25 @@ static int nrf52_i2c_transfer(FAR struct i2c_master_s *dev,
 #ifdef CONFIG_I2C_POLLED
           while (nrf52_i2c_getreg(priv,
                                   NRF52_TWIM_EVENTS_LASTTX_OFFSET) != 1);
+          while (1)
+            {
+              regval = nrf52_i2c_getreg(priv,
+                                        NRF52_TWIM_ERRORSRC_OFFSET) & 0x7;
+              if (regval != 0)
+                {
+                  i2cerr("Error SRC: 0x%08" PRIx32 "\n", regval);
+                  ret = -1;
+                  nrf52_i2c_putreg(priv,
+                                  NRF52_TWIM_ERRORSRC_OFFSET, 0x7);
+                  goto errout;
+                }
+
+              if (nrf52_i2c_getreg(priv,
+                                  NRF52_TWIM_EVENTS_LASTTX_OFFSET) == 1)
+                {
+                  break;
+                }
+            }
 
           /* Clear event */
 
@@ -334,6 +406,7 @@ static int nrf52_i2c_transfer(FAR struct i2c_master_s *dev,
 
           if (priv->status < 0)
             {
+              ret = priv->status;
               goto errout;
             }
 #endif
@@ -343,6 +416,7 @@ static int nrf52_i2c_transfer(FAR struct i2c_master_s *dev,
           /* Write RXD data pointer */
 
           regval = (uint32_t)priv->ptr;
+          DEBUGASSERT(nrf52_easydma_valid(regval));
           nrf52_i2c_putreg(priv, NRF52_TWIM_RXDPTR_OFFSET, regval);
 
           /* Write number of bytes in RXD buffer */
@@ -357,8 +431,25 @@ static int nrf52_i2c_transfer(FAR struct i2c_master_s *dev,
           /* Wait for last RX done */
 
 #ifdef CONFIG_I2C_POLLED
-          while (nrf52_i2c_getreg(priv,
-                                  NRF52_TWIM_EVENTS_LASTRX_OFFSET) != 1);
+        while (1)
+          {
+            regval = nrf52_i2c_getreg(priv,
+                                      NRF52_TWIM_ERRORSRC_OFFSET) & 0x7;
+            if (regval != 0)
+              {
+                i2cerr("Error SRC: 0x%08" PRIx32 "\n", regval);
+                ret = -1;
+                nrf52_i2c_putreg(priv,
+                                 NRF52_TWIM_ERRORSRC_OFFSET, 0x7);
+                goto errout;
+              }
+
+            if (nrf52_i2c_getreg(priv,
+                                 NRF52_TWIM_EVENTS_LASTRX_OFFSET) == 1)
+              {
+                break;
+              }
+          }
 
           /* Clear event */
 
@@ -368,6 +459,7 @@ static int nrf52_i2c_transfer(FAR struct i2c_master_s *dev,
 
           if (priv->status < 0)
             {
+              ret = priv->status;
               goto errout;
             }
 #endif
@@ -387,8 +479,25 @@ static int nrf52_i2c_transfer(FAR struct i2c_master_s *dev,
   /* Wait for stop event */
 
 #ifdef CONFIG_I2C_POLLED
-  while (nrf52_i2c_getreg(priv,
-                          NRF52_TWIM_EVENTS_STOPPED_OFFSET) != 1);
+  while (1)
+    {
+      regval = nrf52_i2c_getreg(priv,
+                                NRF52_TWIM_ERRORSRC_OFFSET) & 0x7;
+      if (regval != 0)
+        {
+          i2cerr("Error SRC: 0x%08" PRIx32 "\n", regval);
+          ret = -1;
+          nrf52_i2c_putreg(priv,
+                           NRF52_TWIM_ERRORSRC_OFFSET, 0x7);
+          goto errout;
+        }
+
+      if (nrf52_i2c_getreg(priv,
+                           NRF52_TWIM_EVENTS_STOPPED_OFFSET) == 1)
+        {
+          break;
+        }
+    }
 
   /* Clear event */
 
@@ -398,12 +507,20 @@ static int nrf52_i2c_transfer(FAR struct i2c_master_s *dev,
 
   if (priv->status < 0)
     {
+      ret = priv->status;
       goto errout;
     }
 #endif
 
 errout:
-  nxsem_post(&priv->sem_excl);
+#ifndef CONFIG_NRF52_I2C_MASTER_DISABLE_NOSTART
+  if (pack_buf != NULL && pack_buf != priv->copy_buf)
+    {
+      kmm_free(pack_buf);
+    }
+#endif
+
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -422,7 +539,7 @@ errout:
  ****************************************************************************/
 
 #ifdef CONFIG_I2C_RESET
-static int nrf52_i2c_reset(FAR struct i2c_master_s *dev)
+static int nrf52_i2c_reset(struct i2c_master_s *dev)
 {
 #error not implemented
 }
@@ -437,9 +554,10 @@ static int nrf52_i2c_reset(FAR struct i2c_master_s *dev)
  ****************************************************************************/
 
 #ifndef CONFIG_I2C_POLLED
-static int nrf52_i2c_isr(int irq, void *context, FAR void *arg)
+static int nrf52_i2c_isr(int irq, void *context, void *arg)
 {
-  FAR struct nrf52_i2c_priv_s *priv = (FAR struct nrf52_i2c_priv_s *)arg;
+  struct nrf52_i2c_priv_s *priv = (struct nrf52_i2c_priv_s *)arg;
+  uint32_t                 regval = 0;
 
   /* Reset I2C status */
 
@@ -493,14 +611,26 @@ static int nrf52_i2c_isr(int irq, void *context, FAR void *arg)
       nrf52_i2c_putreg(priv, NRF52_TWIM_EVENTS_STOPPED_OFFSET, 0);
     }
 
-#ifdef CONFIG_NRF52_I2C_ERRORS
   if (nrf52_i2c_getreg(priv, NRF52_TWIM_EVENTS_ERROR_OFFSET) == 1)
     {
-      i2cerr("I2C ERROR\n");
+      regval = nrf52_i2c_getreg(priv, NRF52_TWIM_ERRORSRC_OFFSET) & 0x7;
+
+      i2cerr("Error SRC: 0x%08" PRIx32 "\n", regval);
 
       /* Set ERROR status */
 
-      priv->status = ERROR;
+      if (regval & TWIM_ERRORSRC_OVERRUN)
+        {
+          /* Overrun error */
+
+          priv->status = -EIO;
+        }
+      else
+        {
+          /* NACK */
+
+          priv->status = -ENXIO;
+        }
 
       /* ERROR event */
 
@@ -509,8 +639,8 @@ static int nrf52_i2c_isr(int irq, void *context, FAR void *arg)
       /* Clear event */
 
       nrf52_i2c_putreg(priv, NRF52_TWIM_EVENTS_ERROR_OFFSET, 0);
+      nrf52_i2c_putreg(priv, NRF52_TWIM_ERRORSRC_OFFSET, 0x7);
     }
-#endif
 
   return OK;
 }
@@ -524,11 +654,15 @@ static int nrf52_i2c_isr(int irq, void *context, FAR void *arg)
  *
  ****************************************************************************/
 
-static int nrf52_i2c_init(FAR struct nrf52_i2c_priv_s *priv)
+static int nrf52_i2c_init(struct nrf52_i2c_priv_s *priv)
 {
   uint32_t regval = 0;
   int pin         = 0;
   int port        = 0;
+
+  /* Disable TWI interface */
+
+  nrf52_i2c_putreg(priv, NRF52_TWIM_ENABLE_OFFSET, TWIM_ENABLE_DIS);
 
   /* Configure SCL and SDA pins */
 
@@ -555,69 +689,19 @@ static int nrf52_i2c_init(FAR struct nrf52_i2c_priv_s *priv)
 
   /* Enable TWI interface */
 
-  nrf52_i2c_putreg(priv, NRF52_TWIS_ENABLE_OFFSET, TWIM_ENABLE_EN);
+  nrf52_i2c_putreg(priv, NRF52_TWIM_ENABLE_OFFSET, TWIM_ENABLE_EN);
 
 #ifndef CONFIG_I2C_POLLED
   /* Enable I2C interrupts */
 
-#ifdef CONFIG_NRF52_I2C_ERRORS
   regval = (TWIM_INT_LASTRX | TWIM_INT_LASTTX | TWIM_INT_STOPPED |
             TWIM_INT_ERROR);
-#else
-  regval = (TWIM_INT_LASTRX | TWIM_INT_LASTTX | TWIM_INT_STOPPED);
-#endif
   nrf52_i2c_putreg(priv, NRF52_TWIM_INTEN_OFFSET, regval);
 
   /* Attach error and event interrupts to the ISRs */
 
   irq_attach(priv->irq, nrf52_i2c_isr, priv);
   up_enable_irq(priv->irq);
-#endif
-
-  return OK;
-}
-
-/****************************************************************************
- * Name: nrf52_i2c_sem_init
- *
- * Description:
- *   Initialize semaphores
- *
- ****************************************************************************/
-
-static int nrf52_i2c_sem_init(FAR struct nrf52_i2c_priv_s *priv)
-{
-  /* Initialize semaphores */
-
-  nxsem_init(&priv->sem_excl, 0, 1);
-
-#ifndef CONFIG_I2C_POLLED
-  /* This semaphore is used for signaling and, hence, should not have
-   * priority inheritance enabled.
-   */
-
-  nxsem_init(&priv->sem_isr, 0, 0);
-  nxsem_setprotocol(&priv->sem_isr, SEM_PRIO_NONE);
-#endif
-
-  return OK;
-}
-
-/****************************************************************************
- * Name: nrf52_i2c_sem_destroy
- *
- * Description:
- *   Destroy semaphores.
- *
- ****************************************************************************/
-
-static int nrf52_i2c_sem_destroy(FAR struct nrf52_i2c_priv_s *priv)
-{
-  /* Release unused resources */
-
-  nxsem_destroy(&priv->sem_excl);
-#ifndef CONFIG_I2C_POLLED
-  nxsem_destroy(&priv->sem_isr);
 #endif
 
   return OK;
@@ -631,11 +715,11 @@ static int nrf52_i2c_sem_destroy(FAR struct nrf52_i2c_priv_s *priv)
  *
  ****************************************************************************/
 
-static int nrf52_i2c_deinit(FAR struct nrf52_i2c_priv_s *priv)
+static int nrf52_i2c_deinit(struct nrf52_i2c_priv_s *priv)
 {
-  /* Enable TWI interface */
+  /* Disable TWI interface */
 
-  nrf52_i2c_putreg(priv, TWIM_ENABLE_DIS, NRF52_TWIS_ENABLE_OFFSET);
+  nrf52_i2c_putreg(priv, NRF52_TWIM_ENABLE_OFFSET, TWIM_ENABLE_DIS);
 
   /* Unconfigure GPIO pins */
 
@@ -669,10 +753,9 @@ static int nrf52_i2c_deinit(FAR struct nrf52_i2c_priv_s *priv)
  *
  ****************************************************************************/
 
-FAR struct i2c_master_s *nrf52_i2cbus_initialize(int port)
+struct i2c_master_s *nrf52_i2cbus_initialize(int port)
 {
-  FAR struct nrf52_i2c_priv_s *priv = NULL;
-  irqstate_t flags;
+  struct nrf52_i2c_priv_s *priv = NULL;
 
   i2cinfo("I2C INITIALIZE port=%d\n", port);
 
@@ -683,7 +766,7 @@ FAR struct i2c_master_s *nrf52_i2cbus_initialize(int port)
 #ifdef CONFIG_NRF52_I2C0_MASTER
       case 0:
         {
-          priv = (FAR struct nrf52_i2c_priv_s *)&g_nrf52_i2c0_priv;
+          priv = (struct nrf52_i2c_priv_s *)&g_nrf52_i2c0_priv;
           break;
         }
 #endif
@@ -691,7 +774,7 @@ FAR struct i2c_master_s *nrf52_i2cbus_initialize(int port)
 #ifdef CONFIG_NRF52_I2C1_MASTER
       case 1:
         {
-          priv = (FAR struct nrf52_i2c_priv_s *)&g_nrf52_i2c1_priv;
+          priv = (struct nrf52_i2c_priv_s *)&g_nrf52_i2c1_priv;
           break;
         }
 #endif
@@ -706,21 +789,15 @@ FAR struct i2c_master_s *nrf52_i2cbus_initialize(int port)
    * power-up hardware and configure GPIOs.
    */
 
-  flags = enter_critical_section();
-
+  nxmutex_lock(&priv->lock);
   if (priv->refs++ == 0)
     {
-      /* Initialize sempaphores */
-
-      nrf52_i2c_sem_init(priv);
-
       /* Initialize I2C */
 
       nrf52_i2c_init(priv);
     }
 
-  leave_critical_section(flags);
-
+  nxmutex_unlock(&priv->lock);
   return (struct i2c_master_s *)priv;
 }
 
@@ -732,10 +809,9 @@ FAR struct i2c_master_s *nrf52_i2cbus_initialize(int port)
  *
  ****************************************************************************/
 
-int nrf52_i2cbus_uninitialize(FAR struct i2c_master_s *dev)
+int nrf52_i2cbus_uninitialize(struct i2c_master_s *dev)
 {
-  FAR struct nrf52_i2c_priv_s *priv = (struct nrf52_i2c_priv_s *)dev;
-  irqstate_t flags;
+  struct nrf52_i2c_priv_s *priv = (struct nrf52_i2c_priv_s *)dev;
 
   DEBUGASSERT(dev);
 
@@ -746,23 +822,17 @@ int nrf52_i2cbus_uninitialize(FAR struct i2c_master_s *dev)
       return ERROR;
     }
 
-  flags = enter_critical_section();
-
+  nxmutex_lock(&priv->lock);
   if (--priv->refs)
     {
-      leave_critical_section(flags);
+      nxmutex_unlock(&priv->lock);
       return OK;
     }
-
-  leave_critical_section(flags);
 
   /* Disable power and other HW resource (GPIO's) */
 
   nrf52_i2c_deinit(priv);
-
-  /* Release semaphores */
-
-  nrf52_i2c_sem_destroy(priv);
+  nxmutex_unlock(&priv->lock);
 
   return OK;
 }

@@ -1,6 +1,8 @@
 /****************************************************************************
  * sched/wqueue/kwork_queue.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -25,13 +27,13 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
-#include <queue.h>
 #include <assert.h>
 #include <errno.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/clock.h>
+#include <nuttx/list.h>
 #include <nuttx/wqueue.h>
 
 #include "wqueue/wqueue.h"
@@ -39,104 +41,24 @@
 #ifdef CONFIG_SCHED_WORKQUEUE
 
 /****************************************************************************
- * Private Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: work_qqueue
- *
- * Description:
- *   Queue work to be performed at a later time.  All queued work will be
- *   performed on the worker thread of execution (not the caller's).
- *
- *   The work structure is allocated by caller, but completely managed by
- *   the work queue logic.  The caller should never modify the contents of
- *   the work queue structure; the caller should not call work_qqueue()
- *   again until either (1) the previous work has been performed and removed
- *   from the queue, or (2) work_cancel() has been called to cancel the work
- *   and remove it from the work queue.
- *
- * Input Parameters:
- *   qid    - The work queue ID (index)
- *   work   - The work structure to queue
- *   worker - The worker callback to be invoked.  The callback will invoked
- *            on the worker thread of execution.
- *   arg    - The argument that will be passed to the workder callback when
- *            int is invoked.
- *   delay  - Delay (in clock ticks) from the time queue until the worker
- *            is invoked. Zero means to perform the work immediately.
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-static void work_qqueue(FAR struct kwork_wqueue_s *wqueue,
-                        FAR struct work_s *work, worker_t worker,
-                        FAR void *arg, clock_t delay)
-{
-  irqstate_t flags;
-
-  DEBUGASSERT(work != NULL && worker != NULL);
-
-  /* Interrupts are disabled so that this logic can be called from with
-   * task logic or ifrom nterrupt handling logic.
-   */
-
-  flags = enter_critical_section();
-
-  /* Is there already pending work? */
-
-  if (work->worker != NULL)
-    {
-      /* Remove the entry from the work queue.  It will re requeued at the
-       * end of the work queue.
-       */
-
-      dq_rem((FAR dq_entry_t *)work, &wqueue->q);
-    }
-
-  /* Initialize the work structure. */
-
-  work->worker = worker;           /* Work callback. non-NULL means queued */
-  work->arg    = arg;              /* Callback argument */
-  work->delay  = delay;            /* Delay until work performed */
-
-  /* Now, time-tag that entry and put it in the work queue */
-
-  work->qtime  = clock_systimer(); /* Time work queued */
-
-  dq_addlast((FAR dq_entry_t *)work, &wqueue->q);
-
-  leave_critical_section(flags);
-}
-
-/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: work_queue
+ * Name: work_queue_next/work_queue_next_wq
  *
  * Description:
- *   Queue kernel-mode work to be performed at a later time.  All queued
- *   work will be performed on the worker thread of execution (not the
- *   caller's).
- *
- *   The work structure is allocated and must be initialized to all zero by
- *   the caller.  Otherwise, the work structure is completely managed by the
- *   work queue logic.  The caller should never modify the contents of the
- *   work queue structure directly.  If work_queue() is called before the
- *   previous work as been performed and removed from the queue, then any
- *   pending work will be canceled and lost.
+ *   Queue work to be performed at a later time based on the last expiration
+ *   time. This function must be called in the workqueue callback.
  *
  * Input Parameters:
- *   qid    - The work queue ID (index)
+ *   qid    - The work queue ID (must be HPWORK or LPWORK)
+ *   wqueue - The work queue handle
  *   work   - The work structure to queue
- *   worker - The worker callback to be invoked.  The callback will invoked
- *            on the worker thread of execution.
- *   arg    - The argument that will be passed to the workder callback when
- *            int is invoked.
+ *   worker - The worker callback to be invoked.  The callback will be
+ *            invoked on the worker thread of execution.
+ *   arg    - The argument that will be passed to the worker callback when
+ *            it is invoked.
  *   delay  - Delay (in clock ticks) from the time queue until the worker
  *            is invoked. Zero means to perform the work immediately.
  *
@@ -145,36 +67,166 @@ static void work_qqueue(FAR struct kwork_wqueue_s *wqueue,
  *
  ****************************************************************************/
 
-int work_queue(int qid, FAR struct work_s *work, worker_t worker,
-               FAR void *arg, clock_t delay)
+int work_queue_next_wq(FAR struct kwork_wqueue_s *wqueue,
+                       FAR struct work_s *work, worker_t worker,
+                       FAR void *arg, clock_t delay)
 {
-  /* Queue the new work */
+  irqstate_t flags;
 
-#ifdef CONFIG_SCHED_HPWORK
-  if (qid == HPWORK)
-    {
-      /* Queue high priority work */
-
-      work_qqueue((FAR struct kwork_wqueue_s *)&g_hpwork, work, worker,
-                  arg, delay);
-      return work_signal(HPWORK);
-    }
-  else
-#endif
-#ifdef CONFIG_SCHED_LPWORK
-  if (qid == LPWORK)
-    {
-      /* Queue low priority work */
-
-      work_qqueue((FAR struct kwork_wqueue_s *)&g_lpwork, work, worker,
-                  arg, delay);
-      return work_signal(LPWORK);
-    }
-  else
-#endif
+  if (wqueue == NULL || work == NULL || worker == NULL ||
+      delay > WDOG_MAX_DELAY)
     {
       return -EINVAL;
     }
+
+  /* Initialize the work structure. */
+
+  work->worker = worker; /* Work callback. non-NULL means queued */
+  work->arg    = arg;    /* Callback argument */
+  work->qtime += delay;  /* Expected time based on last expiration time */
+
+  flags = spin_lock_irqsave(&wqueue->lock);
+
+  if (delay)
+    {
+      /* Insert to the pending list of the wqueue. */
+
+      if (work_insert_pending(wqueue, work))
+        {
+          /* Start the timer if the work is the earliest expired work. */
+
+          wd_start_abstick(&wqueue->timer, work->qtime,
+                           work_timer_expired, (wdparm_t)wqueue);
+        }
+    }
+  else
+    {
+      /* Insert to the expired list of the wqueue. */
+
+      list_add_tail(&wqueue->expired, &work->node);
+    }
+
+  spin_unlock_irqrestore(&wqueue->lock, flags);
+
+  if (!delay)
+    {
+      /* Immediately wake up the worker thread. */
+
+      nxsem_post(&wqueue->sem);
+    }
+
+  return 0;
+}
+
+int work_queue_next(int qid, FAR struct work_s *work, worker_t worker,
+                    FAR void *arg, clock_t delay)
+{
+  return work_queue_next_wq(work_qid2wq(qid), work, worker, arg, delay);
+}
+
+/****************************************************************************
+ * Name: work_queue/work_queue_wq
+ *
+ * Description:
+ *   Queue work to be performed at a later time.  All queued work will be
+ *   performed on the worker thread of execution (not the caller's).
+ *
+ *   The work structure is allocated and must be initialized to all zero by
+ *   the caller.  Otherwise, the work structure is completely managed by the
+ *   work queue logic.  The caller should never modify the contents of the
+ *   work queue structure directly.  If work_queue() is called before the
+ *   previous work has been performed and removed from the queue, then any
+ *   pending work will be canceled and lost.
+ *
+ * Input Parameters:
+ *   qid    - The work queue ID (must be HPWORK or LPWORK)
+ *   wqueue - The work queue handle
+ *   work   - The work structure to queue
+ *   worker - The worker callback to be invoked.  The callback will be
+ *            invoked on the worker thread of execution.
+ *   arg    - The argument that will be passed to the worker callback when
+ *            it is invoked.
+ *   delay  - Delay (in clock ticks) from the time queue until the worker
+ *            is invoked. Zero means to perform the work immediately.
+ *
+ * Returned Value:
+ *   Zero on success, a negated errno on failure
+ *
+ ****************************************************************************/
+
+int work_queue_wq(FAR struct kwork_wqueue_s *wqueue,
+                  FAR struct work_s *work, worker_t worker,
+                  FAR void *arg, clock_t delay)
+{
+  irqstate_t flags;
+  clock_t expected;
+  bool retimer;
+
+  if (wqueue == NULL || work == NULL || worker == NULL ||
+      delay > WDOG_MAX_DELAY)
+    {
+      return -EINVAL;
+    }
+
+  expected = clock_delay2abstick(delay);
+
+  /* Interrupts are disabled so that this logic can be called from with
+   * task logic or from interrupt handling logic.
+   */
+
+  flags = spin_lock_irqsave(&wqueue->lock);
+
+  /* Ensure the work has been removed. */
+
+  retimer = work_available(work) ? false : work_remove(wqueue, work);
+
+  /* Initialize the work structure. */
+
+  work->worker = worker;   /* Work callback. non-NULL means queued */
+  work->arg    = arg;      /* Callback argument */
+  work->qtime  = expected; /* Expected time */
+
+  if (delay)
+    {
+      /* Insert to the pending list of the wqueue. */
+
+      if (work_insert_pending(wqueue, work))
+        {
+          /* Start the timer if the work is the earliest expired work. */
+
+          retimer = false;
+          wd_start_abstick(&wqueue->timer, work->qtime,
+                           work_timer_expired, (wdparm_t)wqueue);
+        }
+    }
+  else
+    {
+      /* Insert to the expired list of the wqueue. */
+
+      list_add_tail(&wqueue->expired, &work->node);
+    }
+
+  if (retimer)
+    {
+      work_timer_reset(wqueue);
+    }
+
+  spin_unlock_irqrestore(&wqueue->lock, flags);
+
+  if (!delay)
+    {
+      /* Immediately wake up the worker thread. */
+
+      nxsem_post(&wqueue->sem);
+    }
+
+  return 0;
+}
+
+int work_queue(int qid, FAR struct work_s *work, worker_t worker,
+               FAR void *arg, clock_t delay)
+{
+  return work_queue_wq(work_qid2wq(qid), work, worker, arg, delay);
 }
 
 #endif /* CONFIG_SCHED_WORKQUEUE */

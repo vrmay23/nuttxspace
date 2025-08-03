@@ -1,6 +1,8 @@
 /****************************************************************************
  * net/arp/arp_format.c
  *
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  *   Copyright (C) 2007-2011, 2014 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
@@ -49,18 +51,10 @@
 #include <netinet/in.h>
 
 #include <nuttx/net/netdev.h>
-#include <nuttx/net/arp.h>
 
 #include "arp/arp.h"
 
 #ifdef CONFIG_NET_ARP
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#define ETHBUF  ((struct eth_hdr_s *)&dev->d_buf[0])
-#define ARPBUF  ((struct arp_hdr_s *)&dev->d_buf[ETH_HDRLEN])
 
 /****************************************************************************
  * Public Functions
@@ -83,8 +77,18 @@
 
 void arp_format(FAR struct net_driver_s *dev, in_addr_t ipaddr)
 {
-  FAR struct arp_hdr_s *arp = ARPBUF;
-  FAR struct eth_hdr_s *eth = ETHBUF;
+  FAR struct arp_hdr_s *arp;
+  FAR struct eth_hdr_s *eth;
+
+  /* Prepare device buffer before format arp */
+
+  if (netdev_iob_prepare(dev, false, 0) != OK)
+    {
+      return;
+    }
+
+  arp = ARPBUF;
+  eth = ETHBUF;
 
   /* Construct the ARP packet.  Creating both the Ethernet and ARP headers */
 
@@ -104,6 +108,10 @@ void arp_format(FAR struct net_driver_s *dev, in_addr_t ipaddr)
 
   eth->type        = HTONS(ETHTYPE_ARP);
   dev->d_len       = sizeof(struct arp_hdr_s) + ETH_HDRLEN;
+
+  /* Update device buffer length */
+
+  iob_update_pktlen(dev->d_iob, sizeof(struct arp_hdr_s), false);
 }
 
 #endif /* CONFIG_NET_ARP */

@@ -1,8 +1,9 @@
 /****************************************************************************
  * arch/arm/src/tiva/tiva_adc.h
  *
- *   Copyright (C) 2015 TRD2 Inc. All rights reserved.
- *   Author: Calvin Maguranis <calvin.maguranis@trd2inc.com>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2015 TRD2 Inc. All rights reserved.
+ * SPDX-FileContributor: Calvin Maguranis <calvin.maguranis@trd2inc.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -211,7 +212,7 @@ struct tiva_adc_s;
  *
  ****************************************************************************/
 
-int tiva_adc_lock(FAR struct tiva_adc_s *priv, int sse);
+int tiva_adc_lock(struct tiva_adc_s *priv, int sse);
 
 /****************************************************************************
  * Name: tiva_adc_unlock
@@ -221,7 +222,7 @@ int tiva_adc_lock(FAR struct tiva_adc_s *priv, int sse);
  *
  ****************************************************************************/
 
-void tiva_adc_unlock(FAR struct tiva_adc_s *priv, int sse);
+void tiva_adc_unlock(struct tiva_adc_s *priv, int sse);
 
 #endif /* CONFIG_TIVA_ADC */
 

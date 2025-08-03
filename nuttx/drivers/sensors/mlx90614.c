@@ -1,38 +1,26 @@
 /****************************************************************************
  * drivers/sensors/mlx90614.c
- * Character driver for the Melexis MLX90614 Infrared Thermometer
  *
- *   Copyright (C) 2018 Alan Carvalho de Assis. All rights reserved.
- *   Author: Alan Carvalho de Assis <acassis@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
+
+/* Character driver for the Melexis MLX90614 Infrared Thermometer */
 
 /****************************************************************************
  * Included Files
@@ -40,6 +28,7 @@
 
 #include <nuttx/config.h>
 
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <stdlib.h>
@@ -53,14 +42,10 @@
 #include <nuttx/random.h>
 
 #ifdef CONFIG_MLX90614_CRC
-#include <crc8.h>
+#include <nuttx/crc8.h>
 #endif
 
 #if defined(CONFIG_I2C) && defined(CONFIG_SENSORS_MLX90614)
-
-/****************************************************************************
- * Pre-process Definitions
- ****************************************************************************/
 
 /****************************************************************************
  * Private Types
@@ -79,20 +64,18 @@ struct mlx90614_dev_s
 /* I2C Helpers */
 
 static int     mlx90614_read_word(FAR struct mlx90614_dev_s *priv,
-                  uint8_t cmd, FAR uint16_t *regval);
+                                  uint8_t cmd, FAR uint16_t *regval);
 static int     mlx90614_write_word(FAR struct mlx90614_dev_s *priv,
-                  uint8_t cmd, uint16_t regval);
+                                   uint8_t cmd, uint16_t regval);
 
 /* Character driver methods */
 
-static int     mlx90614_open(FAR struct file *filep);
-static int     mlx90614_close(FAR struct file *filep);
 static ssize_t mlx90614_read(FAR struct file *filep, FAR char *buffer,
-                  size_t buflen);
+                             size_t buflen);
 static ssize_t mlx90614_write(FAR struct file *filep,
                   FAR const char *buffer, size_t buflen);
 static int     mlx90614_ioctl(FAR struct file *filep, int cmd,
-                  unsigned long arg);
+                              unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -100,16 +83,12 @@ static int     mlx90614_ioctl(FAR struct file *filep, int cmd,
 
 static const struct file_operations g_mlx90614_fops =
 {
-  mlx90614_open,   /* open */
-  mlx90614_close,  /* close */
+  NULL,            /* open */
+  NULL,            /* close */
   mlx90614_read,   /* read */
   mlx90614_write,  /* write */
   NULL,            /* seek */
   mlx90614_ioctl,  /* ioctl */
-  NULL             /* poll */
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL            /* unlink */
-#endif
 };
 
 /****************************************************************************
@@ -146,7 +125,7 @@ static int mlx90614_read_word(FAR struct mlx90614_dev_s *priv, uint8_t cmd,
 
   /* Point "buffer" to checkcrc[3] to fill it with received bytes */
 
-  buffer = (uint8_t *) &checkcrc[3];
+  buffer = (FAR uint8_t *)&checkcrc[3];
 #endif
 
   /* Set up the I2C configuration */
@@ -267,32 +246,6 @@ static int mlx90614_write_word(FAR struct mlx90614_dev_s *priv, uint8_t cmd,
 }
 
 /****************************************************************************
- * Name: mlx90614_open
- *
- * Description:
- *   This function is called whenever the MLX90614 device is opened.
- *
- ****************************************************************************/
-
-static int mlx90614_open(FAR struct file *filep)
-{
-  return OK;
-}
-
-/****************************************************************************
- * Name: mlx90614_close
- *
- * Description:
- *   This routine is called when the MLX90614 device is closed.
- *
- ****************************************************************************/
-
-static int mlx90614_close(FAR struct file *filep)
-{
-  return OK;
-}
-
-/****************************************************************************
  * Name: mlx90614_read
  ****************************************************************************/
 
@@ -305,11 +258,10 @@ static ssize_t mlx90614_read(FAR struct file *filep, FAR char *buffer,
   uint8_t cmd;
   int ret;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct mlx90614_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Check if the user is reading the right size */
 
@@ -373,7 +325,7 @@ static int mlx90614_ioctl(FAR struct file *filep, int cmd,
                           unsigned long arg)
 {
   FAR struct inode *inode = filep->f_inode;
-  FAR struct mlx90614_dev_s *priv  = inode->i_private;
+  FAR struct mlx90614_dev_s *priv = inode->i_private;
   int ret = OK;
 
   switch (cmd)
@@ -449,7 +401,7 @@ int mlx90614_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   /* Initialize the MLX90614 device structure */
 
   FAR struct mlx90614_dev_s *priv =
-    (FAR struct mlx90614_dev_s *)kmm_malloc(sizeof(struct mlx90614_dev_s));
+    kmm_malloc(sizeof(struct mlx90614_dev_s));
 
   if (priv == NULL)
     {

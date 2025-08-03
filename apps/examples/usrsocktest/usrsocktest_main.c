@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/usrsocktest/usrsocktest_main.c
+ * apps/examples/usrsocktest/usrsocktest_main.c
  *
- *   Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
- *    Author: Jussi Kivilinna <jussi.kivilinna@haltian.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,7 +29,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <malloc.h>
 #include <stdio.h>
+#include <assert.h>
 #include <debug.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -62,14 +51,10 @@
  ****************************************************************************/
 
 #ifndef dbg
-  #define dbg _warn
+#  define dbg _warn
 #endif
 
 #define usrsocktest_dbg(...) ((void)0)
-
-#ifndef ARRAY_SIZE
-#  define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#endif
 
 /****************************************************************************
  * Private Data
@@ -162,23 +147,23 @@ static void run_tests(FAR const char *name, void (CODE *test_fn)(void))
 
 static void run_all_tests(void)
 {
-  RUN_TEST_GROUP(CharDev);
-  RUN_TEST_GROUP(NoDaemon);
-  RUN_TEST_GROUP(BasicDaemon);
-  RUN_TEST_GROUP(BasicConnect);
-  RUN_TEST_GROUP(BasicConnectDelay);
-  RUN_TEST_GROUP(NoBlockConnect);
-  RUN_TEST_GROUP(BasicSend);
-  RUN_TEST_GROUP(NoBlockSend);
-  RUN_TEST_GROUP(BlockSend);
-  RUN_TEST_GROUP(NoBlockRecv);
-  RUN_TEST_GROUP(BlockRecv);
-  RUN_TEST_GROUP(RemoteDisconnect);
-  RUN_TEST_GROUP(BasicSetSockOpt);
-  RUN_TEST_GROUP(BasicGetSockOpt);
-  RUN_TEST_GROUP(BasicGetSockName);
-  RUN_TEST_GROUP(WakeWithSignal);
-  RUN_TEST_GROUP(MultiThread);
+  RUN_TEST_GROUP(char_dev);
+  RUN_TEST_GROUP(no_daemon);
+  RUN_TEST_GROUP(basic_daemon);
+  RUN_TEST_GROUP(basic_connect);
+  RUN_TEST_GROUP(basic_connect_delay);
+  RUN_TEST_GROUP(no_block_connect);
+  RUN_TEST_GROUP(basic_send);
+  RUN_TEST_GROUP(no_block_send);
+  RUN_TEST_GROUP(block_send);
+  RUN_TEST_GROUP(no_block_recv);
+  RUN_TEST_GROUP(block_recv);
+  RUN_TEST_GROUP(remote_disconnect);
+  RUN_TEST_GROUP(basic_setsockopt);
+  RUN_TEST_GROUP(basic_getsockopt);
+  RUN_TEST_GROUP(basic_getsockname);
+  RUN_TEST_GROUP(wake_with_signal);
+  RUN_TEST_GROUP(multithread);
 }
 
 /****************************************************************************

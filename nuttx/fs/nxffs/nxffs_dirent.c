@@ -1,37 +1,22 @@
 /****************************************************************************
  * fs/nxffs/nxffs_dirent.c
  *
- *   Copyright (C) 2011, 2017-2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * References: Linux/Documentation/filesystems/romfs.txt
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,17 +26,28 @@
 
 #include <nuttx/config.h>
 
+#include <stdint.h>
 #include <string.h>
-#include <dirent.h>
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/fs/fs.h>
 #include <nuttx/mtd/mtd.h>
-#include <nuttx/fs/dirent.h>
+#include <nuttx/kmalloc.h>
 
 #include "nxffs.h"
+#include "fs_heap.h"
+
+/****************************************************************************
+ * Private Types
+ ****************************************************************************/
+
+struct nxffs_dir_s
+{
+  struct fs_dirent_s base;
+  off_t offset;
+};
 
 /****************************************************************************
  * Public Functions
@@ -66,9 +62,10 @@
  ****************************************************************************/
 
 int nxffs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
-                  FAR struct fs_dirent_s *dir)
+                  FAR struct fs_dirent_s **dir)
 {
-  struct nxffs_volume_s *volume;
+  FAR struct nxffs_volume_s *volume;
+  FAR struct nxffs_dir_s *ndir;
   int ret;
 
   finfo("relpath: \"%s\"\n", relpath ? relpath : "NULL");
@@ -80,10 +77,16 @@ int nxffs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
   /* Recover the file system state from the NuttX inode instance */
 
   volume = mountpt->i_private;
-  ret = nxsem_wait(&volume->exclsem);
+  ndir = fs_heap_zalloc(sizeof(*ndir));
+  if (ndir == NULL)
+    {
+      return -ENOMEM;
+    }
+
+  ret = nxmutex_lock(&volume->lock);
   if (ret < 0)
     {
-      goto errout;
+      goto errout_with_ndir;
     }
 
   /* The requested directory must be the volume-relative "root" directory */
@@ -91,19 +94,38 @@ int nxffs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
   if (relpath && relpath[0] != '\0')
     {
       ret = -ENOENT;
-      goto errout_with_semaphore;
+      goto errout_with_lock;
     }
 
   /* Set the offset to the offset to the first valid inode */
 
-  dir->u.nxffs.nx_offset = volume->inoffset;
-  ret = OK;
+  ndir->offset = volume->inoffset;
+  nxmutex_unlock(&volume->lock);
+  *dir = &ndir->base;
+  return 0;
 
-errout_with_semaphore:
-  nxsem_post(&volume->exclsem);
+errout_with_lock:
+  nxmutex_unlock(&volume->lock);
 
-errout:
+errout_with_ndir:
+  fs_heap_free(ndir);
   return ret;
+}
+
+/****************************************************************************
+ * Name: nxffs_closedir
+ *
+ * Description:
+ *   Close directory
+ *
+ ****************************************************************************/
+
+int nxffs_closedir(FAR struct inode *mountpt,
+                   FAR struct fs_dirent_s *dir)
+{
+  DEBUGASSERT(dir);
+  fs_heap_free(dir);
+  return 0;
 }
 
 /****************************************************************************
@@ -113,10 +135,13 @@ errout:
  *
  ****************************************************************************/
 
-int nxffs_readdir(FAR struct inode *mountpt, FAR struct fs_dirent_s *dir)
+int nxffs_readdir(FAR struct inode *mountpt,
+                  FAR struct fs_dirent_s *dir,
+                  FAR struct dirent *dentry)
 {
   FAR struct nxffs_volume_s *volume;
-  FAR struct nxffs_entry_s entry;
+  FAR struct nxffs_dir_s *ndir;
+  struct nxffs_entry_s entry;
   off_t offset;
   int ret;
 
@@ -127,7 +152,8 @@ int nxffs_readdir(FAR struct inode *mountpt, FAR struct fs_dirent_s *dir)
   /* Recover the file system state from the NuttX inode instance */
 
   volume = mountpt->i_private;
-  ret = nxsem_wait(&volume->exclsem);
+  ndir = (FAR struct nxffs_dir_s *)dir;
+  ret = nxmutex_lock(&volume->lock);
   if (ret < 0)
     {
       goto errout;
@@ -135,7 +161,7 @@ int nxffs_readdir(FAR struct inode *mountpt, FAR struct fs_dirent_s *dir)
 
   /* Read the next inode header from the offset */
 
-  offset = dir->u.nxffs.nx_offset;
+  offset = ndir->offset;
   ret = nxffs_nextentry(volume, offset, &entry);
 
   /* If the read was successful, then handle the reported inode.  Note
@@ -147,18 +173,18 @@ int nxffs_readdir(FAR struct inode *mountpt, FAR struct fs_dirent_s *dir)
     {
       /* Return the filename and file type */
 
-      finfo("Offset %d: \"%s\"\n", entry.hoffset, entry.name);
-      dir->fd_dir.d_type = DTYPE_FILE;
-      strncpy(dir->fd_dir.d_name, entry.name, NAME_MAX + 1);
+      finfo("Offset %jd: \"%s\"\n", (intmax_t)entry.hoffset, entry.name);
+      dentry->d_type = DTYPE_FILE;
+      strlcpy(dentry->d_name, entry.name, sizeof(dentry->d_name));
 
       /* Discard this entry and set the next offset. */
 
-      dir->u.nxffs.nx_offset = nxffs_inodeend(volume, &entry);
+      ndir->offset = nxffs_inodeend(volume, &entry);
       nxffs_freeentry(&entry);
       ret = OK;
     }
 
-  nxsem_post(&volume->exclsem);
+  nxmutex_unlock(&volume->lock);
 
 errout:
   return ret;
@@ -186,7 +212,7 @@ int nxffs_rewinddir(FAR struct inode *mountpt, FAR struct fs_dirent_s *dir)
   /* Recover the file system state from the NuttX inode instance */
 
   volume = mountpt->i_private;
-  ret = nxsem_wait(&volume->exclsem);
+  ret = nxmutex_lock(&volume->lock);
   if (ret < 0)
     {
       goto errout;
@@ -194,10 +220,10 @@ int nxffs_rewinddir(FAR struct inode *mountpt, FAR struct fs_dirent_s *dir)
 
   /* Reset the offset to the FLASH offset to the first valid inode */
 
-  dir->u.nxffs.nx_offset = volume->inoffset;
+  ((FAR struct nxffs_dir_s *)dir)->offset = volume->inoffset;
   ret = OK;
 
-  nxsem_post(&volume->exclsem);
+  nxmutex_unlock(&volume->lock);
 
 errout:
   return ret;

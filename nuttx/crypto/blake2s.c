@@ -1,39 +1,30 @@
 /****************************************************************************
  * crypto/blake2s.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/****************************************************************************
+ *
  * This code is based on public-domain/CC0 BLAKE2 reference implementation
  * by Samual Neves, at https://github.com/BLAKE2/BLAKE2/tree/master/ref
  * Copyright 2012, Samuel Neves <sneves@dei.uc.pt>
- *
- * Copyright (C) 2017 Haltian Ltd. All rights reserved.
- * Authors: Jussi Kivilinna <jussi.kivilinna@haltian.com>
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
 
@@ -52,6 +43,7 @@
 #include <assert.h>
 #include <errno.h>
 
+#include <nuttx/kmalloc.h>
 #include <nuttx/crypto/blake2s.h>
 
 /****************************************************************************
@@ -62,7 +54,7 @@
  * Private Data
  ****************************************************************************/
 
-static const uint32_t blake2s_IV[8] =
+static const uint32_t blake2s_iv[8] =
 {
   0x6a09e667ul, 0xbb67ae85ul, 0x3c6ef372ul, 0xa54ff53aul, 0x510e527ful,
   0x9b05688cul, 0x1f83d9abul, 0x5be0cd19ul
@@ -117,7 +109,7 @@ static void blake2_memcpy(FAR void *dst, FAR const void *src, size_t len)
       len--;
     }
 #else
-  memcpy(dst, set, len);
+  memcpy(dst, src, len);
 #endif
 }
 
@@ -129,7 +121,7 @@ static void blake2_memset(FAR void *dst, int set, size_t len)
   uint32_t mset;
 
   set &= 0xff;
-  mset = (uint32_t)set * 0x01010101UL;
+  mset = (uint32_t)set * 0x01010101ul;
 
   while (len >= sizeof(uint32_alias_t))
     {
@@ -182,7 +174,7 @@ static void blake2s_init0(FAR blake2s_state *S)
   blake2_memset(S, 0, sizeof(*S) - sizeof(S->buf));
 
   for (i = 0; i < 8; ++i)
-    S->h[i] = blake2s_IV[i];
+    S->h[i] = blake2s_iv[i];
 }
 
 static void blake2s_compress(FAR blake2s_state *S,
@@ -203,14 +195,14 @@ static void blake2s_compress(FAR blake2s_state *S,
       v[i] = S->h[i];
     }
 
-  v[8] = blake2s_IV[0];
-  v[9] = blake2s_IV[1];
-  v[10] = blake2s_IV[2];
-  v[11] = blake2s_IV[3];
-  v[12] = S->t[0] ^ blake2s_IV[4];
-  v[13] = S->t[1] ^ blake2s_IV[5];
-  v[14] = S->f[0] ^ blake2s_IV[6];
-  v[15] = S->f[1] ^ blake2s_IV[7];
+  v[8] = blake2s_iv[0];
+  v[9] = blake2s_iv[1];
+  v[10] = blake2s_iv[2];
+  v[11] = blake2s_iv[3];
+  v[12] = S->t[0] ^ blake2s_iv[4];
+  v[13] = S->t[1] ^ blake2s_iv[5];
+  v[14] = S->f[0] ^ blake2s_iv[6];
+  v[15] = S->f[1] ^ blake2s_iv[7];
 
 #define G(r,i,a,b,c,d)                      \
   do {                                      \
@@ -283,7 +275,7 @@ static void selftest_seq(FAR uint8_t *out, size_t len, uint32_t seed)
   uint32_t a;
   uint32_t b;
 
-  a = 0xDEAD4BAD * seed; /* prime */
+  a = 0xdead4bad * seed; /* prime */
   b = 1;
 
   /* fill the buf */
@@ -293,7 +285,7 @@ static void selftest_seq(FAR uint8_t *out, size_t len, uint32_t seed)
       t = a + b;
       a = b;
       b = t;
-      out[i] = (t >> 24) & 0xFF;
+      out[i] = (t >> 24) & 0xff;
     }
 }
 
@@ -314,10 +306,12 @@ static int blake2s_selftest(void)
   {
     16, 20, 28, 32
   };
+
   static const size_t b2s_in_len[6] =
   {
     0, 3, 64, 65, 255, 1024
   };
+
   size_t i;
   size_t j;
   size_t outlen;
@@ -328,7 +322,7 @@ static int blake2s_selftest(void)
   blake2s_state ctx;
   int ret = -1;
 
-  in = malloc(1024);
+  in = kmm_malloc(1024);
   if (!in)
     {
       goto out;
@@ -364,13 +358,13 @@ static int blake2s_selftest(void)
   for (i = 0; i < 32; i++)
     {
       if (md[i] != blake2s_res[i])
-        goto out;
+          goto out;
     }
 
   ret = 0;
 
 out:
-  free(in);
+  kmm_free(in);
   return ret;
 }
 #endif
@@ -395,7 +389,7 @@ int blake2s_init_param(FAR blake2s_state *S, FAR const blake2s_param *P)
       ret = blake2s_selftest();
       DEBUGASSERT(ret == 0);
       if (ret)
-        return -1;
+          return -1;
     }
 #endif
 
@@ -442,7 +436,9 @@ int blake2s_init(FAR blake2s_state *S, size_t outlen)
   return blake2s_init_param(S, P);
 }
 
-int blake2s_init_key(FAR blake2s_state *S, size_t outlen, FAR const void *key,
+int blake2s_init_key(FAR blake2s_state *S,
+                     size_t outlen,
+                     FAR const void *key,
                      size_t keylen)
 {
   blake2s_param P[1];
@@ -548,6 +544,7 @@ int blake2s_final(FAR blake2s_state *S, FAR void *out, size_t outlen)
     {
       blake2_memset(S->buf + S->buflen, 0, padding);
     }
+
   blake2s_compress(S, S->buf);
 
   /* Output hash to out buffer */

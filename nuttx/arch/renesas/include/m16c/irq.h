@@ -1,37 +1,24 @@
-/************************************************************************************
+/****************************************************************************
  * arch/renesas/include/m16c/irq.h
  *
- *   Copyright (C) 2009, 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 /* This file should never be included directly but, rather,
  * only indirectly through nuttx/irq.h
@@ -40,20 +27,20 @@
 #ifndef __ARCH_RENESAS_INCLUDE_M16C_IRQ_H
 #define __ARCH_RENESAS_INCLUDE_M16C_IRQ_H
 
-/************************************************************************************
+/****************************************************************************
  * Included Files
- ************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 #ifndef __ASSEMBLY__
 #  include <stdint.h>
 #endif
 
-/************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- ************************************************************************************/
+ ****************************************************************************/
 
-/* IRQ numbers **********************************************************************/
+/* IRQ numbers **************************************************************/
 
 /* Fixed vector table */
 
@@ -234,20 +221,15 @@
 
 #define XCPTCONTEXT_SIZE      22
 
-/************************************************************************************
+/****************************************************************************
  * Public Types
- ************************************************************************************/
+ ****************************************************************************/
+
 /* This struct defines the way the registers are stored.  We need to save: */
 
 #ifndef __ASSEMBLY__
 struct xcptcontext
 {
-  /* The following function pointer is non-zero if there are pending signals
-   * to be processed.
-   */
-
-  void *sigdeliver; /* Actual type is sig_deliver_t */
-
   /* These are saved copies of LR and SR used during signal processing.
    *
    * REVISIT:  Because there is only one copy of these save areas,
@@ -265,9 +247,29 @@ struct xcptcontext
 };
 #endif
 
-/************************************************************************************
+/****************************************************************************
+ * Inline functions
+ ****************************************************************************/
+
+/* Return the current value of the stack pointer */
+
+static inline_function uint16_t up_getsp(void)
+{
+  uint16_t sp;
+
+  __asm__ __volatile__
+    (
+      "\tstc sp, %0\n\t"
+      : "=r" (sp)
+      :
+      : "memory"
+    );
+  return sp;
+}
+
+/****************************************************************************
  * Public Data
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ASSEMBLY__
 #ifdef __cplusplus
@@ -278,9 +280,9 @@ extern "C"
 #define EXTERN extern
 #endif
 
-/************************************************************************************
+/****************************************************************************
  * Inline Functions
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ASSEMBLY__
 
@@ -295,7 +297,7 @@ extern "C"
 
 /* Return the current interrupt enable state and disable IRQs */
 
-static inline irqstate_t up_irq_save(void)
+static inline_function irqstate_t up_irq_save(void)
 {
   irqstate_t flags;
   __asm__ __volatile__
@@ -310,7 +312,7 @@ static inline irqstate_t up_irq_save(void)
 
 /* Restore saved IRQ state */
 
-static inline void up_irq_restore(irqstate_t flags)
+static inline_function void up_irq_restore(irqstate_t flags)
 {
   __asm__ __volatile__
     (
@@ -322,7 +324,7 @@ static inline void up_irq_restore(irqstate_t flags)
 
 /* Return the current interrupt enable state and enable IRQs */
 
-static inline irqstate_t up_irq_enable(void)
+static inline_function irqstate_t up_irq_enable(void)
 {
   irqstate_t flags;
   __asm__ __volatile__
@@ -337,9 +339,26 @@ static inline irqstate_t up_irq_enable(void)
 
 #endif
 
-/************************************************************************************
- * Public Functions
- ************************************************************************************/
+/****************************************************************************
+ * Public Functions Prototypes
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: up_getusrpc
+ ****************************************************************************/
+
+#define up_getusrpc(regs) \
+    (((uint32_t *)((regs) ? (regs) : up_current_regs()))[REG_PC])
+
+/****************************************************************************
+ * Name: up_getusrsp
+ ****************************************************************************/
+
+static inline_function uintptr_t up_getusrsp(void *regs)
+{
+  uint8_t *ptr = regs;
+  return (uintptr_t)(ptr[REG_SP] << 8 | ptr[REG_SP + 1]);
+}
 
 #undef EXTERN
 #ifdef __cplusplus

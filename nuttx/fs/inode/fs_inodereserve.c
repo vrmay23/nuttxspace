@@ -1,36 +1,22 @@
 /****************************************************************************
- * fs/inode/fs_registerreserve.c
+ * fs/inode/fs_inodereserve.c
  *
- *   Copyright (C) 2007-2009, 2011-2012, 2015, 2017 Gregory Nutt. All
- *     rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -47,6 +33,13 @@
 #include <nuttx/fs/fs.h>
 
 #include "inode/inode.h"
+#include "fs_heap.h"
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+static ino_t g_ino;
 
 /****************************************************************************
  * Private Functions
@@ -58,7 +51,7 @@
 
 static int inode_namelen(FAR const char *name)
 {
-  const char *tmp = name;
+  FAR const char *tmp = name;
   while (*tmp && *tmp != '/')
     {
       tmp++;
@@ -71,7 +64,7 @@ static int inode_namelen(FAR const char *name)
  * Name: inode_namecpy
  ****************************************************************************/
 
-static void inode_namecpy(char *dest, const char *src)
+static void inode_namecpy(FAR char *dest, FAR const char *src)
 {
   while (*src && *src != '/')
     {
@@ -85,26 +78,34 @@ static void inode_namecpy(char *dest, const char *src)
  * Name: inode_alloc
  ****************************************************************************/
 
-static FAR struct inode *inode_alloc(FAR const char *name)
+static FAR struct inode *inode_alloc(FAR const char *name, mode_t mode)
 {
-  FAR struct inode *node;
+  FAR struct inode *inode;
   int namelen;
 
   namelen = inode_namelen(name);
-  node    = (FAR struct inode *)kmm_zalloc(FSNODE_SIZE(namelen));
-  if (node)
+  inode   = fs_heap_zalloc(FSNODE_SIZE(namelen));
+  if (inode)
     {
-      inode_namecpy(node->i_name, name);
+      inode->i_ino   = g_ino++;
+      atomic_set(&inode->i_crefs, 1);
+#ifdef CONFIG_PSEUDOFS_ATTRIBUTES
+      inode->i_mode  = mode;
+      clock_gettime(CLOCK_REALTIME, &inode->i_atime);
+      inode->i_mtime = inode->i_atime;
+      inode->i_ctime = inode->i_atime;
+#endif
+      inode_namecpy(inode->i_name, name);
     }
 
-  return node;
+  return inode;
 }
 
 /****************************************************************************
  * Name: inode_insert
  ****************************************************************************/
 
-static void inode_insert(FAR struct inode *node,
+static void inode_insert(FAR struct inode *inode,
                          FAR struct inode *peer,
                          FAR struct inode *parent)
 {
@@ -114,32 +115,38 @@ static void inode_insert(FAR struct inode *node,
 
   if (peer)
     {
-      node->i_peer = peer->i_peer;
-      peer->i_peer = node;
+      inode->i_peer   = peer->i_peer;
+      inode->i_parent = parent;
+      peer->i_peer    = inode;
     }
 
-  /* If parent is non-null, then it must go at the head of its
-   * list of children.
-   */
-
-  else if (parent)
-    {
-      node->i_peer    = parent->i_child;
-      parent->i_child = node;
-    }
-
-  /* Otherwise, this must be the new root_inode */
+  /* Then it must go at the head of parent's list of children. */
 
   else
     {
-      node->i_peer = g_root_inode;
-      g_root_inode = node;
+      DEBUGASSERT(parent != NULL);
+      inode->i_peer   = parent->i_child;
+      inode->i_parent = parent;
+      parent->i_child = inode;
     }
 }
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: inode_root_reserve
+ *
+ * Description:
+ *   Reserve the root inode for the pseudo file system.
+ *
+ ****************************************************************************/
+
+void inode_root_reserve(void)
+{
+  g_root_inode = inode_alloc("", 0777);
+}
 
 /****************************************************************************
  * Name: inode_reserve
@@ -150,6 +157,7 @@ static void inode_insert(FAR struct inode *node,
  *
  * Input Parameters:
  *   path - The path to the inode to create
+ *   mode - inmode privileges
  *   inode - The location to return the inode pointer
  *
  * Returned Value:
@@ -165,7 +173,8 @@ static void inode_insert(FAR struct inode *node,
  *
  ****************************************************************************/
 
-int inode_reserve(FAR const char *path, FAR struct inode **inode)
+int inode_reserve(FAR const char *path,
+                  mode_t mode, FAR struct inode **inode)
 {
   struct inode_search_s desc;
   FAR struct inode *left;
@@ -178,9 +187,7 @@ int inode_reserve(FAR const char *path, FAR struct inode **inode)
   DEBUGASSERT(path != NULL && inode != NULL);
   *inode = NULL;
 
-  /* Handle paths that are interpreted as the root directory */
-
-  if (path[0] == '\0' || path[0] != '/')
+  if (path[0] == '\0')
     {
       return -EINVAL;
     }
@@ -220,7 +227,7 @@ int inode_reserve(FAR const char *path, FAR struct inode **inode)
         {
           /* Insert an operationless node */
 
-          node = inode_alloc(name);
+          node = inode_alloc(name, 0777);
           if (node != NULL)
             {
               inode_insert(node, left, parent);
@@ -235,7 +242,7 @@ int inode_reserve(FAR const char *path, FAR struct inode **inode)
         }
       else
         {
-          node = inode_alloc(name);
+          node = inode_alloc(name, mode);
           if (node != NULL)
             {
               inode_insert(node, left, parent);

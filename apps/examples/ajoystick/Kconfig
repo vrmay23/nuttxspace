@@ -6,7 +6,7 @@
 config EXAMPLES_AJOYSTICK
 	tristate "Analog joystick example"
 	default n
-	depends on AJOYSTICK
+	depends on INPUT_AJOYSTICK
 	---help---
 		Enable the analog joystick example
 
@@ -18,6 +18,6 @@ config EXAMPLES_AJOYSTICK_DEVNAME
 
 config EXAMPLES_AJOYSTICK_SIGNO
 	int "Joystick signal"
-	default 13
+	default 32
 
 endif

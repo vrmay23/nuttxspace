@@ -1,8 +1,11 @@
 /****************************************************************************
  * arch/arm/src/s32k1xx/s32k1xx_clockconfig.h
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2019 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2016-2018 NXP
+ * SPDX-FileCopyrightText: 2013 - 2015, Freescale Semiconductor, Inc.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -412,7 +415,6 @@ struct sim_clock_config_s
 struct peripheral_clock_config_s;      /* Forward reference */
 struct pcc_config_s
 {
-  unsigned int count;                  /* Number of peripherals to be configured */
   const struct peripheral_clock_config_s *pclks; /* The peripheral clock configuration array */
 };
 
@@ -440,15 +442,20 @@ struct clock_configuration_s
   struct pmc_config_s pmc;             /* PMC Clock configuration */
 };
 
+enum scg_system_clock_mode_e
+{
+  SCG_SYSTEM_CLOCK_MODE_CURRENT = 0,  /* Current mode. */
+  SCG_SYSTEM_CLOCK_MODE_RUN     = 1,  /* Run mode. */
+  SCG_SYSTEM_CLOCK_MODE_VLPR    = 2,  /* Very Low Power Run mode. */
+  SCG_SYSTEM_CLOCK_MODE_HSRUN   = 3,  /* High Speed Run mode. */
+  SCG_SYSTEM_CLOCK_MODE_NONE          /* MAX value. */
+};
+
 /****************************************************************************
  * Inline Functions
  ****************************************************************************/
 
 #ifndef __ASSEMBLY__
-
-/****************************************************************************
- * Public Data
- ****************************************************************************/
 
 #undef EXTERN
 #if defined(__cplusplus)
@@ -460,8 +467,47 @@ extern "C"
 #endif
 
 /****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+EXTERN const unsigned int num_of_peripheral_clocks_0;
+
+/****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: s32k1xx_get_runmode
+ *
+ * Description:
+ *   Get the current running mode.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   The current running mode.
+ *
+ ****************************************************************************/
+
+enum scg_system_clock_mode_e s32k1xx_get_runmode(void);
+
+/****************************************************************************
+ * Name: s32k1xx_set_runmode
+ *
+ * Description:
+ *   Set the running mode.
+ *
+ * Input Parameters:
+ *   next_run_mode - The next running mode.
+ *
+ * Returned Value:
+ *   The current running mode.
+ *
+ ****************************************************************************/
+
+enum scg_system_clock_mode_e s32k1xx_set_runmode(enum scg_system_clock_mode_e
+  next_run_mode);
 
 /****************************************************************************
  * Name: s32k1xx_clockconfig
@@ -481,7 +527,25 @@ extern "C"
  *
  ****************************************************************************/
 
-int s32k1xx_clockconfig(FAR const struct clock_configuration_s *clkcfg);
+int s32k1xx_clockconfig(const struct clock_configuration_s *clkcfg);
+
+/****************************************************************************
+ * Name: s32k1xx_clock_pm_register
+ *
+ * Description:
+ *   This function is called after OS and PM init in order to register to
+ *   receive power management event callbacks.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Values:
+ *   None
+ *
+ ****************************************************************************/
+#ifdef CONFIG_PM
+void s32k1xx_clock_pm_register(void);
+#endif
 
 /****************************************************************************
  * Name: s32k1xx_get_coreclk

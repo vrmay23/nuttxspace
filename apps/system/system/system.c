@@ -1,35 +1,22 @@
 /****************************************************************************
  * apps/system/system/system.c
  *
- *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -45,6 +32,9 @@
 #include <spawn.h>
 #include <assert.h>
 #include <debug.h>
+#include <errno.h>
+#include <execinfo.h>
+#include <syslog.h>
 
 #include "nshlib/nshlib.h"
 
@@ -74,13 +64,18 @@
 
 int system(FAR const char *cmd)
 {
-  FAR char *argv[2];
+  FAR char *argv[4];
   struct sched_param param;
   posix_spawnattr_t attr;
   pid_t pid;
   int errcode;
   int rc;
   int ret;
+
+#ifdef CONFIG_SYSTEM_SYSTEM_DUMPINFO
+  syslog(LOG_INFO, "SYSTEM cmd=%s\n", cmd);
+  dump_stack();
+#endif
 
   /* REVISIT: If cmd is NULL, then system() should return a non-zero value to
    * indicate if the command processor is available or zero if it is not.
@@ -105,15 +100,16 @@ int system(FAR const char *cmd)
       goto errout_with_attrs;
     }
 
-  errcode = task_spawnattr_setstacksize(&attr, CONFIG_SYSTEM_SYSTEM_STACKSIZE);
+  errcode = posix_spawnattr_setstacksize(&attr,
+                                         CONFIG_SYSTEM_SYSTEM_STACKSIZE);
   if (errcode != 0)
     {
       goto errout_with_attrs;
     }
 
-   /* If robin robin scheduling is enabled, then set the scheduling policy
-    * of the new task to SCHED_RR before it has a chance to run.
-    */
+  /* If robin robin scheduling is enabled, then set the scheduling policy
+   * of the new task to SCHED_RR before it has a chance to run.
+   */
 
 #if CONFIG_RR_INTERVAL > 0
   errcode = posix_spawnattr_setschedpolicy(&attr, SCHED_RR);
@@ -141,15 +137,19 @@ int system(FAR const char *cmd)
 
   /* Spawn nsh_system() which will execute the command under the shell. */
 
-  argv[0] = (FAR char *)cmd;
-  argv[1] = NULL;
+  argv[1] = "-c";
+  argv[2] = (FAR char *)cmd;
+  argv[3] = NULL;
 
 #ifdef CONFIG_SYSTEM_SYSTEM_SHPATH
-  errcode = posix_spawn(&pid, CONFIG_SYSTEM_SYSTEM_SHPATH,  NULL, &attr,
-                        argv, (FAR char * const *)NULL);
+  argv[0] = CONFIG_SYSTEM_SYSTEM_SHPATH;
+  errcode = posix_spawn(&pid, argv[0],  NULL, &attr, argv, NULL);
 #else
-  errcode = task_spawn(&pid, "popen", nsh_system, NULL, &attr,
-                       argv, (FAR char * const *)NULL);
+  pid = task_spawn("system", nsh_system, NULL, &attr, argv + 1, NULL);
+  if (pid < 0)
+    {
+      errcode = -pid;
+    }
 #endif
 
   /* Release the attributes and check for an error from the spawn operation */
@@ -177,6 +177,6 @@ errout_with_attrs:
   posix_spawnattr_destroy(&attr);
 
 errout:
-  set_errno(errcode);
+  errno = errcode;
   return ERROR;
 }

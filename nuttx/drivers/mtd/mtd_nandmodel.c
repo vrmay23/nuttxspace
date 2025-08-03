@@ -1,14 +1,8 @@
 /****************************************************************************
  * drivers/mtd/mtd_nandmodel.c
  *
- *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * This logic was based largely on Atmel sample code with modifications for
- * better integration with NuttX.  The Atmel sample code has a BSD
- * compatible license that requires this copyright notice:
- *
- *   Copyright (c) 2011, 2012, Atmel Corporation
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: Copyright (c) 2011, 2012, Atmel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,15 +38,11 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/mtd/nand_config.h>
 
-#include <sys/types.h>
-#include <stdint.h>
 #include <string.h>
 #include <errno.h>
 #include <debug.h>
 
-#include <nuttx/mtd/nand.h>
 #include <nuttx/mtd/nand_model.h>
 
 /****************************************************************************
@@ -73,7 +63,8 @@
  * Input Parameters:
  *   modeltab  List of nand_model_s instances.
  *   size      Number of models in list.
- *   chipid    Identifier returned by the Nand(id1|(id2<<8)|(id3<<16)|(id4<<24)).
+ *   chipid    Identifier returned by the Nand
+ *             (id1|(id2<<8)|(id3<<16)|(id4<<24)).
  *   model     nand_model_s instance to update with the model parameters.
  *
  * Returned Value:
@@ -161,6 +152,7 @@ int nandmodel_find(FAR const struct nand_model_s *modeltab, size_t size,
               finfo("  pagesize:  %d (B)\n",  model->pagesize);
               finfo("  options:   0x%02x\n",  model->options);
             }
+
           break;
         }
     }
@@ -187,13 +179,13 @@ int nandmodel_find(FAR const struct nand_model_s *modeltab, size_t size,
  *   offset  Stores the byte offset inside the first accessed page.
  *
  * Returned Value:
- *   OK on success; -EPIPE on failure.
+ *   OK on success; -ESPIPE on failure.
  *
  ****************************************************************************/
 
 int nandmodel_translate(FAR const struct nand_model_s *model, off_t address,
-                        size_t size, FAR off_t *block, off_t *page,
-                        off_t *offset)
+                        size_t size, FAR off_t *block, FAR off_t *page,
+                        FAR off_t *offset)
 {
   size_t blocksize;
   size_t pagesize;

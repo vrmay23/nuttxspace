@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/x86/include/i486/irq.h
  *
- *   Copyright (C) 2011 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -91,7 +78,7 @@
 
 #define IRQ0    32 /* System timer (cannot be changed) */
 #define IRQ1    33 /* Keyboard controller (cannot be changed) */
-#define IRQ2    34 /* Cascaded signals from IRQs 8–15 */
+#define IRQ2    34 /* Cascaded signals from IRQs 8-15 */
 #define IRQ3    35 /* Serial port controller for COM2/4 */
 #define IRQ4    36 /* serial port controller for COM1/3 */
 #define IRQ5    37 /* LPT port 2 or sound card */
@@ -153,7 +140,7 @@
  *   change occurred.
  */
 
-#define TOP_PUSHA    	 REG_IRQNO
+#define TOP_PUSHA         REG_IRQNO
 #define BOTTOM_PRIO      (XCPTCONTEXT_REGS-REG_IRQNO)
 #define BOTTOM_NOPRIO    (REG_SP-REG_IRQNO)
 
@@ -166,12 +153,6 @@
 #ifndef __ASSEMBLY__
 struct xcptcontext
 {
-  /* The following function pointer is non-zero if there are pending signals
-   * to be processed.
-   */
-
-  void *sigdeliver; /* Actual type is sig_deliver_t */
-
   /* These are saved copies of instruction pointer and EFLAGS used during
    * signal processing.
    *
@@ -186,7 +167,7 @@ struct xcptcontext
 
   /* Register save area */
 
-   uint32_t regs[XCPTCONTEXT_REGS];
+  uint32_t regs[XCPTCONTEXT_REGS];
 };
 #endif
 
@@ -195,6 +176,58 @@ struct xcptcontext
  ****************************************************************************/
 
 #ifndef __ASSEMBLY__
+
+/* Return stack pointer */
+
+static inline_function uint32_t up_getsp(void)
+{
+  uint32_t regval;
+
+  asm volatile(
+    "\tmovl %%esp, %0\n"
+    : "=rm" (regval)
+    :
+    : "memory");
+  return regval;
+}
+
+/* Get segment registers */
+
+static inline_function uint32_t up_getds(void)
+{
+  uint32_t regval;
+
+  asm volatile(
+    "\tmov %%ds, %0\n"
+    : "=rm" (regval)
+    :
+    : "memory");
+  return regval;
+}
+
+static inline_function uint32_t up_getcs(void)
+{
+  uint32_t regval;
+
+  asm volatile(
+    "\tmov %%cs, %0\n"
+    : "=rm" (regval)
+    :
+    : "memory");
+  return regval;
+}
+
+static inline_function uint32_t up_getss(void)
+{
+  uint32_t regval;
+
+  asm volatile(
+    "\tmov %%ss, %0\n"
+    : "=rm" (regval)
+    :
+    : "memory");
+  return regval;
+}
 
 /* Name: up_irq_save, up_irq_restore, and friends.
  *
@@ -207,7 +240,7 @@ struct xcptcontext
 
 /* Get the current FLAGS register contents */
 
-static inline irqstate_t irqflags()
+static inline_function irqstate_t irqflags()
 {
   irqstate_t flags;
 
@@ -225,33 +258,33 @@ static inline irqstate_t irqflags()
  * if the X86_FLAGS_IF is set by sti, then interrupts are enable.
  */
 
-static inline bool up_irq_disabled(irqstate_t flags)
+static inline_function bool up_irq_disabled(irqstate_t flags)
 {
   return ((flags & X86_FLAGS_IF) == 0);
 }
 
-static inline bool up_irq_enabled(irqstate_t flags)
+static inline_function bool up_irq_enabled(irqstate_t flags)
 {
   return ((flags & X86_FLAGS_IF) != 0);
 }
 
 /* Disable interrupts unconditionally */
 
-static inline void up_irq_disable(void)
+static inline_function void up_irq_disable(void)
 {
   asm volatile("cli": : :"memory");
 }
 
 /* Enable interrupts unconditionally */
 
-static inline void up_irq_enable(void)
+static inline_function void up_irq_enable(void)
 {
   asm volatile("sti": : :"memory");
 }
 
 /* Disable interrupts, but return previous interrupt state */
 
-static inline irqstate_t up_irq_save(void)
+static inline_function irqstate_t up_irq_save(void)
 {
   irqstate_t flags = irqflags();
   up_irq_disable();
@@ -260,7 +293,7 @@ static inline irqstate_t up_irq_save(void)
 
 /* Conditionally disable interrupts */
 
-static inline void up_irq_restore(irqstate_t flags)
+static inline_function void up_irq_restore(irqstate_t flags)
 {
   if (up_irq_enabled(flags))
     {
@@ -268,8 +301,8 @@ static inline void up_irq_restore(irqstate_t flags)
     }
 }
 
-static inline void system_call3(unsigned int nbr, uintptr_t parm1,
-			                    uintptr_t parm2, uintptr_t parm3)
+static inline_function void system_call3(unsigned int nbr, uintptr_t parm1,
+                                         uintptr_t parm2, uintptr_t parm3)
 {
   /* To be provided */
 }

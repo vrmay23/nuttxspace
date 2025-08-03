@@ -1,36 +1,22 @@
 /****************************************************************************
  * net/utils/net_chksum.c
  *
- *   Copyright (C) 2007-2010, 2012, 2014-2015 Gregory Nutt.  All rights
- *     reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,14 +30,14 @@
 #include "utils/utils.h"
 
 /****************************************************************************
- * Public Functions
+ * Private Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: chksum
+ * Name: checksum
  *
  * Description:
- *   Calculate the raw change some over the memory region described by
+ *   Calculate the raw change sum over the memory region described by
  *   data and len.
  *
  * Input Parameters:
@@ -60,6 +46,7 @@
  *          sum is called.
  *   data - Beginning of the data to include in the checksum.
  *   len  - Length of the data to include in the checksum.
+ *   odd  - the flag of the Calculated data sum
  *
  * Returned Value:
  *   The updated checksum value.
@@ -67,7 +54,8 @@
  ****************************************************************************/
 
 #ifndef CONFIG_NET_ARCH_CHKSUM
-uint16_t chksum(uint16_t sum, FAR const uint8_t *data, uint16_t len)
+uint16_t checksum(uint16_t sum, FAR const uint8_t *data,
+                    uint16_t len, bool *odd)
 {
   FAR const uint8_t *dataptr;
   FAR const uint8_t *last_byte;
@@ -75,6 +63,18 @@ uint16_t chksum(uint16_t sum, FAR const uint8_t *data, uint16_t len)
 
   dataptr = data;
   last_byte = data + len - 1;
+
+  if (*odd == true)
+    {
+      t = dataptr[0];
+      sum += t;
+      if (sum < t)
+        {
+          sum++; /* carry */
+        }
+
+      dataptr += 1;
+    }
 
   while (dataptr < last_byte)
     {
@@ -90,6 +90,8 @@ uint16_t chksum(uint16_t sum, FAR const uint8_t *data, uint16_t len)
       dataptr += 2;
     }
 
+  *odd = false;
+
   if (dataptr == last_byte)
     {
       t = (dataptr[0] << 8) + 0;
@@ -98,13 +100,93 @@ uint16_t chksum(uint16_t sum, FAR const uint8_t *data, uint16_t len)
         {
           sum++; /* carry */
         }
+
+      *odd = true;
     }
 
   /* Return sum in host byte order. */
 
   return sum;
 }
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: chksum
+ *
+ * Description:
+ *   Calculate the raw change sum over the memory region described by
+ *   data and len.
+ *
+ * Input Parameters:
+ *   sum  - Partial calculations carried over from a previous call to
+ *          chksum().  This should be zero on the first time that check
+ *          sum is called.
+ *   data - Beginning of the data to include in the checksum.
+ *   len  - Length of the data to include in the checksum.
+ *
+ * Returned Value:
+ *   The updated checksum value.
+ *
+ ****************************************************************************/
+
+uint16_t chksum(uint16_t sum, FAR const uint8_t *data, uint16_t len)
+{
+  bool odd = false;
+
+  return checksum(sum, data, len, &odd);
+}
+
 #endif /* CONFIG_NET_ARCH_CHKSUM */
+
+/****************************************************************************
+ * Name: chksum_iob
+ *
+ * Description:
+ *   Calculate the Internet checksum over an iob chain buffer.
+ *
+ * Input Parameters:
+ *   sum    - Partial calculations carried over from a previous call to
+ *            chksum().  This should be zero on the first time that check
+ *            sum is called.
+ *   iob    - An iob chain buffer over which the checksum is to be computed.
+ *   offset - Specifies the byte offset of the start of valid data.
+ *
+ * Returned Value:
+ *   The updated checksum value.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_MM_IOB
+uint16_t chksum_iob(uint16_t sum, FAR struct iob_s *iob, uint16_t offset)
+{
+  /* Skip to the I/O buffer containing the data offset */
+
+  bool odd = false;
+
+  while (iob != NULL && offset > iob->io_len)
+    {
+      offset -= iob->io_len;
+      iob     = iob->io_flink;
+    }
+
+  /* If the link pointer is not empty, loop to walk through all I/O buffer
+   * and accumulate the sum
+   */
+
+  while (iob != NULL)
+    {
+      sum = checksum(sum, iob->io_data + iob->io_offset + offset,
+                      iob->io_len - offset, &odd);
+      iob = iob->io_flink;
+      offset = 0;
+    }
+
+  return sum;
+}
+#endif /* CONFIG_MM_IOB */
 
 /****************************************************************************
  * Name: net_chksum
@@ -124,7 +206,8 @@ uint16_t chksum(uint16_t sum, FAR const uint8_t *data, uint16_t len)
  *
  *   buf - A pointer to the buffer over which the checksum is to be computed.
  *
- *   len - The length of the buffer over which the checksum is to be computed.
+ *   len - The length of the buffer over which the checksum is to be
+ *         computed.
  *
  * Returned Value:
  *   The Internet checksum of the buffer.
@@ -134,8 +217,102 @@ uint16_t chksum(uint16_t sum, FAR const uint8_t *data, uint16_t len)
 #ifndef CONFIG_NET_ARCH_CHKSUM
 uint16_t net_chksum(FAR uint16_t *data, uint16_t len)
 {
-  return htons(chksum(0, (uint8_t *)data, len));
+  return HTONS(chksum(0, (uint8_t *)data, len));
 }
 #endif /* CONFIG_NET_ARCH_CHKSUM */
+
+/****************************************************************************
+ * Name: net_chksum_iob
+ *
+ * Description:
+ *   Calculate the Internet checksum over an iob chain buffer.
+ *
+ *   The Internet checksum is the one's complement of the one's complement
+ *   sum of all 16-bit words in the buffer.
+ *
+ *   See RFC1071.
+ *
+ *   If CONFIG_NET_ARCH_CHKSUM is defined, then this function must be
+ *   provided by architecture-specific logic.
+ *
+ * Input Parameters:
+ *   sum    - Partial calculations carried over from a previous call to
+ *            chksum().  This should be zero on the first time that check
+ *            sum is called.
+ *   iob    - An iob chain buffer over which the checksum is to be computed.
+ *   offset - Specifies the byte offset of the start of valid data.
+ *
+ * Returned Value:
+ *   The Internet checksum of the given iob chain buffer.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_MM_IOB
+uint16_t net_chksum_iob(uint16_t sum, FAR struct iob_s *iob, uint16_t offset)
+{
+  return HTONS(chksum_iob(sum, iob, offset));
+}
+#endif /* CONFIG_MM_IOB */
+
+/****************************************************************************
+ * Name: net_chksum_adjust
+ *
+ * Description:
+ *   Adjusts the checksum of a packet without having to completely
+ *   recalculate it, as described in RFC 3022, Section 4.2, Page 9.
+ *
+ * Input Parameters:
+ *   chksum - points to the chksum in the packet
+ *   optr   - points to the old data in the packet
+ *   olen   - length of old data
+ *   nptr   - points to the new data in the packet
+ *   nlen   - length of new data
+ *
+ * Limitations:
+ *   The algorithm is applicable only for even offsets and even lengths.
+ ****************************************************************************/
+
+void net_chksum_adjust(FAR uint16_t *chksum,
+                       FAR const uint16_t *optr, ssize_t olen,
+                       FAR const uint16_t *nptr, ssize_t nlen)
+{
+  int32_t x;
+  int32_t oldval;
+  int32_t newval;
+
+  x = NTOHS(*chksum);
+  x = ~x & 0xffff;
+  while (olen > 0)
+    {
+      oldval = NTOHS(*optr);
+
+      x -= oldval & 0xffff;
+      if (x <= 0)
+        {
+          x--;
+          x &= 0xffff;
+        }
+
+      optr++;
+      olen -= 2;
+    }
+  while (nlen > 0)
+    {
+      newval = NTOHS(*nptr);
+
+      x += newval & 0xffff;
+      if ((x & 0x10000) != 0)
+        {
+          x++;
+          x &= 0xffff;
+        }
+
+      nptr++;
+      nlen -= 2;
+    }
+
+  x = ~x & 0xffff;
+  *chksum = HTONS(x);
+}
 
 #endif /* CONFIG_NET */

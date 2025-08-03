@@ -13,27 +13,145 @@ menuconfig INPUT
 
 if INPUT
 
-config MOUSE
-	bool "Enable mouse support"
+config INPUT_GOLDFISH_EVENTS
+	bool "Goldfish input events driver"
+	select INPUT_TOUCHSCREEN
+	select INPUT_KEYBOARD
+	select INPUT_MOUSE
+	default n
+
+config INPUT_GOLDFISH_NBUFFER
+	int "Number of goldfish events buffer"
+	depends on INPUT_GOLDFISH_EVENTS
+	default 8
+
+config INPUT_FF
+	bool "Support Force Feedback device"
+	default n
+	---help---
+		Enable support for force feedback devices.
+		The doc link: https://www.kernel.org/doc/html/v4.19/input/ff.html.
+
+if INPUT_FF
+
+config FF_DUMMY
+	bool "Enable dummy force feedback driver"
+	default n
+	---help---
+		Enable support for a dummy force feedback driver.
+
+config FF_AW86225
+	bool "Enable aw86225 driver"
+	default n
+	---help---
+		Enable aw86225 haptic controller chip.
+
+if FF_AW86225
+
+config AW86225_RTP_FILE_SUPPORT
+	bool "Enable aw86225 rtp file support"
+	default n
+	---help---
+		Enable support for aw86225 rtp file.
+
+config AW86225_RTP_FILE_PATH
+	string "Path of aw86225 rtp file"
+	default "/etc"
+	---help---
+		File path depend on the opening of FF_AW86225.
+
+endif # FF_AW86225
+
+endif # INPUT_FF
+
+config INPUT_MOUSE
+	bool
 	default n
 	---help---
 		Enable support for mouse devices.
 
-if MOUSE
+if INPUT_MOUSE
 
-config MOUSE_WHEEL
+config INPUT_MOUSE_WHEEL
 	bool "Enable mouse wheel support"
 	default n
 	---help---
-		Enable support for a 4-button mouse report that includes a while
+		Enable support for a 4-button mouse report that includes a wheel
 		position.
 
-endif # MOUSE
+endif # INPUT_MOUSE
+
+config INPUT_TOUCHSCREEN
+	bool
+	default n
+
+config INPUT_KEYBOARD
+	bool
+	default n
+
+config INPUT_UINPUT
+	bool
+	default n
+	---help---
+		Enable support virtual input device driver
+
+config UINPUT_RPMSG
+	bool "Enable uinput RPMSG"
+	depends on INPUT_UINPUT
+	depends on RPMSG
+	default n
+	---help---
+		Enable support uinput cross core communication
+
+config UINPUT_TOUCH
+	bool "Enable uinput touch"
+	select INPUT_TOUCHSCREEN
+	select INPUT_UINPUT
+	default n
+	---help---
+		Enable support virtual input touch device driver
+
+if UINPUT_TOUCH
+
+config UINPUT_TOUCH_MAXPOINT
+	int "Maximum number of touch points supported"
+	default 1
+
+config UINPUT_TOUCH_BUFNUMBER
+	int "Number of touch data buffer"
+	default 8
+
+endif
+
+config UINPUT_BUTTONS
+	bool "Enable uinput buttons"
+	select INPUT_BUTTONS
+	select INPUT_UINPUT
+	default n
+	---help---
+		Enable support virtual input button device driver
+
+config UINPUT_KEYBOARD
+	bool "Enable uinput keyboard"
+	select INPUT_KEYBOARD
+	select INPUT_UINPUT
+	default n
+	---help---
+		Enable support virtual input keyboard device driver
+
+if UINPUT_KEYBOARD
+
+config UINPUT_KEYBOARD_BUFNUMBER
+	int "Number keyboard data buffer"
+	default 8
+
+endif
 
 config INPUT_MAX11802
 	bool "MAX11802 touchscreen controller"
 	default n
 	select SPI
+	select INPUT_TOUCHSCREEN
 	---help---
 		Enable support for the MAX11802 touchscreen controller
 
@@ -41,6 +159,7 @@ config INPUT_TSC2007
 	bool "TI TSC2007 touchscreen controller"
 	default n
 	select I2C
+	select INPUT_TOUCHSCREEN
 	---help---
 		Enable support for the TI TSC2007 touchscreen controller
 
@@ -70,6 +189,7 @@ config INPUT_FT5X06
 	bool "FocalTech FT5x06 multi-touch, capacitive touch panel controller"
 	default n
 	select I2C
+	select INPUT_TOUCHSCREEN
 	---help---
 		Enable support for the FocalTech FT5x06 multi-touch, capacitive
 		touch panel controller
@@ -79,6 +199,7 @@ config INPUT_FT5336
 	default n
 	select I2C
 	select INPUT_FT5X06
+	select INPUT_TOUCHSCREEN
 	depends on EXPERIMENTAL
 	---help---
 		Enable support for the FocalTech FT5x06 multi-touch, capacitive
@@ -96,12 +217,6 @@ config FT5X06_POLLMODE
 		This is a non-optimal design both because (1) it will lead to delays
 		in detecting touch related events and (2) it will consume a
 		significant amount of CPU time to perform the polling.
-
-config FT5X06_SWAPXY
-	bool "Swap X/Y"
-	default n
-	---help---
-		Reverse the meaning of X and Y to handle different LCD orientations.
 
 config FT5X06_SINGLEPOINT
 	bool "Single point"
@@ -131,11 +246,11 @@ config FT5X06_THRESHY
 
 endif # FT5X06_SINGLEPOINT
 
-config FT5X06_NPOLLWAITERS
-	int "Number FT5336/FT5x06 poll waiters"
-	default 4
-	---help---
-		Maximum number of threads that can be waiting on poll()
+config FT5X06_SAMPLE_NBUFFER
+       int "Number FT5336/FT5x06 sample buffers"
+       default 4
+       ---help---
+               Maximum number of samples buffered.
 
 endif # INPUT_FT5X06
 
@@ -143,6 +258,7 @@ config INPUT_ADS7843E
 	bool "TI ADS7843/TSC2046 touchscreen controller"
 	default n
 	select SPI
+	select INPUT_TOUCHSCREEN
 	---help---
 		Enable support for the TI/Burr-Brown ADS7842 touchscreen controller.  I believe
 		that driver should be compatible with the TI/Burr-Brown TSC2046 and XPT2046
@@ -214,10 +330,11 @@ config ADS7843E_THRESHY
 		12-bit values the raw ranges are 0-4095. So for example, if your display is
 		320x240, then THRESHX=13 and THRESHY=17 would correspond to one pixel.  Default: 12
 
-endif
+endif # INPUT_ADS7843E
 
 config INPUT_MXT
 	bool "Atmel maXTouch Driver"
+	select INPUT_TOUCHSCREEN
 	default n
 	---help---
 		Enables support for the Atmel maXTouch driver
@@ -275,6 +392,7 @@ endif # INPUT_MXT
 config INPUT_STMPE811
 	bool "STMicro STMPE811 Driver"
 	default n
+	select INPUT_TOUCHSCREEN
 	---help---
 		Enables support for the STMPE811 driver
 
@@ -342,29 +460,45 @@ config STMPE811_SWAPXY
 	---help---
 		Reverse the meaning of X and Y to handle different LCD orientations.
 
+config STMPE811_OFFSETX
+	int "X offset"
+	default 0
+	depends on !STMPE811_TSC_DISABLE
+	---help---
+		Horizontal offset between the left edge of the touchscreen and
+		the left edge of the display area.
+
+config STMPE811_OFFSETY
+	int "Y offset"
+	default 0
+	depends on !STMPE811_TSC_DISABLE
+	---help---
+		Vertical offset between the top edge of the touchscreen and
+		the top edge of the display area.
+
 config STMPE811_THRESHX
 	int "X threshold"
 	default 12
 	depends on !STMPE811_TSC_DISABLE
 	---help---
-		STMPE811 touchscreen data comes in a a very high rate.  New touch positions
-		will only be reported when the X or Y data changes by these thresholds.
-		This trades reduced data rates for some loss in dragging accuracy.  The
-		STMPE811 is configure for 12-bit values the raw ranges are 0-4095. So
-		for example, if your display is 320x240, then THRESHX=13 and THRESHY=17
-		would correspond to one pixel.  Default: 12
+		STMPE811 touchscreen data comes in at a very high rate.  New touch
+		positions will only be reported when the X or Y data changes by these
+		thresholds.  This trades reduced data rates for some loss in dragging
+		accuracy.  The STMPE811 is configured for 12-bit values; the raw ranges
+		are 0-4095.  So for example, if your display is 320x240, then THRESHX=13
+		and THRESHY=17 would correspond to one pixel.  Default: 12
 
 config STMPE811_THRESHY
 	int "Y threshold"
 	default 12
 	depends on !STMPE811_TSC_DISABLE
 	---help---
-		STMPE811 touchscreen data comes in a a very high rate.  New touch positions
-		will only be reported when the X or Y data changes by these thresholds.
-		This trades reduced data rates for some loss in dragging accuracy.  The
-		STMPE811 is configure for 12-bit values the raw ranges are 0-4095. So
-		for example, if your display is 320x240, then THRESHX=13 and THRESHY=17
-		would correspond to one pixel.  Default: 12
+		STMPE811 touchscreen data comes in at a very high rate.  New touch
+		positions will only be reported when the X or Y data changes by these
+		thresholds.  This trades reduced data rates for some loss in dragging
+		accuracy.  The STMPE811 is configured for 12-bit values; the raw ranges
+		are 0-4095. So for example, if your display is 320x240, then THRESHX=13
+		and THRESHY=17 would correspond to one pixel.  Default: 12
 
 config STMPE811_ADC_DISABLE
 	bool "Disable STMPE811 ADC Support"
@@ -383,8 +517,8 @@ config STMPE811_GPIOINT_DISABLE
 	default y
 	depends on !STMPE811_GPIO_DISABLE
 	---help---
-		Disable driver GPIO interrupt functionality (ignored if GPIO functionality is
-		disabled).
+		Disable driver GPIO interrupt functionality (ignored if GPIO
+		functionality is disabled).
 
 config STMPE811_TEMP_DISABLE
 	bool "Disable STMPE811 Temperature Sensor Support"
@@ -404,6 +538,7 @@ endif # INPUT_STMPE811
 config INPUT_CYPRESS_MBR3108
 	bool "Enable Cypress MBR3108 CapSense driver"
 	default n
+	select INPUT_TOUCHSCREEN
 	---help---
 		Enable support for Cypress MBR3108 CapSense touch button & proximity
 		input sensor.
@@ -425,49 +560,110 @@ config INPUT_CYPRESS_MBR3108_NPOLLWAITERS
 
 endif # INPUT_CYPRESS_MBR3108
 
-config BUTTONS
+config INPUT_GT9XX
+	bool "Goodix GT9xx Driver"
+	default n
+	select INPUT_TOUCHSCREEN
+	---help---
+		Enable support for Goodix GT9xx touch panel.
+
+if INPUT_GT9XX
+
+config INPUT_GT9XX_NPOLLWAITERS
+	int "Number of waiters to poll"
+	default 1
+	---help---
+		Maximum number of threads that can be waiting on poll()
+
+config INPUT_GT9XX_I2C_FREQUENCY
+	int "I2C frequency (Hz)"
+	default 400000
+	---help---
+		I2C frequency in Hz
+
+endif # INPUT_GT9XX
+
+config INPUT_BUTTONS
 	bool "Button Inputs"
 	default n
 	---help---
 		Enable standard button upper half driver.
 
-if BUTTONS
+config INPUT_BUTTONS_DEBOUNCE_DELAY
+	int "Button Debounce Delay (millisecond)"
+	default 0
+	depends on INPUT_BUTTONS
+	---help---
+		Button Debounce Delay in ms
 
-config BUTTONS_LOWER
+if INPUT_BUTTONS
+
+config INPUT_BUTTONS_LOWER
 	bool "Generic Lower Half Button Driver"
 	default n
 	depends on ARCH_BUTTONS && ARCH_IRQBUTTONS
 	---help---
-		If the board supports the standard button interfaces as
-		defined in include/nuttx/board.h header file, then this
-		standard button lower half driver might be usable.
+		If the board supports the standard button interfaces as defined in
+		include/nuttx/board.h header file, then this standard button lower
+		half driver might be usable.
 
 		In order for this generic driver to be usable:
-
-		1. The board implementation must provide the button
-		   interfaces as defined in include/nuttx/board.h
-		2. The board implementation must support interrupts for each
-		  button.
-		3. The board.h header file must provide the definition
-		   NUM_BUTTONS, and
-		4. The board.h header file must not include any other
-		   header files that are not accessible in this context
-		   (such as those in arch/<arch>/src/<chip>) UNLESS those
-		   inclusions are conditioned on __KERNEL__.  button_lower.c
-		   will undefine __KERNEL__ before included board.h.
+		1. The board implementation must provide the button interfaces as
+		   defined in include/nuttx/board.h
+		2. The board implementation must support interrupts for each button.
 
 		If your board does not meet these requirements, then the
-		button_lower.c file can still be copied to your your
-		board src/ directory and modified for your specific board
-		requirements.
+		button_lower.c file can still be copied to your board src/ directory
+		and modified for your specific board requirements.
 
-config BUTTONS_NPOLLWAITERS
+config INPUT_BUTTONS_NPOLLWAITERS
 	int "Max Number of Poll Waiters"
 	default 2
 
-endif # BUTTONS
+endif # INPUT_BUTTONS
 
-config DJOYSTICK
+config INPUT_SBUTTON
+	bool "Single Button Multi Actions"
+	select INPUT_KEYBOARD
+	default n
+	---help---
+		Enable the Single Button Multi Actions upper half driver.
+		This driver allows using a single button to generate two
+		events (mapped to short press and long press). Using it
+		is possible navigate a menu interface when using with a
+		LCD/OLED display.
+
+if INPUT_SBUTTON
+
+config INPUT_SBUTTON_KEY1
+	int "ASCII code to generate for short press"
+	default 9
+	---help---
+		Which key will be generated when user do a short press.
+		Default key is TAB (ASCII 9)
+
+config INPUT_SBUTTON_KEY2
+	int "ASCII code to generate for long press"
+	default 13
+	---help---
+		Which key will be generated when user do a short press.
+		Default key is ENTER (ASCII 13)
+
+config INPUT_SBUTTON_BUFSIZE
+	int "Buffer size to store keys"
+	default 8
+
+config INPUT_SBUTTON_KEY_THRESH_MS
+	int "Threshold in milliseconds for short press"
+	default 500
+
+config INPUT_SBUTTON_KEY_DEBOUNCE_MS
+	int "Key Debounce value in milliseconds"
+	default 30
+
+endif # INPUT_SBUTTON
+
+config INPUT_DJOYSTICK
 	bool "Discrete Joystick"
 	default n
 	---help---
@@ -477,15 +673,15 @@ config DJOYSTICK
 		values like buttons (as opposed to integer values like you might
 		obtain from an analog joystick).
 
-if DJOYSTICK
+if INPUT_DJOYSTICK
 
-config DJOYSTICK_NPOLLWAITERS
+config INPUT_DJOYSTICK_NPOLLWAITERS
 	int "Max Number of Poll Waiters"
 	default 2
 
-endif # DJOYSTICK
+endif # INPUT_DJOYSTICK
 
-config AJOYSTICK
+config INPUT_AJOYSTICK
 	bool "Analog Joystick"
 	default n
 	---help---
@@ -495,13 +691,13 @@ config AJOYSTICK
 		to-Digital Conversion (ADC).  The analog positional data may also
 		be accompanied by discrete button data.
 
-if AJOYSTICK
+if INPUT_AJOYSTICK
 
-config AJOYSTICK_NPOLLWAITERS
+config INPUT_AJOYSTICK_NPOLLWAITERS
 	int "Max Number of Poll Waiters"
 	default 2
 
-endif # AJOYSTICK
+endif # INPUT_AJOYSTICK
 
 config INPUT_NUNCHUCK
 	bool "Nintendo Wii Nunchuck Joystick (White Model)"
@@ -510,8 +706,8 @@ config INPUT_NUNCHUCK
 	---help---
 		Enable a Nintendo Wii Nunchuck joystick upper half driver. The
 		nunchuck joystick provides position data as an integer value.The
-		analog positional data may also	be accompanied by discrete
-		button data.
+		analog positional data may also be accompanied by discrete button
+		data.
 
 if INPUT_NUNCHUCK
 
@@ -520,5 +716,37 @@ config NUNCHUCK_NPOLLWAITERS
 	default 2
 
 endif # INPUT_NUNCHUCK
+
+config INPUT_SPQ10KBD
+	bool "Solder Party Q10 BlackBerry Keyboard"
+	default n
+	select I2C
+	---help---
+		Enable the Solder Party Q10 BlackBerry Keyboard support.  This
+		exposes itself as a standard keyboard at /dev/kbdN.
+		This keyboard exists both as a standalone module and integrated
+		into the Solder Party Keyboard FeatherWing.  Information on this
+		can be found at https://www.solder.party/docs/keyboard-pmod/
+
+if INPUT_SPQ10KBD
+
+config SPQ10KBD_DJOY
+	bool "Joystick Interface for Buttons"
+	select INPUT_DJOYSTICK
+	default n
+
+config SPQ10KBD_REGDBG
+	bool "Keyboard Register Debug"
+	default n
+
+config SPQ10KBD_BUFSIZE
+	int "Keyboard Buffer Size"
+	default 10
+
+config SPQ10KBD_NPOLLWAITERS
+	int "Max Number of Poll Waiters"
+	default 2
+
+endif # INPUT_SPQ10KBD
 
 endif # INPUT

@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/samv7/sam_progmem.c
  *
- *   Copyright (C) 2015, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,15 +27,15 @@
 #include <nuttx/config.h>
 
 #include <string.h>
+#include <sys/param.h>
 #include <errno.h>
 
 #include <nuttx/arch.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
+#include <arch/barriers.h>
 #include <arch/samv7/chip.h>
 
-#include "up_arch.h"
-#include "up_internal.h"
-#include "barriers.h"
+#include "arm_internal.h"
 
 #include "hardware/sam_memorymap.h"
 
@@ -152,47 +139,18 @@
 #define SAMV7_PROGMEM_ENDSEC     (SAMV7_TOTAL_NSECTORS)
 #define SAMV7_PROGMEM_STARTSEC   (SAMV7_PROGMEM_ENDSEC - CONFIG_SAMV7_PROGMEM_NSECTORS)
 
-/* Misc stuff */
-
-#ifndef MIN
-#  define MIN(a, b)              ((a) < (b) ? (a) : (b))
-#endif
-
-#ifndef MAX
-#  define MAX(a, b)              ((a) > (b) ? (a) : (b))
-#endif
+#define SAMV7_PROGMEM_ERASEDVAL  (0xffu)
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
 static uint32_t g_page_buffer[SAMV7_PAGE_WORDS];
-static sem_t g_page_sem;
+static mutex_t g_page_lock = NXMUTEX_INITIALIZER;
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: page_buffer_lock
- *
- * Description:
- *   Get exclusive access to the global page buffer
- *
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-static int page_buffer_lock(void)
-{
-  return nxsem_wait_uninterruptible(&g_page_sem);
-}
-
-#define page_buffer_unlock() nxsem_post(&g_page_sem)
 
 /****************************************************************************
  * Public Functions
@@ -225,12 +183,6 @@ void sam_progmem_initialize(void)
   regval  = getreg32(SAM_EEFC_FMR);
   regval &= ~EEFC_FMR_FRDY;
   sam_eefc_writefmr(regval);
-
-  /* Initialize the semaphore that manages exclusive access to the global
-   * page buffer.
-   */
-
-  nxsem_init(&g_page_sem, 0, 1);
 }
 
 /****************************************************************************
@@ -460,13 +412,13 @@ ssize_t up_progmem_ispageerased(size_t cluster)
   address = (cluster << SAMV7_CLUSTER_SHIFT) + SAMV7_PROGMEM_START;
   up_flush_dcache(address, address + SAMV7_CLUSTER_SIZE);
 
-  /* Verify that the cluster is erased (i.e., all 0xff) */
+  /* Verify that the cluster is erased (i.e., all SAMV7_PROGMEM_ERASEDVAL) */
 
   for (nleft = SAMV7_CLUSTER_SIZE, nwritten = 0;
        nleft > 0;
        nleft--, address++)
     {
-      if (getreg8(address) != 0xff)
+      if (getreg8(address) != SAMV7_PROGMEM_ERASEDVAL)
         {
           nwritten++;
         }
@@ -484,7 +436,7 @@ ssize_t up_progmem_ispageerased(size_t cluster)
  * Input Parameters:
  *   address - Address with or without flash offset
  *   buffer  - Pointer to buffer
- *   buflen   - Number of bytes to write
+ *   buflen  - Number of bytes to write
  *
  * Returned Value:
  *   Bytes written or negative value on error.  The following errors are
@@ -503,8 +455,8 @@ ssize_t up_progmem_ispageerased(size_t cluster)
 
 ssize_t up_progmem_write(size_t address, const void *buffer, size_t buflen)
 {
-  FAR uint32_t *dest;
-  FAR const uint32_t *src;
+  uint32_t *dest;
+  const uint32_t *src;
   size_t written;
   size_t xfrsize;
   size_t offset;
@@ -540,7 +492,7 @@ ssize_t up_progmem_write(size_t address, const void *buffer, size_t buflen)
 
   /* Get exclusive access to the global page buffer */
 
-  ret = page_buffer_lock();
+  ret = nxmutex_lock(&g_page_lock);
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -552,14 +504,14 @@ ssize_t up_progmem_write(size_t address, const void *buffer, size_t buflen)
 
   /* Loop until all of the data has been written */
 
-  dest    = (FAR uint32_t *)address;
+  dest    = (uint32_t *)(address & ~SAMV7_PAGE_MASK);
   written = 0;
 
   while (buflen > 0)
     {
       /* How much can we write into this page? */
 
-      xfrsize = MIN((size_t)SAMV7_PAGE_SIZE - offset, buflen) ;
+      xfrsize = MIN((size_t)SAMV7_PAGE_SIZE - offset, buflen);
 
       /* Do we need to use the intermediate buffer? */
 
@@ -567,7 +519,7 @@ ssize_t up_progmem_write(size_t address, const void *buffer, size_t buflen)
         {
           /* No, we can take the data directly from the user buffer */
 
-          src = (FAR const uint32_t *)buffer;
+          src = (const uint32_t *)buffer;
         }
       else
         {
@@ -592,15 +544,19 @@ ssize_t up_progmem_write(size_t address, const void *buffer, size_t buflen)
 
       /* Write the page */
 
-      for (i = 0; i < (SAMV7_PAGE_SIZE / sizeof(uint32_t)); i++)
+      for (i = 0; i < SAMV7_PAGE_WORDS; i++)
         {
           *dest++ = *src++;
-           ARM_DMB();
+
+#ifdef CONFIG_ARMV7M_DCACHE_WRITETHROUGH
+          UP_DMB();
+#endif
         }
 
       /* Flush the data cache to memory */
 
-      up_clean_dcache(address, address + SAMV7_PAGE_SIZE);
+      up_clean_dcache(address & ~SAMV7_PAGE_MASK,
+        (address & ~SAMV7_PAGE_MASK) + SAMV7_PAGE_SIZE);
 
       /* Send the write command */
 
@@ -613,12 +569,26 @@ ssize_t up_progmem_write(size_t address, const void *buffer, size_t buflen)
       /* Adjust pointers and counts for the next time through the loop */
 
       address += xfrsize;
-      dest     = (FAR uint32_t *)address;
-      buffer   = (FAR void *)((uintptr_t)buffer + xfrsize);
+      dest     = (uint32_t *)address;
+      buffer   = (void *)((uintptr_t)buffer + xfrsize);
       buflen  -= xfrsize;
+      offset   = 0;
       page++;
     }
 
-  page_buffer_unlock();
+  nxmutex_unlock(&g_page_lock);
   return written;
+}
+
+/****************************************************************************
+ * Name: up_progmem_erasestate
+ *
+ * Description:
+ *   Return a byte that represents flash erased value state
+ *
+ ****************************************************************************/
+
+uint8_t up_progmem_erasestate(void)
+{
+  return SAMV7_PROGMEM_ERASEDVAL;
 }

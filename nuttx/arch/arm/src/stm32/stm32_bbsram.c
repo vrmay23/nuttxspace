@@ -1,36 +1,22 @@
 /****************************************************************************
  * arch/arm/src/stm32/stm32_bbsram.c
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *           David Sidrane <david_s5@nscdg.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -51,12 +37,13 @@
 #include <stdbool.h>
 #include <string.h>
 #include <poll.h>
+#include <assert.h>
 #include <errno.h>
 #include <unistd.h>
 #include <time.h>
 #include <nuttx/fs/fs.h>
-
-#include <crc32.h>
+#include <nuttx/crc32.h>
+#include <nuttx/mutex.h>
 
 #include "stm32_bbsram.h"
 #include "chip.h"
@@ -101,40 +88,40 @@
 
 struct bbsramfh_s
 {
-  uint32_t crc;                /* CRC calculated over data and this struct
-                                * starting at fileno */
-  uint8_t fileno;              /* The minor number */
-  uint8_t dirty;               /* Data has been written to the file */
-  uint16_t len;                /* Total Bytes in this file */
-  struct timespec lastwrite;   /* Last write time */
-  uint8_t  data[];             /* Data in the file */
+  uint32_t crc;              /* CRC calculated over data and this struct
+                             * starting at fileno */
+  uint8_t fileno;            /* The minor number */
+  uint8_t dirty;             /* Data has been written to the file */
+  uint16_t len;              /* Total Bytes in this file */
+  struct timespec lastwrite; /* Last write time */
+  uint8_t  data[];           /* Data in the file */
 };
 
 struct stm32_bbsram_s
 {
-  sem_t    exclsem;            /* For atomic accesses to this structure */
-  uint8_t  refs;               /* Number of references */
-  FAR struct bbsramfh_s *bbf;  /* File in bbram */
+  mutex_t  lock;             /* For atomic accesses to this structure */
+  uint8_t  refs;             /* Number of references */
+  struct bbsramfh_s *bbf;    /* File in bbram */
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static int     stm32_bbsram_open(FAR struct file *filep);
-static int     stm32_bbsram_close(FAR struct file *filep);
-static off_t   stm32_bbsram_seek(FAR struct file *filep, off_t offset,
-                 int whence);
-static ssize_t stm32_bbsram_read(FAR struct file *filep, FAR char *buffer,
-                 size_t len);
-static ssize_t stm32_bbsram_write(FAR struct file *filep,
-                 FAR const char *buffer, size_t len);
-static int stm32_bbsram_ioctl(FAR struct file *filep, int cmd,
-                 unsigned long arg);
-static int     stm32_bbsram_poll(FAR struct file *filep,
-                 FAR struct pollfd *fds, bool setup);
+static int     stm32_bbsram_open(struct file *filep);
+static int     stm32_bbsram_close(struct file *filep);
+static off_t   stm32_bbsram_seek(struct file *filep, off_t offset,
+                                 int whence);
+static ssize_t stm32_bbsram_read(struct file *filep, char *buffer,
+                                 size_t len);
+static ssize_t stm32_bbsram_write(struct file *filep,
+                                  const char *buffer, size_t len);
+static int stm32_bbsram_ioctl(struct file *filep, int cmd,
+                              unsigned long arg);
+static int     stm32_bbsram_poll(struct file *filep,
+                                 struct pollfd *fds, bool setup);
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-static int     stm32_bbsram_unlink(FAR struct inode *inode);
+static int     stm32_bbsram_unlink(struct inode *inode);
 #endif
 
 /****************************************************************************
@@ -145,7 +132,7 @@ static int     stm32_bbsram_unlink(FAR struct inode *inode);
 static uint8_t debug[STM32_BBSRAM_SIZE];
 #endif
 
-static const struct file_operations stm32_bbsram_fops =
+static const struct file_operations g_stm32_bbsram_fops =
 {
   .open   = stm32_bbsram_open,
   .close  = stm32_bbsram_close,
@@ -155,7 +142,7 @@ static const struct file_operations stm32_bbsram_fops =
   .ioctl  = stm32_bbsram_ioctl,
   .poll   = stm32_bbsram_poll,
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  .unlink = stm32_bbsram_unlink,
+  .unlink = stm32_bbsram_unlink
 #endif
 };
 
@@ -181,7 +168,7 @@ static void stm32_bbsram_rd(void)
  ****************************************************************************/
 
 #if defined(CONFIG_BBSRAM_DEBUG)
-static void stm32_bbsram_dump(FAR struct bbsramfh_s *bbf, char *op)
+static void stm32_bbsram_dump(struct bbsramfh_s *bbf, char *op)
 {
   BBSRAM_DEBUG_READ();
   _info("%s:\n", op);
@@ -197,35 +184,7 @@ static void stm32_bbsram_dump(FAR struct bbsramfh_s *bbf, char *op)
 #endif
 
 /****************************************************************************
- * Name: stm32_bbsram_semgive
- ****************************************************************************/
-
-static void stm32_bbsram_semgive(FAR struct stm32_bbsram_s *priv)
-{
-  nxsem_post(&priv->exclsem);
-}
-
-/****************************************************************************
- * Name: stm32_bbsram_semtake
- *
- * Description:
- *   Take a semaphore handling any exceptional conditions
- *
- * Input Parameters:
- *   priv - A reference to the CAN peripheral state
- *
- * Returned Value:
- *  None
- *
- ****************************************************************************/
-
-static int stm32_bbsram_semtake(FAR struct stm32_bbsram_s *priv)
-{
-  return nxsem_wait_uninterruptible(&priv->exclsem);
-}
-
-/****************************************************************************
- * Name: stm32_bbsram_ulock
+ * Name: stm32_bbsram_unlock
  *
  * Description:
  *   Unprotects RTC registers, RTC backup data registers and backup SRAM
@@ -278,7 +237,7 @@ static inline void stm32_bbsram_lock(void)
  *
  ****************************************************************************/
 
-static uint32_t stm32_bbsram_crc(FAR struct bbsramfh_s *pf)
+static uint32_t stm32_bbsram_crc(struct bbsramfh_s *pf)
 {
   return crc32((uint8_t *)pf + BBSRAM_CRCED_OFFSET,
                BBSRAM_CRCED_SIZE(pf->len));
@@ -291,18 +250,18 @@ static uint32_t stm32_bbsram_crc(FAR struct bbsramfh_s *pf)
  *
  ****************************************************************************/
 
-static int stm32_bbsram_open(FAR struct file *filep)
+static int stm32_bbsram_open(struct file *filep)
 {
-  FAR struct inode *inode = filep->f_inode;
-  FAR struct stm32_bbsram_s *bbr;
+  struct inode *inode = filep->f_inode;
+  struct stm32_bbsram_s *bbr;
   int ret;
 
-  DEBUGASSERT(inode && inode->i_private);
-  bbr = (FAR struct stm32_bbsram_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  bbr = inode->i_private;
 
   /* Increment the reference count */
 
-  ret = stm32_bbsram_semtake(bbr);
+  ret = nxmutex_lock(&bbr->lock);
   if (ret < 0)
     {
       return ret;
@@ -317,7 +276,7 @@ static int stm32_bbsram_open(FAR struct file *filep)
       bbr->refs++;
     }
 
-  stm32_bbsram_semgive(bbr);
+  nxmutex_unlock(&bbr->lock);
   return OK;
 }
 
@@ -329,7 +288,7 @@ static int stm32_bbsram_open(FAR struct file *filep)
  *
  ****************************************************************************/
 
-static int stm32_bbsram_internal_close(FAR struct bbsramfh_s *bbf)
+static int stm32_bbsram_internal_close(struct bbsramfh_s *bbf)
 {
   bbf->dirty = 0;
   clock_gettime(CLOCK_REALTIME, &bbf->lastwrite);
@@ -346,16 +305,16 @@ static int stm32_bbsram_internal_close(FAR struct bbsramfh_s *bbf)
  *
  ****************************************************************************/
 
-static int stm32_bbsram_close(FAR struct file *filep)
+static int stm32_bbsram_close(struct file *filep)
 {
-  FAR struct inode *inode = filep->f_inode;
-  FAR struct stm32_bbsram_s *bbr;
+  struct inode *inode = filep->f_inode;
+  struct stm32_bbsram_s *bbr;
   int ret = OK;
 
-  DEBUGASSERT(inode && inode->i_private);
-  bbr = (FAR struct stm32_bbsram_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  bbr = inode->i_private;
 
-  ret = stm32_bbsram_semtake(bbr);
+  ret = nxmutex_lock(&bbr->lock);
   if (ret < 0)
     {
       return ret;
@@ -384,7 +343,7 @@ static int stm32_bbsram_close(FAR struct file *filep)
         }
     }
 
-  stm32_bbsram_semgive(bbr);
+  nxmutex_unlock(&bbr->lock);
   return ret;
 }
 
@@ -392,18 +351,18 @@ static int stm32_bbsram_close(FAR struct file *filep)
  * Name: stm32_bbsram_seek
  ****************************************************************************/
 
-static off_t stm32_bbsram_seek(FAR struct file *filep, off_t offset,
+static off_t stm32_bbsram_seek(struct file *filep, off_t offset,
                                int whence)
 {
-  FAR struct inode *inode = filep->f_inode;
-  FAR struct stm32_bbsram_s *bbr;
+  struct inode *inode = filep->f_inode;
+  struct stm32_bbsram_s *bbr;
   off_t newpos;
   int ret;
 
-  DEBUGASSERT(inode && inode->i_private);
-  bbr = (FAR struct stm32_bbsram_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  bbr = inode->i_private;
 
-  ret = stm32_bbsram_semtake(bbr);
+  ret = nxmutex_lock(&bbr->lock);
   if (ret < 0)
     {
       return (off_t)ret;
@@ -429,7 +388,7 @@ static off_t stm32_bbsram_seek(FAR struct file *filep, off_t offset,
 
       /* Return EINVAL if the whence argument is invalid */
 
-      stm32_bbsram_semgive(bbr);
+      nxmutex_unlock(&bbr->lock);
       return -EINVAL;
     }
 
@@ -440,7 +399,7 @@ static off_t stm32_bbsram_seek(FAR struct file *filep, off_t offset,
    *   point, subsequent reads of data in the gap shall return bytes with the
    *   value 0 until data is actually written into the gap."
    *
-   * We can conform to the first part, but not the second.  But return EINVAL
+   * We can conform to the first part, but not the second. But return -EINVAL
    * if "...the resulting file offset would be negative for a regular file,
    *     block special file, or directory."
    */
@@ -455,7 +414,7 @@ static off_t stm32_bbsram_seek(FAR struct file *filep, off_t offset,
       ret = -EINVAL;
     }
 
-  stm32_bbsram_semgive(bbr);
+  nxmutex_unlock(&bbr->lock);
   return ret;
 }
 
@@ -463,17 +422,17 @@ static off_t stm32_bbsram_seek(FAR struct file *filep, off_t offset,
  * Name: stm32_bbsram_read
  ****************************************************************************/
 
-static ssize_t stm32_bbsram_read(FAR struct file *filep, FAR char *buffer,
+static ssize_t stm32_bbsram_read(struct file *filep, char *buffer,
                                  size_t len)
 {
-  FAR struct inode *inode = filep->f_inode;
-  FAR struct stm32_bbsram_s *bbr;
+  struct inode *inode = filep->f_inode;
+  struct stm32_bbsram_s *bbr;
   int ret;
 
-  DEBUGASSERT(inode && inode->i_private);
-  bbr = (FAR struct stm32_bbsram_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  bbr = inode->i_private;
 
-  ret = stm32_bbsram_semtake(bbr);
+  ret = nxmutex_lock(&bbr->lock);
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -488,7 +447,7 @@ static ssize_t stm32_bbsram_read(FAR struct file *filep, FAR char *buffer,
 
   memcpy(buffer, &bbr->bbf->data[filep->f_pos], len);
   filep->f_pos += len;
-  stm32_bbsram_semgive(bbr);
+  nxmutex_unlock(&bbr->lock);
   return len;
 }
 
@@ -496,8 +455,8 @@ static ssize_t stm32_bbsram_read(FAR struct file *filep, FAR char *buffer,
  * Name: stm32_bbsram_internal_write
  ****************************************************************************/
 
-static ssize_t stm32_bbsram_internal_write(FAR struct bbsramfh_s *bbf,
-                                           FAR const char *buffer,
+static ssize_t stm32_bbsram_internal_write(struct bbsramfh_s *bbf,
+                                           const char *buffer,
                                            off_t offset, size_t len)
 {
   bbf->dirty = 1;
@@ -509,15 +468,15 @@ static ssize_t stm32_bbsram_internal_write(FAR struct bbsramfh_s *bbf,
  * Name: stm32_bbsram_write
  ****************************************************************************/
 
-static ssize_t stm32_bbsram_write(FAR struct file *filep,
-                                  FAR const char *buffer, size_t len)
+static ssize_t stm32_bbsram_write(struct file *filep,
+                                  const char *buffer, size_t len)
 {
-  FAR struct inode *inode = filep->f_inode;
-  FAR struct stm32_bbsram_s *bbr;
+  struct inode *inode = filep->f_inode;
+  struct stm32_bbsram_s *bbr;
   int ret = -EFBIG;
 
-  DEBUGASSERT(inode && inode->i_private);
-  bbr = (FAR struct stm32_bbsram_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  bbr = inode->i_private;
 
   /* Forbid writes past the end of the device */
 
@@ -530,7 +489,7 @@ static ssize_t stm32_bbsram_write(FAR struct file *filep,
           len = bbr->bbf->len - filep->f_pos;
         }
 
-      ret = stm32_bbsram_semtake(bbr);
+      ret = nxmutex_lock(&bbr->lock);
       if (ret < 0)
         {
           return (ssize_t)ret;
@@ -544,7 +503,7 @@ static ssize_t stm32_bbsram_write(FAR struct file *filep,
       stm32_bbsram_lock();
       filep->f_pos += len;
       BBSRAM_DUMP(bbr->bbf, "write done");
-      stm32_bbsram_semgive(bbr);
+      nxmutex_unlock(&bbr->lock);
     }
 
   BBSRAM_DEBUG_READ();
@@ -555,16 +514,12 @@ static ssize_t stm32_bbsram_write(FAR struct file *filep,
  * Name: stm32_bbsram_poll
  ****************************************************************************/
 
-static int stm32_bbsram_poll(FAR struct file *filep, FAR struct pollfd *fds,
+static int stm32_bbsram_poll(struct file *filep, struct pollfd *fds,
                              bool setup)
 {
   if (setup)
     {
-      fds->revents |= (fds->events & (POLLIN | POLLOUT));
-      if (fds->revents != 0)
-        {
-          nxsem_post(fds->sem);
-        }
+      poll_notify(&fds, 1, POLLIN | POLLOUT);
     }
 
   return OK;
@@ -577,21 +532,21 @@ static int stm32_bbsram_poll(FAR struct file *filep, FAR struct pollfd *fds,
  *
  ****************************************************************************/
 
-static int stm32_bbsram_ioctl(FAR struct file *filep, int cmd,
+static int stm32_bbsram_ioctl(struct file *filep, int cmd,
                               unsigned long arg)
 {
-  FAR struct inode *inode = filep->f_inode;
-  FAR struct stm32_bbsram_s *bbr;
+  struct inode *inode = filep->f_inode;
+  struct stm32_bbsram_s *bbr;
   int ret = -ENOTTY;
 
-  DEBUGASSERT(inode && inode->i_private);
-  bbr = (FAR struct stm32_bbsram_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  bbr = inode->i_private;
 
   if (cmd == STM32_BBSRAM_GETDESC_IOCTL)
     {
-      FAR struct bbsramd_s *bbrr = (FAR struct bbsramd_s *)((uintptr_t)arg);
+      struct bbsramd_s *bbrr = (struct bbsramd_s *)((uintptr_t)arg);
 
-      ret = stm32_bbsram_semtake(bbr);
+      ret = nxmutex_lock(&bbr->lock);
       if (ret < 0)
         {
           return ret;
@@ -612,7 +567,7 @@ static int stm32_bbsram_ioctl(FAR struct file *filep, int cmd,
           ret = OK;
         }
 
-      stm32_bbsram_semgive(bbr);
+      nxmutex_unlock(&bbr->lock);
     }
 
   return ret;
@@ -632,15 +587,15 @@ static int stm32_bbsram_ioctl(FAR struct file *filep, int cmd,
  ****************************************************************************/
 
 #ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-static int stm32_bbsram_unlink(FAR struct inode *inode)
+static int stm32_bbsram_unlink(struct inode *inode)
 {
-  FAR struct stm32_bbsram_s *bbr;
+  struct stm32_bbsram_s *bbr;
   int ret;
 
-  DEBUGASSERT(inode && inode->i_private);
-  bbr = (FAR struct stm32_bbsram_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  bbr = inode->i_private;
 
-  ret = stm32_bbsram_semtake(bbr);
+  ret = nxmutex_lock(&bbr->lock);
   if (ret < 0)
     {
       return ret;
@@ -653,8 +608,8 @@ static int stm32_bbsram_unlink(FAR struct inode *inode)
   bbr->bbf->crc = stm32_bbsram_crc(bbr->bbf);
   stm32_bbsram_lock();
   bbr->refs  = 0;
-  stm32_bbsram_semgive(bbr);
-  nxsem_destroy(&bbr->exclsem);
+  nxmutex_unlock(&bbr->lock);
+  nxmutex_destroy(&bbr->lock);
 
   return 0;
 }
@@ -717,7 +672,7 @@ static int stm32_bbsram_probe(int *ent, struct stm32_bbsram_s pdev[])
 
           pdev[i].bbf = pf;
           pf = (struct bbsramfh_s *)((uint8_t *)pf + alloc);
-          nxsem_init(&g_bbsram[i].exclsem, 0, 1);
+          nxmutex_init(&g_bbsram[i].lock);
         }
 
       avail -= alloc;
@@ -757,7 +712,6 @@ int stm32_bbsraminitialize(char *devpath, int *sizes)
 {
   int i;
   int fcnt;
-  char path[32];
   char devname[32];
 
   int ret = OK;
@@ -768,7 +722,7 @@ int stm32_bbsraminitialize(char *devpath, int *sizes)
     }
 
   i = strlen(devpath);
-  if (i == 0 || i > sizeof(path) + 3)
+  if (i == 0 || i > sizeof(devname) - 3)
     {
       return -EINVAL;
     }
@@ -797,13 +751,11 @@ int stm32_bbsraminitialize(char *devpath, int *sizes)
 
   fcnt = stm32_bbsram_probe(sizes, g_bbsram);
 
-  strncpy(path, devpath, sizeof(path));
-  strcat(path, "%d");
-
   for (i = 0; i < fcnt && ret >= OK; i++)
     {
-      snprintf(devname, sizeof(devname), path, i);
-      ret = register_driver(devname, &stm32_bbsram_fops, 0666, &g_bbsram[i]);
+      snprintf(devname, sizeof(devname), "%s%d", devpath, i);
+      ret = register_driver(devname, &g_stm32_bbsram_fops,
+                            0666, &g_bbsram[i]);
     }
 
   /* Disallow Access */
@@ -833,7 +785,7 @@ int stm32_bbsraminitialize(char *devpath, int *sizes)
 #if defined(CONFIG_STM32_SAVE_CRASHDUMP)
 int stm32_bbsram_savepanic(int fileno, uint8_t *context, int length)
 {
-  FAR struct bbsramfh_s *bbf;
+  struct bbsramfh_s *bbf;
   int fill;
   int ret = -ENOSPC;
 

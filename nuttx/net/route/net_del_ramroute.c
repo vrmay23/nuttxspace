@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/route/net_del_ramroute.c
  *
- *   Copyright (C) 2013, 2015, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -47,6 +34,7 @@
 #include <arpa/inet.h>
 #include <nuttx/net/ip.h>
 
+#include "netlink/netlink.h"
 #include "route/ramroute.h"
 #include "route/route.h"
 
@@ -79,10 +67,10 @@ struct route_match_ipv6_s
  ****************************************************************************/
 
 /****************************************************************************
- * Name: net_match_ipv4
+ * Name: net_del_ipv4route
  *
  * Description:
- *   Return 1 if the route is available
+ *   Return 1 if the route is available, and delete the match route
  *
  * Input Parameters:
  *   route - The next route to examine
@@ -94,9 +82,11 @@ struct route_match_ipv6_s
  ****************************************************************************/
 
 #ifdef CONFIG_ROUTE_IPv4_RAMROUTE
-static int net_match_ipv4(FAR struct net_route_ipv4_s *route, FAR void *arg)
+static int net_del_ipv4route(FAR struct net_route_ipv4_s *route,
+                             FAR void *arg)
 {
-  FAR struct route_match_ipv4_s *match = (FAR struct route_match_ipv4_s *)arg;
+  FAR struct route_match_ipv4_s *match =
+                    (FAR struct route_match_ipv4_s *)arg;
 
   /* To match, the masked target address must be the same, and the masks
    * must be the same.
@@ -104,8 +94,8 @@ static int net_match_ipv4(FAR struct net_route_ipv4_s *route, FAR void *arg)
 
   net_ipv4_dumproute("Comparing", route);
   ninfo("With:\n");
-  ninfo("  target=%08lx netmask=%08lx\n",
-        htonl(match->target), htonl(match->netmask));
+  ninfo("  target=%08" PRIx32 " netmask=%08" PRIx32 "\n",
+        HTONL(match->target), HTONL(match->netmask));
 
   if (net_ipv4addr_maskcmp(route->target, match->target, match->netmask) &&
       net_ipv4addr_cmp(route->netmask, match->netmask))
@@ -114,13 +104,16 @@ static int net_match_ipv4(FAR struct net_route_ipv4_s *route, FAR void *arg)
 
       if (match->prev)
         {
-          ramroute_ipv4_remafter((FAR struct net_route_ipv4_entry_s *)match->prev,
-                                 &g_ipv4_routes);
+          ramroute_ipv4_remafter(
+                         (FAR struct net_route_ipv4_entry_s *)match->prev,
+                         &g_ipv4_routes);
         }
       else
         {
           ramroute_ipv4_remfirst(&g_ipv4_routes);
         }
+
+      netlink_route_notify(route, RTM_DELROUTE, AF_INET);
 
       /* And free the routing table entry by adding it to the free list */
 
@@ -139,9 +132,11 @@ static int net_match_ipv4(FAR struct net_route_ipv4_s *route, FAR void *arg)
 #endif
 
 #ifdef CONFIG_ROUTE_IPv6_RAMROUTE
-static int net_match_ipv6(FAR struct net_route_ipv6_s *route, FAR void *arg)
+static int net_del_ipv6route(FAR struct net_route_ipv6_s *route,
+                             FAR void *arg)
 {
-  FAR struct route_match_ipv6_s *match = (FAR struct route_match_ipv6_s *)arg;
+  FAR struct route_match_ipv6_s *match =
+                     (FAR struct route_match_ipv6_s *)arg;
 
   /* To match, the masked target address must be the same, and the masks
    * must be the same.
@@ -150,15 +145,15 @@ static int net_match_ipv6(FAR struct net_route_ipv6_s *route, FAR void *arg)
   net_ipv6_dumproute("Comparing", route);
   ninfo("With:\n");
   ninfo("  target:  %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-        htons(match->target[0]),  htons(match->target[1]),
-        htons(match->target[2]),  htons(match->target[3]),
-        htons(match->target[4]),  htons(match->target[5]),
-        htons(match->target[6]),  htons(match->target[7]));
+        HTONS(match->target[0]),  HTONS(match->target[1]),
+        HTONS(match->target[2]),  HTONS(match->target[3]),
+        HTONS(match->target[4]),  HTONS(match->target[5]),
+        HTONS(match->target[6]),  HTONS(match->target[7]));
   ninfo("  netmask: %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-        htons(match->netmask[0]), htons(match->netmask[1]),
-        htons(match->netmask[2]), htons(match->netmask[3]),
-        htons(match->netmask[4]), htons(match->netmask[5]),
-        htons(match->netmask[6]), htons(match->netmask[7]));
+        HTONS(match->netmask[0]), HTONS(match->netmask[1]),
+        HTONS(match->netmask[2]), HTONS(match->netmask[3]),
+        HTONS(match->netmask[4]), HTONS(match->netmask[5]),
+        HTONS(match->netmask[6]), HTONS(match->netmask[7]));
 
   if (net_ipv6addr_maskcmp(route->target, match->target, match->netmask) &&
       net_ipv6addr_cmp(route->netmask, match->netmask))
@@ -167,13 +162,16 @@ static int net_match_ipv6(FAR struct net_route_ipv6_s *route, FAR void *arg)
 
       if (match->prev)
         {
-          ramroute_ipv6_remafter((FAR struct net_route_ipv6_entry_s *)match->prev,
-                                 &g_ipv6_routes);
+          ramroute_ipv6_remafter(
+                     (FAR struct net_route_ipv6_entry_s *)match->prev,
+                     &g_ipv6_routes);
         }
       else
         {
           ramroute_ipv6_remfirst(&g_ipv6_routes);
         }
+
+      netlink_route_notify(route, RTM_DELROUTE, AF_INET6);
 
       /* And free the routing table entry by adding it to the free list */
 
@@ -221,7 +219,7 @@ int net_delroute_ipv4(in_addr_t target, in_addr_t netmask)
 
   /* Then remove the entry from the routing table */
 
-  return net_foreachroute_ipv4(net_match_ipv4, &match) ? OK : -ENOENT;
+  return net_foreachroute_ipv4(net_del_ipv4route, &match) ? OK : -ENOENT;
 }
 #endif
 
@@ -238,7 +236,7 @@ int net_delroute_ipv6(net_ipv6addr_t target, net_ipv6addr_t netmask)
 
   /* Then remove the entry from the routing table */
 
-  return net_foreachroute_ipv6(net_match_ipv6, &match) ? OK : -ENOENT;
+  return net_foreachroute_ipv6(net_del_ipv6route, &match) ? OK : -ENOENT;
 }
 #endif
 

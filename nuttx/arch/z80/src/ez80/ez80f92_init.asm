@@ -1,6 +1,8 @@
 ;**************************************************************************
 ; arch/z80/src/ez80/ez80f92_init.asm
 ;
+; SPDX-License-Identifier: Apache-2.0
+;
 ; Licensed to the Apache Software Foundation (ASF) under one or more
 ; contributor license agreements.  See the NOTICE file distributed with
 ; this work for additional information regarding copyright ownership.  The
@@ -67,12 +69,12 @@
 _ez80_init:
 	; Disable internal peripheral interrupt sources
 
-	ld		a, %ff
+	ld		a, 0ffh
 	out0	(PB_DDR), a			; GPIO
 	out0	(PC_DDR), a
 	out0	(PD_DDR), a
 
-	ld		a, %00
+	ld		a, 000h
 	out0	(PB_ALT1), a
 	out0	(PC_ALT1), a
 	out0	(PD_ALT1), a
@@ -95,11 +97,11 @@ _ez80_init:
 
 	out0	(FLASH_IRQ), a		; Flash
 
-	ld		a, %04
+	ld		a, 004h
 	out0	(SPI_CTL), a		; SPI
 
 	in0		a, (RTC_CTRL)		; RTC,
-	and		a, %be
+	and		a, 0beh
 	out0	(RTC_CTRL), a
 
 	; Configure external memory/io

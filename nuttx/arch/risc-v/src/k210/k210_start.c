@@ -1,32 +1,22 @@
 /****************************************************************************
  * arch/risc-v/src/k210/k210_start.c
  *
- *   Copyright (C) 2019 Masayuki Ishikawa. All rights reserved.
- *   Author: Masayuki Ishikawa <masayuki.ishikawa@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -36,10 +26,11 @@
 
 #include <nuttx/config.h>
 
+#include <nuttx/init.h>
 #include <nuttx/arch.h>
 #include <arch/board/board.h>
 
-#include "up_arch.h"
+#include "riscv_internal.h"
 #include "k210_clockconfig.h"
 #include "k210_userspace.h"
 #include "k210.h"
@@ -50,7 +41,7 @@
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_FEATURES
-#  define showprogress(c) up_lowputc(c)
+#  define showprogress(c) riscv_lowputc(c)
 #else
 #  define showprogress(c)
 #endif
@@ -59,27 +50,12 @@
  * Public Data
  ****************************************************************************/
 
-/* g_idle_topstack: _sbss is the start of the BSS region as defined by the
- * linker script. _ebss lies at the end of the BSS region. The idle task
- * stack starts at the end of BSS and is of size CONFIG_IDLETHREAD_STACKSIZE.
- * The IDLE thread is the thread that the system boots on and, eventually,
- * becomes the IDLE, do nothing task that runs only when there is nothing
- * else to run.  The heap continues from there until the end of memory.
- * g_idle_topstack is a read-only variable the provides this computed
- * address.
- */
-
-uintptr_t g_idle_topstack = K210_IDLESTACK_TOP;
-volatile bool g_serial_ok = false;
-
-extern void k210_cpu_boot(uint32_t);
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: k210_start
+ * Name: __k210_start
  ****************************************************************************/
 
 void __k210_start(uint32_t mhartid)
@@ -87,7 +63,9 @@ void __k210_start(uint32_t mhartid)
   const uint32_t *src;
   uint32_t *dest;
 
-  g_serial_ok = false;
+  /* Configure FPU */
+
+  riscv_fpuconfig();
 
   if (0 < mhartid)
     {
@@ -98,7 +76,7 @@ void __k210_start(uint32_t mhartid)
    * certain that there are no issues with the state of global variables.
    */
 
-  for (dest = &_sbss; dest < &_ebss; )
+  for (dest = (uint32_t *)_sbss; dest < (uint32_t *)_ebss; )
     {
       *dest++ = 0;
     }
@@ -109,7 +87,9 @@ void __k210_start(uint32_t mhartid)
    * end of all of the other read-only data (.text, .rodata) at _eronly.
    */
 
-  for (src = &_eronly, dest = &_sdata; dest < &_edata; )
+  for (src = (const uint32_t *)_eronly,
+       dest = (uint32_t *)_sdata; dest < (uint32_t *)_edata;
+      )
     {
       *dest++ = *src++;
     }
@@ -125,12 +105,10 @@ void __k210_start(uint32_t mhartid)
   showprogress('A');
 
 #ifdef USE_EARLYSERIALINIT
-  up_earlyserialinit();
+  riscv_earlyserialinit();
 #endif
 
   showprogress('B');
-
-  g_serial_ok = true;
 
   /* Do board initialization */
 
@@ -154,11 +132,10 @@ void __k210_start(uint32_t mhartid)
   nx_start();
 
 cpu1:
-
   showprogress('a');
 
 #if defined(CONFIG_SMP) && (CONFIG_SMP_NCPUS == 2)
-  k210_cpu_boot(mhartid);
+  riscv_cpu_boot(mhartid);
 #endif
 
   while (true)

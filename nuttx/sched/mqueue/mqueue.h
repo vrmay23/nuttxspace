@@ -1,5 +1,7 @@
-/********************************************************************************
- *  sched/mqueue/mqueue.h
+/****************************************************************************
+ * sched/mqueue/mqueue.h
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -16,14 +18,14 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  *
- ********************************************************************************/
+ ****************************************************************************/
 
 #ifndef __SCHED_MQUEUE_MQUEUE_H
 #define __SCHED_MQUEUE_MQUEUE_H
 
-/********************************************************************************
+/****************************************************************************
  * Included Files
- ********************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 #include <nuttx/compiler.h>
@@ -35,33 +37,24 @@
 #include <mqueue.h>
 #include <sched.h>
 
+#include <nuttx/spinlock.h>
 #include <nuttx/mqueue.h>
 
-#if CONFIG_MQ_MAXMSGSIZE > 0
+#if defined(CONFIG_MQ_MAXMSGSIZE) && CONFIG_MQ_MAXMSGSIZE > 0
 
-/********************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- ********************************************************************************/
+ ****************************************************************************/
 
 #define MQ_MAX_BYTES   CONFIG_MQ_MAXMSGSIZE
 #define MQ_MAX_MSGS    16
 #define MQ_PRIO_MAX    _POSIX_MQ_PRIO_MAX
 
-/* This defines the number of messages descriptors to allocate at each
- * "gulp."
- */
+#define MQ_MSG_SIZE(n) (sizeof(struct mqueue_msg_s) + (n) - 1)
 
-#define NUM_MSG_DESCRIPTORS 24
-
-/* This defines the number of messages to set aside for exclusive use by
- * interrupt handlers
- */
-
-#define NUM_INTERRUPT_MSGS   8
-
-/********************************************************************************
+/****************************************************************************
  * Public Type Definitions
- ********************************************************************************/
+ ****************************************************************************/
 
 enum mqalloc_e
 {
@@ -74,20 +67,20 @@ enum mqalloc_e
 
 struct mqueue_msg_s
 {
-  FAR struct mqueue_msg_s *next;  /* Forward link to next message */
-  uint8_t type;                   /* (Used to manage allocations) */
-  uint8_t priority;               /* priority of message */
+  struct list_node node;   /* Link node to message */
+  uint8_t type;            /* (Used to manage allocations) */
+  uint8_t priority;        /* Priority of message */
 #if MQ_MAX_BYTES < 256
-  uint8_t msglen;                 /* Message data length */
+  uint8_t msglen;          /* Message data length */
 #else
-  uint16_t msglen;                /* Message data length */
+  uint16_t msglen;         /* Message data length */
 #endif
-  char mail[MQ_MAX_BYTES];        /* Message data */
+  char mail[1];            /* Message data */
 };
 
-/********************************************************************************
+/****************************************************************************
  * Public Data
- ********************************************************************************/
+ ****************************************************************************/
 
 #ifdef __cplusplus
 #define EXTERN extern "C"
@@ -101,59 +94,51 @@ extern "C"
  * The number of messages in this list is a system configuration item.
  */
 
-EXTERN sq_queue_t  g_msgfree;
+EXTERN struct list_node g_msgfree;
 
-/* The g_msgfreeInt is a list of messages that are reserved for use by
+/* The g_msgfreeirq is a list of messages that are reserved for use by
  * interrupt handlers.
  */
 
-EXTERN sq_queue_t  g_msgfreeirq;
+EXTERN struct list_node g_msgfreeirq;
 
-/* The g_desfree data structure is a list of message descriptors available
- * to the operating system for general use. The number of messages in the
- * pool is a constant.
- */
+EXTERN spinlock_t g_msgfreelock;
 
-EXTERN sq_queue_t  g_desfree;
-
-/********************************************************************************
+/****************************************************************************
  * Public Function Prototypes
- ********************************************************************************/
+ ****************************************************************************/
 
 struct tcb_s;        /* Forward reference */
 struct task_group_s; /* Forward reference */
 
-/* Functions defined in mq_initialize.c *****************************************/
+/* Functions defined in mq_initialize.c *************************************/
 
-void weak_function nxmq_initialize(void);
-void nxmq_alloc_desblock(void);
+void nxmq_initialize(void);
+
+/* mq_msgfree.c *************************************************************/
+
 void nxmq_free_msg(FAR struct mqueue_msg_s *mqmsg);
 
-/* mq_waitirq.c *****************************************************************/
+/* mq_waitirq.c *************************************************************/
 
 void nxmq_wait_irq(FAR struct tcb_s *wtcb, int errcode);
 
-/* mq_rcvinternal.c *************************************************************/
+/* mq_rcvinternal.c *********************************************************/
 
-int nxmq_verify_receive(mqd_t mqdes, FAR char *msg, size_t msglen);
-int nxmq_wait_receive(mqd_t mqdes, FAR struct mqueue_msg_s **rcvmsg);
-ssize_t nxmq_do_receive(mqd_t mqdes, FAR struct mqueue_msg_s *mqmsg,
-                        FAR char *ubuffer, FAR unsigned int *prio);
+int nxmq_wait_receive(FAR struct mqueue_inode_s *msgq,
+                      FAR struct mqueue_msg_s **rcvmsg,
+                      FAR const struct timespec *abstime,
+                      sclock_t ticks);
+void nxmq_notify_receive(FAR struct mqueue_inode_s *msgq);
 
-/* mq_sndinternal.c *************************************************************/
+/* mq_sndinternal.c *********************************************************/
 
-int nxmq_verify_send(mqd_t mqdes, FAR const char *msg, size_t msglen,
-                     unsigned int prio);
-FAR struct mqueue_msg_s *nxmq_alloc_msg(void);
-int nxmq_wait_send(mqd_t mqdes);
-int nxmq_do_send(mqd_t mqdes, FAR struct mqueue_msg_s *mqmsg,
-                 FAR const char *msg, size_t msglen, unsigned int prio);
+int nxmq_wait_send(FAR struct mqueue_inode_s *msgq,
+                   FAR const struct timespec *abstime,
+                   sclock_t ticks);
+void nxmq_notify_send(FAR struct mqueue_inode_s *msgq);
 
-/* mq_release.c *****************************************************************/
-
-void nxmq_release(FAR struct task_group_s *group);
-
-/* mq_recover.c *****************************************************************/
+/* mq_recover.c *************************************************************/
 
 void nxmq_recover(FAR struct tcb_s *tcb);
 
@@ -162,5 +147,5 @@ void nxmq_recover(FAR struct tcb_s *tcb);
 }
 #endif
 
-#endif /* CONFIG_MQ_MAXMSGSIZE > 0 */
+#endif /* defined(CONFIG_MQ_MAXMSGSIZE) && CONFIG_MQ_MAXMSGSIZE > 0 */
 #endif /* __SCHED_MQUEUE_MQUEUE_H */

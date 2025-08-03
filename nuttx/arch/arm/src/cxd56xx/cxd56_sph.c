@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/cxd56xx/cxd56_sph.c
  *
- *   Copyright 2018 Sony Semiconductor Solutions Corporation
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
- *    the names of its contributors may be used to endorse or promote
- *    products derived from this software without specific prior written
- *    permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -47,10 +34,11 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "chip.h"
 
 #include "hardware/cxd56_sph.h"
@@ -90,27 +78,21 @@ struct sph_dev_s
  * Private Function Prototypes
  ****************************************************************************/
 
-static int sph_open(FAR struct file *filep);
-static int sph_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
-static int sph_semtake(sem_t *id);
-static void sph_semgive(sem_t *id);
-static int sph_lock(FAR struct sph_dev_s *priv);
-static int sph_trylock(FAR struct sph_dev_s *priv);
-static inline int sph_unlock(FAR struct sph_dev_s *priv);
-static int cxd56_sphirqhandler(int irq, FAR void *context, FAR void *arg);
+static int sph_open(struct file *filep);
+static int sph_ioctl(struct file *filep, int cmd, unsigned long arg);
+static int sph_lock(struct sph_dev_s *priv);
+static int sph_trylock(struct sph_dev_s *priv);
+static inline int sph_unlock(struct sph_dev_s *priv);
+static int cxd56_sphirqhandler(int irq, void *context, void *arg);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static const struct file_operations sph_fops =
+static const struct file_operations g_sph_fops =
 {
   .open  = sph_open,
-  .close = 0,
-  .read  = 0,
-  .write = 0,
-  .seek  = 0,
-  .ioctl = sph_ioctl,
+  .ioctl = sph_ioctl
 };
 
 static struct sph_dev_s g_sphdev[NR_HSEMS];
@@ -120,11 +102,11 @@ static int g_cpuid;
  * Private Functions
  ****************************************************************************/
 
-static int sph_open(FAR struct file *filep)
+static int sph_open(struct file *filep)
 {
   /* Exclusive access */
 
-  if (filep->f_inode->i_crefs > 1)
+  if (atomic_read(&filep->f_inode->i_crefs) > 2)
     {
       return ERROR;
     }
@@ -132,10 +114,10 @@ static int sph_open(FAR struct file *filep)
   return OK;
 }
 
-static int sph_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
+static int sph_ioctl(struct file *filep, int cmd, unsigned long arg)
 {
-  FAR struct sph_dev_s *priv =
-    (FAR struct sph_dev_s *)filep->f_inode->i_private;
+  struct sph_dev_s *priv =
+    filep->f_inode->i_private;
   int ret = -ENOTTY;
 
   hsinfo("cmd = %x\n", cmd);
@@ -166,17 +148,7 @@ static int sph_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   return ret;
 }
 
-static int sph_semtake(sem_t *id)
-{
-  return nxsem_wait_uninterruptible(id);
-}
-
-static void sph_semgive(sem_t *id)
-{
-  nxsem_post(id);
-}
-
-static int sph_lock(FAR struct sph_dev_s *priv)
+static int sph_lock(struct sph_dev_s *priv)
 {
   uint32_t sts;
   int ret;
@@ -200,7 +172,7 @@ static int sph_lock(FAR struct sph_dev_s *priv)
           sts = getreg32(CXD56_SPH_STS(priv->id));
           if (sph_state_busy(sts))
             {
-              sph_semtake(&priv->wait);
+              nxsem_wait_uninterruptible(&priv->wait);
             }
 
           /* Get latest status for determining locked owner. */
@@ -219,7 +191,7 @@ static int sph_lock(FAR struct sph_dev_s *priv)
   return OK;
 }
 
-static int sph_trylock(FAR struct sph_dev_s *priv)
+static int sph_trylock(struct sph_dev_s *priv)
 {
   uint32_t sts;
 
@@ -239,22 +211,22 @@ static int sph_trylock(FAR struct sph_dev_s *priv)
   return -EBUSY;
 }
 
-static inline int sph_unlock(FAR struct sph_dev_s *priv)
+static inline int sph_unlock(struct sph_dev_s *priv)
 {
   putreg32(REQ_UNLOCK, CXD56_SPH_REQ(priv->id));
   hsinfo("hsem%d is unlocked.\n", priv->id);
   return OK;
 }
 
-static inline int cxd56_sphdevinit(FAR const char *devname, int num)
+static inline int cxd56_sphdevinit(const char *devname, int num)
 {
-  FAR struct sph_dev_s *priv = &g_sphdev[num];
+  struct sph_dev_s *priv = &g_sphdev[num];
   char fullpath[64];
   int ret;
 
   snprintf(fullpath, sizeof(fullpath), "/dev/%s%d", devname, num);
 
-  ret = register_driver(fullpath, &sph_fops, 0666, (FAR void *)priv);
+  ret = register_driver(fullpath, &g_sph_fops, 0666, (void *)priv);
   if (ret != 0)
     {
       return ERROR;
@@ -269,7 +241,7 @@ static inline int cxd56_sphdevinit(FAR const char *devname, int num)
   return OK;
 }
 
-static int cxd56_sphirqhandler(int irq, FAR void *context, FAR void *arg)
+static int cxd56_sphirqhandler(int irq, void *context, void *arg)
 {
   int id;
 
@@ -285,8 +257,7 @@ static int cxd56_sphirqhandler(int irq, FAR void *context, FAR void *arg)
 
   /* Give semaphore for hardware semaphore is locked */
 
-  sph_semgive(&g_sphdev[id].wait);
-
+  nxsem_post(&g_sphdev[id].wait);
   return OK;
 }
 
@@ -294,14 +265,18 @@ static int cxd56_sphirqhandler(int irq, FAR void *context, FAR void *arg)
  * Public Functions
  ****************************************************************************/
 
-int cxd56_sphinitialize(FAR const char *devname)
+int cxd56_sphinitialize(const char *devname)
 {
   int ret;
   int i;
 
-  /* No. 0-2 and 15 semaphores are reserved by other system. */
+  /* No. 0-2 and (14)-15 semaphores are reserved by other system. */
 
+#ifdef CONFIG_CXD56_TESTSET
+  for (i = 3; i < 14; i++)
+#else
   for (i = 3; i < 15; i++)
+#endif
     {
       ret = cxd56_sphdevinit(devname, i);
       if (ret != OK)

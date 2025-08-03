@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/igmp/igmp_send.c
  *
- *   Copyright (C) 2010, 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -77,18 +64,18 @@
 /* Buffer layout */
 
 #define RASIZE      (4)
-#define IPv4BUF     ((FAR struct igmp_iphdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev)])
-#define IGMPBUF(hl) ((FAR struct igmp_hdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev) + (hl)])
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
+#ifdef CONFIG_NET_IGMP_CHECKSUMS
 static uint16_t igmp_chksum(FAR uint8_t *buffer, int buflen)
 {
   uint16_t sum = net_chksum((FAR uint16_t *)buffer, buflen);
   return sum ? sum : 0xffff;
 }
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -117,18 +104,30 @@ static uint16_t igmp_chksum(FAR uint8_t *buffer, int buflen)
  ****************************************************************************/
 
 void igmp_send(FAR struct net_driver_s *dev, FAR struct igmp_group_s *group,
-               FAR in_addr_t *destipaddr, uint8_t msgid)
+               FAR const in_addr_t *destipaddr, uint8_t msgid)
 {
-  FAR struct igmp_iphdr_s *ipv4 = IPv4BUF;
   FAR struct igmp_hdr_s *igmp;
   uint16_t iphdrlen;
+  struct ipv4_opt_s opt;
+  uint32_t tmp;
 
   ninfo("msgid: %02x destipaddr: %08x\n", msgid, (int)*destipaddr);
+
+  /* Prepare device buffer */
+
+  if (netdev_iob_prepare(dev, false, 0) != OK)
+    {
+      return;
+    }
+
+  /* Select IPv4 */
+
+  IFF_SET_IPv4(dev->d_flags);
 
   /* The IGMP header immediately follows the IP header */
 
   iphdrlen          = IPv4_HDRLEN + RASIZE;
-  igmp              = IGMPBUF(iphdrlen);
+  igmp              = IPBUF(iphdrlen);
 
   /* The total length to send is the size of the IP and IGMP headers and 4
    * bytes for the ROUTER ALERT (and, eventually, the Ethernet header)
@@ -136,36 +135,22 @@ void igmp_send(FAR struct net_driver_s *dev, FAR struct igmp_group_s *group,
 
   dev->d_len        = iphdrlen + IGMP_HDRLEN;
 
+  /* Update device buffer length */
+
+  iob_update_pktlen(dev->d_iob, dev->d_len, false);
+
   /* The total size of the data is the size of the IGMP header */
 
   dev->d_sndlen     = IGMP_HDRLEN;
 
   /* Add the router alert option to the IPv4 header (RFC 2113) */
 
-  ipv4->ra[0]       = HTONS(IPOPT_RA >> 16);
-  ipv4->ra[1]       = HTONS(IPOPT_RA & 0xffff);
+  tmp = HTONL(IPOPT_RA);
+  memcpy(opt.data, &tmp, sizeof(uint32_t));
+  opt.len = sizeof(uint32_t);
 
-  /* Initialize the IPv4 header */
-
-  ipv4->vhl         = 0x46;  /* 4->IP; 6->24 bytes */
-  ipv4->tos         = 0;
-  ipv4->len[0]      = (dev->d_len >> 8);
-  ipv4->len[1]      = (dev->d_len & 0xff);
-  ++g_ipid;
-  ipv4->ipid[0]     = g_ipid >> 8;
-  ipv4->ipid[1]     = g_ipid & 0xff;
-  ipv4->ipoffset[0] = IP_FLAG_DONTFRAG >> 8;
-  ipv4->ipoffset[1] = IP_FLAG_DONTFRAG & 0xff;
-  ipv4->ttl         = IGMP_TTL;
-  ipv4->proto       = IP_PROTO_IGMP;
-
-  net_ipv4addr_hdrcopy(ipv4->srcipaddr, &dev->d_ipaddr);
-  net_ipv4addr_hdrcopy(ipv4->destipaddr, destipaddr);
-
-  /* Calculate IP checksum. */
-
-  ipv4->ipchksum    = 0;
-  ipv4->ipchksum    = ~igmp_chksum((FAR uint8_t *)igmp, iphdrlen);
+  ipv4_build_header(IPv4BUF, dev->d_len, IP_PROTO_IGMP,
+                    &dev->d_ipaddr, destipaddr, IGMP_TTL, 0, &opt);
 
   /* Set up the IGMP message */
 
@@ -176,13 +161,15 @@ void igmp_send(FAR struct net_driver_s *dev, FAR struct igmp_group_s *group,
   /* Calculate the IGMP checksum. */
 
   igmp->chksum      = 0;
+
+#ifdef CONFIG_NET_IGMP_CHECKSUMS
   igmp->chksum      = ~igmp_chksum(&igmp->type, IGMP_HDRLEN);
+#endif
 
   IGMP_STATINCR(g_netstats.igmp.poll_send);
   IGMP_STATINCR(g_netstats.ipv4.sent);
 
-  ninfo("Outgoing IGMP packet length: %d (%d)\n",
-        dev->d_len, (ipv4->len[0] << 8) | ipv4->len[1]);
+  ninfo("Outgoing IGMP packet length: %d\n", dev->d_len);
   igmp_dumppkt(RA, iphdrlen + IGMP_HDRLEN);
 }
 

@@ -1,35 +1,22 @@
 /****************************************************************************
- * testing/ostest/timedwait.c
+ * apps/testing/ostest/timedwait.c
  *
- *   Copyright (C) 2007, 2008, 2011 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -37,11 +24,13 @@
  * Included Files
  ****************************************************************************/
 
+#include <assert.h>
+#include <errno.h>
+#include <pthread.h>
+#include <sched.h>
 #include <stdio.h>
 #include <time.h>
-#include <pthread.h>
 #include <unistd.h>
-#include <errno.h>
 
 #include "ostest.h"
 
@@ -71,7 +60,9 @@ static void *thread_waiter(void *parameter)
   status = pthread_mutex_lock(&mutex);
   if (status != 0)
     {
-      printf("thread_waiter: ERROR pthread_mutex_lock failed, status=%d\n", status);
+      printf("thread_waiter: ERROR pthread_mutex_lock failed, status=%d\n",
+              status);
+      ASSERT(false);
     }
 
   printf("thread_waiter: Starting 5 second wait for condition\n");
@@ -80,7 +71,9 @@ static void *thread_waiter(void *parameter)
   if (status != 0)
     {
       printf("thread_waiter: ERROR clock_gettime failed\n");
+      ASSERT(false);
     }
+
   ts.tv_sec += 5;
 
   /* The wait -- no-one is ever going to awaken us */
@@ -94,12 +87,17 @@ static void *thread_waiter(void *parameter)
         }
       else
         {
-          printf("thread_waiter: ERROR pthread_cond_timedwait failed, status=%d\n", status);
+          printf("thread_waiter: "
+                 "ERROR pthread_cond_timedwait failed, status=%d\n", status);
+          ASSERT(false);
         }
     }
   else
     {
-      printf("thread_waiter: ERROR pthread_cond_timedwait returned without timeout, status=%d\n", status);
+      printf("thread_waiter: ERROR "
+             "pthread_cond_timedwait returned without timeout, status=%d\n",
+              status);
+      ASSERT(false);
     }
 
   /* Release the mutex */
@@ -108,7 +106,9 @@ static void *thread_waiter(void *parameter)
   status = pthread_mutex_unlock(&mutex);
   if (status != 0)
     {
-      printf("thread_waiter: ERROR pthread_mutex_unlock failed, status=%d\n", status);
+      printf("thread_waiter: ERROR pthread_mutex_unlock failed, status=%d\n",
+              status);
+      ASSERT(false);
     }
 
   printf("thread_waiter: Exit with status 0x12345678\n");
@@ -135,7 +135,9 @@ void timedwait_test(void)
   status = pthread_mutex_init(&mutex, NULL);
   if (status != 0)
     {
-      printf("timedwait_test: ERROR pthread_mutex_init failed, status=%d\n", status);
+      printf("timedwait_test: ERROR pthread_mutex_init failed, status=%d\n",
+              status);
+      ASSERT(false);
     }
 
   /* Initialize the condition variable */
@@ -144,7 +146,9 @@ void timedwait_test(void)
   status = pthread_cond_init(&cond, NULL);
   if (status != 0)
     {
-      printf("timedwait_test: ERROR pthread_condinit failed, status=%d\n", status);
+      printf("timedwait_test: ERROR pthread_condinit failed, status=%d\n",
+              status);
+      ASSERT(false);
     }
 
   /* Start the waiter thread at higher priority */
@@ -153,11 +157,12 @@ void timedwait_test(void)
   status = pthread_attr_init(&attr);
   if (status != 0)
     {
-      printf("timedwait_test: pthread_attr_init failed, status=%d\n", status);
+      printf("timedwait_test: pthread_attr_init failed, status=%d\n",
+              status);
     }
 
   prio_max = sched_get_priority_max(SCHED_FIFO);
-  status = sched_getparam (getpid(), &sparam);
+  status = sched_getparam (gettid(), &sparam);
   if (status != 0)
     {
       printf("timedwait_test: sched_getparam failed\n");
@@ -165,14 +170,17 @@ void timedwait_test(void)
     }
 
   sparam.sched_priority = (prio_max + sparam.sched_priority) / 2;
-  status = pthread_attr_setschedparam(&attr,&sparam);
+  status = pthread_attr_setschedparam(&attr, &sparam);
   if (status != OK)
     {
-      printf("timedwait_test: pthread_attr_setschedparam failed, status=%d\n", status);
+      printf("timedwait_test: "
+             "pthread_attr_setschedparam failed, status=%d\n",
+              status);
     }
   else
     {
-      printf("timedwait_test: Set thread 2 priority to %d\n", sparam.sched_priority);
+      printf("timedwait_test: Set thread 2 priority to %d\n",
+              sparam.sched_priority);
     }
 
   status = pthread_create(&waiter, &attr, thread_waiter, NULL);
@@ -186,7 +194,9 @@ void timedwait_test(void)
   status = pthread_join(waiter, &result);
   if (status != 0)
     {
-      printf("timedwait_test: ERROR pthread_join failed, status=%d\n", status);
+      printf("timedwait_test: ERROR pthread_join failed, status=%d\n",
+              status);
+      ASSERT(false);
     }
   else
     {

@@ -1,37 +1,22 @@
 /****************************************************************************
  * arch/arm/src/lc823450/lc823450_syscontrol.c
  *
- *   Copyright 2014,2015,2016,2017,2018 Sony Video & Sound Products Inc.
- *   Author: Masatoshi Tateishi <Masatoshi.Tateishi@jp.sony.com>
- *   Author: Masayuki Ishikawa <Masayuki.Ishikawa@jp.sony.com>
- *   Author: Nobutaka Toyoshima <Nobutaka.Toyoshima@jp.sony.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,17 +25,16 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/irq.h>
 #include <nuttx/arch.h>
+#include <nuttx/spinlock.h>
 #include <stdint.h>
+#include <assert.h>
 #include <debug.h>
 
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "up_arch.h"
-#include "up_internal.h"
-
+#include "arm_internal.h"
 #include "lc823450_gpio.h"
 #include "lc823450_syscontrol.h"
 #include <arch/chip/clk.h>
@@ -59,6 +43,7 @@
  * Private Data
  ****************************************************************************/
 
+static spinlock_t g_lc823450_syscontrol_lock = SP_UNLOCKED;
 static struct clk_st lc823450_clocks[] = LC823450_CLOCKS;
 
 /****************************************************************************
@@ -83,18 +68,19 @@ uint32_t get_cpu_ver(void)
   switch (reg)
     {
       case MODEM_MAV_ES1:
-        sinfo("ES1 \n");
+        sinfo("ES1\n");
         break;
 
       case MODEM_MAV_ES2:
-        sinfo("ES2 \n");
+        sinfo("ES2\n");
         ret = 1;
         break;
 
       default:
-        sinfo("??? \n");
+        sinfo("???\n");
         break;
     }
+
   cpu_ver = ret;
   return ret;
 }
@@ -123,8 +109,9 @@ void mod_stby_regs(uint32_t enabits, uint32_t disbits)
 
   if (enabits)
     {
-      /* stand-by to active case */
-      /* assumption: the specified blocks are already isolated */
+      /* stand-by to active case
+       * assumption: the specified blocks are already isolated
+       */
 
       up_udelay(100); /* need to wait 100us */
 
@@ -133,7 +120,9 @@ void mod_stby_regs(uint32_t enabits, uint32_t disbits)
       modifyreg32(ISOCNT, 0, enabits);
     }
 
-  /* sinfo("ISOCNT=0x%x, LSISTBY=0x%x \n", getreg32(ISOCNT), getreg32(LSISTBY)); */
+  /* sinfo("ISOCNT=0x%x, LSISTBY=0x%x\n",
+   * getreg32(ISOCNT), getreg32(LSISTBY));
+   */
 }
 #endif /* CONFIG_LC823450_LSISTBY */
 
@@ -144,7 +133,7 @@ void mod_stby_regs(uint32_t enabits, uint32_t disbits)
 void up_enable_clk(enum clock_e clk)
 {
   irqstate_t flags;
-  flags = spin_lock_irqsave();
+  flags = spin_lock_irqsave(&g_lc823450_syscontrol_lock);
 
   DEBUGASSERT(clk < LC823450_CLOCK_NUM);
 
@@ -154,7 +143,7 @@ void up_enable_clk(enum clock_e clk)
                   0, lc823450_clocks[clk].regmask);
     }
 
-  spin_unlock_irqrestore(flags);
+  spin_unlock_irqrestore(&g_lc823450_syscontrol_lock, flags);
 }
 
 /****************************************************************************
@@ -164,7 +153,7 @@ void up_enable_clk(enum clock_e clk)
 void up_disable_clk(enum clock_e clk)
 {
   irqstate_t flags;
-  flags = spin_lock_irqsave();
+  flags = spin_lock_irqsave(&g_lc823450_syscontrol_lock);
 
   DEBUGASSERT(clk < LC823450_CLOCK_NUM);
 
@@ -181,7 +170,7 @@ void up_disable_clk(enum clock_e clk)
       lc823450_clocks[clk].count = 0;
     }
 
-  spin_unlock_irqrestore(flags);
+  spin_unlock_irqrestore(&g_lc823450_syscontrol_lock, flags);
 }
 
 /****************************************************************************

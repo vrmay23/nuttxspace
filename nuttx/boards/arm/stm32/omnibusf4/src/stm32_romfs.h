@@ -1,8 +1,9 @@
 /****************************************************************************
  * boards/arm/stm32/omnibusf4/src/stm32_romfs.h
  *
- *   Copyright (C) 2017 Tomasz Wozniak. All rights reserved.
- *   Author: Tomasz Wozniak <t.wozniak@samsung.com>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2017 Tomasz Wozniak. All rights reserved.
+ * SPDX-FileContributor: Tomasz Wozniak <t.wozniak@samsung.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,8 +34,8 @@
  *
  ****************************************************************************/
 
-#ifndef __BOARDS_ARM_STM32_STM32F4DISCOVERY_SRC_STM32_ROMFS_H
-#define __BOARDS_ARM_STM32_STM32F4DISCOVERY_SRC_STM32_ROMFS_H
+#ifndef __BOARDS_ARM_STM32_OMNIBUSF4_SRC_STM32_ROMFS_H
+#define __BOARDS_ARM_STM32_OMNIBUSF4_SRC_STM32_ROMFS_H
 
 /****************************************************************************
  * Included Files
@@ -64,7 +65,7 @@
  *   Zero (OK) on success, a negated errno value on error.
  *
  * Assumptions/Limitations:
- *   Memory addresses [&romfs_data_begin .. &romfs_data_begin) should contain
+ *   Memory addresses [romfs_data_begin .. romfs_data_end) should contain
  *   ROMFS volume data, as included in the assembly snippet above (l. 84).
  *
  ****************************************************************************/
@@ -73,4 +74,4 @@ int stm32_romfs_initialize(void);
 
 #endif /* CONFIG_STM32_ROMFS */
 
-#endif /* __BOARDS_ARM_STM32_STM32F4DISCOVERY_SRC_STM32_ROMFS_H */
+#endif /* __BOARDS_ARM_STM32_OMNIBUSF4_SRC_STM32_ROMFS_H */

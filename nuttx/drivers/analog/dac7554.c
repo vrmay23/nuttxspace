@@ -1,41 +1,22 @@
 /****************************************************************************
- * arch/drivers/analog/dac7554.c
+ * drivers/analog/dac7554.c
  *
- *   Copyright (C) 2010, 2016, 2018 Gregory Nutt. All rights reserved.
- *   Copyright (C) 2018 Daniel P. Carvalho. All rights reserved.
- *   Copyright (C) 2019 Augusto Fraga Giachero. All rights reserved.
- *   Author:  Augusto Fraga Giachero <afg@augustofg.net>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * This file is a part of NuttX:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -49,6 +30,7 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -96,9 +78,9 @@ static int  dac7554_setup(FAR struct dac_dev_s *dev);
 static void dac7554_shutdown(FAR struct dac_dev_s *dev);
 static void dac7554_txint(FAR struct dac_dev_s *dev, bool enable);
 static int  dac7554_send(FAR struct dac_dev_s *dev,
-              FAR struct dac_msg_s *msg);
+                         FAR struct dac_msg_s *msg);
 static int  dac7554_ioctl(FAR struct dac_dev_s *dev, int cmd,
-              unsigned long arg);
+                          unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -106,12 +88,12 @@ static int  dac7554_ioctl(FAR struct dac_dev_s *dev, int cmd,
 
 static const struct dac_ops_s g_dacops =
 {
-  .ao_reset    = dac7554_reset,
-  .ao_setup    = dac7554_setup,
-  .ao_shutdown = dac7554_shutdown,
-  .ao_txint    = dac7554_txint,
-  .ao_send     = dac7554_send,
-  .ao_ioctl    = dac7554_ioctl,
+  dac7554_reset,        /* ao_reset */
+  dac7554_setup,        /* ao_setup */
+  dac7554_shutdown,     /* ao_shutdown */
+  dac7554_txint,        /* ao_txint */
+  dac7554_send,         /* ao_send */
+  dac7554_ioctl         /* ao_ioctl */
 };
 
 /****************************************************************************
@@ -158,7 +140,7 @@ static void dac7554_reset(FAR struct dac_dev_s *dev)
  *
  ****************************************************************************/
 
-static int  dac7554_setup(FAR struct dac_dev_s *dev)
+static int dac7554_setup(FAR struct dac_dev_s *dev)
 {
   return OK;
 }
@@ -199,7 +181,7 @@ static int dac7554_send(FAR struct dac_dev_s *dev, FAR struct dac_msg_s *msg)
 
   /* Sanity check */
 
-  DEBUGASSERT(priv->SPI != NULL);
+  DEBUGASSERT(priv->spi != NULL);
 
   /* Set up message to send */
 
@@ -261,16 +243,15 @@ FAR struct dac_dev_s *dac7554_initialize(FAR struct spi_dev_s *spi,
 
   /* Sanity check */
 
-  DEBUGASSERT(i2c != NULL);
+  DEBUGASSERT(spi != NULL);
 
   /* Initialize the DAC7554 device structure */
 
-  priv =
-    (FAR struct dac7554_dev_s *)kmm_malloc(sizeof(struct dac7554_dev_s));
+  priv = kmm_malloc(sizeof(struct dac7554_dev_s));
   priv->spi = spi;
   priv->spidev = spidev;
 
-  g_dacdev = (FAR struct dac_dev_s *)kmm_malloc(sizeof(struct dac_dev_s));
+  g_dacdev = kmm_malloc(sizeof(struct dac_dev_s));
   g_dacdev->ad_ops = &g_dacops;
   g_dacdev->ad_priv = priv;
 

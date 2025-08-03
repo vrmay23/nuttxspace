@@ -1,9 +1,8 @@
 /****************************************************************************
- * fs/spiffs/spiffs.c
- * Interface between SPIFFS and the NuttX VFS
+ * fs/spiffs/src/spiffs_vfs.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2018 Gregory Nutt
  *
  * Includes logic taken from 0.3.7 of SPIFFS by Peter Andersion.  That
  * version was originally released under the MIT license.
@@ -50,17 +49,17 @@
 #include <stdint.h>
 #include <string.h>
 #include <fcntl.h>
-#include <dirent.h>
 #include <errno.h>
 #include <assert.h>
-#include <queue.h>
 #include <debug.h>
+#include <inttypes.h>
 
 #include <nuttx/kmalloc.h>
+#include <nuttx/queue.h>
 #include <nuttx/fs/fs.h>
-#include <nuttx/fs/dirent.h>
 #include <nuttx/fs/ioctl.h>
 
+#include "fs_heap.h"
 #include "spiffs.h"
 #include "spiffs_core.h"
 #include "spiffs_cache.h"
@@ -71,17 +70,23 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define spiffs_lock_volume(fs)       (spiffs_lock_reentrant(&fs->exclsem))
-#define spiffs_unlock_volume(fs)     (spiffs_unlock_reentrant(&fs->exclsem))
+#define spiffs_lock_volume(fs)       (nxrmutex_lock(&fs->lock))
+#define spiffs_unlock_volume(fs)     (nxrmutex_unlock(&fs->lock))
+
+/****************************************************************************
+ * Private Types
+ ****************************************************************************/
+
+struct spiffs_dir_s
+{
+  struct fs_dirent_s base;
+  int16_t block;
+  int entry;
+};
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
-
-/* SPIFFS helpers */
-
-static int  spiffs_lock_reentrant(FAR struct spiffs_sem_s *sem);
-static void spiffs_unlock_reentrant(FAR struct spiffs_sem_s *sem);
 
 /* File system operations */
 
@@ -101,11 +106,12 @@ static int  spiffs_fstat(FAR const struct file *filep, FAR struct stat *buf);
 static int  spiffs_truncate(FAR struct file *filep, off_t length);
 
 static int  spiffs_opendir(FAR struct inode *mountpt,
-              FAR const char *relpath, FAR struct fs_dirent_s *dir);
+              FAR const char *relpath, FAR struct fs_dirent_s **dir);
 static int  spiffs_closedir(FAR struct inode *mountpt,
               FAR struct fs_dirent_s *dir);
 static int  spiffs_readdir(FAR struct inode *mountpt,
-              FAR struct fs_dirent_s *dir);
+              FAR struct fs_dirent_s *dir,
+              FAR struct dirent *dentry);
 static int  spiffs_rewinddir(FAR struct inode *mountpt,
               FAR struct fs_dirent_s *dir);
 static int  spiffs_bind(FAR struct inode *mtdinode, FAR const void *data,
@@ -127,7 +133,7 @@ static int  spiffs_stat(FAR struct inode *mountpt, FAR const char *relpath,
  * Public Data
  ****************************************************************************/
 
-const struct mountpt_operations spiffs_operations =
+const struct mountpt_operations g_spiffs_operations =
 {
   spiffs_open,       /* open */
   spiffs_close,      /* close */
@@ -135,11 +141,16 @@ const struct mountpt_operations spiffs_operations =
   spiffs_write,      /* write */
   spiffs_seek,       /* seek */
   spiffs_ioctl,      /* ioctl */
+  NULL,              /* mmap */
+  spiffs_truncate,   /* truncate */
+  NULL,              /* poll */
+  NULL,              /* readv */
+  NULL,              /* writev */
 
   spiffs_sync,       /* sync */
   spiffs_dup,        /* dup */
   spiffs_fstat,      /* fstat */
-  spiffs_truncate,   /* truncate */
+  NULL,              /* fchstat */
 
   spiffs_opendir,    /* opendir */
   spiffs_closedir,   /* closedir */
@@ -155,6 +166,7 @@ const struct mountpt_operations spiffs_operations =
   spiffs_rmdir,      /* rmdir */
   spiffs_rename,     /* rename */
   spiffs_stat,       /* stat */
+  NULL               /* chstat */
 };
 
 /****************************************************************************
@@ -173,71 +185,7 @@ static inline int spiffs_map_errno(int errcode)
 }
 
 /****************************************************************************
- * Name: spiffs_lock_reentrant
- ****************************************************************************/
-
-static int spiffs_lock_reentrant(FAR struct spiffs_sem_s *rsem)
-{
-  pid_t me;
-  int ret = OK;
-
-  /* Do we already hold the semaphore? */
-
-  me = getpid();
-  if (me == rsem->holder)
-    {
-      /* Yes... just increment the count */
-
-      rsem->count++;
-      DEBUGASSERT(rsem->count > 0);
-    }
-
-  /* Take the semaphore (perhaps waiting) */
-
-  else
-    {
-      ret = nxsem_wait_uninterruptible(&rsem->sem);
-      if (ret >= 0)
-        {
-          /* No we hold the semaphore */
-
-          rsem->holder = me;
-          rsem->count  = 1;
-        }
-    }
-
-  return ret;
-}
-
-/****************************************************************************
- * Name: spiffs_unlock_reentrant
- ****************************************************************************/
-
-static void spiffs_unlock_reentrant(FAR struct spiffs_sem_s *rsem)
-{
-  DEBUGASSERT(rsem->holder == getpid());
-
-  /* Is this our last count on the semaphore? */
-
-  if (rsem->count > 1)
-    {
-      /* No.. just decrement the count */
-
-      rsem->count--;
-    }
-
-  /* Yes.. then we can really release the semaphore */
-
-  else
-    {
-      rsem->holder = SPIFFS_NO_HOLDER;
-      rsem->count  = 0;
-      nxsem_post(&rsem->sem);
-    }
-}
-
-/****************************************************************************
- * Name: spiffs_readdir_callback
+ * Name: spiffs_consistency_check
  ****************************************************************************/
 
 static int spiffs_consistency_check(FAR struct spiffs_s *fs)
@@ -324,13 +272,20 @@ static int spiffs_readdir_callback(FAR struct spiffs_s *fs,
                                 SPIFFS_PH_FLAG_NDXDELE)) ==
       (SPIFFS_PH_FLAG_DELET | SPIFFS_PH_FLAG_NDXDELE))
     {
-      FAR struct fs_dirent_s *dir = (FAR struct fs_dirent_s *)user_var;
-      FAR struct dirent *entryp;
+      FAR struct dirent *entryp = user_var;
 
-      DEBUGASSERT(dir != NULL);
-      entryp = &dir->fd_dir;
+#ifdef CONFIG_SPIFFS_LEADING_SLASH
+      /* Skip the leading '/'. */
 
-      strncpy(entryp->d_name, (FAR char *)objhdr.name, NAME_MAX + 1);
+      if (objhdr.name[0] != '/')
+        {
+          return -EINVAL; /* The filesystem is corrupted */
+        }
+#endif
+
+      strlcpy(entryp->d_name,
+              (FAR char *)objhdr.name + SPIFFS_LEADING_SLASH_SIZE,
+              sizeof(entryp->d_name));
       entryp->d_type = objhdr.type;
       return OK;
     }
@@ -353,7 +308,7 @@ static int spiffs_open(FAR struct file *filep, FAR const char *relpath,
   int ret;
 
   finfo("relpath=%s oflags; %04x\n", relpath, oflags);
-  DEBUGASSERT(filep->f_priv == NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv == NULL);
 
   /* Get the mountpoint inode reference from the file structure and the
    * mountpoint private data from the inode structure
@@ -380,7 +335,7 @@ static int spiffs_open(FAR struct file *filep, FAR const char *relpath,
   /* Allocate a new file object with a reference count of one. */
 
   fobj = (FAR struct spiffs_file_s *)
-    kmm_zalloc(sizeof(struct spiffs_file_s));
+    fs_heap_zalloc(sizeof(struct spiffs_file_s));
   if (fobj == NULL)
     {
       ferr("ERROR: Failed to allocate fail object\n");
@@ -395,7 +350,7 @@ static int spiffs_open(FAR struct file *filep, FAR const char *relpath,
   ret = spiffs_lock_volume(fs);
   if (ret < 0)
     {
-      kmm_free(fobj);
+      fs_heap_free(fobj);
       return ret;
     }
 
@@ -496,7 +451,7 @@ static int spiffs_open(FAR struct file *filep, FAR const char *relpath,
   return OK;
 
 errout_with_fileobject:
-  kmm_free(fobj);
+  fs_heap_free(fobj);
   spiffs_unlock_volume(fs);
   return spiffs_map_errno(ret);
 }
@@ -513,7 +468,7 @@ static int spiffs_close(FAR struct file *filep)
   int ret;
 
   finfo("filep=%p\n", filep);
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv != NULL);
 
   /* Get the mountpoint inode reference from the file structure and the
    * volume state data from the inode structure
@@ -555,7 +510,7 @@ static int spiffs_close(FAR struct file *filep)
 
       /* Flush any cached writes for the file object being closed.
        * This could result in an ENOSPC error being reported if the
-       * cache could not flushed to FALSH (and the file will appear to
+       * cache could not flushed to FLASH (and the file will appear to
        * to have been truncated).
        */
 
@@ -598,7 +553,7 @@ static ssize_t spiffs_read(FAR struct file *filep, FAR char *buffer,
 
   finfo("filep=%p buffer=%p buflen=%lu\n",
         filep, buffer, (unsigned long)buflen);
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv != NULL);
 
   /* Get the mountpoint inode reference from the file structure and the
    * volume state data from the inode structure
@@ -648,9 +603,9 @@ static ssize_t spiffs_write(FAR struct file *filep, FAR const char *buffer,
   off_t offset;
   int ret;
 
-  finfo("filep=%p buffer=%p buflen=%lu\n",
-        filep, buffer, (unsigned long)buflen);
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
+  finfo("filep=%p buffer=%p buflen=%zu\n",
+        filep, buffer, buflen);
+  DEBUGASSERT(filep->f_priv != NULL);
 
   /* Get the mountpoint inode reference from the file structure and the
    * volume state data from the inode structure
@@ -715,7 +670,7 @@ static ssize_t spiffs_write(FAR struct file *filep, FAR const char *buffer,
                    */
 
                   spiffs_cacheinfo("Cache page=%d for fobj ID=%d "
-                                   "Boundary violation, offset=%d size=%d\n",
+                         "Boundary violation, offset=%" PRIu32 " size=%d\n",
                                    fobj->cache_page->cpndx, fobj->objid,
                                    fobj->cache_page->offset,
                                    fobj->cache_page->size);
@@ -765,9 +720,10 @@ static ssize_t spiffs_write(FAR struct file *filep, FAR const char *buffer,
               offset_in_cpage = offset - fobj->cache_page->offset;
 
               spiffs_cacheinfo("Storing to cache page %d for fobj %d "
-                               "offset=%d:%d buflen=%d\n",
-                               fobj->cache_page->cpndx, fobj->objid, offset,
-                               offset_in_cpage, buflen);
+                               "offset=%jd:%jd buflen=%zu\n",
+                               fobj->cache_page->cpndx, fobj->objid,
+                               (intmax_t)offset,
+                               (intmax_t)offset_in_cpage, buflen);
 
               cache      = spiffs_get_cache(fs);
               cpage_data = spiffs_get_cache_page(fs, cache,
@@ -803,7 +759,7 @@ static ssize_t spiffs_write(FAR struct file *filep, FAR const char *buffer,
               /* Write back cache first */
 
               spiffs_cacheinfo("Cache page=%d for fobj ID=%d "
-                               "Boundary violation, offset=%d size=%d\n",
+                  "Boundary violation, offset=%" PRIu32 " size=%d\n",
                                fobj->cache_page->cpndx, fobj->objid,
                                fobj->cache_page->offset,
                                fobj->cache_page->size);
@@ -868,7 +824,7 @@ static off_t spiffs_seek(FAR struct file *filep, off_t offset, int whence)
   int ret;
 
   finfo("filep=%p offset=%ld whence=%d\n", filep, (long)offset, whence);
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv != NULL);
 
   /* Get the mountpoint inode reference from the file structure and the
    * volume state data from the inode structure
@@ -986,7 +942,7 @@ static int spiffs_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   int ret;
 
   finfo("filep=%p cmd=%d arg=%ld\n", filep, cmd, (long)arg);
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv != NULL);
 
   /* Get the mountpoint inode reference from the file structure and the
    * volume state data from the inode structure
@@ -1004,7 +960,7 @@ static int spiffs_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       return ret;
     }
 
-  /* Handle the IOCTL according tot he command */
+  /* Handle the IOCTL according to the command */
 
   switch (cmd)
     {
@@ -1103,7 +1059,7 @@ static int spiffs_sync(FAR struct file *filep)
   int ret;
 
   finfo("filep=%p\n", filep);
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv != NULL);
 
   /* Get the mountpoint inode reference from the file structure and the
    * volume state data from the inode structure
@@ -1170,7 +1126,6 @@ static int spiffs_dup(FAR const struct file *oldp, FAR struct file *newp)
   ret = spiffs_lock_volume(fs);
   if (ret >= 0)
     {
-      spiffs_lock_volume(fs);
       fobj->crefs++;
       spiffs_unlock_volume(fs);
 
@@ -1200,7 +1155,7 @@ static int spiffs_fstat(FAR const struct file *filep, FAR struct stat *buf)
   int ret;
 
   finfo("filep=%p buf=%p\n", filep, buf);
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL &&
+  DEBUGASSERT(filep->f_priv != NULL &&
               buf != NULL);
 
   /* Get the mountpoint inode reference from the file structure and the
@@ -1234,7 +1189,10 @@ static int spiffs_fstat(FAR const struct file *filep, FAR struct stat *buf)
     }
 
   spiffs_unlock_volume(fs);
-  return spiffs_map_errno(ret);
+
+  ret = spiffs_map_errno(ret);
+
+  return ret >= 0 ? OK : ret;
 }
 
 /****************************************************************************
@@ -1250,7 +1208,7 @@ static int spiffs_truncate(FAR struct file *filep, off_t length)
   int ret;
 
   finfo("filep=%p length=%ld\n", filep, (long)length);
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL &&
+  DEBUGASSERT(filep->f_priv != NULL &&
               length >= 0);
 
   /* Get the mountpoint inode reference from the file structure and the
@@ -1300,17 +1258,26 @@ static int spiffs_truncate(FAR struct file *filep, off_t length)
  ****************************************************************************/
 
 static int spiffs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
-                         FAR struct fs_dirent_s *dir)
+                          FAR struct fs_dirent_s **dir)
 {
+  FAR struct spiffs_dir_s *sdir;
+
   finfo("mountpt=%p relpath=%s dir=%p\n",
         mountpt, relpath, dir);
 
   DEBUGASSERT(mountpt != NULL && relpath != NULL && dir != NULL);
 
+  sdir = fs_heap_zalloc(sizeof(*sdir));
+  if (sdir == NULL)
+    {
+      return -ENOMEM;
+    }
+
   /* Initialize for traversal of the 'directory' */
 
-  dir->u.spiffs.block   = 0;
-  dir->u.spiffs.entry   = 0;
+  sdir->block = 0;
+  sdir->entry = 0;
+  *dir        = &sdir->base;
   return OK;
 }
 
@@ -1319,13 +1286,11 @@ static int spiffs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
  ****************************************************************************/
 
 static int spiffs_closedir(FAR struct inode *mountpt,
-                          FAR struct fs_dirent_s *dir)
+                           FAR struct fs_dirent_s *dir)
 {
   finfo("mountpt=%p dir=%p\n",  mountpt, dir);
   DEBUGASSERT(mountpt != NULL && dir != NULL);
-
-  /* There is nothing to be done */
-
+  fs_heap_free(dir);
   return OK;
 }
 
@@ -1334,8 +1299,10 @@ static int spiffs_closedir(FAR struct inode *mountpt,
  ****************************************************************************/
 
 static int spiffs_readdir(FAR struct inode *mountpt,
-                         FAR struct fs_dirent_s *dir)
+                          FAR struct fs_dirent_s *dir,
+                          FAR struct dirent *dentry)
 {
+  FAR struct spiffs_dir_s *sdir;
   FAR struct spiffs_s *fs;
   int16_t blkndx;
   int entry;
@@ -1343,6 +1310,8 @@ static int spiffs_readdir(FAR struct inode *mountpt,
 
   finfo("mountpt=%p dir=%p\n",  mountpt, dir);
   DEBUGASSERT(mountpt != NULL && dir != NULL);
+
+  sdir = (FAR struct spiffs_dir_s *)dir;
 
   /* Get the mountpoint private data from the inode structure */
 
@@ -1355,13 +1324,13 @@ static int spiffs_readdir(FAR struct inode *mountpt,
 
   /* And visit the next file object */
 
-  ret = spiffs_foreach_objlu(fs, dir->u.spiffs.block, dir->u.spiffs.entry,
+  ret = spiffs_foreach_objlu(fs, sdir->block, sdir->entry,
                              SPIFFS_VIS_NO_WRAP, 0, spiffs_readdir_callback,
-                             NULL, dir, &blkndx, &entry);
+                             NULL, dentry, &blkndx, &entry);
   if (ret >= 0)
     {
-      dir->u.spiffs.block = blkndx;
-      dir->u.spiffs.entry = entry + 1;
+      sdir->block = blkndx;
+      sdir->entry = entry + 1;
     }
 
   /* Release the lock on the file system */
@@ -1377,13 +1346,17 @@ static int spiffs_readdir(FAR struct inode *mountpt,
 static int spiffs_rewinddir(FAR struct inode *mountpt,
                            FAR struct fs_dirent_s *dir)
 {
+  FAR struct spiffs_dir_s *sdir;
+
   finfo("mountpt=%p dir=%p\n",  mountpt, dir);
   DEBUGASSERT(mountpt != NULL && dir != NULL);
 
+  sdir = (FAR struct spiffs_dir_s *)dir;
+
   /* Reset as when opendir() was called. */
 
-  dir->u.spiffs.block   = 0;
-  dir->u.spiffs.entry   = 0;
+  sdir->block = 0;
+  sdir->entry = 0;
 
   return OK;
 }
@@ -1414,7 +1387,7 @@ static int spiffs_bind(FAR struct inode *mtdinode, FAR const void *data,
 
   /* Create an instance of the SPIFFS file system */
 
-  fs = (FAR struct spiffs_s *)kmm_zalloc(sizeof(struct spiffs_s));
+  fs = fs_heap_zalloc(sizeof(struct spiffs_s));
   if (fs == NULL)
     {
       ferr("ERROR: Failed to allocate volume structure\n");
@@ -1456,7 +1429,7 @@ static int spiffs_bind(FAR struct inode *mtdinode, FAR const void *data,
   /* Allocate the cache */
 
   fs->cache_size = cache_size;
-  fs->cache      = (FAR void *)kmm_malloc(cache_size);
+  fs->cache      = fs_heap_malloc(cache_size);
 
   if (fs->cache == NULL)
     {
@@ -1477,7 +1450,7 @@ static int spiffs_bind(FAR struct inode *mtdinode, FAR const void *data,
    */
 
   work_size = 3 * SPIFFS_GEO_PAGE_SIZE(fs);
-  work      = (FAR uint8_t *)kmm_malloc(work_size);
+  work      = fs_heap_malloc(work_size);
 
   if (work == NULL)
     {
@@ -1490,7 +1463,7 @@ static int spiffs_bind(FAR struct inode *mtdinode, FAR const void *data,
   fs->lu_work   = &work[SPIFFS_GEO_PAGE_SIZE(fs)];
   fs->mtd_work  = &work[2 * SPIFFS_GEO_PAGE_SIZE(fs)];
 
-  nxsem_init(&fs->exclsem.sem, 0, 1);
+  nxrmutex_init(&fs->lock);
 
   /* Check the file system */
 
@@ -1505,7 +1478,7 @@ static int spiffs_bind(FAR struct inode *mtdinode, FAR const void *data,
         (unsigned int)SPIFFS_GEO_PAGE_SIZE(fs));
   finfo("object lookup pages:         %u\n",
         (unsigned int)SPIFFS_OBJ_LOOKUP_PAGES(fs));
-  finfo("page pages per block:        %u\n",
+  finfo("pages per block:             %u\n",
         (unsigned int)SPIFFS_GEO_PAGES_PER_BLOCK(fs));
   finfo("page header length:          %u\n",
         (unsigned int)sizeof(struct spiffs_page_header_s));
@@ -1532,13 +1505,13 @@ static int spiffs_bind(FAR struct inode *mtdinode, FAR const void *data,
   return OK;
 
 errout_with_work:
-  kmm_free(fs->work);
+  fs_heap_free(fs->work);
 
 errout_with_cache:
-  kmm_free(fs->cache);
+  fs_heap_free(fs->cache);
 
 errout_with_volume:
-  kmm_free(fs);
+  fs_heap_free(fs);
   return spiffs_map_errno(ret);
 }
 
@@ -1551,7 +1524,6 @@ static int spiffs_unbind(FAR void *handle, FAR struct inode **mtdinode,
 {
   FAR struct spiffs_s *fs = (FAR struct spiffs_s *)handle;
   FAR struct spiffs_file_s *fobj;
-  int ret;
 
   finfo("handle=%p mtdinode=%p flags=%02x\n",
         handle, mtdinode, flags);
@@ -1566,8 +1538,8 @@ static int spiffs_unbind(FAR void *handle, FAR struct inode **mtdinode,
   if (!dq_empty(&fs->objq) && (flags & MNT_FORCE) == 0)
     {
       fwarn("WARNING: Open files and umount not forced\n");
-      ret = -EBUSY;
-      goto errout_with_lock;
+      spiffs_unlock_volume(fs);
+      return spiffs_map_errno(-EBUSY);
     }
 
   /* Release all of the open file objects... Very scary stuff. */
@@ -1583,23 +1555,21 @@ static int spiffs_unbind(FAR void *handle, FAR struct inode **mtdinode,
 
   if (fs->work != NULL)
     {
-      kmm_free(fs->work);
+      fs_heap_free(fs->work);
     }
 
   if (fs->cache != NULL)
     {
-      kmm_free(fs->cache);
+      fs_heap_free(fs->cache);
     }
 
-  /* Free the volume memory (note that the semaphore is now stale!) */
+  /* Free the volume memory (note that the mutex is now stale!) */
 
-  nxsem_destroy(&fs->exclsem.sem);
-  kmm_free(fs);
-  ret = OK;
-
-errout_with_lock:
   spiffs_unlock_volume(fs);
-  return spiffs_map_errno(ret);
+  nxrmutex_destroy(&fs->lock);
+  fs_heap_free(fs);
+
+  return spiffs_map_errno(OK);
 }
 
 /****************************************************************************
@@ -1730,7 +1700,7 @@ static int spiffs_unlink(FAR struct inode *mountpt, FAR const char *relpath)
        */
 
       fobj = (FAR struct spiffs_file_s *)
-        kmm_zalloc(sizeof(struct spiffs_file_s));
+        fs_heap_zalloc(sizeof(struct spiffs_file_s));
       if (fobj == NULL)
         {
           fwarn("WARNING: Failed to allocate fobj\n");
@@ -1744,14 +1714,14 @@ static int spiffs_unlink(FAR struct inode *mountpt, FAR const char *relpath)
       if (ret < 0)
         {
           ferr("ERROR: spiffs_fobj_open_bypage failed: %d\n", ret);
-          kmm_free(fobj);
+          fs_heap_free(fobj);
           goto errout_with_lock;
         }
 
       /* Now we can remove the file by truncating it to zero length */
 
       ret = spiffs_fobj_truncate(fs, fobj, 0, true);
-      kmm_free(fobj);
+      fs_heap_free(fobj);
 
       if (ret < 0)
         {
@@ -1838,7 +1808,7 @@ static int spiffs_rename(FAR struct inode *mountpt,
                                  &oldpgndx);
   if (ret < 0)
     {
-      fwarn("WARNING: spiffs_find_objhdr_pgndx failed: %d\n");
+      fwarn("WARNING: spiffs_find_objhdr_pgndx failed: %d\n", ret);
       goto errout_with_lock;
     }
 
@@ -1863,7 +1833,7 @@ static int spiffs_rename(FAR struct inode *mountpt,
   /* Allocate new file object.  NOTE:  The file could already be open. */
 
   fobj = (FAR struct spiffs_file_s *)
-    kmm_zalloc(sizeof(struct spiffs_file_s));
+    fs_heap_zalloc(sizeof(struct spiffs_file_s));
   if (fobj == NULL)
     {
       ret = -ENOMEM;
@@ -1886,7 +1856,7 @@ static int spiffs_rename(FAR struct inode *mountpt,
                                   &newpgndx);
 
 errout_with_fobj:
-  kmm_free(fobj);
+  fs_heap_free(fobj);
 
 errout_with_lock:
   spiffs_unlock_volume(fs);
@@ -1964,7 +1934,8 @@ static int spiffs_stat(FAR struct inode *mountpt, FAR const char *relpath,
 
 errout_with_lock:
   spiffs_unlock_volume(fs);
-  return spiffs_map_errno(ret);
+  ret = spiffs_map_errno(ret);
+  return ret >= 0 ? OK : ret;
 }
 
 /****************************************************************************

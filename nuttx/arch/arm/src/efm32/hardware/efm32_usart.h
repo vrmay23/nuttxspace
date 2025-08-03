@@ -1,7 +1,12 @@
-/********************************************************************************************************************************
- * arch/arm/src/efm32/EFM32GG/efm32_usart.h
+/****************************************************************************
+ * arch/arm/src/efm32/hardware/efm32_usart.h
  *
- *    (C) Copyright 2014 Silicon Labs, http://www.silabs.com
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2014 Silicon Laboratories, Inc.
+ * SPDX-FileCopyrightText: 2014 Pierre-noel Bouteville . All rights reserved.
+ * SPDX-FileCopyrightText: 2014 Gregory Nutt. All rights reserved.
+ * SPDX-FileContributor: Pierre-noel Bouteville <pnb990@gmail.com>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Permission is granted to anyone to use this software for any purpose,
  * including commercial applications, and to alter it and redistribute it
@@ -23,11 +28,6 @@
  * Silicon Labs will not be liable for any consequential, incidental, or
  * special damages, or any other relief, or for any claim by any third party,
  * arising from your use of this Software.
- *
- *   Copyright (C) 2014 Pierre-noel Bouteville . All rights reserved.
- *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
- *   Authors: Pierre-noel Bouteville <pnb990@gmail.com>
- *            Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -56,14 +56,14 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- *******************************************************************************************************************************/
+ ****************************************************************************/
 
-#ifndef __ARCH_ARM_SRC_EFM32_CHIP_EFM32_USART_H
-#define __ARCH_ARM_SRC_EFM32_CHIP_EFM32_USART_H
+#ifndef __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32_USART_H
+#define __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32_USART_H
 
-/*******************************************************************************************************************************
+/****************************************************************************
  * Included Files
- *******************************************************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 #include "hardware/efm32_memorymap.h"
@@ -72,22 +72,30 @@
 #  warning This is the EFM32GG/G header file; Review/modification needed for this architecture
 #endif
 
-/*******************************************************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- *******************************************************************************************************************************/
-/* The UART is functionally equivalent to the USART with the following exceptions.  The register map and register descriptions
- * are equal to those of the USART.
+ ****************************************************************************/
+
+/* The UART is functionally equivalent to the USART with the following
+ * exceptions.  The register map and register descriptions are equal to
+ * those of the USART.
  *
- *   - Synchronous operation   Not available. SYNC, CSMA, CSINV, CPOL and CPHA in USARTn_CTRL, and MASTEREN in USARTn_STATUS
- *                             are always 0.
- *   - Transmission direction  Always LSB first. MSBF in USARTn_CTRL is always 0.
- *   - Chip-select             Not available. AUTOCS in USARTn_CTRL is always 0.
- *   - SmartCard mode          Not available. SCMODE in USARTn_CTRL is always 0.
- *   - Frame size              Limited to 8-9 databits. Other configurations of DATABITS in USARTn_FRAME are not possible.
+ *   - Synchronous operation   Not available. SYNC, CSMA, CSINV, CPOL and
+ *                             CPHA in USARTn_CTRL, and MASTEREN in
+ *                             USARTn_STATUS are always 0.
+ *   - Transmission direction  Always LSB first.
+ *                             MSBF in USARTn_CTRL is always 0.
+ *   - Chip-select             Not available.
+ *                             AUTOCS in USARTn_CTRL is always 0.
+ *   - SmartCard mode          Not available.
+ *                             SCMODE in USARTn_CTRL is always 0.
+ *   - Frame size              Limited to 8-9 databits.
+ *                             Other configurations of DATABITS in
+ *                             USARTn_FRAME are not possible.
  *   - IrDA Not available.     IREN in USARTn_IRCTRL is always 0.
  */
 
-/* USART Register Offsets ******************************************************************************************************/
+/* USART Register Offsets ***************************************************/
 
 #define EFM32_USART_CTRL_OFFSET              0x0000 /* Control Register */
 #define EFM32_USART_FRAME_OFFSET             0x0004 /* USART Frame Format Register */
@@ -116,7 +124,7 @@
 #  define EFM32_USART_I2SCTRL_OFFSET         0x005c /* I2S Control Register */
 #endif
 
-/* USART Register Addresses ****************************************************************************************************/
+/* USART Register Addresses *************************************************/
 
 #define EFM32_USART0_CTRL                    (EFM32_USART0_BASE+EFM32_USART_CTRL_OFFSET)
 #define EFM32_USART0_FRAME                   (EFM32_USART0_BASE+EFM32_USART_FRAME_OFFSET)
@@ -253,7 +261,7 @@
 #  define EFM32_UART1_I2SCTRL                (EFM32_UART1_BASE+EFM32_USART_I2SCTRL_OFFSET)
 #endif
 
-/* USART Register Register Bit Definitions *************************************************************************************/
+/* USART Register Register Bit Definitions **********************************/
 
 /* Bit fields for USART CTRL */
 
@@ -1380,4 +1388,4 @@
 #define USART_I2SCTRL_FORMAT_W16D8            (_USART_I2SCTRL_FORMAT_W16D8 << 8)     /* Shifted mode W16D8 for USART_I2SCTRL */
 #define USART_I2SCTRL_FORMAT_W8D8             (_USART_I2SCTRL_FORMAT_W8D8 << 8)      /* Shifted mode W8D8 for USART_I2SCTRL */
 
-#endif /* __ARCH_ARM_SRC_EFM32_CHIP_EFM32_USART_H */
+#endif /* __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32_USART_H */

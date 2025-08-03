@@ -1,59 +1,26 @@
 /****************************************************************************
- * fs/mmap/rammap.h
+ * fs/mmap/fs_rammap.h
  *
- *   Copyright (C) 2011 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * References: Linux/Documentation/filesystems/romfs.txt
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
-#ifndef __FS_MMAP_RAMMAP_H
-#define __FS_MMAP_RAMMAP_H
-
-/****************************************************************************
- * Included Files
- ****************************************************************************/
-
-#include <nuttx/config.h>
-
-#include <sys/types.h>
-#include <nuttx/semaphore.h>
-
-#ifdef CONFIG_FS_RAMMAP
-
-/****************************************************************************
- * Public Types
- ****************************************************************************/
-
-/* This structure describes one file that has been copied to memory and
+/* This driver manages files that have been copied to memory and
  * managed as a share-able "memory mapped" file.  This functionality is
  * intended to provide a substitute for memory mapped files for architectures
  * that do not have MMUs and, hence, cannot support on demand paging of
@@ -70,50 +37,40 @@
  * - There are not access privileges.
  */
 
-struct fs_rammap_s
+#ifndef __FS_MMAP_FS_RAMMAP_H
+#define __FS_MMAP_FS_RAMMAP_H
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
+#include <nuttx/config.h>
+
+#include <sys/types.h>
+#include <nuttx/mm/map.h>
+
+/* A memory mapping type definition */
+
+enum mm_map_type_e
 {
-  struct fs_rammap_s *flink;       /* Implements a singly linked list */
-  FAR void           *addr;        /* Start of allocated memory */
-  size_t              length;      /* Length of region */
-  off_t               offset;      /* File offset */
+  MAP_USER = 0,
+  MAP_KERNEL,
+  MAP_XIP,
 };
 
-/* This structure defines all "mapped" files */
+#ifdef CONFIG_FS_RAMMAP
 
-struct fs_allmaps_s
-{
-  bool                initialized; /* True: This structure has been initialized */
-  sem_t               exclsem;     /* Provides exclusive access the list */
-  struct fs_rammap_s *head;        /* List of mapped files */
-};
+/****************************************************************************
+ * Public Types
+ ****************************************************************************/
 
 /****************************************************************************
  * Public Data
  ****************************************************************************/
 
-/* This is the list of all mapped files */
-
-extern struct fs_allmaps_s g_rammaps;
-
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
-
-/****************************************************************************
- * Name: rammap_initialize
- *
- * Description:
- *   Verified that this capability has been initialized.
- *
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-void rammap_initialize(void);
 
 /****************************************************************************
  * Name: rammmap
@@ -122,14 +79,14 @@ void rammap_initialize(void);
  *   Support simulation of memory mapped files by copying files into RAM.
  *
  * Input Parameters:
- *   fd      file descriptor of the backing file -- required.
+ *   filep   file descriptor of the backing file -- required.
  *   length  The length of the mapping.  For exception #1 above, this length
  *           ignored:  The entire underlying media is always accessible.
  *   offset  The offset into the file to map
+ *   type    fs_heap_zalloc or kumm_zalloc or xip_base
  *
  * Returned Value:
- *   On success, rammmap() returns a pointer to the mapped area. On error, the
- *   value MAP_FAILED is returned, and errno is set  appropriately.
+ *   On success rammmap returns 0. Otherwise errno is returned appropriately.
  *
  *     EBADF
  *      'fd' is not a valid file descriptor.
@@ -140,7 +97,10 @@ void rammap_initialize(void);
  *
  ****************************************************************************/
 
-FAR void *rammap(int fd, size_t length, off_t offset);
-
+int rammap(FAR struct file *filep, FAR struct mm_map_entry_s *entry,
+           enum mm_map_type_e type);
+#else
+#  define rammap(file, entry, type) (-ENOSYS)
 #endif /* CONFIG_FS_RAMMAP */
-#endif /* __FS_MMAP_RAMMAP_H */
+
+#endif /* __FS_MMAP_FS_RAMMAP_H */

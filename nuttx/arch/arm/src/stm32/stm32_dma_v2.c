@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/stm32/stm32_dma_v2.c
  *
- *   Copyright (C) 2011-2013, 2016-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,8 +26,10 @@
 
 #include <nuttx/config.h>
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
@@ -48,8 +37,7 @@
 #include <nuttx/arch.h>
 #include <nuttx/semaphore.h>
 
-#include "up_arch.h"
-#include "up_internal.h"
+#include "arm_internal.h"
 #include "sched/sched.h"
 #include "chip.h"
 #include "stm32_dma.h"
@@ -106,48 +94,56 @@ static struct stm32_dma_s g_dma[DMA_NSTREAMS] =
     .stream   = 0,
     .irq      = STM32_IRQ_DMA1S0,
     .shift    = DMA_INT_STREAM0_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMA_OFFSET(0),
   },
   {
     .stream   = 1,
     .irq      = STM32_IRQ_DMA1S1,
     .shift    = DMA_INT_STREAM1_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMA_OFFSET(1),
   },
   {
     .stream   = 2,
     .irq      = STM32_IRQ_DMA1S2,
     .shift    = DMA_INT_STREAM2_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMA_OFFSET(2),
   },
   {
     .stream   = 3,
     .irq      = STM32_IRQ_DMA1S3,
     .shift    = DMA_INT_STREAM3_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMA_OFFSET(3),
   },
   {
     .stream   = 4,
     .irq      = STM32_IRQ_DMA1S4,
     .shift    = DMA_INT_STREAM4_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMA_OFFSET(4),
   },
   {
     .stream   = 5,
     .irq      = STM32_IRQ_DMA1S5,
     .shift    = DMA_INT_STREAM5_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMA_OFFSET(5),
   },
   {
     .stream   = 6,
     .irq      = STM32_IRQ_DMA1S6,
     .shift    = DMA_INT_STREAM6_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMA_OFFSET(6),
   },
   {
     .stream   = 7,
     .irq      = STM32_IRQ_DMA1S7,
     .shift    = DMA_INT_STREAM7_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA1_BASE + STM32_DMA_OFFSET(7),
   },
 #if STM32_NDMA > 1
@@ -155,47 +151,55 @@ static struct stm32_dma_s g_dma[DMA_NSTREAMS] =
     .stream   = 0,
     .irq      = STM32_IRQ_DMA2S0,
     .shift    = DMA_INT_STREAM0_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA2_BASE + STM32_DMA_OFFSET(0),
   },
   {
     .stream   = 1,
     .irq      = STM32_IRQ_DMA2S1,
     .shift    = DMA_INT_STREAM1_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA2_BASE + STM32_DMA_OFFSET(1),
   },
   {
     .stream   = 2,
     .irq      = STM32_IRQ_DMA2S2,
     .shift    = DMA_INT_STREAM2_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA2_BASE + STM32_DMA_OFFSET(2),
   },
   {
     .stream   = 3,
     .irq      = STM32_IRQ_DMA2S3,
     .shift    = DMA_INT_STREAM3_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA2_BASE + STM32_DMA_OFFSET(3),
   },
   {
     .stream   = 4,
     .irq      = STM32_IRQ_DMA2S4,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA2_BASE + STM32_DMA_OFFSET(4),
   },
   {
     .stream   = 5,
     .irq      = STM32_IRQ_DMA2S5,
     .shift    = DMA_INT_STREAM5_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA2_BASE + STM32_DMA_OFFSET(5),
   },
   {
     .stream   = 6,
     .irq      = STM32_IRQ_DMA2S6,
     .shift    = DMA_INT_STREAM6_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA2_BASE + STM32_DMA_OFFSET(6),
   },
   {
     .stream   = 7,
     .irq      = STM32_IRQ_DMA2S7,
     .shift    = DMA_INT_STREAM7_SHIFT,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32_DMA2_BASE + STM32_DMA_OFFSET(7),
   },
 #endif
@@ -241,22 +245,11 @@ static inline void dmast_putreg(struct stm32_dma_s *dmast, uint32_t offset,
   putreg32(value, dmast->base + offset);
 }
 
-/****************************************************************************
- * Name: stm32_dmatake() and stm32_dmagive()
- *
- * Description:
- *   Used to get exclusive access to a DMA channel.
- *
- ****************************************************************************/
-
-static int stm32_dmatake(FAR struct stm32_dma_s *dmast)
+static inline void dmast_modifyreg32(struct stm32_dma_s *dmast,
+                                     uint32_t offset, uint32_t clrbits,
+                                     uint32_t setbits)
 {
-  return nxsem_wait_uninterruptible(&dmast->sem);
-}
-
-static inline void stm32_dmagive(FAR struct stm32_dma_s *dmast)
-{
-  nxsem_post(&dmast->sem);
+  modifyreg32(dmast->base + offset, clrbits, setbits);
 }
 
 /****************************************************************************
@@ -268,8 +261,8 @@ static inline void stm32_dmagive(FAR struct stm32_dma_s *dmast)
  *
  ****************************************************************************/
 
-static inline FAR struct stm32_dma_s *stm32_dmastream(unsigned int stream,
-                                                    unsigned int controller)
+static inline struct stm32_dma_s *stm32_dmastream(unsigned int stream,
+                                                  unsigned int controller)
 {
   int index;
 
@@ -298,7 +291,7 @@ static inline FAR struct stm32_dma_s *stm32_dmastream(unsigned int stream,
  *
  ****************************************************************************/
 
-static inline FAR struct stm32_dma_s *stm32_dmamap(unsigned long dmamap)
+static inline struct stm32_dma_s *stm32_dmamap(unsigned long dmamap)
 {
   /* Extract the DMA controller number from the bit encoded value */
 
@@ -460,7 +453,7 @@ static int stm32_dmainterrupt(int irq, void *context, void *arg)
  *
  ****************************************************************************/
 
-void weak_function up_dma_initialize(void)
+void weak_function arm_dma_initialize(void)
 {
   struct stm32_dma_s *dmast;
   int stream;
@@ -470,7 +463,6 @@ void weak_function up_dma_initialize(void)
   for (stream = 0; stream < DMA_NSTREAMS; stream++)
     {
       dmast = &g_dma[stream];
-      nxsem_init(&dmast->sem, 0, 1);
 
       /* Attach DMA interrupt vectors */
 
@@ -525,7 +517,7 @@ void weak_function up_dma_initialize(void)
 
 DMA_HANDLE stm32_dmachannel(unsigned int dmamap)
 {
-  FAR struct stm32_dma_s *dmast;
+  struct stm32_dma_s *dmast;
   int ret;
 
   /* Get the stream index from the bit-encoded channel value */
@@ -537,7 +529,7 @@ DMA_HANDLE stm32_dmachannel(unsigned int dmamap)
    * is available if it is currently being used by another driver
    */
 
-  ret = stm32_dmatake(dmast);
+  ret = nxsem_wait_uninterruptible(&dmast->sem);
   if (ret < 0)
     {
       return NULL;
@@ -579,7 +571,7 @@ void stm32_dmafree(DMA_HANDLE handle)
 
   /* Release the channel */
 
-  stm32_dmagive(dmast);
+  nxsem_post(&dmast->sem);
 }
 
 /****************************************************************************
@@ -596,8 +588,10 @@ void stm32_dmasetup(DMA_HANDLE handle, uint32_t paddr, uint32_t maddr,
   struct stm32_dma_s *dmast = (struct stm32_dma_s *)handle;
   uint32_t regoffset;
   uint32_t regval;
+  uint32_t timeout;
 
-  dmainfo("paddr: %08x maddr: %08x ntransfers: %d scr: %08x\n",
+  dmainfo("paddr: %08" PRIx32 " maddr: %08" PRIx32
+          " ntransfers: %zu scr: %08" PRIx32 "\n",
           paddr, maddr, ntransfers, scr);
 
 #ifdef CONFIG_STM32_DMACAPABLE
@@ -614,7 +608,36 @@ void stm32_dmasetup(DMA_HANDLE handle, uint32_t paddr, uint32_t maddr,
    * configuration. ..."
    */
 
-  while ((dmast_getreg(dmast, STM32_DMA_SCR_OFFSET) & DMA_SCR_EN) != 0);
+  /* Drivers using DMA should manage the streams. If a DMA request
+   * is not made on an error or an abort occurs. The driver should
+   * stop the DMA. If it fails to do so we can not just hang waiting
+   * on the HW that will not change state.
+   *
+   * If at the end of waiting the HW is still not ready there is a HW problem
+   * or a SW usage problem.
+   *
+   * Enable DEBUGASSERT to detect this.
+   */
+
+  if ((dmast_getreg(dmast, STM32_DMA_SCR_OFFSET) & DMA_SCR_EN) != 0)
+    {
+      /* Attempt to disable the DMA stream and wait up to a 100 us for it
+       * to stop.
+       */
+
+      dmast_modifyreg32(dmast, STM32_DMA_SCR_OFFSET, DMA_SCR_EN, 0);
+      timeout = 100;
+      while (timeout != 0 &&
+             (dmast_getreg(dmast, STM32_DMA_SCR_OFFSET) & DMA_SCR_EN) != 0)
+        {
+          up_udelay(1);
+          timeout--;
+        }
+
+        DEBUGASSERT(timeout != 0 &&
+                    (dmast_getreg(dmast, STM32_DMA_SCR_OFFSET) &
+                     DMA_SCR_EN) == 0);
+    }
 
   /* "... All the stream dedicated bits set in the status register (DMA_LISR
    * and DMA_HISR) from the previous data block DMA transfer should be
@@ -752,7 +775,7 @@ void stm32_dmastart(DMA_HANDLE handle, dma_callback_t callback, void *arg,
 
   DEBUGASSERT(handle != NULL);
 
-  /* Save the callback info.  This will be invoked whent the DMA completes */
+  /* Save the callback info.  This will be invoked when the DMA completes. */
 
   dmast->callback = callback;
   dmast->arg      = arg;
@@ -864,13 +887,14 @@ size_t stm32_dmaresidual(DMA_HANDLE handle)
  ****************************************************************************/
 
 #ifdef CONFIG_STM32_DMACAPABLE
-bool stm32_dmacapable(uint32_t maddr, uint32_t count, uint32_t ccr)
+bool stm32_dmacapable(uintptr_t maddr, uint32_t count, uint32_t ccr)
 {
   uint32_t transfer_size;
   uint32_t burst_length;
   uint32_t mend;
 
-  dmainfo("stm32_dmacapable: 0x%08x/%u 0x%08x\n", maddr, count, ccr);
+  dmainfo("stm32_dmacapable: 0x%08" PRIxPTR "/%" PRIu32 " 0x%08" PRIx32 "\n",
+          maddr, count, ccr);
 
   /* Verify that the address conforms to the memory transfer size.
    * Transfers to/from memory performed by the DMA controller are

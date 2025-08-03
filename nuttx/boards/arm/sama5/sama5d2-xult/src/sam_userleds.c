@@ -1,5 +1,7 @@
 /****************************************************************************
- *  boards/arm/sama5/sama5d2-xult/src/sam_userleds.c
+ * boards/arm/sama5/sama5d2-xult/src/sam_userleds.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  *  Licensed to the Apache Software Foundation (ASF) under one or more
  *  contributor license agreements.  See the NOTICE file distributed with
@@ -55,7 +57,7 @@
  * Name: board_userled_initialize
  ****************************************************************************/
 
-void board_userled_initialize(void)
+uint32_t board_userled_initialize(void)
 {
   /* Configure LED PIOs for output */
 
@@ -63,6 +65,7 @@ void board_userled_initialize(void)
   sam_configpio(PIO_LED_GREEN);
 #endif
   sam_configpio(PIO_LED_BLUE);
+  return BOARD_NLEDS;
 }
 
 /****************************************************************************
@@ -98,7 +101,7 @@ void board_userled(int led, bool ledon)
  * Name: board_userled_all
  ****************************************************************************/
 
-void board_userled_all(uint8_t ledset)
+void board_userled_all(uint32_t ledset)
 {
   bool ledon;
 

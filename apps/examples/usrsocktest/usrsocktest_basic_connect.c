@@ -1,37 +1,22 @@
 /****************************************************************************
- * examples/usrsocktest/usrsocktest_basic_connect.c
- * Basic connect tests with socket daemon
+ * apps/examples/usrsocktest/usrsocktest_basic_connect.c
  *
- *   Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
- *   Authors: Roman Saveljev <roman.saveljev@haltian.com>
- *            Jussi Kivilinna <jussi.kivilinna@haltian.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,6 +31,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <unistd.h>
 
 #include "defines.h"
 
@@ -77,7 +63,7 @@ static int sd;
  ****************************************************************************/
 
 /****************************************************************************
- * Name: Setup
+ * Name: setup
  *
  * Description:
  *   Run before every testcase
@@ -93,7 +79,7 @@ static int sd;
  *
  ****************************************************************************/
 
-static void Setup(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void setup(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   dconf->endpoint_addr = "127.0.0.1";
   dconf->endpoint_port = 255;
@@ -123,25 +109,25 @@ static void Setup(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void Teardown(void)
+static void teardown(void)
 {
-  int ret;
+  int unused_data ret;
 
   if (sd >= 0)
     {
       ret = close(sd);
-      assert(ret >= 0);
+      TEST_ASSERT_TRUE(ret >= 0);
     }
 
   if (started)
     {
       ret = usrsocktest_daemon_stop();
-      assert(ret == OK);
+      TEST_ASSERT_EQUAL(OK, ret);
     }
 }
 
 /****************************************************************************
- * Name: NotConnected
+ * Name: not_connected
  *
  * Description:
  *   Opened socket is not connected
@@ -157,13 +143,13 @@ static void Teardown(void)
  *
  ****************************************************************************/
 
-static void NotConnected(void)
+static void not_connected(void)
 {
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
 }
 
 /****************************************************************************
- * Name: Connect
+ * Name: basic_connect_connect
  *
  * Description:
  *   Open and connect the socket
@@ -179,7 +165,7 @@ static void NotConnected(void)
  *
  ****************************************************************************/
 
-static void Connect(void)
+static void basic_connect_connect(void)
 {
   int ret;
   struct sockaddr_in addr;
@@ -232,7 +218,7 @@ static void Connect(void)
 }
 
 /****************************************************************************
- * Name: WrongAF
+ * Name: wrong_af
  *
  * Description:
  *   Open and connect the socket with wrong AF
@@ -248,7 +234,7 @@ static void Connect(void)
  *
  ****************************************************************************/
 
-static void WrongAF(void)
+static void wrong_af(void)
 {
   int ret;
   struct sockaddr_in addr;
@@ -282,7 +268,7 @@ static void WrongAF(void)
 }
 
 /****************************************************************************
- * Name: WrongPort
+ * Name: wrong_port
  *
  * Description:
  *   Open and connect the socket with wrong port
@@ -298,7 +284,7 @@ static void WrongAF(void)
  *
  ****************************************************************************/
 
-static void WrongPort(void)
+static void wrong_port(void)
 {
   int ret;
   struct sockaddr_in addr;
@@ -332,7 +318,7 @@ static void WrongPort(void)
 }
 
 /****************************************************************************
- * Name: WrongEndpoint
+ * Name: wrong_endpoint
  *
  * Description:
  *   Open and connect the socket with wrong endpoint
@@ -348,7 +334,7 @@ static void WrongPort(void)
  *
  ****************************************************************************/
 
-static void WrongEndpoint(void)
+static void wrong_endpoint(void)
 {
   int ret;
   struct sockaddr_in addr;
@@ -391,97 +377,97 @@ static void WrongEndpoint(void)
   TEST_ASSERT_EQUAL(0, usrsocktest_dcmd_malloc_cnt);
 }
 
-TEST_SETUP(BasicConnect)
+TEST_SETUP(basic_connect)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  Setup(&usrsocktest_daemon_config);
+  setup(&usrsocktest_daemon_config);
 }
 
-TEST_TEAR_DOWN(BasicConnect)
+TEST_TEAR_DOWN(basic_connect)
 {
-  Teardown();
+  teardown();
 }
 
-TEST(BasicConnect, NotConnected)
+TEST(basic_connect, not_connected)
 {
-  NotConnected();
+  not_connected();
 }
 
-TEST(BasicConnect, Connect)
+TEST(basic_connect, basic_connect_connect)
 {
-  Connect();
+  basic_connect_connect();
 }
 
-TEST(BasicConnect, WrongAF)
+TEST(basic_connect, wrong_af)
 {
-  WrongAF();
+  wrong_af();
 }
 
-TEST(BasicConnect, WrongPort)
+TEST(basic_connect, wrong_port)
 {
-  WrongPort();
+  wrong_port();
 }
 
-TEST(BasicConnect, WrongEndpoint)
+TEST(basic_connect, wrong_endpoint)
 {
-  WrongEndpoint();
+  wrong_endpoint();
 }
 
-TEST_SETUP(BasicConnectDelay)
+TEST_SETUP(basic_connect_delay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  Setup(&usrsocktest_daemon_config);
+  setup(&usrsocktest_daemon_config);
 }
 
-TEST_TEAR_DOWN(BasicConnectDelay)
+TEST_TEAR_DOWN(basic_connect_delay)
 {
-  Teardown();
+  teardown();
 }
 
-TEST(BasicConnectDelay, NotConnected)
+TEST(basic_connect_delay, not_connected)
 {
-  NotConnected();
+  not_connected();
 }
 
-TEST(BasicConnectDelay, Connect)
+TEST(basic_connect_delay, basic_connect_connect)
 {
-  Connect();
+  basic_connect_connect();
 }
 
-TEST(BasicConnectDelay, WrongAF)
+TEST(basic_connect_delay, wrong_af)
 {
-  WrongAF();
+  wrong_af();
 }
 
-TEST(BasicConnectDelay, WrongPort)
+TEST(basic_connect_delay, wrong_port)
 {
-  WrongPort();
+  wrong_port();
 }
 
-TEST(BasicConnectDelay, WrongEndpoint)
+TEST(basic_connect_delay, wrong_endpoint)
 {
-  WrongEndpoint();
+  wrong_endpoint();
 }
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-TEST_GROUP(BasicConnect)
+TEST_GROUP(basic_connect)
 {
-  RUN_TEST_CASE(BasicConnect, NotConnected);
-  RUN_TEST_CASE(BasicConnect, Connect);
-  RUN_TEST_CASE(BasicConnect, WrongAF);
-  RUN_TEST_CASE(BasicConnect, WrongPort);
-  RUN_TEST_CASE(BasicConnect, WrongEndpoint);
+  RUN_TEST_CASE(basic_connect, not_connected);
+  RUN_TEST_CASE(basic_connect, basic_connect_connect);
+  RUN_TEST_CASE(basic_connect, wrong_af);
+  RUN_TEST_CASE(basic_connect, wrong_port);
+  RUN_TEST_CASE(basic_connect, wrong_endpoint);
 }
 
-TEST_GROUP(BasicConnectDelay)
+TEST_GROUP(basic_connect_delay)
 {
-  RUN_TEST_CASE(BasicConnectDelay, NotConnected);
-  RUN_TEST_CASE(BasicConnectDelay, Connect);
-  RUN_TEST_CASE(BasicConnectDelay, WrongAF);
-  RUN_TEST_CASE(BasicConnectDelay, WrongPort);
-  RUN_TEST_CASE(BasicConnectDelay, WrongEndpoint);
+  RUN_TEST_CASE(basic_connect_delay, not_connected);
+  RUN_TEST_CASE(basic_connect_delay, basic_connect_connect);
+  RUN_TEST_CASE(basic_connect_delay, wrong_af);
+  RUN_TEST_CASE(basic_connect_delay, wrong_port);
+  RUN_TEST_CASE(basic_connect_delay, wrong_endpoint);
 }

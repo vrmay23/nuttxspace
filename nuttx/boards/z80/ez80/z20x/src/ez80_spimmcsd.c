@@ -1,6 +1,8 @@
 /****************************************************************************
  * boards/z80/ez80/z20x/src/ez80_spimmcsd.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -78,7 +80,9 @@ int ez80_mmcsd_initialize(void)
       return -ENODEV;
     }
 
-  /* Register the MMC/SD block driver for slot 0 with device minor number 0. */
+  /* Register the MMC/SD block driver for
+   * slot 0 with device minor number 0.
+   */
 
   ret = mmcsd_spislotinitialize(0, 0, spi);
   if (ret < 0)

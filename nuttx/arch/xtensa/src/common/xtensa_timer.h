@@ -1,13 +1,10 @@
 /****************************************************************************
  * arch/xtensa/src/common/xtensa_timer.h
  *
- * Adapted from use in NuttX by:
- *
- *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * Derives from logic originally provided by Cadence Design Systems Inc.
- * Copyright (c) 2003-2015 Cadence Design Systems, Inc.
+ * SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: 2016 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2003-2015 Cadence Design Systems Inc.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -62,25 +59,25 @@
 
 #ifndef XT_TIMER_INDEX
 #  if XCHAL_TIMER3_INTERRUPT != XTHAL_TIMER_UNCONFIGURED
-#    if XCHAL_INT_LEVEL(XCHAL_TIMER3_INTERRUPT) <= XCHAL_EXCM_LEVEL
+#    if XCHAL_INT_LEVEL(XCHAL_TIMER3_INTERRUPT) <= XCHAL_IRQ_LEVEL
 #      undef  XT_TIMER_INDEX
 #      define XT_TIMER_INDEX    3
 #    endif
 #  endif
 #  if XCHAL_TIMER2_INTERRUPT != XTHAL_TIMER_UNCONFIGURED
-#    if XCHAL_INT_LEVEL(XCHAL_TIMER2_INTERRUPT) <= XCHAL_EXCM_LEVEL
+#    if XCHAL_INT_LEVEL(XCHAL_TIMER2_INTERRUPT) <= XCHAL_IRQ_LEVEL
 #      undef  XT_TIMER_INDEX
 #      define XT_TIMER_INDEX    2
 #    endif
 #  endif
 #  if XCHAL_TIMER1_INTERRUPT != XTHAL_TIMER_UNCONFIGURED
-#    if XCHAL_INT_LEVEL(XCHAL_TIMER1_INTERRUPT) <= XCHAL_EXCM_LEVEL
+#    if XCHAL_INT_LEVEL(XCHAL_TIMER1_INTERRUPT) <= XCHAL_IRQ_LEVEL
 #      undef  XT_TIMER_INDEX
 #      define XT_TIMER_INDEX    1
 #    endif
 #  endif
 #  if XCHAL_TIMER0_INTERRUPT != XTHAL_TIMER_UNCONFIGURED
-#    if XCHAL_INT_LEVEL(XCHAL_TIMER0_INTERRUPT) <= XCHAL_EXCM_LEVEL
+#    if XCHAL_INT_LEVEL(XCHAL_TIMER0_INTERRUPT) <= XCHAL_IRQ_LEVEL
 #      undef  XT_TIMER_INDEX
 #      define XT_TIMER_INDEX    0
 #    endif
@@ -97,7 +94,7 @@
 
 #if XT_TIMER_INTNUM == XTHAL_TIMER_UNCONFIGURED
 #  error "The timer selected by XT_TIMER_INDEX does not exist in this core."
-#elif XT_TIMER_INTPRI > XCHAL_EXCM_LEVEL
+#elif XT_TIMER_INTPRI > XCHAL_IRQ_LEVEL
 #  error "The timer interrupt cannot be high priority (use medium or low)."
 #endif
 

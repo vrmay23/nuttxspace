@@ -1,13 +1,10 @@
-/************************************************************************************************************
+/****************************************************************************
  * arch/arm/src/tiva/hardware/cc13x0/cc13x0_ccfg.h
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *
- * Technical content derives from a TI header file that has a compatible BSD license:
- *
- *   Copyright (c) 2015-2017, Texas Instruments Incorporated
- *   All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2018 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2015-2017, Texas Instruments Incorporated
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,23 +33,23 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ************************************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_TIVA_HARDWARE_CC13X0_CC13X0_CCFG_H
 #define __ARCH_ARM_SRC_TIVA_HARDWARE_CC13X0_CC13X0_CCFG_H
 
-/************************************************************************************************************
+/****************************************************************************
  * Included Files
- ************************************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 #include "hardware/tiva_memorymap.h"
 
-/************************************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- ************************************************************************************************************/
+ ****************************************************************************/
 
-/* CCFG Register Offsets ************************************************************************************/
+/* CCFG Register Offsets ****************************************************/
 
 #define TIVA_CCFG_EXT_LF_CLK_OFFSET             0x0fa8  /* Extern LF clock configuration */
 #define TIVA_CCFG_MODE_CONF_1_OFFSET            0x0fac  /* Mode Configuration 1 */
@@ -77,7 +74,7 @@
 #define TIVA_CCFG_CCFG_PROT_95_64_OFFSET        0x0ff8  /* Protect Sectors 64-95 */
 #define TIVA_CCFG_CCFG_PROT_127_96_OFFSET       0x0ffc  /* Protect Sectors 96-127 */
 
-/* CCFG Register Addresses **********************************************************************************/
+/* CCFG Register Addresses **************************************************/
 
 #define TIVA_CCFG_EXT_LF_CLK                    (TIVA_CCFG_BASE + TIVA_CCFG_EXT_LF_CLK_OFFSET)
 #define TIVA_CCFG_MODE_CONF_1                   (TIVA_CCFG_BASE + TIVA_CCFG_MODE_CONF_1_OFFSET)
@@ -102,7 +99,7 @@
 #define TIVA_CCFG_CCFG_PROT_95_64               (TIVA_CCFG_BASE + TIVA_CCFG_CCFG_PROT_95_64_OFFSET)
 #define TIVA_CCFG_CCFG_PROT_127_96              (TIVA_CCFG_BASE + TIVA_CCFG_CCFG_PROT_127_96_OFFSET)
 
-/* CCFG Bifield Definitions *********************************************************************************/
+/* CCFG Bifield Definitions *************************************************/
 
 /* TIVA_CCFG_EXT_LF_CLK */
 
@@ -221,8 +218,11 @@
 #define CCFG_FREQ_OFFSET_HF_COMP_P0_MASK        (0xffff << CCFG_FREQ_OFFSET_HF_COMP_P0_SHIFT)
 
 /* TIVA_CCFG_IEEE_MAC_0 (32-bit value) */
+
 /* TIVA_CCFG_IEEE_MAC_1 (32-bit value) */
+
 /* TIVA_CCFG_IEEE_BLE_0 (32-bit value) */
+
 /* TIVA_CCFG_IEEE_BLE_1 (32-bit value) */
 
 /* TIVA_CCFG_BL_CONFIG */

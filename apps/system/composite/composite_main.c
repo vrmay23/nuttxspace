@@ -1,5 +1,7 @@
 /****************************************************************************
- * system/composite/composite_main.c
+ * apps/system/composite/composite_main.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -29,6 +31,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <malloc.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -97,7 +100,7 @@ static void show_memory_usage(struct mallinfo *mmbefore,
     }
 }
 #else
-# define show_memory_usage(mm1, mm2)
+#  define show_memory_usage(mm1, mm2)
 #endif
 
 /****************************************************************************
@@ -397,7 +400,7 @@ int main(int argc, FAR char *argv[])
 
   if (g_composite.cmphandle)
     {
-      fprintf(stderr, "conn_main: ERROR: Already connected\n");
+      dprintf(STDERR_FILENO, "conn_main: ERROR: Already connected\n");
       return 1;
     }
 
@@ -409,7 +412,8 @@ int main(int argc, FAR char *argv[])
     }
   else if (argc > 2)
     {
-      fprintf(stderr, "conn_main: ERROR: Too many arguments: %d\n", argc);
+      dprintf(STDERR_FILENO, "conn_main: ERROR: Too many arguments: %d\n",
+              argc);
       return EXIT_FAILURE;
     }
 
@@ -512,7 +516,7 @@ int disconn_main(int argc, char *argv[])
 
   if (!g_composite.cmphandle)
     {
-      fprintf(stderr, "disconn_main: ERROR: Not connected\n");
+      dprintf(STDERR_FILENO, "disconn_main: ERROR: Not connected\n");
       return 1;
     }
 
@@ -526,7 +530,8 @@ int disconn_main(int argc, char *argv[])
     }
   else if (argc > 2)
     {
-      fprintf(stderr, "conn_main: ERROR: Too many arguments: %d\n", argc);
+      dprintf(STDERR_FILENO, "conn_main: ERROR: Too many arguments: %d\n",
+              argc);
       return EXIT_FAILURE;
     }
 

@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/z80/src/ez80/ez80_i2c.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -31,7 +33,7 @@
 #include <assert.h>
 #include <debug.h>
 
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/kmalloc.h>
 #include <arch/io.h>
@@ -89,10 +91,10 @@ static int      ez80_i2c_transfer(FAR struct i2c_master_s *dev,
  * Private Data
  ****************************************************************************/
 
-static bool  g_initialized;  /* true:I2C has been initialized */
-static sem_t g_i2csem;       /* Serialize I2C transfers */
+static bool    g_initialized;                   /* true:I2C has been initialized */
+static mutex_t g_i2clock = NXMUTEX_INITIALIZER; /* Serialize I2C transfers */
 
-const struct i2c_ops_s g_ops =
+static const struct i2c_ops_s g_ops =
 {
   ez80_i2c_transfer
 };
@@ -100,25 +102,6 @@ const struct i2c_ops_s g_ops =
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: ez80_i2c_semtake/ez80_i2c_semgive
- *
- * Description:
- *   Take/Give the I2C semaphore.
- *
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-static int ez80_i2c_semtake(void)
-{
-  return nxsem_wait(&g_i2csem);
-}
 
 /****************************************************************************
  * Name: ez80_i2c_setccr
@@ -579,7 +562,9 @@ static int ez80_i2c_read_transfer(FAR struct ez80_i2cdev_s *priv,
 
           else if (regval == I2C_SR_MDATARDNAK)
             {
-              /* Since we just NACKed the incoming byte, it must be the last */
+              /* Since we just NACKed the incoming byte, it must be the
+               * last
+               */
 
               DEBUGASSERT(count <= 1);
 
@@ -815,7 +800,7 @@ static int ez80_i2c_transfer(FAR struct i2c_master_s *dev,
 
   /* Get exclusive access to the I2C bus */
 
-  ret = nxsem_wait(&g_i2csem);
+  ret = nxmutex_lock(&g_i2clock);
   if (ret < 0)
     {
       return ret;
@@ -887,7 +872,7 @@ static int ez80_i2c_transfer(FAR struct i2c_master_s *dev,
       flags = (nostop) ? EZ80_NOSTART : 0;
     }
 
-  nxsem_post(&g_i2csem);
+  nxmutex_unlock(&g_i2clock);
   return ret;
 }
 
@@ -925,11 +910,9 @@ FAR struct i2c_master_s *ez80_i2cbus_initialize(int port)
       ccr = ez80_i2c_getccr(100 * 1000);
       ez80_i2c_setccr(ccr);
 
-      /* No GPIO setup is required -- I2C pints, SCL/SDA are not multiplexed */
-
-      /* This semaphore enforces serialized access for I2C transfers */
-
-      nxsem_init(&g_i2csem, 0, 1);
+      /* No GPIO setup is required -- I2C pints,
+       * SCL/SDA are not multiplexed
+       */
 
       /* Enable I2C -- but not interrupts */
 

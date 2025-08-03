@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/xtensa/include/esp32/irq.h
  *
- *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -49,6 +36,21 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+/* CPU interrupt flags:
+ *   These flags can be used to specify which interrupt qualities the
+ *   code calling esp32_setup_irq needs.
+ */
+
+#define ESP32_CPUINT_FLAG_LEVEL   (1 << 0) /* Level-triggered interrupt */
+#define ESP32_CPUINT_FLAG_EDGE    (1 << 1) /* Edge-triggered interrupt */
+#define ESP32_CPUINT_FLAG_SHARED  (1 << 2) /* Interrupt can be shared between ISRs */
+#define ESP32_CPUINT_FLAG_IRAM    (1 << 3) /* ISR can be called if cache is disabled */
+
+/* Trigger mask useful on debug assertion */
+
+#define ESP32_CPUINT_TRIGGER_MASK (ESP32_CPUINT_FLAG_LEVEL | \
+                                   ESP32_CPUINT_FLAG_EDGE)
 
 /* Interrupt Matrix
  *
@@ -132,7 +134,8 @@
 #define ESP32_PERIPH_PWM3           42 /* INTR_STATUS_REG_1, bit 10 */
 #define ESP32_PERIPH_LEDC           43 /* INTR_STATUS_REG_1, bit 11 */
 #define ESP32_PERIPH_EFUSE          44 /* INTR_STATUS_REG_1, bit 12 */
-#define ESP32_PERIPH_CAN            45 /* INTR_STATUS_REG_1, bit 13 */
+#define ESP32_PERIPH_TWAI           45 /* INTR_STATUS_REG_1, bit 13 */
+#define ESP32_PERIPH_CAN            ESP32_PERIPH_TWAI
 #define ESP32_PERIPH_RTC_CORE       46 /* INTR_STATUS_REG_1, bit 14 */
 #define ESP32_PERIPH_RMT            47 /* INTR_STATUS_REG_1, bit 15 */
 #define ESP32_PERIPH_PCNT           48 /* INTR_STATUS_REG_1, bit 16 */
@@ -181,8 +184,9 @@
  *   0x03c0     Double exception
  *
  * REVISIT: In more architectures supported by NuttX, exception errors
- * tie into the normal interrupt handling via special IRQ numbers.  I
- * is still to be determined what will be done for the ESP32.
+ * tie into the normal interrupt handling via special IRQ numbers.
+ * It is still to be determined what will be done for the ESP32.
+ *
  */
 
 /* IRQ numbers for internal interrupts that are dispatched like peripheral
@@ -193,15 +197,17 @@
 #define XTENSA_IRQ_TIMER1           1  /* INTERRUPT, bit 15 */
 #define XTENSA_IRQ_TIMER2           2  /* INTERRUPT, bit 16 */
 #define XTENSA_IRQ_SYSCALL          3  /* User interrupt w/EXCCAUSE=syscall */
+#define XTENSA_IRQ_SWINT            4  /* Software interrupt */
 
-#define XTENSA_NIRQ_INTERNAL        4  /* Number of dispatch internal interrupts */
-#define XTENSA_IRQ_FIRSTPERIPH      4  /* First peripheral IRQ number */
+#define XTENSA_NIRQ_INTERNAL        5  /* Number of dispatch internal interrupts */
+#define XTENSA_IRQ_FIRSTPERIPH      5  /* First peripheral IRQ number */
 
 /* IRQ numbers for peripheral interrupts coming through the Interrupt
  * Matrix.
  */
 
 #define ESP32_IRQ2PERIPH(irq)       ((irq)-XTENSA_IRQ_FIRSTPERIPH)
+#define ESP32_PERIPH2IRQ(id)        ((id)+XTENSA_IRQ_FIRSTPERIPH)
 
 /* PRO_INTR_STATUS_REG_0 / APP_INTR_STATUS_REG_0 */
 
@@ -234,9 +240,9 @@
 #define ESP32_IRQ_CPU_CPU2          (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_CPU_CPU2)
 #define ESP32_IRQ_CPU_CPU3          (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_CPU_CPU3)
 #define ESP32_IRQ_SPI0              (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_SPI0)
-#define ESP32_IRQ_SPI1              (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_SPI1
+#define ESP32_IRQ_SPI1              (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_SPI1)
 #define ESP32_IRQ_SPI2              (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_SPI2)
-#define ESP32_IRQ_SPI3              (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_SPI3
+#define ESP32_IRQ_SPI3              (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_SPI3)
 
 #define ESP32_IRQ_SREG0             ESP32_IRQ_MAC
 #define ESP32_NIRQS_SREG0           32
@@ -256,7 +262,8 @@
 #define ESP32_IRQ_PWM3              (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_PWM3)
 #define ESP32_IRQ_LEDC              (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_LEDC)
 #define ESP32_IRQ_EFUSE             (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_EFUSE)
-#define ESP32_IRQ_CAN               (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_CAN)
+#define ESP32_IRQ_TWAI              (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_CAN)
+#define ESP32_IRQ_CAN               ESP32_IRQ_TWAI
 #define ESP32_IRQ_RTC_CORE          (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_RTC_CORE)
 #define ESP32_IRQ_RMT               (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_RMT)
 #define ESP32_IRQ_PCNT              (XTENSA_IRQ_FIRSTPERIPH+ESP32_PERIPH_PCNT)
@@ -292,12 +299,27 @@
 
 #define ESP32_NIRQ_PERIPH           ESP32_NPERIPHERALS
 
+#ifdef CONFIG_ESP32_GPIO_IRQ
+
+/* The PRO and APP CPU have different interrupts sources for the GPIO
+ * peripheral.  Each CPU needs to allocate a separate interrupt and attach
+ * it to its peripheral.
+ * Here we add a separate IRQ to differentiate between each interrupt.
+ * When enabling/disabling the IRQ we handle the APP's GPIO separately
+ * to correctly retrieve the peripheral.
+ */
+
+#  ifdef CONFIG_SMP
+#    define ESP32_IRQ_APPCPU_GPIO     ESP32_NPERIPHERALS
+#    undef  ESP32_NIRQ_PERIPH
+#    define ESP32_NIRQ_PERIPH         ESP32_NPERIPHERALS + 1
+#  endif
+
 /* Second level GPIO interrupts.  GPIO interrupts are decoded and dispatched
  * as a second level of decoding:  The first level dispatches to the GPIO
  * interrupt handler.  The second to the decoded GPIO interrupt handler.
  */
 
-#ifdef CONFIG_ESP32_GPIO_IRQ
 #  define ESP32_NIRQ_GPIO           40
 #  define ESP32_FIRST_GPIOIRQ       (XTENSA_NIRQ_INTERNAL+ESP32_NIRQ_PERIPH)
 #  define ESP32_LAST_GPIOIRQ        (ESP32_FIRST_GPIOIRQ+ESP32_NIRQ_GPIO-1)
@@ -307,9 +329,42 @@
 #  define ESP32_NIRQ_GPIO           0
 #endif
 
+#ifdef CONFIG_ESP32_RTCIO_IRQ
+
+/* Second level RTC interrupts.  RTC interrupts are decoded and dispatched
+ * as a second level of decoding:  The first level dispatches to the RTC
+ * interrupt handler.  The second to the decoded RTC interrupt handler.
+ * A third level might be required to be implemented on the driver (e.g.
+ * Touch pads)
+ */
+
+#  define ESP32_NIRQ_RTCIO_PERIPH       9
+#  define ESP32_NIRQ_RTCIO_TOUCHPAD     10
+#  define ESP32_NIRQ_RTCIO              (ESP32_NIRQ_RTCIO_PERIPH+ESP32_NIRQ_RTCIO_TOUCHPAD)
+
+#  define ESP32_FIRST_RTCIOIRQ_PERIPH   (XTENSA_NIRQ_INTERNAL+ESP32_NIRQ_PERIPH+ESP32_NIRQ_GPIO)
+#  define ESP32_LAST_RTCIOIRQ_PERIPH    (ESP32_FIRST_RTCIOIRQ_PERIPH+ESP32_NIRQ_RTCIO_PERIPH-1)
+#  define ESP32_IRQ_RTC_SLP_WAKEUP      (ESP32_FIRST_RTCIOIRQ_PERIPH+0)
+#  define ESP32_IRQ_RTC_SLP_REJECT      (ESP32_FIRST_RTCIOIRQ_PERIPH+1)
+#  define ESP32_IRQ_RTC_SDIO_IDLE       (ESP32_FIRST_RTCIOIRQ_PERIPH+2)
+#  define ESP32_IRQ_RTC_WDT             (ESP32_FIRST_RTCIOIRQ_PERIPH+3)
+#  define ESP32_IRQ_RTC_TIME_VALID      (ESP32_FIRST_RTCIOIRQ_PERIPH+4)
+#  define ESP32_IRQ_RTC_SAR             (ESP32_FIRST_RTCIOIRQ_PERIPH+5)
+#  define ESP32_IRQ_RTC_TOUCH           (ESP32_FIRST_RTCIOIRQ_PERIPH+6)
+#  define ESP32_IRQ_RTC_BROWN_OUT       (ESP32_FIRST_RTCIOIRQ_PERIPH+7)
+#  define ESP32_IRQ_RTC_MAIN_TIMER      (ESP32_FIRST_RTCIOIRQ_PERIPH+8)
+
+#  define ESP32_FIRST_RTCIOIRQ_TOUCHPAD (ESP32_LAST_RTCIOIRQ_PERIPH+1)
+#  define ESP32_LAST_RTCIOIRQ_TOUCHPAD  (ESP32_FIRST_RTCIOIRQ_TOUCHPAD+ESP32_NIRQ_RTCIO_TOUCHPAD-1)
+#  define ESP32_TOUCHPAD2IRQ(t)         ((t) + ESP32_FIRST_RTCIOIRQ_TOUCHPAD)
+#  define ESP32_IRQ2TOUCHPAD(i)         ((i) - ESP32_FIRST_RTCIOIRQ_TOUCHPAD)
+#else
+#  define ESP32_NIRQ_RTCIO              0
+#endif
+
 /* Total number of interrupts */
 
-#define NR_IRQS                     (XTENSA_NIRQ_INTERNAL+ESP32_NIRQ_PERIPH+ESP32_NIRQ_GPIO)
+#define NR_IRQS                     (XTENSA_NIRQ_INTERNAL+ESP32_NIRQ_PERIPH+ESP32_NIRQ_GPIO+ESP32_NIRQ_RTCIO)
 
 /* Xtensa CPU Interrupts.
  *
@@ -332,9 +387,9 @@
  * CPU peripheral interrupts can be a assigned to a CPU interrupt using the
  * PRO_*_MAP_REG or APP_*_MAP_REG.  There are a pair of these registers for
  * each peripheral source.  Multiple peripheral interrupt sources can be
- * mapped to the same.
+ * mapped to the same CPU interrupt.
  *
- * The remaining, five, internal CPU interrupts are:
+ * The remaining, six, internal CPU interrupts are:
  *
  *   6   Timer0    - Priority 1
  *   7   Software  - Priority 1
@@ -369,7 +424,7 @@
 #define ESP32_CPUINT_LEVELPERIPH_20 31
 
 #define ESP32_CPUINT_NLEVELPERIPHS  21
-#define EPS32_CPUINT_LEVELSET       0x8fbe333f
+#define ESP32_CPUINT_LEVELSET       0x8fbe333f
 
 #define ESP32_CPUINT_EDGEPERIPH_0   10
 #define ESP32_CPUINT_EDGEPERIPH_1   22
@@ -377,11 +432,12 @@
 #define ESP32_CPUINT_EDGEPERIPH_3   30
 
 #define ESP32_CPUINT_NEDGEPERIPHS   4
-#define EPS32_CPUINT_EDGESET        0x50400400
+#define ESP32_CPUINT_EDGESET        0x50400400
 
 #define ESP32_CPUINT_NNMIPERIPHS    1
-#define EPS32_CPUINT_NMISET         0x00004000
+#define ESP32_CPUINT_NMISET         0x00004000
 
+#define ESP32_CPUINT_MAC            0
 #define ESP32_CPUINT_TIMER0         6
 #define ESP32_CPUINT_SOFTWARE0      7
 #define ESP32_CPUINT_PROFILING      11
@@ -393,8 +449,8 @@
 
 #define ESP32_NCPUINTS              32
 #define ESP32_CPUINT_MAX            (ESP32_NCPUINTS - 1)
-#define EPS32_CPUINT_PERIPHSET      0xdffe773f
-#define EPS32_CPUINT_INTERNALSET    0x200188c0
+#define ESP32_CPUINT_PERIPHSET      0xdffe741f
+#define ESP32_CPUINT_INTERNALSET    0x200188c0
 
 /* Priority 1:   0-10, 12-13, 17-18    (15)
  * Priority 2:   19-21                 (3)
@@ -420,6 +476,41 @@
 /****************************************************************************
  * Inline functions
  ****************************************************************************/
+
+#ifdef CONFIG_ESP32_GPIO_IRQ
+#ifdef CONFIG_SMP
+static inline_function int esp32_irq_gpio(int cpu)
+{
+  if (cpu == 0)
+    {
+      return ESP32_IRQ_CPU_GPIO;
+    }
+  else
+    {
+      return ESP32_IRQ_APPCPU_GPIO;
+    }
+}
+#else
+#  define esp32_irq_gpio(c)   (UNUSED(c), ESP32_IRQ_CPU_GPIO)
+#endif
+#endif
+
+#ifdef CONFIG_ARCH_HAVE_MULTICPU
+noinstrument_function
+static inline_function int xtensa_cpu_index(void)
+{
+  int index;
+
+  __asm__ __volatile__
+  (
+    "rsr.prid %0\n"
+    "extui %0,%0,13,1\n"
+    : "=r"(index)
+  );
+
+  return index;
+}
+#endif /* CONFIG_ARCH_HAVE_MULTICPU */
 
 /****************************************************************************
  * Public Data

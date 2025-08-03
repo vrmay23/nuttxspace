@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/lpc54xx/lpcxpresso-lpc54628/src/lpc54_ft5x06.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,6 +27,7 @@
 #include <nuttx/config.h>
 
 #include <syslog.h>
+#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/arch.h>
@@ -56,22 +44,22 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define FT5x06_FREQUENCY 400000  /* For now, will boost later */
+#define FT5X06_FREQUENCY 400000  /* For now, will boost later */
 
 /****************************************************************************
  * Private Function Ptototypes
  ****************************************************************************/
 
 #ifndef CONFIG_FT5X06_POLLMODE
-static int  lpc54_ft5x06_attach(FAR const struct ft5x06_config_s *config,
-              xcpt_t isr, FAR void *arg);
-static void lpc54_ft5x06_enable(FAR const struct ft5x06_config_s *config,
+static int  lpc54_ft5x06_attach(const struct ft5x06_config_s *config,
+              xcpt_t isr, void *arg);
+static void lpc54_ft5x06_enable(const struct ft5x06_config_s *config,
               bool enable);
-static void lpc54_ft5x06_clear(FAR const struct ft5x06_config_s *config);
+static void lpc54_ft5x06_clear(const struct ft5x06_config_s *config);
 #endif
 
-static void lpc54_ft5x06_wakeup(FAR const struct ft5x06_config_s *config);
-static void lpc54_ft5x06_nreset(FAR const struct ft5x06_config_s *config,
+static void lpc54_ft5x06_wakeup(const struct ft5x06_config_s *config);
+static void lpc54_ft5x06_nreset(const struct ft5x06_config_s *config,
               bool state);
 
 /****************************************************************************
@@ -80,15 +68,21 @@ static void lpc54_ft5x06_nreset(FAR const struct ft5x06_config_s *config,
 
 static const struct ft5x06_config_s g_ft5x06_config =
 {
-  .address   = FT5x06_I2C_ADDRESS,
-  .frequency = FT5x06_FREQUENCY,
+  .address   = FT5X06_I2C_ADDRESS,
+  .frequency = FT5X06_FREQUENCY,
 #ifndef CONFIG_FT5X06_POLLMODE
   .attach    = lpc54_ft5x06_attach,
   .enable    = lpc54_ft5x06_enable,
   .clear     = lpc54_ft5x06_clear,
 #endif
   .wakeup    = lpc54_ft5x06_wakeup,
-  .nreset    = lpc54_ft5x06_nreset
+  .nreset    = lpc54_ft5x06_nreset,
+  .lower     =
+    {
+#ifdef CONFIG_ARCH_BOARD_LPCXPRESSO_LPC54628_TOUCHSCREEN_SWAPXY
+      .flags = TOUCH_FLAG_SWAPXY,
+#endif
+    },
 };
 
 #ifndef CONFIG_FT5X06_POLLMODE
@@ -108,8 +102,8 @@ static uint8_t g_ft5x06_irq;
  ****************************************************************************/
 
 #ifndef CONFIG_FT5X06_POLLMODE
-static int lpc54_ft5x06_attach(FAR const struct ft5x06_config_s *config,
-                               xcpt_t isr, FAR void *arg)
+static int lpc54_ft5x06_attach(const struct ft5x06_config_s *config,
+                               xcpt_t isr, void *arg)
 {
   return irq_attach(g_ft5x06_irq, isr, arg);
 }
@@ -124,7 +118,7 @@ static int lpc54_ft5x06_attach(FAR const struct ft5x06_config_s *config,
  ****************************************************************************/
 
 #ifndef CONFIG_FT5X06_POLLMODE
-static void lpc54_ft5x06_enable(FAR const struct ft5x06_config_s *config,
+static void lpc54_ft5x06_enable(const struct ft5x06_config_s *config,
                                 bool enable)
 {
   if (enable)
@@ -147,7 +141,7 @@ static void lpc54_ft5x06_enable(FAR const struct ft5x06_config_s *config,
  ****************************************************************************/
 
 #ifndef CONFIG_FT5X06_POLLMODE
-static void lpc54_ft5x06_clear(FAR const struct ft5x06_config_s *config)
+static void lpc54_ft5x06_clear(const struct ft5x06_config_s *config)
 {
   lpc54_gpio_ackedge(g_ft5x06_irq);
 }
@@ -162,7 +156,7 @@ static void lpc54_ft5x06_clear(FAR const struct ft5x06_config_s *config)
  *
  ****************************************************************************/
 
-static void lpc54_ft5x06_wakeup(FAR const struct ft5x06_config_s *config)
+static void lpc54_ft5x06_wakeup(const struct ft5x06_config_s *config)
 {
   /* We do not have access to the WAKE pin in the implementation */
 }
@@ -175,10 +169,10 @@ static void lpc54_ft5x06_wakeup(FAR const struct ft5x06_config_s *config)
  *
  ****************************************************************************/
 
-static void lpc54_ft5x06_nreset(FAR const struct ft5x06_config_s *config,
+static void lpc54_ft5x06_nreset(const struct ft5x06_config_s *config,
                                 bool nstate)
 {
-  lpc54_gpio_write(GPIO_FT5x06_CTRSTn, nstate);
+  lpc54_gpio_write(GPIO_FT5X06_CTRSTN, nstate);
 }
 
 /****************************************************************************
@@ -195,7 +189,7 @@ static void lpc54_ft5x06_nreset(FAR const struct ft5x06_config_s *config,
 
 int lpc54_ft5x06_register(void)
 {
-  FAR struct i2c_master_s *i2c;
+  struct i2c_master_s *i2c;
   int ret;
 
 #ifndef CONFIG_FT5X06_POLLMODE
@@ -205,8 +199,8 @@ int lpc54_ft5x06_register(void)
    * early LCD initialization.  The Part is in reset now.
    */
 
-  lpc54_gpio_config(GPIO_FT5x06_INTR);
-  irq = lpc54_gpio_irqno(GPIO_FT5x06_INTR);
+  lpc54_gpio_config(GPIO_FT5X06_INTR);
+  irq = lpc54_gpio_irqno(GPIO_FT5X06_INTR);
   DEBUGASSERT(irq > 0 && irq < UINT8_MAX);
   g_ft5x06_irq = (uint8_t)irq;
 
@@ -218,7 +212,7 @@ int lpc54_ft5x06_register(void)
 
   /* Take the FT5x06 out of reset */
 
-  lpc54_gpio_write(GPIO_FT5x06_CTRSTn, true);
+  lpc54_gpio_write(GPIO_FT5X06_CTRSTN, true);
 
   /* The FT5x06 is on I2C2.  Get the handle and register the F5x06 device */
 
@@ -236,7 +230,7 @@ int lpc54_ft5x06_register(void)
           syslog(LOG_ERR, "ERROR: Failed to register FT5x06 driver: %d\n",
                  ret);
 
-          lpc54_gpio_write(GPIO_FT5x06_CTRSTn, false);
+          lpc54_gpio_write(GPIO_FT5X06_CTRSTN, false);
           lpc54_i2c_free(I2C2NDX);
           return ret;
         }

@@ -1,36 +1,22 @@
 /****************************************************************************
  * arch/arm/src/sam34/sam_wdt.c
  *
- *   Copyright (C) 2014-2016 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *            Bob Doiron
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,7 +29,9 @@
 
 #include <sys/types.h>
 
+#include <inttypes.h>
 #include <stdint.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -51,7 +39,7 @@
 #include <nuttx/timers/watchdog.h>
 #include <arch/board/board.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "sam_wdt.h"
 
 #if defined(CONFIG_WATCHDOG) && defined(CONFIG_SAM34_WDT)
@@ -59,7 +47,9 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
 /* Clocking *****************************************************************/
+
 /* The minimum frequency of the WWDG clock is:
  *
  * So the maximum delay (in milliseconds) is then:
@@ -88,6 +78,7 @@
 /****************************************************************************
  * Private Types
  ****************************************************************************/
+
 /* This structure provides the private representation of the "lower-half"
  * driver state structure.  This structure must be cast-compatible with the
  * well-known watchdog_lowerhalf_s structure.
@@ -95,7 +86,8 @@
 
 struct sam34_lowerhalf_s
 {
-  FAR const struct watchdog_ops_s  *ops;  /* Lower half operations */
+  const struct watchdog_ops_s  *ops;  /* Lower half operations */
+
   xcpt_t   handler;  /* Current EWI interrupt handler */
   uint32_t timeout;  /* The actual timeout value */
   bool     started;  /* The timer has been started */
@@ -106,37 +98,39 @@ struct sam34_lowerhalf_s
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
+
 /* Register operations ******************************************************/
 
 #ifdef CONFIG_SAM34_WDT_REGDEBUG
 static uint32_t sam34_getreg(uint32_t addr);
 static void     sam34_putreg(uint32_t val, uint32_t addr);
 #else
-# define        sam34_getreg(addr)     getreg32(addr)
-# define        sam34_putreg(val,addr) putreg32(val,addr)
+#  define       sam34_getreg(addr)     getreg32(addr)
+#  define       sam34_putreg(val,addr) putreg32(val,addr)
 #endif
 
 /* Interrupt handling *******************************************************/
 
-static int      sam34_interrupt(int irq, FAR void *context, FAR void *arg);
+static int      sam34_interrupt(int irq, void *context, void *arg);
 
 /* "Lower half" driver methods **********************************************/
 
-static int      sam34_start(FAR struct watchdog_lowerhalf_s *lower);
-static int      sam34_stop(FAR struct watchdog_lowerhalf_s *lower);
-static int      sam34_keepalive(FAR struct watchdog_lowerhalf_s *lower);
-static int      sam34_getstatus(FAR struct watchdog_lowerhalf_s *lower,
-                  FAR struct watchdog_status_s *status);
-static int      sam34_settimeout(FAR struct watchdog_lowerhalf_s *lower,
+static int      sam34_start(struct watchdog_lowerhalf_s *lower);
+static int      sam34_stop(struct watchdog_lowerhalf_s *lower);
+static int      sam34_keepalive(struct watchdog_lowerhalf_s *lower);
+static int      sam34_getstatus(struct watchdog_lowerhalf_s *lower,
+                  struct watchdog_status_s *status);
+static int      sam34_settimeout(struct watchdog_lowerhalf_s *lower,
                   uint32_t timeout);
-static xcpt_t   sam34_capture(FAR struct watchdog_lowerhalf_s *lower,
+static xcpt_t   sam34_capture(struct watchdog_lowerhalf_s *lower,
                   xcpt_t handler);
-static int      sam34_ioctl(FAR struct watchdog_lowerhalf_s *lower, int cmd,
+static int      sam34_ioctl(struct watchdog_lowerhalf_s *lower, int cmd,
                   unsigned long arg);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
+
 /* "Lower half" driver methods */
 
 static const struct watchdog_ops_s g_wdgops =
@@ -177,8 +171,8 @@ static uint32_t sam34_getreg(uint32_t addr)
 
   uint32_t val = getreg32(addr);
 
-  /* Is this the same value that we read from the same register last time?  Are
-   * we polling the register?  If so, suppress some of the output.
+  /* Is this the same value that we read from the same register last time?
+   * Are we polling the register?  If so, suppress some of the output.
    */
 
   if (addr == prevaddr && val == preval)
@@ -204,7 +198,7 @@ static uint32_t sam34_getreg(uint32_t addr)
         {
           /* Yes.. then show how many times the value repeated */
 
-          wdinfo("[repeats %d more times]\n", count-3);
+          wdinfo("[repeats %d more times]\n", count - 3);
         }
 
       /* Save the new address, value, and count */
@@ -256,9 +250,9 @@ static void sam34_putreg(uint32_t val, uint32_t addr)
  *
  ****************************************************************************/
 
-static int sam34_interrupt(int irq, FAR void *context, FAR void *arg)
+static int sam34_interrupt(int irq, void *context, void *arg)
 {
-  FAR struct sam34_lowerhalf_s *priv = &g_wdgdev;
+  struct sam34_lowerhalf_s *priv = &g_wdgdev;
   uint16_t regval;
 
   /* Check if the EWI interrupt is really pending */
@@ -291,17 +285,17 @@ static int sam34_interrupt(int irq, FAR void *context, FAR void *arg)
  *   Start the watchdog timer, resetting the time to the current timeout,
  *
  * Input Parameters:
- *   lower - A pointer the publicly visible representation of the "lower-half"
- *           driver state structure.
+ *   lower - A pointer the publicly visible representation of the
+ *           "lower-half" driver state structure.
  *
  * Returned Value:
  *   Zero on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-static int sam34_start(FAR struct watchdog_lowerhalf_s *lower)
+static int sam34_start(struct watchdog_lowerhalf_s *lower)
 {
-  FAR struct sam34_lowerhalf_s *priv = (FAR struct sam34_lowerhalf_s *)lower;
+  struct sam34_lowerhalf_s *priv = (struct sam34_lowerhalf_s *)lower;
   uint32_t mr_val = 0;
 
   wdinfo("Entry\n");
@@ -315,14 +309,15 @@ static int sam34_start(FAR struct watchdog_lowerhalf_s *lower)
 #if defined(CONFIG_SAM34_JTAG_FULL_ENABLE) || \
     defined(CONFIG_SAM34_JTAG_NOJNTRST_ENABLE) || \
     defined(CONFIG_SAM34_JTAG_SW_ENABLE)
-  {
-    mr_val |= (WDT_MR_WDDBGHLT|WDT_MR_WDIDLEHLT);
-  }
+    {
+      mr_val |= (WDT_MR_WDDBGHLT | WDT_MR_WDIDLEHLT);
+    }
 #endif
 
   /* TODO: WDT_MR_WDFIEN if handler available? WDT_MR_WDRPROC? */
 
-  mr_val |= (WDT_MR_WDD(priv->window) | WDT_MR_WDV(priv->reload) | WDT_MR_WDRSTEN);
+  mr_val |= (WDT_MR_WDD(priv->window) | WDT_MR_WDV(priv->reload) |
+             WDT_MR_WDRSTEN);
   sam34_putreg(mr_val, SAM_WDT_MR);
   priv->started = true;
   return OK;
@@ -335,15 +330,15 @@ static int sam34_start(FAR struct watchdog_lowerhalf_s *lower)
  *   Stop the watchdog timer
  *
  * Input Parameters:
- *   lower - A pointer the publicly visible representation of the "lower-half"
- *           driver state structure.
+ *   lower - A pointer the publicly visible representation of the
+ *           "lower-half" driver state structure.
  *
  * Returned Value:
  *   Zero on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-static int sam34_stop(FAR struct watchdog_lowerhalf_s *lower)
+static int sam34_stop(struct watchdog_lowerhalf_s *lower)
 {
   /* The watchdog is always disabled after a reset. It is enabled by clearing
    * the WDDIS bit in the WDT_CR register, then it cannot be disabled again
@@ -366,15 +361,15 @@ static int sam34_stop(FAR struct watchdog_lowerhalf_s *lower)
  *   intervals during normal operation to prevent an MCU reset.
  *
  * Input Parameters:
- *   lower - A pointer the publicly visible representation of the "lower-half"
- *           driver state structure.
+ *   lower - A pointer the publicly visible representation of the
+ *           "lower-half" driver state structure.
  *
  * Returned Value:
  *   Zero on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-static int sam34_keepalive(FAR struct watchdog_lowerhalf_s *lower)
+static int sam34_keepalive(struct watchdog_lowerhalf_s *lower)
 {
   wdinfo("Entry\n");
 
@@ -389,8 +384,8 @@ static int sam34_keepalive(FAR struct watchdog_lowerhalf_s *lower)
  *   Get the current watchdog timer status
  *
  * Input Parameters:
- *   lower  - A pointer the publicly visible representation of the "lower-half"
- *            driver state structure.
+ *   lower  - A pointer the publicly visible representation of the
+ *            "lower-half" driver state structure.
  *   status - The location to return the watchdog status information.
  *
  * Returned Value:
@@ -398,10 +393,10 @@ static int sam34_keepalive(FAR struct watchdog_lowerhalf_s *lower)
  *
  ****************************************************************************/
 
-static int sam34_getstatus(FAR struct watchdog_lowerhalf_s *lower,
-                           FAR struct watchdog_status_s *status)
+static int sam34_getstatus(struct watchdog_lowerhalf_s *lower,
+                           struct watchdog_status_s *status)
 {
-  FAR struct sam34_lowerhalf_s *priv = (FAR struct sam34_lowerhalf_s *)lower;
+  struct sam34_lowerhalf_s *priv = (struct sam34_lowerhalf_s *)lower;
   uint32_t elapsed;
 
   wdinfo("Entry\n");
@@ -425,16 +420,18 @@ static int sam34_getstatus(FAR struct watchdog_lowerhalf_s *lower,
   status->timeout = priv->timeout;
 
   /* Get the time remaining until the watchdog expires (in milliseconds) */
+
   /* REVISIT: not sure if you can read this... */
 
-  elapsed = ((sam34_getreg(SAM_WDT_MR) & WDT_MR_WDV_MASK) >> WDT_MR_WDV_SHIFT);
+  elapsed = ((sam34_getreg(SAM_WDT_MR) & WDT_MR_WDV_MASK) >>
+             WDT_MR_WDV_SHIFT);
 
   status->timeleft = (priv->timeout * elapsed) / (priv->reload + 1);
 
-  wdinfo("Status     : %08x\n", sam34_getreg(SAM_WDT_SR));
-  wdinfo("  flags    : %08x\n", status->flags);
-  wdinfo("  timeout  : %d\n", status->timeout);
-  wdinfo("  timeleft : %d\n", status->timeleft);
+  wdinfo("Status     : %08" PRIx32 "\n", sam34_getreg(SAM_WDT_SR));
+  wdinfo("  flags    : %08" PRIx32 "\n", status->flags);
+  wdinfo("  timeout  : %" PRId32 "\n", status->timeout);
+  wdinfo("  timeleft : %" PRId32 "\n", status->timeleft);
   return OK;
 }
 
@@ -445,8 +442,8 @@ static int sam34_getstatus(FAR struct watchdog_lowerhalf_s *lower,
  *   Set a new timeout value (and reset the watchdog timer)
  *
  * Input Parameters:
- *   lower   - A pointer the publicly visible representation of the "lower-half"
- *             driver state structure.
+ *   lower   - A pointer the publicly visible representation of the
+ *             "lower-half" driver state structure.
  *   timeout - The new timeout value in millisecnds.
  *
  * Returned Value:
@@ -454,26 +451,25 @@ static int sam34_getstatus(FAR struct watchdog_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static int sam34_settimeout(FAR struct watchdog_lowerhalf_s *lower,
+static int sam34_settimeout(struct watchdog_lowerhalf_s *lower,
                             uint32_t timeout)
 {
-  FAR struct sam34_lowerhalf_s *priv = (FAR struct sam34_lowerhalf_s *)lower;
+  struct sam34_lowerhalf_s *priv = (struct sam34_lowerhalf_s *)lower;
   uint32_t reload;
 
   DEBUGASSERT(priv);
-  wdinfo("Entry: timeout=%d\n", timeout);
+  wdinfo("Entry: timeout=%" PRId32 "\n", timeout);
 
   /* Can this timeout be represented? */
 
   if (timeout < 1 || timeout > WDT_MAXTIMEOUT)
     {
-      wderr("ERROR: Cannot represent timeout=%d > %d\n",
+      wderr("ERROR: Cannot represent timeout=%" PRId32 " > %d\n",
             timeout, WDT_MAXTIMEOUT);
       return -ERANGE;
     }
 
-
-    reload = ((timeout * WDT_FCLK) / 1000) - 1;
+  reload = ((timeout * WDT_FCLK) / 1000) - 1;
 
   /* Make sure that the final reload value is within range */
 
@@ -493,7 +489,7 @@ static int sam34_settimeout(FAR struct watchdog_lowerhalf_s *lower,
 
   priv->reload = reload;
 
-  wdinfo("fwdt=%d reload=%d timeout=%d\n",
+  wdinfo("fwdt=%d reload=%" PRId32 " timeout=%" PRId32 "\n",
          WDT_FCLK, reload, priv->timeout);
 
   /* Don't commit to MR register until started! */
@@ -510,8 +506,8 @@ static int sam34_settimeout(FAR struct watchdog_lowerhalf_s *lower,
  *   behavior.
  *
  * Input Parameters:
- *   lower      - A pointer the publicly visible representation of the "lower-half"
- *                driver state structure.
+ *   lower      - A pointer the publicly visible representation of the
+ *                "lower-half" driver state structure.
  *   newhandler - The new watchdog expiration function pointer.  If this
  *                function pointer is NULL, then the reset-on-expiration
  *                behavior is restored,
@@ -523,11 +519,11 @@ static int sam34_settimeout(FAR struct watchdog_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static xcpt_t sam34_capture(FAR struct watchdog_lowerhalf_s *lower,
+static xcpt_t sam34_capture(struct watchdog_lowerhalf_s *lower,
                             xcpt_t handler)
 {
 #if 0 /* TODO */
-  FAR struct sam34_lowerhalf_s *priv = (FAR struct sam34_lowerhalf_s *)lower;
+  struct sam34_lowerhalf_s *priv = (struct sam34_lowerhalf_s *)lower;
   irqstate_t flags;
   xcpt_t oldhandler;
   uint16_t regval;
@@ -542,7 +538,7 @@ static xcpt_t sam34_capture(FAR struct watchdog_lowerhalf_s *lower,
 
   /* Save the new handler */
 
-   priv->handler = handler;
+  priv->handler = handler;
 
   /* Are we attaching or detaching the handler? */
 
@@ -570,7 +566,7 @@ static xcpt_t sam34_capture(FAR struct watchdog_lowerhalf_s *lower,
   return oldhandler;
 
 #endif
-  DEBUGASSERT(0);
+  DEBUGPANIC();
   return NULL;
 }
 
@@ -582,8 +578,8 @@ static xcpt_t sam34_capture(FAR struct watchdog_lowerhalf_s *lower,
  *   are forwarded to the lower half driver through this method.
  *
  * Input Parameters:
- *   lower - A pointer the publicly visible representation of the "lower-half"
- *           driver state structure.
+ *   lower - A pointer the publicly visible representation of the
+ *           "lower-half" driver state structure.
  *   cmd   - The ioctl command value
  *   arg   - The optional argument that accompanies the 'cmd'.  The
  *           interpretation of this argument depends on the particular
@@ -594,10 +590,10 @@ static xcpt_t sam34_capture(FAR struct watchdog_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static int sam34_ioctl(FAR struct watchdog_lowerhalf_s *lower, int cmd,
-                    unsigned long arg)
+static int sam34_ioctl(struct watchdog_lowerhalf_s *lower, int cmd,
+                       unsigned long arg)
 {
-  FAR struct sam34_lowerhalf_s *priv = (FAR struct sam34_lowerhalf_s *)lower;
+  struct sam34_lowerhalf_s *priv = (struct sam34_lowerhalf_s *)lower;
   int ret = -ENOTTY;
 
   DEBUGASSERT(priv);
@@ -624,7 +620,8 @@ static int sam34_ioctl(FAR struct watchdog_lowerhalf_s *lower, int cmd,
 
       else if (mintime < priv->timeout)
         {
-          uint32_t window = (((priv->timeout - mintime) * WDT_FCLK) / 1000) - 1;
+          uint32_t window = (((priv->timeout - mintime) * WDT_FCLK) /
+                             1000) - 1;
           DEBUGASSERT(window <= priv->reload);
           priv->window = window;
           ret = OK;
@@ -642,8 +639,8 @@ static int sam34_ioctl(FAR struct watchdog_lowerhalf_s *lower, int cmd,
  * Name: sam_wdtinitialize
  *
  * Description:
- *   Initialize the WDT watchdog timer.  The watchdog timer is initialized and
- *   registers as 'devpath'.
+ *   Initialize the WDT watchdog timer.  The watchdog timer is initialized
+ *   and registers as 'devpath'.
  *
  * Input Parameters:
  *   devpath - The full path to the watchdog.  This should be of the form
@@ -655,9 +652,9 @@ static int sam34_ioctl(FAR struct watchdog_lowerhalf_s *lower, int cmd,
  ****************************************************************************/
 
 #ifndef CONFIG_WDT_DISABLE_ON_RESET
-void sam_wdtinitialize(FAR const char *devpath)
+void sam_wdtinitialize(const char *devpath)
 {
-  FAR struct sam34_lowerhalf_s *priv = &g_wdgdev;
+  struct sam34_lowerhalf_s *priv = &g_wdgdev;
   uint32_t mr_val;
 
   /* Enable watchdog with 5 sec timeout */
@@ -688,7 +685,7 @@ void sam_wdtinitialize(FAR const char *devpath)
    * device option bits, the watchdog is automatically enabled at power-on.
    */
 
-  sam34_settimeout((FAR struct watchdog_lowerhalf_s *)priv,
+  sam34_settimeout((struct watchdog_lowerhalf_s *)priv,
                    CONFIG_WDT_TIMEOUT);
 
   /* Disable minimum time feature for now. */
@@ -699,8 +696,7 @@ void sam_wdtinitialize(FAR const char *devpath)
    * (default /dev/watchdog0).
    */
 
-  watchdog_register(devpath, (FAR struct watchdog_lowerhalf_s *)priv);
-
+  watchdog_register(devpath, (struct watchdog_lowerhalf_s *)priv);
 }
 #endif /* CONFIG_WDT_DISABLE_ON_RESET */
 

@@ -1,35 +1,22 @@
 /****************************************************************************
- * boards/arm/sama5/sama5d4-ek/src/sam_bringup.c
+ * boards/arm/sama5/sama5d3-xplained/src/sam_bringup.c
  *
- *   Copyright (C) 2014, 2016, 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,6 +33,10 @@
 #include <errno.h>
 #include <debug.h>
 
+#include <nuttx/signal.h>
+
+#include <nuttx/fs/fs.h>
+
 #ifdef CONFIG_USBMONITOR
 #  include <nuttx/usb/usbmonitor.h>
 #endif
@@ -56,7 +47,7 @@
 #include "sam_twi.h"
 #include "sama5d3-xplained.h"
 
-#ifdef HAVE_ROMFS
+#if defined(CONFIG_FS_ROMFS) && defined(CONFIG_INIT_MOUNT)
 #  include <arch/board/boot_romfsimg.h>
 #endif
 
@@ -70,8 +61,8 @@
  ****************************************************************************/
 
 #define NSECTORS(n) \
-  (((n)+CONFIG_SAMA5D4EK_ROMFS_ROMDISK_SECTSIZE-1) / \
-   CONFIG_SAMA5D4EK_ROMFS_ROMDISK_SECTSIZE)
+  (((n)+CONFIG_SAMA5D3XPLAINED_ROMFS_ROMDISK_SECTSIZE-1) / \
+   CONFIG_SAMA5D3XPLAINED_ROMFS_ROMDISK_SECTSIZE)
 
 /****************************************************************************
  * Private Functions
@@ -88,7 +79,7 @@
 #ifdef HAVE_I2CTOOL
 static void sam_i2c_register(int bus)
 {
-  FAR struct i2c_master_s *i2c;
+  struct i2c_master_s *i2c;
   int ret;
 
   i2c = sam_i2cbus_initialize(bus);
@@ -167,24 +158,28 @@ int sam_bringup(void)
            HSMCI0_SLOTNO, HSMCI0_MINOR, ret);
     }
 
-#ifdef CONFIG_SAMA5D4EK_HSMCI0_MOUNT
-  else
+#ifdef CONFIG_SAMA5D3XPLAINED_HSMCI0_MOUNT
+  else if (sam_cardinserted(0))
     {
-      /* REVISIT:
-       *  A delay seems to be required here or the mount will fail.
-       */
+      ret = 1;
+      for (int retry = 0; ret != 0 && retry < 3; ++retry)
+        {
+          /* Wait for mmc block driver to be registered. */
 
-      /* Mount the volume on HSMCI0 */
+          nxsig_sleep(1);
 
-      ret = mount(CONFIG_SAMA5D4EK_HSMCI0_MOUNT_BLKDEV,
-                  CONFIG_SAMA5D4EK_HSMCI0_MOUNT_MOUNTPOINT,
-                  CONFIG_SAMA5D4EK_HSMCI0_MOUNT_FSTYPE,
-                  0, NULL);
+          /* Mount the volume on HSMCI0 */
+
+          ret = nx_mount(CONFIG_SAMA5D3XPLAINED_HSMCI0_MOUNT_BLKDEV,
+                         CONFIG_SAMA5D3XPLAINED_HSMCI0_MOUNT_MOUNTPOINT,
+                         CONFIG_SAMA5D3XPLAINED_HSMCI0_MOUNT_FSTYPE,
+                         0, NULL);
+        }
 
       if (ret < 0)
         {
           _err("ERROR: Failed to mount %s: %d\n",
-               CONFIG_SAMA5D4EK_HSMCI0_MOUNT_MOUNTPOINT, errno);
+               CONFIG_SAMA5D3XPLAINED_HSMCI0_MOUNT_MOUNTPOINT, ret);
         }
     }
 #endif
@@ -200,22 +195,22 @@ int sam_bringup(void)
            HSMCI1_SLOTNO, HSMCI1_MINOR, ret);
     }
 
-#ifdef CONFIG_SAMA5D4EK_HSMCI1_MOUNT
+#ifdef CONFIG_SAMA5D3XPLAINED_HSMCI1_MOUNT
   else
     {
-      /* REVISIT:  A delay seems to be required here or the mount will fail. */
+      /* REVISIT: A delay seems to be required here or the mount will fail */
 
       /* Mount the volume on HSMCI1 */
 
-      ret = mount(CONFIG_SAMA5D4EK_HSMCI1_MOUNT_BLKDEV,
-                  CONFIG_SAMA5D4EK_HSMCI1_MOUNT_MOUNTPOINT,
-                  CONFIG_SAMA5D4EK_HSMCI1_MOUNT_FSTYPE,
-                  0, NULL);
+      ret = nx_mount(CONFIG_SAMA5D3XPLAINED_HSMCI1_MOUNT_BLKDEV,
+                     CONFIG_SAMA5D3XPLAINED_HSMCI1_MOUNT_MOUNTPOINT,
+                     CONFIG_SAMA5D3XPLAINED_HSMCI1_MOUNT_FSTYPE,
+                     0, NULL);
 
       if (ret < 0)
         {
           _err("ERROR: Failed to mount %s: %d\n",
-               CONFIG_SAMA5D4EK_HSMCI1_MOUNT_MOUNTPOINT, errno);
+               CONFIG_SAMA5D3XPLAINED_HSMCI1_MOUNT_MOUNTPOINT, ret);
         }
     }
 #endif
@@ -228,29 +223,15 @@ int sam_bringup(void)
   sam_automount_initialize();
 #endif
 
-#ifdef HAVE_ROMFS
+#if defined(CONFIG_FS_ROMFS) && defined(CONFIG_INIT_MOUNT)
   /* Create a ROM disk for the /etc filesystem */
 
-  ret = romdisk_register(CONFIG_SAMA5D4EK_ROMFS_ROMDISK_MINOR, romfs_img,
-                         NSECTORS(romfs_img_len),
-                         CONFIG_SAMA5D4EK_ROMFS_ROMDISK_SECTSIZE);
+  ret = romdisk_register(CONFIG_SAMA5D3XPLAINED_ROMFS_ROMDISK_MINOR,
+                         romfs_img, NSECTORS(romfs_img_len),
+                         CONFIG_SAMA5D3XPLAINED_ROMFS_ROMDISK_SECTSIZE);
   if (ret < 0)
     {
       _err("ERROR: romdisk_register failed: %d\n", -ret);
-    }
-  else
-    {
-      /* Mount the file system */
-
-      ret = mount(CONFIG_SAMA5D4EK_ROMFS_ROMDISK_DEVNAME,
-                  CONFIG_SAMA5D4EK_ROMFS_MOUNT_MOUNTPOINT,
-                  "romfs", MS_RDONLY, NULL);
-      if (ret < 0)
-        {
-          _err("ERROR: mount(%s,%s,romfs) failed: %d\n",
-               CONFIG_SAMA5D4EK_ROMFS_ROMDISK_DEVNAME,
-               CONFIG_SAMA5D4EK_ROMFS_MOUNT_MOUNTPOINT, errno);
-        }
     }
 #endif
 
@@ -329,7 +310,7 @@ int sam_bringup(void)
 #ifdef CONFIG_FS_PROCFS
   /* Mount the procfs file system */
 
-  ret = mount(NULL, SAMA5_PROCFS_MOUNTPOINT, "procfs", 0, NULL);
+  ret = nx_mount(NULL, SAMA5_PROCFS_MOUNTPOINT, "procfs", 0, NULL);
   if (ret < 0)
     {
       _err("ERROR: Failed to mount procfs at %s: %d\n",

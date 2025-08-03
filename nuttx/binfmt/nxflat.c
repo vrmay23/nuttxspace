@@ -1,35 +1,22 @@
 /****************************************************************************
  * binfmt/nxflat.c
  *
- *   Copyright (C) 2009, 2019-2020 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,6 +26,7 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <string.h>
@@ -58,29 +46,28 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* CONFIG_DEBUG_FEATURES, CONFIG_DEBUG_INFO, and CONFIG_DEBUG_BINFMT have to be
- * defined or CONFIG_NXFLAT_DUMPBUFFER does nothing.
+/* CONFIG_DEBUG_FEATURES, CONFIG_DEBUG_INFO, and CONFIG_DEBUG_BINFMT
+ * have to be defined or CONFIG_NXFLAT_DUMPBUFFER does nothing.
  */
 
-#if !defined(CONFIG_DEBUG_INFO) || !defined (CONFIG_DEBUG_BINFMT)
+#if !defined(CONFIG_DEBUG_INFO) || !defined(CONFIG_DEBUG_BINFMT)
 #  undef CONFIG_NXFLAT_DUMPBUFFER
 #endif
 
 #ifdef CONFIG_NXFLAT_DUMPBUFFER
-# define nxflat_dumpbuffer(m,b,n) binfodumpbuffer(m,b,n)
+#  define nxflat_dumpbuffer(m,b,n) binfodumpbuffer(m,b,n)
 #else
-# define nxflat_dumpbuffer(m,b,n)
-#endif
-
-#ifndef MIN
-#  define MIN(a,b) (a < b ? a : b)
+#  define nxflat_dumpbuffer(m,b,n)
 #endif
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static int nxflat_loadbinary(FAR struct binary_s *binp);
+static int nxflat_loadbinary(FAR struct binary_s *binp,
+                             FAR const char *filename,
+                             FAR const struct symtab_s *exports,
+                             int nexports);
 static int nxflat_unloadbinary(FAR struct binary_s *binp);
 
 #if defined(CONFIG_DEBUG_FEATURES) && defined(CONFIG_DEBUG_BINFMT)
@@ -135,12 +122,9 @@ static void nxflat_dumploadinfo(FAR struct nxflat_loadinfo_s *loadinfo)
   binfo("  RELOCS:\n");
   binfo("    relocstart:   %08lx\n", loadinfo->relocstart);
   binfo("    reloccount:   %d\n",    loadinfo->reloccount);
-
-  binfo("  HANDLES:\n");
-  binfo("    filfd:        %d\n",    loadinfo->filfd);
 }
 #else
-# define nxflat_dumploadinfo(i)
+#  define nxflat_dumploadinfo(i)
 #endif
 
 /****************************************************************************
@@ -152,16 +136,19 @@ static void nxflat_dumploadinfo(FAR struct nxflat_loadinfo_s *loadinfo)
  *
  ****************************************************************************/
 
-static int nxflat_loadbinary(FAR struct binary_s *binp)
+static int nxflat_loadbinary(FAR struct binary_s *binp,
+                             FAR const char *filename,
+                             FAR const struct symtab_s *exports,
+                             int nexports)
 {
   struct nxflat_loadinfo_s loadinfo;  /* Contains globals for libnxflat */
   int                      ret;
 
-  binfo("Loading file: %s\n", binp->filename);
+  binfo("Loading file: %s\n", filename);
 
   /* Initialize the xflat library to load the program binary. */
 
-  ret = nxflat_init(binp->filename, &loadinfo);
+  ret = nxflat_init(filename, &loadinfo);
   nxflat_dumploadinfo(&loadinfo);
   if (ret != 0)
     {
@@ -181,7 +168,7 @@ static int nxflat_loadbinary(FAR struct binary_s *binp)
 
   /* Bind the program to the exported symbol table */
 
-  ret = nxflat_bind(&loadinfo, binp->exports, binp->nexports);
+  ret = nxflat_bind(&loadinfo, exports, nexports);
   if (ret != 0)
     {
       berr("Failed to bind symbols program binary: %d\n", ret);
@@ -208,7 +195,7 @@ static int nxflat_loadbinary(FAR struct binary_s *binp)
 #ifdef CONFIG_ARCH_ADDRENV
 #  warning "REVISIT"
 #else
-  binp->alloc[0]  = (FAR void *)loadinfo.dspace;
+  binp->picbase  = (FAR void *)loadinfo.dspace;
 #endif
 
 #ifdef CONFIG_ARCH_ADDRENV
@@ -216,7 +203,7 @@ static int nxflat_loadbinary(FAR struct binary_s *binp)
    * needed when the module is executed.
    */
 
-  up_addrenv_clone(&loadinfo.addrenv, &binp->addrenv);
+  up_addrenv_clone(&loadinfo.addrenv.addrenv, &binp->addrenv.addrenv);
 #endif
 
   nxflat_dumpbuffer("Entry code", (FAR const uint8_t *)binp->entrypt,
@@ -244,7 +231,7 @@ errout:
 
 static int nxflat_unloadbinary(FAR struct binary_s *binp)
 {
-  FAR struct dspace_s *dspace = (FAR struct dspace_s *)binp->alloc[0];
+  FAR struct dspace_s *dspace = (FAR struct dspace_s *)binp->picbase;
 
   /* Check if this is the last reference to dspace.  It may still be needed
    * by other threads.  In that case, it must persist after this thread
@@ -258,12 +245,12 @@ static int nxflat_unloadbinary(FAR struct binary_s *binp)
       kumm_free(dspace->region);
       dspace->region = NULL;
 
-      /* Mark alloc[0] (dspace) as freed */
+      /* Mark picbase (dspace) as freed */
 
-      binp->alloc[0] = NULL;
+      binp->picbase = NULL;
 
       /* The reference count will be decremented to zero and the dspace
-       * container will be freed in sched/sched_releasetcb.c
+       * container will be freed in sched/nxsched_release_tcb.c
        */
     }
 

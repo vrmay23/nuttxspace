@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/syslog/syslog_write.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,6 +27,7 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
+#include <assert.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/sched.h>
@@ -52,7 +40,48 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Name: syslog_default_write
+ * Name: syslog_safe_to_block
+ *
+ * Description:
+ *   Check if it is safe to block for write. If not, the write  defaults to a
+ *   non-blocking method.
+ *
+ * Input Parameters:
+ *   None.
+ *
+ * Returned Value:
+ *   true if it is safe to block; false otherwise.
+ *
+ ****************************************************************************/
+
+static bool syslog_safe_to_block(void)
+{
+  FAR const struct tcb_s *rtcb;
+
+  /* It's not safe to block in interrupts or when executing the idle loop */
+
+  if (up_interrupt_context() || sched_idletask())
+    {
+      return false;
+    }
+
+  /* It's not safe to block if a signal is being delivered */
+
+  rtcb = nxsched_self();
+  if (rtcb->sigdeliver != NULL)
+    {
+      return false;
+    }
+
+  return true;
+}
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: syslog_write_foreach
  *
  * Description:
  *   This provides a default write method for syslog devices that do not
@@ -69,48 +98,117 @@
  *
  ****************************************************************************/
 
-static ssize_t syslog_default_write(FAR const char *buffer, size_t buflen)
+ssize_t syslog_write_foreach(FAR const char *buffer,
+                             size_t buflen, bool force)
 {
-  size_t nwritten;
+  syslog_write_t write;
+  syslog_putc_t  putc;
+  size_t nwritten = 0;
+  ssize_t ret;
+  int i;
 
-  if (up_interrupt_context() || sched_idletask())
+  for (i = 0; i < CONFIG_SYSLOG_MAX_CHANNELS; i++)
     {
-      for (nwritten = 0; nwritten < buflen; nwritten++)
+      FAR syslog_channel_t *channel = g_syslog_channel[i];
+
+      if (channel == NULL)
         {
-#ifdef CONFIG_SYSLOG_INTBUFFER
-          if (up_interrupt_context())
+          break;
+        }
+
+#ifdef CONFIG_SYSLOG_IOCTL
+      if (channel->sc_state & SYSLOG_CHANNEL_DISABLE)
+        {
+          continue;
+        }
+#endif
+
+      write = !force ? channel->sc_ops->sc_write :
+                       channel->sc_ops->sc_write_force;
+      if (write != NULL)
+        {
+          nwritten = 0;
+
+#ifdef CONFIG_SYSLOG_CRLF
+          if (!(channel->sc_state & SYSLOG_CHANNEL_DISABLE_CRLF))
             {
-              syslog_add_intbuffer(*buffer++);
+              size_t head;
+
+              for (head = 0; head < buflen; head++)
+                {
+                  if (buffer[head] != '\n')
+                    {
+                      continue;
+                    }
+
+                  ret = write(channel, buffer + nwritten, head - nwritten);
+                  if (ret >= 0)
+                    {
+                      ret = write(channel, "\r\n", 2);
+                    }
+
+                  if (ret < 0)
+                    {
+                      return ret;
+                    }
+
+                  nwritten = head + 1;
+                }
             }
+#endif
+
+          if (nwritten < buflen)
+            {
+              ret = write(channel, buffer + nwritten, buflen - nwritten);
+              if (ret < 0)
+                {
+                  return ret;
+                }
+              else
+                {
+                  nwritten += ret;
+                }
+            }
+        }
+      else
+        {
+          putc = !force ? channel->sc_ops->sc_putc :
+                          channel->sc_ops->sc_force;
+          if (putc == NULL)
+            {
+              continue;
+            }
+
+#ifdef CONFIG_SYSLOG_CRLF
+          if (channel->sc_state & SYSLOG_CHANNEL_DISABLE_CRLF)
+#endif
+            {
+              for (nwritten = 0; nwritten < buflen; nwritten++)
+                {
+                  putc(channel, buffer[nwritten]);
+                }
+            }
+#ifdef CONFIG_SYSLOG_CRLF
           else
-#endif
             {
-              DEBUGASSERT(g_syslog_channel->sc_force != NULL);
-              g_syslog_channel->sc_force(*buffer++);
+              for (nwritten = 0; nwritten < buflen; nwritten++)
+                {
+                  if (buffer[nwritten] == '\n')
+                    {
+                      /* Add CR */
+
+                      putc(channel, '\r');
+                    }
+
+                  putc(channel, buffer[nwritten]);
+                }
             }
-        }
-    }
-#ifdef CONFIG_SYSLOG_WRITE
-  else if (g_syslog_channel->sc_write)
-    {
-      nwritten = g_syslog_channel->sc_write(buffer, buflen);
-    }
 #endif
-  else
-    {
-      for (nwritten = 0; nwritten < buflen; nwritten++)
-        {
-          DEBUGASSERT(g_syslog_channel->sc_putc != NULL);
-          g_syslog_channel->sc_putc(*buffer++);
         }
     }
 
-  return buflen;
+  return nwritten;
 }
-
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
 
 /****************************************************************************
  * Name: syslog_write
@@ -130,15 +228,23 @@ static ssize_t syslog_default_write(FAR const char *buffer, size_t buflen)
 
 ssize_t syslog_write(FAR const char *buffer, size_t buflen)
 {
+  bool force = !syslog_safe_to_block();
+
 #ifdef CONFIG_SYSLOG_INTBUFFER
-  if (!up_interrupt_context() && !sched_idletask())
+  if (force)
+    {
+      syslog_add_intbuffer(buffer, buflen);
+      return buflen;
+    }
+  else
     {
       /* Flush any characters that may have been added to the interrupt
        * buffer.
        */
 
-      syslog_flush_intbuffer(g_syslog_channel, false);
+      syslog_flush_intbuffer(false);
     }
 #endif
-  return syslog_default_write(buffer, buflen);
+
+  return syslog_write_foreach(buffer, buflen, force);
 }

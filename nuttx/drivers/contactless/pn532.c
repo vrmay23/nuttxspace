@@ -1,37 +1,22 @@
 /****************************************************************************
  * drivers/contactless/pn532.c
  *
- *   Copyright(C) 2012, 2013, 2016 Offcode Ltd. All rights reserved.
- *   Authors: Janne Rosberg <janne@offcode.fi>
- *            Teemu Pirinen <teemu@offcode.fi>
- *            Juho Grundström <juho@offcode.fi>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES(INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,6 +26,7 @@
 
 #include <nuttx/config.h>
 #include <assert.h>
+#include <debug.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -49,6 +35,7 @@
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/signal.h>
+#include <nuttx/power/pm.h>
 
 #include "pn532.h"
 
@@ -97,7 +84,8 @@ static void pn532_unlock(FAR struct spi_dev_s *spi);
 
 static int     _open(FAR struct file *filep);
 static int     _close(FAR struct file *filep);
-static ssize_t _read(FAR struct file *filep, FAR char *buffer, size_t buflen);
+static ssize_t _read(FAR struct file *filep,
+                     FAR char *buffer, size_t buflen);
 static ssize_t _write(FAR struct file *filep, FAR const char *buffer,
                       size_t buflen);
 static int     _ioctl(FAR struct file *filep, int cmd, unsigned long arg);
@@ -110,7 +98,7 @@ int pn532_read(FAR struct pn532_dev_s *dev, FAR uint8_t *buff, uint8_t n);
 #if 0 /* TODO */
 /* IRQ Handling */
 
-static int pn532_irqhandler(FAR int irq, FAR void *context, FAR void *dev);
+static int pn532_irqhandler(int irq, FAR void *context, FAR void *dev);
 static inline int pn532_attachirq(FAR struct pn532_dev_s *dev, xcpt_t isr);
 #endif
 
@@ -120,21 +108,17 @@ static inline int pn532_attachirq(FAR struct pn532_dev_s *dev, xcpt_t isr);
 
 static const struct file_operations g_pn532fops =
 {
-  _open,
-  _close,
-  _read,
-  _write,
-  NULL,
-  _ioctl,
-  NULL
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL
-#endif
+  _open,          /* open */
+  _close,         /* close */
+  _read,          /* read */
+  _write,         /* write */
+  NULL,           /* seek */
+  _ioctl,         /* ioctl */
 };
 
 static const uint8_t pn532ack[] =
 {
-  0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00
+  0x00, 0x00, 0xff, 0x00, 0xff, 0x00
 };
 
 /****************************************************************************
@@ -218,7 +202,7 @@ static void pn532_frame_init(FAR struct pn532_frame *frame, uint8_t cmd)
 static void pn532_frame_finish(FAR struct pn532_frame *frame)
 {
   frame->lcs = pn532_checksum(frame->len);
-  frame->data[frame->len-1] = pn532_data_checksum(&frame->tfi, frame->len);
+  frame->data[frame->len - 1] = pn532_data_checksum(&frame->tfi, frame->len);
   frame->data[frame->len]   = PN532_POSTAMBLE;
 }
 
@@ -266,10 +250,10 @@ bool pn532_rx_frame_is_valid(FAR struct pn532_frame *f, bool check_data)
   if (check_data)
     {
       chk = pn532_data_checksum(&f->tfi, f->len);
-      if (chk != f->data[f->len-1])
+      if (chk != f->data[f->len - 1])
         {
           ctlserr("ERROR: Frame data checksum failed: calc=0x%X != 0x%X",
-                   chk, f->data[f->len-1]);
+                   chk, f->data[f->len - 1]);
           return false;
         }
     }
@@ -313,10 +297,7 @@ static int pn532_wait_rx_ready(FAR struct pn532_dev_s *dev, int timeout)
   int ret = OK;
 
 #ifdef CONFIG_PN532_USE_IRQ_FLOW_CONTROL
-  struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
-  ts.tv_sec += 1;
-  nxsem_timedwait(dev->sem_rx, &ts);
+  nxsem_tickwait(dev->sem_rx, SEC2TICK(1));
 #endif
 
   /* TODO: Handle Exception bits 2, 3 */
@@ -367,7 +348,7 @@ static void pn532_writecommand(FAR struct pn532_dev_s *dev, uint8_t cmd)
   pn532_deselect(dev);
   pn532_unlock(dev->spi);
 
-  tracetx("command sent", (uint8_t *) f, FRAME_SIZE(f));
+  tracetx("command sent", (FAR uint8_t *)f, FRAME_SIZE(f));
 }
 #endif
 
@@ -397,7 +378,8 @@ int pn532_read(FAR struct pn532_dev_s *dev, FAR uint8_t *buff, uint8_t n)
   return n;
 }
 
-int pn532_read_more(FAR struct pn532_dev_s *dev, FAR uint8_t *buff, uint8_t n)
+int pn532_read_more(FAR struct pn532_dev_s *dev,
+                    FAR uint8_t *buff, uint8_t n)
 {
   pn532_lock(dev->spi);
   pn532_select(dev);
@@ -428,7 +410,7 @@ int pn532_read_ack(FAR struct pn532_dev_s *dev)
   int res = 0;
   uint8_t ack[6];
 
-  pn532_read(dev, (uint8_t *) &ack, 6);
+  pn532_read(dev, (FAR uint8_t *) &ack, 6);
 
   if (memcmp(&ack, &pn532ack, 6) == 0x00)
     {
@@ -473,7 +455,7 @@ int pn532_write_frame(FAR struct pn532_dev_s *dev, FAR struct pn532_frame *f)
   SPI_SNDBLOCK(dev->spi, f, FRAME_SIZE(f));
   pn532_deselect(dev);
   pn532_unlock(dev->spi);
-  tracetx("WriteFrame", (uint8_t *) f, FRAME_SIZE(f));
+  tracetx("WriteFrame", (FAR uint8_t *)f, FRAME_SIZE(f));
 
   /* Wait ACK frame */
 
@@ -501,7 +483,7 @@ int pn532_read_frame(FAR struct pn532_dev_s *dev, FAR struct pn532_frame *f,
     {
       /* Read header */
 
-      pn532_read(dev, (uint8_t *) f, sizeof(struct pn532_frame));
+      pn532_read(dev, (FAR uint8_t *)f, sizeof(struct pn532_frame));
       if (pn532_rx_frame_is_valid(f, false))
         {
           if (max_size < f->len)
@@ -541,7 +523,7 @@ bool pn532_set_config(FAR struct pn532_dev_s *dev, uint8_t flags)
 
   if (pn532_write_frame(dev, f) == OK)
     {
-      pn532_read(dev, (uint8_t *) &resp, 9);
+      pn532_read(dev, (FAR uint8_t *)&resp, 9);
       tracerx("set config response", resp, 9);
       res = true;
     }
@@ -575,7 +557,7 @@ int pn532_sam_config(FAR struct pn532_dev_s *dev,
     {
       if (pn532_read_frame(dev, f, 4) == OK)
         {
-          tracerx("sam config response", (uint8_t *) f->data, 3);
+          tracerx("sam config response", (FAR uint8_t *)f->data, 3);
           if (f->data[0] == PN532_COMMAND_SAMCONFIGURATION + 1)
             {
               res = OK;
@@ -650,14 +632,14 @@ uint32_t pn532_write_passive_data(FAR struct pn532_dev_s *dev,
                                   uint8_t address, FAR uint8_t *data,
                                   uint8_t len)
 {
-  uint8_t cmd_buffer[8+7];
+  uint8_t cmd_buffer[8 + 7];
   FAR struct pn532_frame *f = (FAR struct pn532_frame *) cmd_buffer;
   uint8_t resp[20];
   uint32_t res = -EIO;
 
   pn532_frame_init(f, PN532_COMMAND_INDATAEXCHANGE);
   f->data[1] = 1;       /* max n cards at once */
-  f->data[2] = 0xA2;    /* command WRITE */
+  f->data[2] = 0xa2;    /* command WRITE */
   f->data[3] = address; /* ADDRESS, 0 = serial */
   memcpy(&f->data[4], data, len);
   f->len += 7;
@@ -672,9 +654,10 @@ uint32_t pn532_write_passive_data(FAR struct pn532_dev_s *dev,
             {
               dev->state = PN532_STATE_IDLE;
               f = (FAR struct pn532_frame *) resp;
-              tracerx("passive target id resp:", (FAR uint8_t *)f, f->len+6);
+              tracerx("passive target id resp:", (FAR uint8_t *)f,
+                      f->len + 6);
 
-              if (f->data[0] == PN532_COMMAND_INDATAEXCHANGE+1)
+              if (f->data[0] == PN532_COMMAND_INDATAEXCHANGE + 1)
                 {
                   res = f->data[1];
                 }
@@ -685,10 +668,11 @@ uint32_t pn532_write_passive_data(FAR struct pn532_dev_s *dev,
   return res;
 }
 
-uint32_t pn532_read_passive_data(FAR struct pn532_dev_s *dev, uint8_t address,
-                                 FAR uint8_t *data, uint8_t len)
+uint32_t pn532_read_passive_data(FAR struct pn532_dev_s *dev,
+                                 uint8_t address, FAR uint8_t *data,
+                                 uint8_t len)
 {
-  uint8_t cmd_buffer[4+7];
+  uint8_t cmd_buffer[4 + 7];
   FAR struct pn532_frame *f = (FAR struct pn532_frame *) cmd_buffer;
   uint8_t resp[30];
   uint32_t res = -1;
@@ -704,13 +688,15 @@ uint32_t pn532_read_passive_data(FAR struct pn532_dev_s *dev, uint8_t address,
     {
       if (dev->state == PN532_STATE_DATA_READY)
         {
-          if (pn532_read_frame(dev, (FAR struct pn532_frame *)resp, 25) == OK)
+          if (pn532_read_frame(dev,
+                               (FAR struct pn532_frame *)resp, 25) == OK)
             {
               dev->state = PN532_STATE_IDLE;
               f = (FAR struct pn532_frame *) resp;
-              tracerx("passive target id resp:", (FAR uint8_t *)f, f->len+6);
+              tracerx("passive target id resp:", (FAR uint8_t *)f,
+                      f->len + 6);
 
-              if (f->data[0] == PN532_COMMAND_INDATAEXCHANGE+1)
+              if (f->data[0] == PN532_COMMAND_INDATAEXCHANGE + 1)
                 {
                   if (f->data[1] == 0 && data && len)
                     {
@@ -729,7 +715,7 @@ uint32_t pn532_read_passive_data(FAR struct pn532_dev_s *dev, uint8_t address,
 uint32_t pn532_read_passive_target_id(FAR struct pn532_dev_s *dev,
                                       uint8_t baudrate)
 {
-  uint8_t cmd_buffer[4+7];
+  uint8_t cmd_buffer[4 + 7];
   FAR struct pn532_frame *f = (FAR struct pn532_frame *) cmd_buffer;
   uint8_t resp[20];
   uint32_t res = -EAGAIN;
@@ -746,9 +732,9 @@ uint32_t pn532_read_passive_target_id(FAR struct pn532_dev_s *dev,
           f = (FAR struct pn532_frame *) resp;
           r = (FAR struct pn_poll_response *) &f->data[1];
 
-          tracerx("passive target id resp:", (FAR uint8_t *)f, f->len+6);
+          tracerx("passive target id resp:", (FAR uint8_t *)f, f->len + 6);
 
-          if (f->data[0] == PN532_COMMAND_INLISTPASSIVETARGET+1)
+          if (f->data[0] == PN532_COMMAND_INLISTPASSIVETARGET + 1)
             {
               uint32_t cid = 0;
 
@@ -783,13 +769,12 @@ uint32_t pn532_read_passive_target_id(FAR struct pn532_dev_s *dev,
     }
 
   return res;
-
 }
 
 static int pn532_read_passive_target(FAR struct pn532_dev_s *dev,
                                      uint8_t baudrate)
 {
-  uint8_t cmd_buffer[4+7];
+  uint8_t cmd_buffer[4 + 7];
   FAR struct pn532_frame *f = (FAR struct pn532_frame *) cmd_buffer;
 
   pn532_frame_init(f, PN532_COMMAND_INLISTPASSIVETARGET);
@@ -800,22 +785,23 @@ static int pn532_read_passive_target(FAR struct pn532_dev_s *dev,
   return pn532_write_frame(dev, f);
 }
 
-bool pn532_set_rf_config(struct pn532_dev_s *dev, struct pn_rf_config_s *conf)
+bool pn532_set_rf_config(struct pn532_dev_s * dev,
+                         struct pn_rf_config_s * conf)
 {
   bool res = false;
-  uint8_t cmd_buffer[15+7];
+  uint8_t cmd_buffer[15 + 7];
   FAR struct pn532_frame *f = (FAR struct pn532_frame *) cmd_buffer;
 
   pn532_frame_init(f, PN532_COMMAND_RFCONFIGURATION);
   f->data[1] = conf->cfg_item;
   memcpy(&f->data[2], conf->config, conf->data_size);
-  f->len += conf->data_size+1;
+  f->len += conf->data_size + 1;
   pn532_frame_finish(f);
 
   if (pn532_write_frame(dev, f) == OK)
     {
-      pn532_read(dev, (uint8_t *) f, 10);
-      tracerx("rf config response", (uint8_t *) f, 10);
+      pn532_read(dev, (FAR uint8_t *)f, 10);
+      tracerx("rf config response", (FAR uint8_t *)f, 10);
       if (pn532_rx_frame_is_valid(f, true))
         {
           if (f->data[0] == PN532_COMMAND_RFCONFIGURATION + 1)
@@ -868,10 +854,9 @@ static int _open(FAR struct file *filep)
   FAR struct inode *inode;
   FAR struct pn532_dev_s *dev;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
+  DEBUGASSERT(inode->i_private);
   dev = inode->i_private;
 
   pn532_configspi(dev->spi);
@@ -899,10 +884,9 @@ static int _close(FAR struct file *filep)
   FAR struct inode *inode;
   FAR struct pn532_dev_s *dev;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
+  DEBUGASSERT(inode->i_private);
   dev = inode->i_private;
 
   dev->config->reset(0);
@@ -936,14 +920,13 @@ static ssize_t _read(FAR struct file *filep, FAR char *buffer, size_t buflen)
   FAR struct inode *inode;
   FAR struct pn532_dev_s *dev;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
+  DEBUGASSERT(inode->i_private);
   dev = inode->i_private;
 
   uint32_t id = pn532_read_passive_target_id(dev, PN532_MIFARE_ISO14443A);
-  if (id != 0xFFFFFFFF)
+  if (id != 0xffffffff)
     {
       if (buffer)
         {
@@ -964,10 +947,9 @@ static ssize_t _write(FAR struct file *filep, FAR const char *buffer,
   FAR struct inode *inode;
   FAR struct pn532_dev_s *dev;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
+  DEBUGASSERT(inode->i_private);
   dev = inode->i_private;
 
   UNUSED(dev);
@@ -985,10 +967,9 @@ static int _ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   FAR struct pn532_dev_s *dev;
   int ret = OK;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
+  DEBUGASSERT(inode->i_private);
   dev = inode->i_private;
 
   switch (cmd)
@@ -1011,7 +992,7 @@ static int _ioctl(FAR struct file *filep, int cmd, unsigned long arg)
               }
 
             ret = pn532_read_passive_data(dev, tag_data->address,
-                                          (uint8_t *) &tag_data->data,
+                                          (FAR uint8_t *)&tag_data->data,
                                           sizeof(tag_data->data));
 
             dev->state = PN532_STATE_IDLE;
@@ -1102,7 +1083,7 @@ static int _ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
     default:
       ctlserr("ERROR: Unrecognized cmd: %d\n", cmd);
-      ret = -EINVAL;
+      ret = -ENOTTY;
       break;
     }
 
@@ -1139,7 +1120,7 @@ int pn532_register(FAR const char *devpath, FAR struct spi_dev_s *spi,
 
   /* Initialize the PN532 device structure */
 
-  dev = (FAR struct pn532_dev_s *)kmm_malloc(sizeof(struct pn532_dev_s));
+  dev = kmm_malloc(sizeof(struct pn532_dev_s));
   if (!dev)
     {
       ctlserr("ERROR: Failed to allocate instance\n");

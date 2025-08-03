@@ -1,36 +1,22 @@
 /****************************************************************************
- * examples/bridge/bridge_main.c
+ * apps/examples/bridge/bridge_main.c
  *
- *   Copyright (C) 2014-2015 Gregory Nutt. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,17 +30,17 @@
 #include <sched.h>
 #include <errno.h>
 #include <debug.h>
+#include <unistd.h>
 
 #include <net/if.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <nuttx/net/ip.h>
 
-#include <nuttx/net/arp.h>
 #include "netutils/netlib.h"
 
 #if defined(CONFIG_EXAMPLES_BRIDGE_NET1_DHCPC) || \
     defined(CONFIG_EXAMPLES_BRIDGE_NET2_DHCPC)
-#  include <arpa/inet.h>
 #  include "netutils/dhcpc.h"
 #endif
 
@@ -94,11 +80,12 @@ static int briget_net1_setup(void)
 #ifdef CONFIG_EXAMPLES_BRIDGE_NET1_DHCPC
   struct dhcpc_state ds;
   void *handle;
+  char inetaddr[INET_ADDRSTRLEN];
 #endif
 
-printf("NET1: Configuring %s\n", CONFIG_EXAMPLES_BRIDGE_NET1_IFNAME);
+  printf("NET1: Configuring %s\n", CONFIG_EXAMPLES_BRIDGE_NET1_IFNAME);
 
-/* Many embedded network interfaces must have a software assigned MAC */
+  /* Many embedded network interfaces must have a software assigned MAC */
 
 #ifdef CONFIG_EXAMPLES_BRIDGE_NET1_NOMAC
   mac[0] = (CONFIG_EXAMPLES_BRIDGE_NET1_MACADDR >> (8 * 5)) & 0xff;
@@ -144,8 +131,9 @@ printf("NET1: Configuring %s\n", CONFIG_EXAMPLES_BRIDGE_NET1_IFNAME);
 
   handle = dhcpc_open("eth0", &mac, IFHWADDRLEN);
 
-  /* Get an IP address.  Note:  there is no logic here for renewing the address in this
-   * example.  The address should be renewed in ds.lease_time/2 seconds.
+  /* Get an IP address.  Note:  there is no logic here for renewing the
+   * address in this example.  The address should be renewed in
+   * ds.lease_time/2 seconds.
    */
 
   if (!handle)
@@ -164,12 +152,14 @@ printf("NET1: Configuring %s\n", CONFIG_EXAMPLES_BRIDGE_NET1_IFNAME);
 
   if (ds.netmask.s_addr != 0)
     {
-      netlib_set_ipv4netmask(CONFIG_EXAMPLES_BRIDGE_NET1_IFNAME, &ds.netmask);
+      netlib_set_ipv4netmask(CONFIG_EXAMPLES_BRIDGE_NET1_IFNAME,
+                             &ds.netmask);
     }
 
   if (ds.default_router.s_addr != 0)
     {
-      netlib_set_dripv4addr(CONFIG_EXAMPLES_BRIDGE_NET1_IFNAME, &ds.default_router);
+      netlib_set_dripv4addr(CONFIG_EXAMPLES_BRIDGE_NET1_IFNAME,
+                            &ds.default_router);
     }
 
   if (ds.dnsaddr.s_addr != 0)
@@ -178,7 +168,8 @@ printf("NET1: Configuring %s\n", CONFIG_EXAMPLES_BRIDGE_NET1_IFNAME);
     }
 
   dhcpc_close(handle);
-  printf("NET1: Assigned IP: %s\n", inet_ntoa(ds.ipaddr));
+  printf("NET1: Assigned IP: %s\n",
+         net_ntoa_r(ds.ipaddr, inetaddr, sizeof(inetaddr)));
 
   /* Save the IP address in network order */
 
@@ -221,11 +212,12 @@ static int briget_net2_setup(void)
 #ifdef CONFIG_EXAMPLES_BRIDGE_NET2_DHCPC
   struct dhcpc_state ds;
   void *handle;
+  char inetaddr[INET_ADDRSTRLEN];
 #endif
 
-printf("NET2: Configuring %s\n", CONFIG_EXAMPLES_BRIDGE_NET2_IFNAME);
+  printf("NET2: Configuring %s\n", CONFIG_EXAMPLES_BRIDGE_NET2_IFNAME);
 
-/* Many embedded network interfaces must have a software assigned MAC */
+  /* Many embedded network interfaces must have a software assigned MAC */
 
 #ifdef CONFIG_EXAMPLES_BRIDGE_NET2_NOMAC
   mac[0] = (CONFIG_EXAMPLES_BRIDGE_NET2_MACADDR >> (8 * 5)) & 0xff;
@@ -265,8 +257,9 @@ printf("NET2: Configuring %s\n", CONFIG_EXAMPLES_BRIDGE_NET2_IFNAME);
 
   handle = dhcpc_open(&mac, IFHWADDRLEN);
 
-  /* Get an IP address.  Note:  there is no logic here for renewing the address in this
-   * example.  The address should be renewed in ds.lease_time/2 seconds.
+  /* Get an IP address.  Note:  there is no logic here for renewing the
+   * address in this example.  The address should be renewed in
+   * ds.lease_time/2 seconds.
    */
 
   if (!handle)
@@ -285,12 +278,14 @@ printf("NET2: Configuring %s\n", CONFIG_EXAMPLES_BRIDGE_NET2_IFNAME);
 
   if (ds.netmask.s_addr != 0)
     {
-      netlib_set_ipv4netmask(CONFIG_EXAMPLES_BRIDGE_NET2_IFNAME, &ds.netmask);
+      netlib_set_ipv4netmask(CONFIG_EXAMPLES_BRIDGE_NET2_IFNAME,
+                             &ds.netmask);
     }
 
   if (ds.default_router.s_addr != 0)
     {
-      netlib_set_dripv4addr(CONFIG_EXAMPLES_BRIDGE_NET2_IFNAME, &ds.default_router);
+      netlib_set_dripv4addr(CONFIG_EXAMPLES_BRIDGE_NET2_IFNAME,
+                            &ds.default_router);
     }
 
   if (ds.dnsaddr.s_addr != 0)
@@ -299,7 +294,8 @@ printf("NET2: Configuring %s\n", CONFIG_EXAMPLES_BRIDGE_NET2_IFNAME);
     }
 
   dhcpc_close(handle);
-  printf("NET1: Assigned IP: %s\n", inet_ntoa(ds.ipaddr));
+  printf("NET1: Assigned IP: %s\n",
+         inet_ntoa_r(ds.ipaddr, inetaddr, sizeof(inetaddr)));
 
   /* Save the IP address in network order */
 
@@ -334,7 +330,6 @@ static int bridge_net1_worker(int argc, char *argv[])
   struct sockaddr_in fromaddr;
   struct sockaddr_in toaddr;
   socklen_t addrlen;
-  in_addr_t tmpaddr;
   ssize_t nrecvd;
   ssize_t nsent;
   int optval;
@@ -345,35 +340,40 @@ static int bridge_net1_worker(int argc, char *argv[])
 
   /* Create a UDP receive socket on network 1 */
 
-  tmpaddr = ntohl(g_net1_ipaddr);
-  printf("NET1: Create receive socket: %d.%d.%d.%d:%d\n",
-         tmpaddr >> 24, (tmpaddr >> 16) & 0xff,
-         (tmpaddr >> 8) & 0xff, tmpaddr & 0xff,
-         CONFIG_EXAMPLES_BRIDGE_NET1_RECVPORT);
+  receiver.sin_family      = AF_INET;
+  receiver.sin_port        = htons(CONFIG_EXAMPLES_BRIDGE_NET1_RECVPORT);
+  receiver.sin_addr.s_addr = g_net1_ipaddr;
+
+  printf("NET1: Create receive socket: %u.%u.%u.%u:%u\n",
+         ip4_addr1(receiver.sin_addr.s_addr),
+         ip4_addr2(receiver.sin_addr.s_addr),
+         ip4_addr3(receiver.sin_addr.s_addr),
+         ip4_addr4(receiver.sin_addr.s_addr),
+         htons(receiver.sin_port));
 
   recvsd = socket(PF_INET, SOCK_DGRAM, 0);
   if (recvsd < 0)
     {
-      fprintf(stderr, "NET1 ERROR: Failed to create receive socket: %d\n", errno);
+      fprintf(stderr, "NET1 ERROR: Failed to create receive socket: %d\n",
+              errno);
       return EXIT_FAILURE;
     }
 
   /* Set socket to reuse address */
 
   optval = 1;
-  if (setsockopt(recvsd, SOL_SOCKET, SO_REUSEADDR, (void*)&optval, sizeof(int)) < 0)
+  if (setsockopt(recvsd, SOL_SOCKET, SO_REUSEADDR,
+                 &optval, sizeof(int)) < 0)
     {
-      fprintf(stderr, "NET1 ERROR: setsockopt SO_REUSEADDR failure: %d\n", errno);
+      fprintf(stderr, "NET1 ERROR: setsockopt SO_REUSEADDR failure: %d\n",
+              errno);
       goto errout_with_recvsd;
     }
 
   /* Bind the socket to a local address */
 
-  receiver.sin_family      = AF_INET;
-  receiver.sin_port        = HTONS(CONFIG_EXAMPLES_BRIDGE_NET1_RECVPORT);
-  receiver.sin_addr.s_addr = g_net1_ipaddr;
-
-  if (bind(recvsd, (struct sockaddr*)&receiver, sizeof(struct sockaddr_in)) < 0)
+  if (bind(recvsd, (struct sockaddr *)&receiver,
+           sizeof(struct sockaddr_in)) < 0)
     {
       fprintf(stderr, "NET1 ERROR: bind failure: %d\n", errno);
       goto errout_with_recvsd;
@@ -381,24 +381,26 @@ static int bridge_net1_worker(int argc, char *argv[])
 
   /* Create a UDP send socket on network 2 */
 
-  tmpaddr = ntohl(g_net2_ipaddr);
-  printf("NET1: Create send socket: %d.%d.%d.%d:INPORT_ANY\n",
-         tmpaddr >> 24, (tmpaddr >> 16) & 0xff,
-         (tmpaddr >> 8) & 0xff, tmpaddr & 0xff);
+  printf("NET1: Create send socket: %u.%u.%u.%u:INPORT_ANY\n",
+         ip4_addr1(g_net2_ipaddr), ip4_addr2(g_net2_ipaddr),
+         ip4_addr3(g_net2_ipaddr), ip4_addr4(g_net2_ipaddr));
 
   sndsd = socket(PF_INET, SOCK_DGRAM, 0);
   if (sndsd < 0)
     {
-      fprintf(stderr, "NET1 ERROR: Failed to create send socket: %d\n", errno);
+      fprintf(stderr, "NET1 ERROR: Failed to create send socket: %d\n",
+              errno);
       goto errout_with_recvsd;
     }
 
   /* Set socket to reuse address */
 
   optval = 1;
-  if (setsockopt(sndsd, SOL_SOCKET, SO_REUSEADDR, (void*)&optval, sizeof(int)) < 0)
+  if (setsockopt(sndsd, SOL_SOCKET, SO_REUSEADDR,
+                 &optval, sizeof(int)) < 0)
     {
-      fprintf(stderr, "NET1 ERROR: setsockopt SO_REUSEADDR failure: %d\n", errno);
+      fprintf(stderr, "NET1 ERROR: setsockopt SO_REUSEADDR failure: %d\n",
+              errno);
       goto errout_with_sendsd;
     }
 
@@ -408,7 +410,8 @@ static int bridge_net1_worker(int argc, char *argv[])
   sender.sin_port        = 0;
   sender.sin_addr.s_addr = g_net2_ipaddr;
 
-  if (bind(sndsd, (struct sockaddr*)&sender, sizeof(struct sockaddr_in)) < 0)
+  if (bind(sndsd, (struct sockaddr *)&sender,
+           sizeof(struct sockaddr_in)) < 0)
     {
       printf("NET1: bind failure: %d\n", errno);
       goto errout_with_sendsd;
@@ -416,7 +419,7 @@ static int bridge_net1_worker(int argc, char *argv[])
 
   /* Then receive and forward UDP packets forever  */
 
-  for (;;)
+  for (; ; )
     {
       /* Read a packet on network 1 */
 
@@ -424,14 +427,16 @@ static int bridge_net1_worker(int argc, char *argv[])
              CONFIG_EXAMPLES_BRIDGE_NET1_IOBUFIZE);
 
       addrlen = sizeof(struct sockaddr_in);
-      nrecvd = recvfrom(recvsd, g_net1_buffer, CONFIG_EXAMPLES_BRIDGE_NET1_IOBUFIZE, 0,
-                        (FAR struct sockaddr*)&fromaddr, &addrlen);
+      nrecvd = recvfrom(recvsd, g_net1_buffer,
+                        CONFIG_EXAMPLES_BRIDGE_NET1_IOBUFIZE, 0,
+                        (FAR struct sockaddr *)&fromaddr, &addrlen);
 
-      tmpaddr = ntohl(fromaddr.sin_addr.s_addr);
-      printf("NET1: Received %ld bytes from %d.%d.%d.%d:%d\n",
+      printf("NET1: Received %ld bytes from %u.%u.%u.%u:%u\n",
              (long)nrecvd,
-             tmpaddr >> 24, (tmpaddr >> 16) & 0xff,
-             (tmpaddr >> 8) & 0xff, tmpaddr & 0xff,
+             ip4_addr1(fromaddr.sin_addr.s_addr),
+             ip4_addr2(fromaddr.sin_addr.s_addr),
+             ip4_addr3(fromaddr.sin_addr.s_addr),
+             ip4_addr4(fromaddr.sin_addr.s_addr),
              ntohs(fromaddr.sin_port));
 
       /* Check for a receive error or zero bytes received.  The negative
@@ -457,20 +462,21 @@ static int bridge_net1_worker(int argc, char *argv[])
 
       /* Send the newly received packet out network 2 */
 
-      printf("NET1: Sending %ld bytes on network 2: %d.%d.%d.%d:%d\n",
-             (long)nrecvd,
-             CONFIG_EXAMPLES_BRIDGE_NET2_IPHOST >> 24,
-             (CONFIG_EXAMPLES_BRIDGE_NET2_IPHOST >> 16) & 0xff,
-             (CONFIG_EXAMPLES_BRIDGE_NET2_IPHOST >> 8) & 0xff,
-             CONFIG_EXAMPLES_BRIDGE_NET2_IPHOST & 0xff,
-             CONFIG_EXAMPLES_BRIDGE_NET2_HOSTPORT);
-
       toaddr.sin_family      = AF_INET;
       toaddr.sin_port        = htons(CONFIG_EXAMPLES_BRIDGE_NET2_HOSTPORT);
       toaddr.sin_addr.s_addr = htonl(CONFIG_EXAMPLES_BRIDGE_NET2_IPHOST);
 
+      printf("NET1: Sending %ld bytes on network 2: %u.%u.%u.%u:%u\n",
+             (long)nrecvd,
+             ip4_addr1(toaddr.sin_addr.s_addr),
+             ip4_addr2(toaddr.sin_addr.s_addr),
+             ip4_addr3(toaddr.sin_addr.s_addr),
+             ip4_addr4(toaddr.sin_addr.s_addr),
+             htons(toaddr.sin_port));
+
       nsent = sendto(sndsd, g_net1_buffer, nrecvd, 0,
-                      (struct sockaddr*)&toaddr, sizeof(struct sockaddr_in));
+                     (struct sockaddr *)&toaddr,
+                     sizeof(struct sockaddr_in));
 
       /* Check for send errors */
 
@@ -492,10 +498,10 @@ static int bridge_net1_worker(int argc, char *argv[])
   return EXIT_SUCCESS;
 
 errout_with_sendsd:
-   close(sndsd);
+  close(sndsd);
 errout_with_recvsd:
-   close(recvsd);
-   return EXIT_FAILURE;
+  close(recvsd);
+  return EXIT_FAILURE;
 }
 
 /****************************************************************************
@@ -509,7 +515,6 @@ static int bridge_net2_worker(int argc, char *argv[])
   struct sockaddr_in fromaddr;
   struct sockaddr_in toaddr;
   socklen_t addrlen;
-  in_addr_t tmpaddr;
   ssize_t nrecvd;
   ssize_t nsent;
   int optval;
@@ -520,35 +525,40 @@ static int bridge_net2_worker(int argc, char *argv[])
 
   /* Create a UDP receive socket on network 2 */
 
-  tmpaddr = ntohl(g_net2_ipaddr);
-  printf("NET2: Create receive socket: %d.%d.%d.%d:%d\n",
-         tmpaddr >> 24, (tmpaddr >> 16) & 0xff,
-         (tmpaddr >> 8) & 0xff, tmpaddr & 0xff,
-         CONFIG_EXAMPLES_BRIDGE_NET2_RECVPORT);
+  receiver.sin_family      = AF_INET;
+  receiver.sin_port        = htons(CONFIG_EXAMPLES_BRIDGE_NET2_RECVPORT);
+  receiver.sin_addr.s_addr = g_net2_ipaddr;
+
+  printf("NET2: Create receive socket: %u.%u.%u,%u:%u\n",
+         ip4_addr1(receiver.sin_addr.s_addr),
+         ip4_addr2(receiver.sin_addr.s_addr),
+         ip4_addr3(receiver.sin_addr.s_addr),
+         ip4_addr4(receiver.sin_addr.s_addr),
+         htons(receiver.sin_port));
 
   recvsd = socket(PF_INET, SOCK_DGRAM, 0);
   if (recvsd < 0)
     {
-      fprintf(stderr, "NET2 ERROR: Failed to create receive socket: %d\n", errno);
+      fprintf(stderr, "NET2 ERROR: Failed to create receive socket: %d\n",
+              errno);
       return EXIT_FAILURE;
     }
 
   /* Set socket to reuse address */
 
   optval = 1;
-  if (setsockopt(recvsd, SOL_SOCKET, SO_REUSEADDR, (void*)&optval, sizeof(int)) < 0)
+  if (setsockopt(recvsd, SOL_SOCKET, SO_REUSEADDR,
+                 &optval, sizeof(int)) < 0)
     {
-      fprintf(stderr, "NET2 ERROR: setsockopt SO_REUSEADDR failure: %d\n", errno);
+      fprintf(stderr, "NET2 ERROR: setsockopt SO_REUSEADDR failure: %d\n",
+              errno);
       goto errout_with_recvsd;
     }
 
   /* Bind the socket to a local address */
 
-  receiver.sin_family      = AF_INET;
-  receiver.sin_port        = HTONS(CONFIG_EXAMPLES_BRIDGE_NET2_RECVPORT);
-  receiver.sin_addr.s_addr = g_net2_ipaddr;
-
-  if (bind(recvsd, (struct sockaddr*)&receiver, sizeof(struct sockaddr_in)) < 0)
+  if (bind(recvsd, (struct sockaddr *)&receiver,
+           sizeof(struct sockaddr_in)) < 0)
     {
       fprintf(stderr, "NET2 ERROR: bind failure: %d\n", errno);
       goto errout_with_recvsd;
@@ -556,24 +566,26 @@ static int bridge_net2_worker(int argc, char *argv[])
 
   /* Create a UDP send socket on network 1 */
 
-  tmpaddr = ntohl(g_net1_ipaddr);
-  printf("NET2: Create send socket: %d.%d.%d.%d:INPORT_ANY\n",
-         tmpaddr >> 24, (tmpaddr >> 16) & 0xff,
-         (tmpaddr >> 8) & 0xff, tmpaddr & 0xff);
+  printf("NET2: Create send socket: %u.%u.%u.%u:INPORT_ANY\n",
+         ip4_addr1(g_net1_ipaddr), ip4_addr2(g_net1_ipaddr),
+         ip4_addr3(g_net1_ipaddr), ip4_addr4(g_net1_ipaddr));
 
   sndsd = socket(PF_INET, SOCK_DGRAM, 0);
   if (sndsd < 0)
     {
-      fprintf(stderr, "NET2 ERROR: Failed to create send socket: %d\n", errno);
+      fprintf(stderr, "NET2 ERROR: Failed to create send socket: %d\n",
+              errno);
       goto errout_with_recvsd;
     }
 
   /* Set socket to reuse address */
 
   optval = 1;
-  if (setsockopt(sndsd, SOL_SOCKET, SO_REUSEADDR, (void*)&optval, sizeof(int)) < 0)
+  if (setsockopt(sndsd, SOL_SOCKET, SO_REUSEADDR, &optval,
+                 sizeof(int)) < 0)
     {
-      fprintf(stderr, "NET2 ERROR: setsockopt SO_REUSEADDR failure: %d\n", errno);
+      fprintf(stderr, "NET2 ERROR: setsockopt SO_REUSEADDR failure: %d\n",
+              errno);
       goto errout_with_sendsd;
     }
 
@@ -583,7 +595,8 @@ static int bridge_net2_worker(int argc, char *argv[])
   sender.sin_port        = 0;
   sender.sin_addr.s_addr = g_net1_ipaddr;
 
-  if (bind(sndsd, (struct sockaddr*)&sender, sizeof(struct sockaddr_in)) < 0)
+  if (bind(sndsd, (struct sockaddr *)&sender,
+           sizeof(struct sockaddr_in)) < 0)
     {
       printf("NET2: bind failure: %d\n", errno);
       goto errout_with_sendsd;
@@ -591,7 +604,7 @@ static int bridge_net2_worker(int argc, char *argv[])
 
   /* Then receive and forward UDP packets forever  */
 
-  for (;;)
+  for (; ; )
     {
       /* Read a packet on network 2 */
 
@@ -599,14 +612,16 @@ static int bridge_net2_worker(int argc, char *argv[])
              CONFIG_EXAMPLES_BRIDGE_NET2_IOBUFIZE);
 
       addrlen = sizeof(struct sockaddr_in);
-      nrecvd = recvfrom(recvsd, g_net2_buffer, CONFIG_EXAMPLES_BRIDGE_NET2_IOBUFIZE, 0,
-                        (FAR struct sockaddr*)&fromaddr, &addrlen);
+      nrecvd = recvfrom(recvsd, g_net2_buffer,
+                        CONFIG_EXAMPLES_BRIDGE_NET2_IOBUFIZE, 0,
+                        (FAR struct sockaddr *)&fromaddr, &addrlen);
 
-      tmpaddr = ntohl(fromaddr.sin_addr.s_addr);
-      printf("NET2: Received %ld bytes from %d.%d.%d.%d:%d\n",
+      printf("NET2: Received %ld bytes from %u.%u.%u.%u:%u\n",
              (long)nrecvd,
-             tmpaddr >> 24, (tmpaddr >> 16) & 0xff,
-             (tmpaddr >> 8) & 0xff, tmpaddr & 0xff,
+             ip4_addr1(fromaddr.sin_addr.s_addr),
+             ip4_addr2(fromaddr.sin_addr.s_addr),
+             ip4_addr3(fromaddr.sin_addr.s_addr),
+             ip4_addr4(fromaddr.sin_addr.s_addr),
              ntohs(fromaddr.sin_port));
 
       /* Check for a receive error or zero bytes received.  The negative
@@ -632,20 +647,20 @@ static int bridge_net2_worker(int argc, char *argv[])
 
       /* Send the newly received packet out network 1 */
 
-      printf("NET2: Sending %ld bytes on network 1: %d.%d.%d.%d:%d\n",
-             (long)nrecvd,
-             CONFIG_EXAMPLES_BRIDGE_NET1_IPHOST >> 24,
-             (CONFIG_EXAMPLES_BRIDGE_NET1_IPHOST >> 16) & 0xff,
-             (CONFIG_EXAMPLES_BRIDGE_NET1_IPHOST >> 8) & 0xff,
-             CONFIG_EXAMPLES_BRIDGE_NET1_IPHOST & 0xff,
-             CONFIG_EXAMPLES_BRIDGE_NET1_HOSTPORT);
-
       toaddr.sin_family      = AF_INET;
       toaddr.sin_port        = htons(CONFIG_EXAMPLES_BRIDGE_NET1_HOSTPORT);
       toaddr.sin_addr.s_addr = htonl(CONFIG_EXAMPLES_BRIDGE_NET1_IPHOST);
 
+      printf("NET2: Sending %ld bytes on network 1: %u.%u.%u.%u:%u\n",
+             (long)nrecvd,
+             ip4_addr1(toaddr.sin_addr.s_addr),
+             ip4_addr2(toaddr.sin_addr.s_addr),
+             ip4_addr3(toaddr.sin_addr.s_addr),
+             ip4_addr4(toaddr.sin_addr.s_addr),
+             htons(toaddr.sin_port));
+
       nsent = sendto(sndsd, g_net2_buffer, nrecvd, 0,
-                      (struct sockaddr*)&toaddr, sizeof(struct sockaddr_in));
+                     (struct sockaddr *)&toaddr, sizeof(struct sockaddr_in));
 
       /* Check for send errors */
 
@@ -667,10 +682,10 @@ static int bridge_net2_worker(int argc, char *argv[])
   return EXIT_SUCCESS;
 
 errout_with_sendsd:
-   close(sndsd);
+  close(sndsd);
 errout_with_recvsd:
-   close(recvsd);
-   return EXIT_FAILURE;
+  close(recvsd);
+  return EXIT_FAILURE;
 }
 
 /****************************************************************************
@@ -707,9 +722,11 @@ int main(int argc, FAR char *argv[])
 
   printf("Start network 1 worker\n");
 
-  net1_worker = task_create("NET1 Worker", CONFIG_EXAMPLES_BRIDGE_NET1_PRIORITY,
-                        CONFIG_EXAMPLES_BRIDGE_NET1_STACKSIZE, bridge_net1_worker,
-                        NULL);
+  net1_worker = task_create("NET1 Worker",
+                            CONFIG_EXAMPLES_BRIDGE_NET1_PRIORITY,
+                            CONFIG_EXAMPLES_BRIDGE_NET1_STACKSIZE,
+                            bridge_net1_worker,
+                            NULL);
   if (net1_worker < 0)
     {
       fprintf(stderr, "ERROR: Failed to start network daemon 1\n");
@@ -718,9 +735,11 @@ int main(int argc, FAR char *argv[])
 
   printf("Start network 2 worker\n");
 
-  net2_worker = task_create("NET2 Worker", CONFIG_EXAMPLES_BRIDGE_NET2_PRIORITY,
-                        CONFIG_EXAMPLES_BRIDGE_NET2_STACKSIZE, bridge_net2_worker,
-                        NULL);
+  net2_worker = task_create("NET2 Worker",
+                            CONFIG_EXAMPLES_BRIDGE_NET2_PRIORITY,
+                            CONFIG_EXAMPLES_BRIDGE_NET2_STACKSIZE,
+                            bridge_net2_worker,
+                            NULL);
   if (net2_worker < 0)
     {
       fprintf(stderr, "ERROR: Failed to start network daemon 2\n");

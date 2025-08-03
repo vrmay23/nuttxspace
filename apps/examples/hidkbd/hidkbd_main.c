@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/hidkbd/hidkbd_main.c
+ * apps/examples/hidkbd/hidkbd_main.c
  *
- *   Copyright (C) 2011, 2013-2015, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name Gregory Nutt nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,6 +29,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/usb/usbhost.h>
@@ -54,13 +42,8 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
 /* Configuration ************************************************************/
-
-/* Sanity checking */
-
-#ifndef CONFIG_USBHOST
-#  error "CONFIG_USBHOST is not defined"
-#endif
 
 #ifdef CONFIG_USBHOST_INT_DISABLE
 #  error "Interrupt endpoints are disabled (CONFIG_USBHOST_INT_DISABLE)"
@@ -72,51 +55,13 @@
 #  define CONFIG_EXAMPLES_HIDKBD_DEVNAME "/dev/kbda"
 #endif
 
-#if !defined(CONFIG_HIDKBD_ENCODED) || !defined(CONFIG_LIB_KBDCODEC)
+#if !defined(CONFIG_HIDKBD_ENCODED) || !defined(CONFIG_LIBC_KBDCODEC)
 #  undef CONFIG_EXAMPLES_HIDKBD_ENCODED
-#endif
-
-/****************************************************************************
- * Private Types
- ****************************************************************************/
-
-#ifdef CONFIG_EXAMPLES_HIDKBD_ENCODED
-struct hidbkd_instream_s
-{
-  struct lib_instream_s stream;
-  FAR char *buffer;
-  ssize_t nbytes;
-};
 #endif
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: hidkbd_getstream
- *
- * Description:
- *   Get one character from the keyboard.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_EXAMPLES_HIDKBD_ENCODED
-static int hidkbd_getstream(FAR struct lib_instream_s *this)
-{
-  FAR struct hidbkd_instream_s *kbdstream = (FAR struct hidbkd_instream_s *)this;
-
-  DEBUGASSERT(kbdstream && kbdstream->buffer);
-  if (kbdstream->nbytes > 0)
-    {
-      kbdstream->nbytes--;
-      kbdstream->stream.nget++;
-      return (int)*kbdstream->buffer++;
-    }
-
-  return EOF;
-}
-#endif
 
 /****************************************************************************
  * Name: hidkbd_decode
@@ -129,7 +74,7 @@ static int hidkbd_getstream(FAR struct lib_instream_s *this)
 #ifdef CONFIG_EXAMPLES_HIDKBD_ENCODED
 static void hidkbd_decode(FAR char *buffer, ssize_t nbytes)
 {
-  struct hidbkd_instream_s kbdstream;
+  struct lib_meminstream_s kbdstream;
   struct kbd_getstate_s state;
   uint8_t ch;
   int ret;
@@ -137,17 +82,14 @@ static void hidkbd_decode(FAR char *buffer, ssize_t nbytes)
   /* Initialize */
 
   memset(&state, 0, sizeof(struct kbd_getstate_s));
-  kbdstream.stream.get  = hidkbd_getstream;
-  kbdstream.stream.nget = 0;
-  kbdstream.buffer      = buffer;
-  kbdstream.nbytes      = nbytes;
+  lib_meminstream(&kbdstream, buffer, nbytes);
 
   /* Loop until all of the bytes have been consumed.  We implicitly assume
    * that the escaped sequences do not cross buffer boundaries.  That
    * might be true if the read buffer were small or the data rates high.
    */
 
-  for (;;)
+  for (; ; )
     {
       /* Decode the next thing from the buffer */
 
@@ -206,7 +148,7 @@ int main(int argc, FAR char *argv[])
    * keyboard test.
    */
 
-  for (;;)
+  for (; ; )
     {
       /* Open the keyboard device.  Loop until the device is successfully
        * opened.
@@ -248,7 +190,8 @@ int main(int argc, FAR char *argv[])
         }
       while (nbytes > 0);
 
-      printf("Closing device %s: %d\n", CONFIG_EXAMPLES_HIDKBD_DEVNAME, (int)nbytes);
+      printf("Closing device %s: %d\n", CONFIG_EXAMPLES_HIDKBD_DEVNAME,
+             (int)nbytes);
       fflush(stdout);
       close(fd);
     }

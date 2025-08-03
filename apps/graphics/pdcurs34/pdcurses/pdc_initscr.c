@@ -1,41 +1,27 @@
 /****************************************************************************
- * apps/graphics/pdcurses/pdc_initscr.c
- * Public Domain Curses
- * RCSID("$Id: initscr.c,v 1.114 2008/07/13 16:08:18 wmcbrine Exp $")
+ * apps/graphics/pdcurs34/pdcurses/pdc_initscr.c
  *
- *   Copyright (C) 2017, 2019 Gregory Nutt. All rights reserved.
- *   Adapted by: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Adapted from the original public domain pdcurses by Gregory Nutt and
- * released as part of NuttX under the 3-clause BSD license:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Adapted from the original public domain pdcurses by Gregory Nutt
  ****************************************************************************/
 
 /* Name: initscr
@@ -137,13 +123,13 @@ const char *_curses_notice = "PDCurses 3.4 - Public Domain 2008";
 
 char ttytype[128];
 
-SCREEN *SP = (SCREEN *) NULL;   /* curses variables */
-WINDOW *curscr = (WINDOW *) NULL;       /* the current screen image */
-WINDOW *stdscr = (WINDOW *) NULL;       /* the default screen window */
-WINDOW *pdc_lastscr = (WINDOW *) NULL;  /* the last screen image */
+SCREEN *SP = NULL;          /* curses variables */
+WINDOW *curscr = NULL;      /* the current screen image */
+WINDOW *stdscr = NULL;      /* the default screen window */
+WINDOW *pdc_lastscr = NULL; /* the last screen image */
 
-int LINES = 0;                  /* current terminal height */
-int COLS = 0;                   /* current terminal width */
+int LINES = 0;              /* current terminal height */
+int COLS = 0;               /* current terminal width */
 int TABSIZE = 8;
 
 MOUSE_STATUS Mouse_status, pdc_mouse_status;
@@ -204,13 +190,13 @@ WINDOW *Xinitscr(int argc, char *argv[])
       exit(4);
     }
 
-  if ((curscr = newwin(LINES, COLS, 0, 0)) == (WINDOW *)NULL)
+  if ((curscr = newwin(LINES, COLS, 0, 0)) == NULL)
     {
       fprintf(stderr, "initscr(): Unable to create curscr.\n");
       exit(2);
     }
 
-  if ((pdc_lastscr = newwin(LINES, COLS, 0, 0)) == (WINDOW *)NULL)
+  if ((pdc_lastscr = newwin(LINES, COLS, 0, 0)) == NULL)
     {
       fprintf(stderr, "initscr(): Unable to create pdc_lastscr.\n");
       exit(2);
@@ -223,7 +209,8 @@ WINDOW *Xinitscr(int argc, char *argv[])
   LINES -= SP->slklines;
 
   /* We have to sort out ripped off lines here, and reduce the height of
-   * stdscr by the number of lines ripped off */
+   * stdscr by the number of lines ripped off
+   */
 
   for (i = 0; i < linesrippedoff; i++)
     {
@@ -277,7 +264,8 @@ WINDOW *Xinitscr(int argc, char *argv[])
 
   def_shell_mode();
 
-  sprintf(ttytype, "pdcurses|PDCurses for %s", PDC_sysname());
+  snprintf(ttytype, sizeof(ttytype),
+           "pdcurses|PDCurses for %s", PDC_sysname());
 
   return stdscr;
 }
@@ -355,15 +343,15 @@ void delscreen(SCREEN *sp)
   delwin(stdscr);
   delwin(curscr);
   delwin(pdc_lastscr);
-  stdscr      = (WINDOW *) NULL;
-  curscr      = (WINDOW *) NULL;
-  pdc_lastscr = (WINDOW *) NULL;
+  stdscr      = NULL;
+  curscr      = NULL;
+  pdc_lastscr = NULL;
 
   SP->alive   = false;
 
   PDC_scr_free();               /* Free SP and pdc_atrtab */
 
-  SP = (SCREEN *)NULL;
+  SP = NULL;
 
 #ifdef CONFIG_PDCURSES_MULTITHREAD
 

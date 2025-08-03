@@ -1,52 +1,29 @@
 /****************************************************************************
- * drivers/net/cdcecm.c
+ * drivers/usbdev/cdcecm.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Authors: Michael Jung <mijung@gmx.net>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * References:
- *   [CDCECM1.2] Universal Serial Bus - Communications Class - Subclass
- *               Specification for Ethernet Control Model Devices - Rev 1.2
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * This driver derives in part from the NuttX CDC/ACM driver:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- *   Copyright (C) 2011-2013, 2016-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * and also from the NuttX RNDIS driver:
- *
- *   Copyright (C) 2011-2017 Gregory Nutt. All rights reserved.
- *   Authors: Sakari Kapanen <sakari.m.kapanen@gmail.com>,
- *            Petteri Aimonen <jpa@git.mail.kapsi.fi>
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
+
+/* References:
+ *   [CDCECM1.2] Universal Serial Bus - Communications Class - Subclass
+ *               Specification for Ethernet Control Model Devices - Rev 1.2
+ */
 
 /****************************************************************************
  * Included Files
@@ -61,17 +38,15 @@
 #include <errno.h>
 #include <assert.h>
 #include <debug.h>
-#include <queue.h>
 
 #include <arpa/inet.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/irq.h>
-#include <nuttx/wdog.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/semaphore.h>
-#include <nuttx/net/arp.h>
+#include <nuttx/net/ip.h>
 #include <nuttx/net/netdev.h>
 #include <nuttx/usb/usbdev.h>
 #include <nuttx/usb/cdc.h>
@@ -79,6 +54,10 @@
 
 #ifdef CONFIG_NET_PKT
 #  include <nuttx/net/pkt.h>
+#endif
+
+#ifdef CONFIG_BOARD_USBDEV_SERIALSTR
+#include <nuttx/board.h>
 #endif
 
 #include "cdcecm.h"
@@ -111,24 +90,20 @@
 #  define CONFIG_CDCECM_NINTERFACES 1
 #endif
 
-/* TX poll delay = 1 seconds. CLK_TCK is the number of clock ticks per second */
-
-#define CDCECM_WDDELAY   (1*CLK_TCK)
-
 /* TX timeout = 1 minute */
 
 #define CDCECM_TXTIMEOUT (60*CLK_TCK)
 
-/* This is a helper pointer for accessing the contents of the Ethernet header */
+/* This is a helper pointer for accessing the contents of Ethernet header */
 
-#define BUF ((struct eth_hdr_s *)self->dev.d_buf)
+#define BUF ((FAR struct eth_hdr_s *)self->dev.d_buf)
 
 /****************************************************************************
  * Private Types
  ****************************************************************************/
 
-/* The cdcecm_driver_s encapsulates all state information for a single hardware
- * interface
+/* The cdcecm_driver_s encapsulates all state information for a single
+ * hardware interface
  */
 
 struct cdcecm_driver_s
@@ -143,7 +118,8 @@ struct cdcecm_driver_s
   FAR struct usbdev_ep_s      *epbulkout;   /* Bulk OUT endpoint */
   uint8_t                      config;      /* Selected configuration number */
 
-  uint8_t                      pktbuf[CONFIG_NET_ETH_PKTSIZE + CONFIG_NET_GUARDSIZE];
+  uint16_t                     pktbuf[(CONFIG_NET_ETH_PKTSIZE +
+                                       CONFIG_NET_GUARDSIZE + 1) / 2];
 
   struct usbdev_req_s         *rdreq;       /* Single read request */
   bool                         rxpending;   /* Packet available in rdreq */
@@ -155,7 +131,6 @@ struct cdcecm_driver_s
   /* Network device */
 
   bool                         bifup;       /* true:ifup false:ifdown */
-  WDOG_ID                      txpoll;      /* TX poll timer */
   struct work_s                irqwork;     /* For deferring interrupt work
                                              * to the work queue */
   struct work_s                pollwork;    /* For deferring poll work to
@@ -165,7 +140,6 @@ struct cdcecm_driver_s
 
   struct net_driver_s          dev;         /* Interface understood by the
                                              * network */
-  bool                         registered;  /* netdev is currently registered */
 };
 
 /****************************************************************************
@@ -187,11 +161,6 @@ static void cdcecm_txdone(FAR struct cdcecm_driver_s *priv);
 
 static void cdcecm_interrupt_work(FAR void *arg);
 
-/* Watchdog timer expirations */
-
-static void cdcecm_poll_work(FAR void *arg);
-static void cdcecm_poll_expiry(int argc, wdparm_t arg, ...);
-
 /* NuttX callback functions */
 
 static int  cdcecm_ifup(FAR struct net_driver_s *dev);
@@ -206,9 +175,6 @@ static int  cdcecm_addmac(FAR struct net_driver_s *dev,
 #ifdef CONFIG_NET_MCASTGROUP
 static int  cdcecm_rmmac(FAR struct net_driver_s *dev,
               FAR const uint8_t *mac);
-#endif
-#ifdef CONFIG_NET_ICMPv6
-static void cdcecm_ipv6multicast(FAR struct cdcecm_driver_s *priv);
 #endif
 #endif
 #ifdef CONFIG_NETDEV_IOCTL
@@ -235,11 +201,6 @@ static void cdcecm_disconnect(FAR struct usbdevclass_driver_s *driver,
 
 /* USB Device Class helpers */
 
-static struct usbdev_req_s *cdcecm_allocreq(FAR struct usbdev_ep_s *ep,
-              uint16_t len);
-static void cdcecm_freereq(FAR struct usbdev_ep_s *ep,
-              FAR struct usbdev_req_s *req);
-
 static void cdcecm_ep0incomplete(FAR struct usbdev_ep_s *ep,
               FAR struct usbdev_req_s *req);
 static void cdcecm_rdcomplete(FAR struct usbdev_ep_s *ep,
@@ -247,9 +208,10 @@ static void cdcecm_rdcomplete(FAR struct usbdev_ep_s *ep,
 static void cdcecm_wrcomplete(FAR struct usbdev_ep_s *ep,
               FAR struct usbdev_req_s *req);
 
-static void cdcecm_mkepdesc(int epidx,
+static int cdcecm_mkepdesc(int epidx,
               FAR struct usb_epdesc_s *epdesc,
-              FAR struct usbdev_devinfo_s *devinfo, bool hispeed);
+              FAR struct usbdev_devinfo_s *devinfo,
+              uint8_t speed);
 
 /****************************************************************************
  * Private Data
@@ -323,8 +285,8 @@ static const struct usb_devdesc_s g_devdesc =
 
 static int cdcecm_transmit(FAR struct cdcecm_driver_s *self)
 {
-  /* Wait until the USB device request for Ethernet frame transmissions becomes
-   * available.
+  /* Wait until the USB device request for Ethernet frame transmissions
+   * becomes available.
    */
 
   while (nxsem_wait(&self->wrreq_idle) != OK)
@@ -333,7 +295,7 @@ static int cdcecm_transmit(FAR struct cdcecm_driver_s *self)
 
   /* Increment statistics */
 
-  NETDEV_TXPACKETS(self->dev);
+  NETDEV_TXPACKETS(&self->dev);
 
   /* Send the packet: address=priv->dev.d_buf, length=priv->dev.d_len */
 
@@ -352,7 +314,8 @@ static int cdcecm_transmit(FAR struct cdcecm_driver_s *self)
  *   devif_poll() may be called:
  *
  *   1. When the preceding TX packet send is complete,
- *   2. When the preceding TX packet send times out and the interface is reset
+ *   2. When the preceding TX packet send times out and the interface is
+ *      reset
  *   3. During normal TX polling
  *
  * Input Parameters:
@@ -371,53 +334,15 @@ static int cdcecm_txpoll(FAR struct net_driver_s *dev)
   FAR struct cdcecm_driver_s *priv =
     (FAR struct cdcecm_driver_s *)dev->d_private;
 
-  /* If the polling resulted in data that should be sent out on the network,
-   * the field d_len is set to a value > 0.
+  /* Send the packet */
+
+  cdcecm_transmit(priv);
+
+  /* Check if there is room in the device to hold another packet. If
+   * not, return a non-zero value to terminate the poll.
    */
 
-  if (priv->dev.d_len > 0)
-    {
-      /* Look up the destination MAC address and add it to the Ethernet
-       * header.
-       */
-
-#ifdef CONFIG_NET_IPv4
-#ifdef CONFIG_NET_IPv6
-      if (IFF_IS_IPv4(priv->dev.d_flags))
-#endif
-        {
-          arp_out(&priv->dev);
-        }
-#endif /* CONFIG_NET_IPv4 */
-
-#ifdef CONFIG_NET_IPv6
-#ifdef CONFIG_NET_IPv4
-      else
-#endif
-        {
-          neighbor_out(&priv->dev);
-        }
-#endif /* CONFIG_NET_IPv6 */
-
-      if (!devif_loopback(&priv->dev))
-        {
-          /* Send the packet */
-
-          cdcecm_transmit(priv);
-
-          /* Check if there is room in the device to hold another packet. If
-           * not, return a non-zero value to terminate the poll.
-           */
-
-          return 1;
-        }
-    }
-
-  /* If zero is returned, the polling will continue until all connections
-   * have been examined.
-   */
-
-  return 0;
+  return 1;
 }
 
 /****************************************************************************
@@ -425,8 +350,8 @@ static int cdcecm_txpoll(FAR struct net_driver_s *dev)
  *
  * Description:
  *   After a packet has been received and dispatched to the network, it
- *   may return return with an outgoing packet.  This function checks for
- *   that case and performs the transmission if necessary.
+ *   may return with an outgoing packet.  This function checks for that
+ *   case and performs the transmission if necessary.
  *
  * Input Parameters:
  *   priv - Reference to the driver state structure
@@ -447,30 +372,6 @@ static void cdcecm_reply(struct cdcecm_driver_s *priv)
 
   if (priv->dev.d_len > 0)
     {
-      /* Update the Ethernet header with the correct MAC address */
-
-#ifdef CONFIG_NET_IPv4
-#ifdef CONFIG_NET_IPv6
-      /* Check for an outgoing IPv4 packet */
-
-      if (IFF_IS_IPv4(priv->dev.d_flags))
-#endif
-        {
-          arp_out(&priv->dev);
-        }
-#endif
-
-#ifdef CONFIG_NET_IPv6
-#ifdef CONFIG_NET_IPv4
-      /* Otherwise, it must be an outgoing IPv6 packet */
-
-      else
-#endif
-        {
-          neighbor_out(&priv->dev);
-        }
-#endif
-
       /* And send the packet */
 
       cdcecm_transmit(priv);
@@ -502,7 +403,7 @@ static void cdcecm_receive(FAR struct cdcecm_driver_s *self)
    * configuration.
    */
 
-  /* Copy the data data from the hardware to self->dev.d_buf.  Set
+  /* Copy the data from the hardware to self->dev.d_buf.  Set
    * amount of data in self->dev.d_len
    */
 
@@ -510,7 +411,7 @@ static void cdcecm_receive(FAR struct cdcecm_driver_s *self)
   self->dev.d_len = self->rdreq->xfrd;
 
 #ifdef CONFIG_NET_PKT
-  /* When packet sockets are enabled, feed the frame into the packet tap */
+  /* When packet sockets are enabled, feed the frame into the tap */
 
   pkt_input(&self->dev);
 #endif
@@ -523,11 +424,8 @@ static void cdcecm_receive(FAR struct cdcecm_driver_s *self)
       ninfo("IPv4 frame\n");
       NETDEV_RXIPV4(&self->dev);
 
-      /* Handle ARP on input, then dispatch IPv4 packet to the network
-       * layer.
-       */
+      /* Receive an IPv4 packet from the network device */
 
-      arp_ipin(&self->dev);
       ipv4_input(&self->dev);
 
       /* Check for a reply to the IPv4 packet */
@@ -553,15 +451,15 @@ static void cdcecm_receive(FAR struct cdcecm_driver_s *self)
   else
 #endif
 #ifdef CONFIG_NET_ARP
-  if (BUF->type == htons(ETHTYPE_ARP))
+  if (BUF->type == HTONS(ETHTYPE_ARP))
     {
       /* Dispatch ARP packet to the network layer */
 
-      arp_arpin(&self->dev);
+      arp_input(&self->dev);
       NETDEV_RXARP(&self->dev);
 
       /* If the above function invocation resulted in data that should be
-       * sent out on the network, the field  d_len will set to a value > 0.
+       * sent out on the network, d_len field will set to a value > 0.
        */
 
       if (self->dev.d_len > 0)
@@ -597,7 +495,7 @@ static void cdcecm_txdone(FAR struct cdcecm_driver_s *priv)
 {
   /* Check for errors and update statistics */
 
-  NETDEV_TXDONE(priv->dev);
+  NETDEV_TXDONE(&priv->dev);
 
   /* In any event, poll the network for new TX data */
 
@@ -646,9 +544,9 @@ static void cdcecm_interrupt_work(FAR void *arg)
       leave_critical_section(flags);
     }
 
-  /* Check if a packet transmission just completed.  If so, call cdcecm_txdone.
-   * This may disable further Tx interrupts if there are no pending
-   * transmissions.
+  /* Check if a packet transmission just completed.  If so, call
+   * cdcecm_txdone. This may disable further Tx interrupts if there
+   * are no pending transmissions.
    */
 
   if (self->txdone)
@@ -661,80 +559,6 @@ static void cdcecm_interrupt_work(FAR void *arg)
     }
 
   net_unlock();
-}
-
-/****************************************************************************
- * Name: cdcecm_poll_work
- *
- * Description:
- *   Perform periodic polling from the worker thread
- *
- * Input Parameters:
- *   arg - The argument passed when work_queue() as called.
- *
- * Returned Value:
- *   OK on success
- *
- * Assumptions:
- *   Run on a work queue thread.
- *
- ****************************************************************************/
-
-static void cdcecm_poll_work(FAR void *arg)
-{
-  FAR struct cdcecm_driver_s *self = (FAR struct cdcecm_driver_s *)arg;
-
-  ninfo("rxpending: %d, txdone: %d\n", self->rxpending, self->txdone);
-
-  /* Lock the network and serialize driver operations if necessary.
-   * NOTE: Serialization is only required in the case where the driver work
-   * is performed on an LP worker thread and where more than one LP worker
-   * thread has been configured.
-   */
-
-  net_lock();
-
-  /* Perform the poll.  We are always able to accept another packet, since
-   * cdcecm_transmit will just wait until the USB device write request will
-   * become available.
-   */
-
-  devif_timer(&self->dev, CDCECM_WDDELAY, cdcecm_txpoll);
-
-  /* Setup the watchdog poll timer again */
-
-  wd_start(self->txpoll, CDCECM_WDDELAY, cdcecm_poll_expiry, 1,
-           (wdparm_t)self);
-
-  net_unlock();
-}
-
-/****************************************************************************
- * Name: cdcecm_poll_expiry
- *
- * Description:
- *   Periodic timer handler.  Called from the timer interrupt handler.
- *
- * Input Parameters:
- *   argc - The number of available arguments
- *   arg  - The first argument
- *
- * Returned Value:
- *   None
- *
- * Assumptions:
- *   Runs in the context of a the timer interrupt handler.  Local
- *   interrupts are disabled by the interrupt logic.
- *
- ****************************************************************************/
-
-static void cdcecm_poll_expiry(int argc, wdparm_t arg, ...)
-{
-  FAR struct cdcecm_driver_s *priv = (FAR struct cdcecm_driver_s *)arg;
-
-  /* Schedule to perform the interrupt processing on the worker thread. */
-
-  work_queue(ETHWORK, &priv->pollwork, cdcecm_poll_work, priv, 0);
 }
 
 /****************************************************************************
@@ -761,9 +585,9 @@ static int cdcecm_ifup(FAR struct net_driver_s *dev)
     (FAR struct cdcecm_driver_s *)dev->d_private;
 
 #ifdef CONFIG_NET_IPv4
-  ninfo("Bringing up: %d.%d.%d.%d\n",
-        dev->d_ipaddr & 0xff, (dev->d_ipaddr >> 8) & 0xff,
-        (dev->d_ipaddr >> 16) & 0xff, dev->d_ipaddr >> 24);
+  ninfo("Bringing up: %u.%u.%u.%u\n",
+        ip4_addr1(dev->d_ipaddr), ip4_addr2(dev->d_ipaddr),
+        ip4_addr3(dev->d_ipaddr), ip4_addr4(dev->d_ipaddr));
 #endif
 #ifdef CONFIG_NET_IPv6
   ninfo("Bringing up: %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
@@ -771,21 +595,6 @@ static int cdcecm_ifup(FAR struct net_driver_s *dev)
         dev->d_ipv6addr[3], dev->d_ipv6addr[4], dev->d_ipv6addr[5],
         dev->d_ipv6addr[6], dev->d_ipv6addr[7]);
 #endif
-
-  /* Initialize PHYs, the Ethernet interface, and setup up Ethernet interrupts */
-
-  /* Instantiate the MAC address from priv->dev.d_mac.ether.ether_addr_octet */
-
-#ifdef CONFIG_NET_ICMPv6
-  /* Set up IPv6 multicast address filtering */
-
-  cdcecm_ipv6multicast(priv);
-#endif
-
-  /* Set and activate a timer process */
-
-  wd_start(priv->txpoll, CDCECM_WDDELAY, cdcecm_poll_expiry, 1,
-           (wdparm_t)priv);
 
   priv->bifup = true;
   return OK;
@@ -817,10 +626,6 @@ static int cdcecm_ifdown(FAR struct net_driver_s *dev)
   /* Disable the Ethernet interrupt */
 
   flags = enter_critical_section();
-
-  /* Cancel the TX poll timer and TX timeout timers */
-
-  wd_cancel(priv->txpoll);
 
   /* Put the EMAC in its reset, non-operational state.  This should be
    * a known configuration that will guarantee the cdcecm_ifup() always
@@ -929,7 +734,8 @@ static int cdcecm_txavail(FAR struct net_driver_s *dev)
  ****************************************************************************/
 
 #if defined(CONFIG_NET_MCASTGROUP) || defined(CONFIG_NET_ICMPv6)
-static int cdcecm_addmac(FAR struct net_driver_s *dev, FAR const uint8_t *mac)
+static int cdcecm_addmac(FAR struct net_driver_s *dev,
+                         FAR const uint8_t *mac)
 {
   FAR struct cdcecm_driver_s *priv =
     (FAR struct cdcecm_driver_s *)dev->d_private;
@@ -945,8 +751,8 @@ static int cdcecm_addmac(FAR struct net_driver_s *dev, FAR const uint8_t *mac)
  * Name: cdcecm_rmmac
  *
  * Description:
- *   NuttX Callback: Remove the specified MAC address from the hardware multicast
- *   address filtering
+ *   NuttX Callback: Remove the specified MAC address from the hardware
+ *   multicast address filtering
  *
  * Input Parameters:
  *   dev  - Reference to the NuttX driver state structure
@@ -969,78 +775,6 @@ static int cdcecm_rmmac(FAR struct net_driver_s *dev, FAR const uint8_t *mac)
   return OK;
 }
 #endif
-
-/****************************************************************************
- * Name: cdcecm_ipv6multicast
- *
- * Description:
- *   Configure the IPv6 multicast MAC address.
- *
- * Input Parameters:
- *   priv - A reference to the private driver state structure
- *
- * Returned Value:
- *   Zero (OK) on success; a negated errno value on failure.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_NET_ICMPv6
-static void cdcecm_ipv6multicast(FAR struct cdcecm_driver_s *priv)
-{
-  FAR struct net_driver_s *dev;
-  uint16_t tmp16;
-  uint8_t mac[6];
-
-  /* For ICMPv6, we need to add the IPv6 multicast address
-   *
-   * For IPv6 multicast addresses, the Ethernet MAC is derived by
-   * the four low-order octets OR'ed with the MAC 33:33:00:00:00:00,
-   * so for example the IPv6 address FF02:DEAD:BEEF::1:3 would map
-   * to the Ethernet MAC address 33:33:00:01:00:03.
-   *
-   * NOTES:  This appears correct for the ICMPv6 Router Solicitation
-   * Message, but the ICMPv6 Neighbor Solicitation message seems to
-   * use 33:33:ff:01:00:03.
-   */
-
-  mac[0] = 0x33;
-  mac[1] = 0x33;
-
-  dev    = &priv->dev;
-  tmp16  = dev->d_ipv6addr[6];
-  mac[2] = 0xff;
-  mac[3] = tmp16 >> 8;
-
-  tmp16  = dev->d_ipv6addr[7];
-  mac[4] = tmp16 & 0xff;
-  mac[5] = tmp16 >> 8;
-
-  ninfo("IPv6 Multicast: %02x:%02x:%02x:%02x:%02x:%02x\n",
-        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-
-  cdcecm_addmac(dev, mac);
-
-#ifdef CONFIG_NET_ICMPv6_AUTOCONF
-  /* Add the IPv6 all link-local nodes Ethernet address.  This is the
-   * address that we expect to receive ICMPv6 Router Advertisement
-   * packets.
-   */
-
-  cdcecm_addmac(dev, g_ipv6_ethallnodes.ether_addr_octet);
-
-#endif /* CONFIG_NET_ICMPv6_AUTOCONF */
-
-#ifdef CONFIG_NET_ICMPv6_ROUTER
-  /* Add the IPv6 all link-local routers Ethernet address.  This is the
-   * address that we expect to receive ICMPv6 Router Solicitation
-   * packets.
-   */
-
-  cdcecm_addmac(dev, g_ipv6_ethallrouters.ether_addr_octet);
-
-#endif /* CONFIG_NET_ICMPv6_ROUTER */
-}
-#endif /* CONFIG_NET_ICMPv6 */
 
 /****************************************************************************
  * Name: cdcecm_ioctl
@@ -1072,7 +806,7 @@ static int cdcecm_ioctl(FAR struct net_driver_s *dev, int cmd,
       /* Add cases here to support the IOCTL commands */
 
       default:
-        nerr("ERROR: Unrecognized IOCTL command: %d\n", command);
+        nerr("ERROR: Unrecognized IOCTL command: %d\n", cmd);
         return -ENOTTY;  /* Special return value for this case */
     }
 
@@ -1097,7 +831,7 @@ static void cdcecm_ep0incomplete(FAR struct usbdev_ep_s *ep,
 {
   if (req->result || req->xfrd != req->len)
     {
-      uerr("result: %hd, xfrd: %hu\n", req->result, req->xfrd);
+      uerr("result: %hd, xfrd: %zu\n", req->result, req->xfrd);
     }
 }
 
@@ -1114,7 +848,7 @@ static void cdcecm_rdcomplete(FAR struct usbdev_ep_s *ep,
 {
   FAR struct cdcecm_driver_s *self = (FAR struct cdcecm_driver_s *)ep->priv;
 
-  uinfo("buf: %p, flags 0x%hhx, len %hu, xfrd %hu, result %hd\n",
+  uinfo("buf: %p, flags 0x%hhx, len %zu, xfrd %zu, result %hd\n",
         req->buf, req->flags, req->len, req->xfrd, req->result);
 
   switch (req->result)
@@ -1123,7 +857,8 @@ static void cdcecm_rdcomplete(FAR struct usbdev_ep_s *ep,
         {
           DEBUGASSERT(!self->rxpending);
           self->rxpending = true;
-          work_queue(ETHWORK, &self->irqwork, cdcecm_interrupt_work, self, 0);
+          work_queue(ETHWORK, &self->irqwork,
+                     cdcecm_interrupt_work, self, 0);
         }
         break;
 
@@ -1154,7 +889,7 @@ static void cdcecm_wrcomplete(FAR struct usbdev_ep_s *ep,
   FAR struct cdcecm_driver_s *self = (FAR struct cdcecm_driver_s *)ep->priv;
   int rc;
 
-  uinfo("buf: %p, flags 0x%hhx, len %hu, xfrd %hu, result %hd\n",
+  uinfo("buf: %p, flags 0x%hhx, len %zu, xfrd %zu, result %hd\n",
         req->buf, req->flags, req->len, req->xfrd, req->result);
 
   /* The single USB device write request is available for upcoming
@@ -1175,65 +910,12 @@ static void cdcecm_wrcomplete(FAR struct usbdev_ep_s *ep,
 }
 
 /****************************************************************************
- * Name: cdcecm_allocreq
- *
- * Description:
- *   Allocate a request instance along with its buffer
- *
- ****************************************************************************/
-
-static struct usbdev_req_s *cdcecm_allocreq(FAR struct usbdev_ep_s *ep,
-                                            uint16_t len)
-{
-  FAR struct usbdev_req_s *req;
-
-  req = EP_ALLOCREQ(ep);
-
-  if (req != NULL)
-    {
-      req->len   = len;
-      req->buf   = EP_ALLOCBUFFER(ep, len);
-      req->flags = USBDEV_REQFLAGS_NULLPKT;
-
-      if (req->buf == NULL)
-        {
-          EP_FREEREQ(ep, req);
-          req = NULL;
-        }
-    }
-
-  return req;
-}
-
-/****************************************************************************
- * Name: cdcecm_freereq
- *
- * Description:
- *   Free a request instance along with its buffer
- *
- ****************************************************************************/
-
-static void cdcecm_freereq(FAR struct usbdev_ep_s *ep,
-                           FAR struct usbdev_req_s *req)
-{
-  if (ep != NULL && req != NULL)
-    {
-      if (req->buf != NULL)
-        {
-          EP_FREEBUFFER(ep, req->buf);
-        }
-
-      EP_FREEREQ(ep, req);
-    }
-}
-
-/******************************************************************************
  * Name: cdcecm_resetconfig
  *
  * Description:
  *   Mark the device as not configured and disable all endpoints.
  *
- ******************************************************************************/
+ ****************************************************************************/
 
 static void cdcecm_resetconfig(FAR struct cdcecm_driver_s *self)
 {
@@ -1259,7 +941,7 @@ static void cdcecm_resetconfig(FAR struct cdcecm_driver_s *self)
     }
 }
 
-/******************************************************************************
+/****************************************************************************
  * Name: cdcecm_setconfig
  *
  *   Set the device configuration by allocating and configuring endpoints and
@@ -1269,7 +951,7 @@ static void cdcecm_resetconfig(FAR struct cdcecm_driver_s *self)
 
 static int cdcecm_setconfig(FAR struct cdcecm_driver_s *self, uint8_t config)
 {
-  struct usb_epdesc_s epdesc;
+  struct usb_ss_epdesc_s epdesc;
   int ret = OK;
 
   if (config == self->config)
@@ -1289,8 +971,9 @@ static int cdcecm_setconfig(FAR struct cdcecm_driver_s *self, uint8_t config)
       return -EINVAL;
     }
 
-  cdcecm_mkepdesc(CDCECM_EP_INTIN_IDX, &epdesc, &self->devinfo, false);
-  ret = EP_CONFIGURE(self->epint, &epdesc, false);
+  cdcecm_mkepdesc(CDCECM_EP_INTIN_IDX,
+                  &epdesc.epdesc, &self->devinfo, self->usbdev.speed);
+  ret = EP_CONFIGURE(self->epint, &epdesc.epdesc, false);
 
   if (ret < 0)
     {
@@ -1299,9 +982,9 @@ static int cdcecm_setconfig(FAR struct cdcecm_driver_s *self, uint8_t config)
 
   self->epint->priv = self;
 
-  bool is_high_speed = (self->usbdev.speed == USB_SPEED_HIGH);
-  cdcecm_mkepdesc(CDCECM_EP_BULKIN_IDX, &epdesc, &self->devinfo, is_high_speed);
-  ret = EP_CONFIGURE(self->epbulkin, &epdesc, false);
+  cdcecm_mkepdesc(CDCECM_EP_BULKIN_IDX,
+                  &epdesc.epdesc, &self->devinfo, self->usbdev.speed);
+  ret = EP_CONFIGURE(self->epbulkin, &epdesc.epdesc, false);
 
   if (ret < 0)
     {
@@ -1310,8 +993,9 @@ static int cdcecm_setconfig(FAR struct cdcecm_driver_s *self, uint8_t config)
 
   self->epbulkin->priv = self;
 
-  cdcecm_mkepdesc(CDCECM_EP_BULKOUT_IDX, &epdesc, &self->devinfo, is_high_speed);
-  ret = EP_CONFIGURE(self->epbulkout, &epdesc, true);
+  cdcecm_mkepdesc(CDCECM_EP_BULKOUT_IDX,
+                  &epdesc.epdesc, &self->devinfo, self->usbdev.speed);
+  ret = EP_CONFIGURE(self->epbulkout, &epdesc.epdesc, true);
 
   if (ret < 0)
     {
@@ -1355,7 +1039,7 @@ error:
   return ret;
 }
 
-/******************************************************************************
+/****************************************************************************
  * Name: cdcecm_setinterface
  *
  ****************************************************************************/
@@ -1377,7 +1061,8 @@ static int cdcecm_setinterface(FAR struct cdcecm_driver_s *self,
 
 static int cdcecm_mkstrdesc(uint8_t id, FAR struct usb_strdesc_s *strdesc)
 {
-  const char *str;
+  FAR uint8_t *data = (FAR uint8_t *)(strdesc + 1);
+  FAR const char *str;
   int len;
   int ndata;
   int i;
@@ -1389,10 +1074,10 @@ static int cdcecm_mkstrdesc(uint8_t id, FAR struct usb_strdesc_s *strdesc)
       {
         /* Descriptor 0 is the language id */
 
-        strdesc->len     = 4;
-        strdesc->type    = USB_DESC_TYPE_STRING;
-        strdesc->data[0] = LSBYTE(CDCECM_STR_LANGUAGE);
-        strdesc->data[1] = MSBYTE(CDCECM_STR_LANGUAGE);
+        strdesc->len  = 4;
+        strdesc->type = USB_DESC_TYPE_STRING;
+        data[0] = LSBYTE(CDCECM_STR_LANGUAGE);
+        data[1] = MSBYTE(CDCECM_STR_LANGUAGE);
         return 4;
       }
 
@@ -1405,7 +1090,11 @@ static int cdcecm_mkstrdesc(uint8_t id, FAR struct usb_strdesc_s *strdesc)
       break;
 
     case CDCECM_SERIALSTRID:
+#ifdef CONFIG_BOARD_USBDEV_SERIALSTR
+      str = board_usbdev_serialstr();
+#else
       str = "0";
+#endif
       break;
 
     case CDCECM_CONFIGSTRID:
@@ -1434,14 +1123,112 @@ static int cdcecm_mkstrdesc(uint8_t id, FAR struct usb_strdesc_s *strdesc)
 
   for (i = 0, ndata = 0; i < len; i++, ndata += 2)
     {
-      strdesc->data[ndata]     = str[i];
-      strdesc->data[ndata + 1] = 0;
+      data[ndata]     = str[i];
+      data[ndata + 1] = 0;
     }
 
   strdesc->len  = ndata + 2;
   strdesc->type = USB_DESC_TYPE_STRING;
   return strdesc->len;
 }
+
+/****************************************************************************
+ * Name: cdcecm_mkepcompdesc
+ *
+ * Description:
+ *   Construct the endpoint companion descriptor
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_USBDEV_SUPERSPEED
+static void cdcecm_mkepcompdesc(int epidx,
+                                FAR struct usb_ss_epcompdesc_s *epcompdesc)
+{
+    switch (epidx)
+    {
+    case CDCECM_EP_INTIN_IDX:  /* Interrupt IN endpoint */
+      {
+        epcompdesc->len  = USB_SIZEOF_SS_EPCOMPDESC;                      /* Descriptor length */
+        epcompdesc->type = USB_DESC_TYPE_ENDPOINT_COMPANION;              /* Descriptor type */
+
+        if (CONFIG_CDCECM_EPINTIN_MAXBURST >= USB_SS_INT_EP_MAXBURST)
+          {
+            epcompdesc->mxburst = USB_SS_INT_EP_MAXBURST - 1;
+          }
+        else
+          {
+            epcompdesc->mxburst = CONFIG_CDCECM_EPINTIN_MAXBURST;
+          }
+
+        epcompdesc->attr      = 0;
+        epcompdesc->wbytes[0] = LSBYTE((epcompdesc->mxburst + 1) *
+                                       CONFIG_CDCECM_EPINTIN_SSSIZE);
+        epcompdesc->wbytes[1] = MSBYTE((epcompdesc->mxburst + 1) *
+                                       CONFIG_CDCECM_EPINTIN_SSSIZE);
+      }
+      break;
+
+    case CDCECM_EP_BULKOUT_IDX:
+      {
+        epcompdesc->len  = USB_SIZEOF_SS_EPCOMPDESC;                      /* Descriptor length */
+        epcompdesc->type = USB_DESC_TYPE_ENDPOINT_COMPANION;              /* Descriptor type */
+
+        if (CONFIG_CDCECM_EPBULKOUT_MAXBURST >= USB_SS_BULK_EP_MAXBURST)
+          {
+            epcompdesc->mxburst = USB_SS_BULK_EP_MAXBURST - 1;
+          }
+        else
+          {
+            epcompdesc->mxburst = CONFIG_CDCECM_EPBULKOUT_MAXBURST;
+          }
+
+        if (CONFIG_CDCECM_EPBULKOUT_MAXSTREAM > USB_SS_BULK_EP_MAXSTREAM)
+          {
+            epcompdesc->attr = USB_SS_BULK_EP_MAXSTREAM;
+          }
+        else
+          {
+            epcompdesc->attr = CONFIG_CDCECM_EPBULKOUT_MAXSTREAM;
+          }
+
+        epcompdesc->wbytes[0] = 0;
+        epcompdesc->wbytes[1] = 0;
+      }
+      break;
+
+    case CDCECM_EP_BULKIN_IDX:
+      {
+        epcompdesc->len  = USB_SIZEOF_SS_EPCOMPDESC;                      /* Descriptor length */
+        epcompdesc->type = USB_DESC_TYPE_ENDPOINT_COMPANION;              /* Descriptor type */
+
+        if (CONFIG_CDCECM_EPBULKIN_MAXBURST >= USB_SS_BULK_EP_MAXBURST)
+          {
+            epcompdesc->mxburst = USB_SS_BULK_EP_MAXBURST - 1;
+          }
+        else
+          {
+            epcompdesc->mxburst = CONFIG_CDCECM_EPBULKIN_MAXBURST;
+          }
+
+        if (CONFIG_CDCECM_EPBULKIN_MAXSTREAM > USB_SS_BULK_EP_MAXSTREAM)
+          {
+            epcompdesc->attr = USB_SS_BULK_EP_MAXSTREAM;
+          }
+        else
+          {
+            epcompdesc->attr = CONFIG_CDCECM_EPBULKIN_MAXSTREAM;
+          }
+
+        epcompdesc->wbytes[0] = 0;
+        epcompdesc->wbytes[1] = 0;
+      }
+      break;
+
+    default:
+      break;
+    }
+}
+#endif
 
 /****************************************************************************
  * Name: cdcecm_mkepdesc
@@ -1451,25 +1238,47 @@ static int cdcecm_mkstrdesc(uint8_t id, FAR struct usb_strdesc_s *strdesc)
  *
  ****************************************************************************/
 
-static void cdcecm_mkepdesc(int epidx,
-                            FAR struct usb_epdesc_s *epdesc,
-                            FAR struct usbdev_devinfo_s *devinfo,
-                            bool hispeed)
+static int cdcecm_mkepdesc(int epidx,
+                           FAR struct usb_epdesc_s *epdesc,
+                           FAR struct usbdev_devinfo_s *devinfo,
+                           uint8_t speed)
 {
   uint16_t intin_mxpktsz   = CONFIG_CDCECM_EPINTIN_FSSIZE;
   uint16_t bulkout_mxpktsz = CONFIG_CDCECM_EPBULKOUT_FSSIZE;
   uint16_t bulkin_mxpktsz  = CONFIG_CDCECM_EPBULKIN_FSSIZE;
+  int len = sizeof(struct usb_epdesc_s);
 
-#ifdef CONFIG_USBDEV_DUALSPEED
-  if (hispeed)
+#ifdef CONFIG_USBDEV_SUPERSPEED
+  if (speed == USB_SPEED_SUPER ||
+      speed == USB_SPEED_SUPER_PLUS ||
+      speed == USB_SPEED_UNKNOWN)
     {
+      /* Maximum packet size (super speed) */
+
+      intin_mxpktsz   = CONFIG_CDCECM_EPINTIN_SSSIZE;
+      bulkout_mxpktsz = CONFIG_CDCECM_EPBULKOUT_SSSIZE;
+      bulkin_mxpktsz  = CONFIG_CDCECM_EPBULKIN_SSSIZE;
+      len += sizeof(struct usb_ss_epcompdesc_s);
+    }
+  else
+#endif
+#ifdef CONFIG_USBDEV_DUALSPEED
+  if (speed == USB_SPEED_HIGH)
+    {
+      /* Maximum packet size (high speed) */
+
       intin_mxpktsz   = CONFIG_CDCECM_EPINTIN_HSSIZE;
       bulkout_mxpktsz = CONFIG_CDCECM_EPBULKOUT_HSSIZE;
       bulkin_mxpktsz  = CONFIG_CDCECM_EPBULKIN_HSSIZE;
     }
 #else
-  UNUSED(hispeed);
+  UNUSED(speed);
 #endif
+
+  if (epdesc == NULL)
+    {
+      return len;
+    }
 
   epdesc->len  = USB_SIZEOF_EPDESC;            /* Descriptor length */
   epdesc->type = USB_DESC_TYPE_ENDPOINT;       /* Descriptor type */
@@ -1510,8 +1319,18 @@ static void cdcecm_mkepdesc(int epidx,
         break;
 
       default:
-        DEBUGASSERT(false);
+        DEBUGPANIC();
     }
+
+#ifdef CONFIG_USBDEV_SUPERSPEED
+  if (speed == USB_SPEED_SUPER || speed == USB_SPEED_SUPER_PLUS)
+    {
+      epdesc++;
+      cdcecm_mkepcompdesc(epidx, (FAR struct usb_ss_epcompdesc_s *)epdesc);
+    }
+#endif
+
+  return len;
 }
 
 /****************************************************************************
@@ -1523,17 +1342,28 @@ static void cdcecm_mkepdesc(int epidx,
  ****************************************************************************/
 
 static int16_t cdcecm_mkcfgdesc(FAR uint8_t *desc,
-                                FAR struct usbdev_devinfo_s *devinfo)
+                                FAR struct usbdev_devinfo_s *devinfo,
+                                uint8_t speed, uint8_t type)
 {
+#ifndef CONFIG_CDCECM_COMPOSITE
   FAR struct usb_cfgdesc_s *cfgdesc = NULL;
+#endif
   int16_t len = 0;
+  int ret;
+
+  /* Check for switches between high and full speed */
+
+  if (type == USB_DESC_TYPE_OTHERSPEEDCONFIG && speed < USB_SPEED_SUPER)
+    {
+      speed = speed == USB_SPEED_HIGH ? USB_SPEED_FULL : USB_SPEED_HIGH;
+    }
 
 #ifndef CONFIG_CDCECM_COMPOSITE
   if (desc)
     {
       cfgdesc = (FAR struct usb_cfgdesc_s *)desc;
       cfgdesc->len         = USB_SIZEOF_CFGDESC;
-      cfgdesc->type        = USB_DESC_TYPE_CONFIG;
+      cfgdesc->type        = type;
       cfgdesc->ninterfaces = CDCECM_NINTERFACES;
       cfgdesc->cfgvalue    = CDCECM_CONFIGID;
       cfgdesc->icfg        = devinfo->strbase + CDCECM_CONFIGSTRID;
@@ -1646,21 +1476,21 @@ static int16_t cdcecm_mkcfgdesc(FAR uint8_t *desc,
 
   len += SIZEOF_ECM_FUNCDESC;
 
+  ret = cdcecm_mkepdesc(CDCECM_EP_INTIN_IDX,
+                        (FAR struct usb_epdesc_s *)desc,
+                        devinfo, speed);
   if (desc)
     {
-      FAR struct usb_epdesc_s *epdesc = (FAR struct usb_epdesc_s *)desc;
-
-      cdcecm_mkepdesc(CDCECM_EP_INTIN_IDX, epdesc, devinfo, false);
-      desc += USB_SIZEOF_EPDESC;
+      desc += ret;
     }
 
-  len += USB_SIZEOF_EPDESC;
+  len += ret;
 
   /* Data Class Interface */
 
   if (desc)
     {
-      FAR struct usb_ifdesc_s *ifdesc = (FAR struct usb_ifdesc_s *)desc;
+      FAR struct usb_ifdesc_s *ifdesc;
 
       ifdesc = (FAR struct usb_ifdesc_s *)desc;
       ifdesc->len      = USB_SIZEOF_IFDESC;
@@ -1680,7 +1510,7 @@ static int16_t cdcecm_mkcfgdesc(FAR uint8_t *desc,
 
   if (desc)
     {
-      FAR struct usb_ifdesc_s *ifdesc = (FAR struct usb_ifdesc_s *)desc;
+      FAR struct usb_ifdesc_s *ifdesc;
 
       ifdesc = (FAR struct usb_ifdesc_s *)desc;
       ifdesc->len      = USB_SIZEOF_IFDESC;
@@ -1698,43 +1528,39 @@ static int16_t cdcecm_mkcfgdesc(FAR uint8_t *desc,
 
   len += USB_SIZEOF_IFDESC;
 
-  #ifdef CONFIG_USBDEV_DUALSPEED
-  bool is_high_speed = USB_SPEED_HIGH;
-  #else
-  bool is_high_speed = USB_SPEED_LOW;
-  #endif
-
+  ret = cdcecm_mkepdesc(CDCECM_EP_BULKIN_IDX,
+                        (FAR struct usb_epdesc_s *)desc,
+                        devinfo, speed);
   if (desc)
     {
-      FAR struct usb_epdesc_s *epdesc = (FAR struct usb_epdesc_s *)desc;
-
-      cdcecm_mkepdesc(CDCECM_EP_BULKIN_IDX, epdesc, devinfo, is_high_speed);
-      desc += USB_SIZEOF_EPDESC;
+      desc += ret;
     }
 
-  len += USB_SIZEOF_EPDESC;
+  len += ret;
 
+  ret = cdcecm_mkepdesc(CDCECM_EP_BULKOUT_IDX,
+                        (FAR struct usb_epdesc_s *)desc,
+                        devinfo, speed);
   if (desc)
     {
-      FAR struct usb_epdesc_s *epdesc = (FAR struct usb_epdesc_s *)desc;
-
-      cdcecm_mkepdesc(CDCECM_EP_BULKOUT_IDX, epdesc, devinfo, is_high_speed);
-      desc += USB_SIZEOF_EPDESC;
+      desc += ret;
     }
 
-  len += USB_SIZEOF_EPDESC;
+  len += ret;
 
+#ifndef CONFIG_CDCECM_COMPOSITE
   if (cfgdesc)
     {
       cfgdesc->totallen[0] = LSBYTE(len);
       cfgdesc->totallen[1] = MSBYTE(len);
     }
+#endif
 
   DEBUGASSERT(len <= CDCECM_MXDESCLEN);
   return len;
 }
 
-/*******************************************************************************
+/****************************************************************************
  * Name: cdcecm_getdescriptor
  *
  * Description:
@@ -1752,10 +1578,10 @@ static int16_t cdcecm_mkcfgdesc(FAR uint8_t *desc,
  *   The size in bytes of the requested USB Descriptor or a negated errno in
  *   case of failure.
  *
- ******************************************************************************/
+ ****************************************************************************/
 
-static int cdcecm_getdescriptor(FAR struct cdcecm_driver_s *self, uint8_t type,
-                                uint8_t index, FAR void *desc)
+static int cdcecm_getdescriptor(FAR struct cdcecm_driver_s *self,
+                                uint8_t type, uint8_t index, FAR void *desc)
 {
   uinfo("type: 0x%02hhx, index: 0x%02hhx\n", type, index);
 
@@ -1764,15 +1590,18 @@ static int cdcecm_getdescriptor(FAR struct cdcecm_driver_s *self, uint8_t type,
 #ifndef CONFIG_CDCECM_COMPOSITE
     case USB_DESC_TYPE_DEVICE:
       {
-        memcpy(desc, &g_devdesc, sizeof(g_devdesc));
-        return (int)sizeof(g_devdesc);
+        return usbdev_copy_devdesc(desc, &g_devdesc, self->usbdev.speed);
       }
       break;
 #endif
 
+#ifdef CONFIG_USBDEV_DUALSPEED
+    case USB_DESC_TYPE_OTHERSPEEDCONFIG:
+#endif /* CONFIG_USBDEV_DUALSPEED */
     case USB_DESC_TYPE_CONFIG:
       {
-        return cdcecm_mkcfgdesc((FAR uint8_t *)desc, &self->devinfo);
+        return cdcecm_mkcfgdesc((FAR uint8_t *)desc, &self->devinfo,
+                                self->usbdev.speed, type);
       }
       break;
 
@@ -1810,11 +1639,13 @@ static int cdcecm_bind(FAR struct usbdevclass_driver_s *driver,
 
   uinfo("\n");
 
+#ifndef CONFIG_CDCECM_COMPOSITE
   dev->ep0->priv = self;
+#endif
 
   /* Preallocate control request */
 
-  self->ctrlreq = cdcecm_allocreq(dev->ep0, CDCECM_MXDESCLEN);
+  self->ctrlreq = usbdev_allocreq(dev->ep0, CDCECM_MXDESCLEN);
 
   if (self->ctrlreq == NULL)
     {
@@ -1850,8 +1681,8 @@ static int cdcecm_bind(FAR struct usbdevclass_driver_s *driver,
 
   /* Pre-allocate read requests.  The buffer size is one full packet. */
 
-  self->rdreq = cdcecm_allocreq(self->epbulkout,
-                                CONFIG_NET_ETH_PKTSIZE + CONFIG_NET_GUARDSIZE);
+  self->rdreq = usbdev_allocreq(self->epbulkout,
+                  CONFIG_NET_ETH_PKTSIZE + CONFIG_NET_GUARDSIZE);
   if (self->rdreq == NULL)
     {
       uerr("Out of memory\n");
@@ -1863,8 +1694,8 @@ static int cdcecm_bind(FAR struct usbdevclass_driver_s *driver,
 
   /* Pre-allocate a single write request.  Buffer size is one full packet. */
 
-  self->wrreq = cdcecm_allocreq(self->epbulkin,
-                                CONFIG_NET_ETH_PKTSIZE + CONFIG_NET_GUARDSIZE);
+  self->wrreq = usbdev_allocreq(self->epbulkin,
+                  CONFIG_NET_ETH_PKTSIZE + CONFIG_NET_GUARDSIZE);
   if (self->wrreq == NULL)
     {
       uerr("Out of memory\n");
@@ -1941,7 +1772,7 @@ static void cdcecm_unbind(FAR struct usbdevclass_driver_s *driver,
 
   if (self->ctrlreq != NULL)
     {
-      cdcecm_freereq(dev->ep0, self->ctrlreq);
+      usbdev_freereq(dev->ep0, self->ctrlreq);
       self->ctrlreq = NULL;
     }
 
@@ -1951,7 +1782,7 @@ static void cdcecm_unbind(FAR struct usbdevclass_driver_s *driver,
 
   if (self->rdreq != NULL)
     {
-      cdcecm_freereq(self->epbulkout, self->rdreq);
+      usbdev_freereq(self->epbulkout, self->rdreq);
       self->rdreq = NULL;
     }
 
@@ -1969,7 +1800,7 @@ static void cdcecm_unbind(FAR struct usbdevclass_driver_s *driver,
 
   if (self->wrreq != NULL)
     {
-      cdcecm_freereq(self->epbulkin, self->wrreq);
+      usbdev_freereq(self->epbulkin, self->wrreq);
       self->wrreq = NULL;
     }
 
@@ -2009,6 +1840,7 @@ static int cdcecm_setup(FAR struct usbdevclass_driver_s *driver,
               uint8_t descindex = ctrl->value[0];
               uint8_t desctype  = ctrl->value[1];
 
+              self->usbdev.speed = dev->speed;
               ret = cdcecm_getdescriptor(self, desctype, descindex,
                                          self->ctrlreq->buf);
             }
@@ -2035,12 +1867,12 @@ static int cdcecm_setup(FAR struct usbdevclass_driver_s *driver,
 
             /* SetEthernetPacketFilter is the only required CDCECM subclass
              * specific request, but it is still ok to always operate in
-             * promiscuous mode and rely on the host to do the filtering.  This
-             * is especially true for our case:  A simulated point-to-point
-             * connection.
+             * promiscuous mode and rely on the host to do the filtering.
+             * This is especially true for our case:
+             *   A simulated point-to-point connection.
              */
 
-            uinfo("ECM_SET_PACKET_FILTER. wValue: 0x%04hx, wIndex: 0x%04hx\n",
+            uinfo("ECM_SET_PACKET_FILTER wValue: 0x%04hx, wIndex: 0x%04hx\n",
                   GETUINT16(ctrl->value), GETUINT16(ctrl->index));
 
             ret = OK;
@@ -2063,9 +1895,12 @@ static int cdcecm_setup(FAR struct usbdevclass_driver_s *driver,
       ctrlreq->len   = MIN(len, ret);
       ctrlreq->flags = USBDEV_REQFLAGS_NULLPKT;
 
+#ifndef CONFIG_CDCECM_COMPOSITE
       ret = EP_SUBMIT(dev->ep0, ctrlreq);
       uinfo("EP_SUBMIT ret: %d\n", ret);
-
+#else
+      ret = composite_ep0submit(driver, dev, ctrlreq, ctrl);
+#endif
       if (ret < 0)
         {
           ctrlreq->result = OK;
@@ -2093,7 +1928,8 @@ static void cdcecm_disconnect(FAR struct usbdevclass_driver_s *driver,
  *
  ****************************************************************************/
 
-static int cdcecm_classobject(int minor, FAR struct usbdev_devinfo_s *devinfo,
+static int cdcecm_classobject(int minor,
+                              FAR struct usbdev_devinfo_s *devinfo,
                               FAR struct usbdevclass_driver_s **classdev)
 {
   FAR struct cdcecm_driver_s *self;
@@ -2110,7 +1946,7 @@ static int cdcecm_classobject(int minor, FAR struct usbdev_devinfo_s *devinfo,
 
   /* Network device initialization */
 
-  self->dev.d_buf     = self->pktbuf;
+  self->dev.d_buf     = (FAR uint8_t *)self->pktbuf;
   self->dev.d_ifup    = cdcecm_ifup;     /* I/F up (new IP address) callback */
   self->dev.d_ifdown  = cdcecm_ifdown;   /* I/F down callback */
   self->dev.d_txavail = cdcecm_txavail;  /* New TX data callback */
@@ -2121,17 +1957,13 @@ static int cdcecm_classobject(int minor, FAR struct usbdev_devinfo_s *devinfo,
 #ifdef CONFIG_NETDEV_IOCTL
   self->dev.d_ioctl   = cdcecm_ioctl;    /* Handle network IOCTL commands */
 #endif
-  self->dev.d_private = (FAR void *)self; /* Used to recover private state from dev */
-
-  /* Create a watchdog for timing polling for and timing of transmissions */
-
-  self->txpoll        = wd_create();   /* Create periodic poll timer */
-
-  DEBUGASSERT(self->txpoll != NULL);
+  self->dev.d_private = self;            /* Used to recover private state from dev */
 
   /* USB device initialization */
 
-#ifdef CONFIG_USBDEV_DUALSPEED
+#if defined(CONFIG_USBDEV_SUPERSPEED)
+  self->usbdev.speed  = USB_SPEED_SUPER;
+#elif defined(CONFIG_USBDEV_DUALSPEED)
   self->usbdev.speed  = USB_SPEED_HIGH;
 #else
   self->usbdev.speed  = USB_SPEED_FULL;
@@ -2160,10 +1992,7 @@ static int cdcecm_classobject(int minor, FAR struct usbdev_devinfo_s *devinfo,
   if (ret < 0)
     {
       nerr("netdev_register failed. ret: %d\n", ret);
-      return ret;
     }
-
-  self->registered = true;
 
   *classdev = (FAR struct usbdevclass_driver_s *)self;
   return ret;
@@ -2180,46 +2009,20 @@ static int cdcecm_classobject(int minor, FAR struct usbdev_devinfo_s *devinfo,
  *
  * Input Parameters:
  *   There is one parameter, it differs in typing depending upon whether the
- *   CDC/ECM driver is an internal part of a composite device, or a standalone
- *   USB driver:
+ *   CDC/ECM driver is an internal part of a composite device, or a
+ *   standalone USB driver:
  *
- *     classdev - The class object returned by cdcacm_classobject()
- *     handle   - The opaque handle representing the class object returned by
- *                a previous call to cdcacm_initialize().
+ *     classdev - The class object returned by cdcecm_classobject()
  *
  * Returned Value:
  *   None
  *
  ****************************************************************************/
 
-#ifdef CONFIG_CDCECM_COMPOSITE
 void cdcecm_uninitialize(FAR struct usbdevclass_driver_s *classdev)
-#else
-void cdcecm_uninitialize(FAR void *handle)
-#endif
 {
-#ifdef CONFIG_CDCECM_COMPOSITE
   FAR struct cdcecm_driver_s *self = (FAR struct cdcecm_driver_s *)classdev;
-#else
-  FAR struct cdcecm_driver_s *self = (FAR struct cdcecm_driver_s *)handle;
-#endif
   int ret;
-
-#ifdef CONFIG_CDCECM_COMPOSITE
-  /* Check for pass 2 uninitialization.  We did most of the work on the
-   * first pass uninitialization.
-   */
-
-  if (!self->registered)
-    {
-      /* In this second and final pass, all that remains to be done is to
-       * free the memory resources.
-       */
-
-      kmm_free(self);
-      return;
-    }
-#endif
 
   /* Un-register the CDC/ECM netdev device */
 
@@ -2229,33 +2032,13 @@ void cdcecm_uninitialize(FAR void *handle)
       nerr("ERROR: netdev_unregister failed. ret: %d\n", ret);
     }
 
-  /* For the case of the composite driver, there is a two pass
-   * uninitialization sequence.  We cannot yet free the driver structure.
-   * We will do that on the second pass.  We mark the fact that we have
-   * already uninitialized by setting the registered flag to false.
-   * If/when we are called again, then we will free the memory resources.
-   */
-
-  self->registered = false; /* Successfully unregistered netdev */
-
-  /* Unregister the driver (unless we are a part of a composite device).  The
-   * device unregister logic will (1) return all of the requests to us then
-   * (2) call the unbind method.
-   *
-   * The same thing will happen in the composite case except that: (1) the
-   * composite driver will call usbdev_unregister() which will (2) return the
-   * requests for all members of the composite, and (3) call the unbind
-   * method in the composite device which will (4) call the unbind method
-   * for this device.
-   */
-
 #ifndef CONFIG_CDCECM_COMPOSITE
   usbdev_unregister(&self->usbdev);
+#endif
 
   /* And free the driver structure */
 
   kmm_free(self);
-#endif
 }
 
 /****************************************************************************
@@ -2266,8 +2049,8 @@ void cdcecm_uninitialize(FAR void *handle)
  * Name: cdcecm_initialize
  *
  * Description:
- *   Register CDC/ECM USB device interface. Register the corresponding network
- *   driver to NuttX and bring up the network.
+ *   Register CDC/ECM USB device interface. Register the corresponding
+ *   network driver to NuttX and bring up the network.
  *
  * Input Parameters:
  *   minor - Device minor number.
@@ -2348,13 +2131,9 @@ void cdcecm_get_composite_devdesc(struct composite_devdesc_s *dev)
   dev->nconfigs     = CDCECM_NCONFIGS; /* Number of configurations supported  */
   dev->configid     = CDCECM_CONFIGID; /* The only supported configuration ID */
 
-  /* Let the construction function calculate the size of the config descriptor */
+  /* Let the construction function calculate the size of config descriptor */
 
-#ifdef CONFIG_USBDEV_DUALSPEED
   dev->cfgdescsize  = cdcecm_mkcfgdesc(NULL, NULL, USB_SPEED_UNKNOWN, 0);
-#else
-  dev->cfgdescsize  = cdcecm_mkcfgdesc(NULL, NULL);
-#endif
 
   /* Board-specific logic must provide the device minor */
 

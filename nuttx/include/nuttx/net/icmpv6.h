@@ -1,15 +1,11 @@
 /****************************************************************************
  * include/nuttx/net/icmpv6.h
- * Header file for the NuttX ICMPv6 stack.
  *
- *   Copyright (C) 2007-2009, 2012, 2014, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * This logic was leveraged from uIP which also has a BSD-style license:
- *
- *   Author Adam Dunkels <adam@dunkels.com>
- *   Copyright (c) 2001-2003, Adam Dunkels.
- *   All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2007-2009, 2012, 2014, 2017 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2001-2003, Adam Dunkels. All rights reserved.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-FileContributor: Adam Dunkels <adam@dunkels.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,8 +34,8 @@
  *
  ****************************************************************************/
 
-#ifndef __INCLUDE_NUTTX_NET_ICMPv6_H
-#define __INCLUDE_NUTTX_NET_ICMPv6_H
+#ifndef __INCLUDE_NUTTX_NET_ICMPV6_H
+#define __INCLUDE_NUTTX_NET_ICMPV6_H
 
 /****************************************************************************
  * Included Files
@@ -101,11 +97,12 @@
 
 /* Option types */
 
-#define ICMPv6_OPT_SRCLLADDR  1 /* Source Link-Layer Address */
-#define ICMPv6_OPT_TGTLLADDR  2 /* Target Link-Layer Address */
-#define ICMPv6_OPT_PREFIX     3 /* Prefix Information */
-#define ICMPv6_OPT_REDIRECT   4 /* Redirected Header */
-#define ICMPv6_OPT_MTU        5 /* MTU */
+#define ICMPv6_OPT_SRCLLADDR  1  /* Source Link-Layer Address */
+#define ICMPv6_OPT_TGTLLADDR  2  /* Target Link-Layer Address */
+#define ICMPv6_OPT_PREFIX     3  /* Prefix Information */
+#define ICMPv6_OPT_REDIRECT   4  /* Redirected Header */
+#define ICMPv6_OPT_MTU        5  /* MTU */
+#define ICMPv6_OPT_RDNSS      25 /* DNS */
 
 /* ICMPv6 Neighbor Advertisement message flags */
 
@@ -121,14 +118,29 @@
 /* Prefix option flags */
 
 #define ICMPv6_PRFX_FLAG_L    (1 << 7) /* On-link flag */
-#define ICMPv6_PRFX_FLAG_A    (1 << 6) /* Autonomous address-configuration flag
+#define ICMPv6_PRFX_FLAG_A    (1 << 6) /* Autonomous address-configuration flag */
 
-/* Return with size of an option (in full octects) using the size of a link
+/* Return with size of an option (in full octets) using the size of a link
  * layer address taking into account a header of the two-bytes.
  */
 
 #define ICMPv6_OPT_SIZE(a)    ((a) > 0 ? ((a) + 2 + 7) & ~7 : 0)
 #define ICMPv6_OPT_OCTECTS(a) ((a) > 0 ? ((a) + 2 + 7) >> 3 : 0)
+
+/* Codes for Destination Unreachable */
+
+#define ICMPv6_NOROUTE        0
+#define ICMPv6_ADM_PROHIBITED 1
+#define ICMPv6_NOT_NEIGHBOUR  2
+#define ICMPv6_ADDR_UNREACH   3
+#define ICMPv6_PORT_UNREACH   4
+#define ICMPv6_POLICY_FAIL    5
+#define ICMPv6_REJECT_ROUTE   6
+
+/* Codes for Time Exceeded */
+
+#define ICMPV6_EXC_HOPLIMIT   0
+#define ICMPV6_EXC_FRAGTIME   1
 
 /****************************************************************************
  * Public Type Definitions
@@ -145,6 +157,8 @@ struct icmpv6_hdr_s
   /* Data following the ICMP header contains the data specific to the
    * message type indicated by the Type and Code fields.
    */
+
+  uint16_t data[2];
 };
 
 /* The ICMPv6 and IPv6 headers */
@@ -240,8 +254,8 @@ struct icmpv6_router_advertise_s
   uint8_t  hoplimit;         /* Current hop limit */
   uint8_t  flags;            /* See ICMPv6_RADV_FLAG_* definitions */
   uint16_t lifetime;         /* Router lifetime */
-  uint32_t reachable;        /* Reachable time */
-  uint32_t retrans;          /* Retransmission timer */
+  uint16_t reachable[2];     /* Reachable time */
+  uint16_t retrans[2];       /* Retransmission timer */
                              /* Options begin here */
 };
 
@@ -250,7 +264,7 @@ struct icmpv6_router_advertise_s
 
 /* This the message format for the ICMPv6 Echo Request message */
 
-struct icmpv6_echo_request_s
+begin_packed_struct struct icmpv6_echo_request_s
 {
   uint8_t  type;             /* Message Type: ICMPv6_ECHO_REQUEST */
   uint8_t  code;             /* Further qualifies the ICMP messages */
@@ -258,14 +272,14 @@ struct icmpv6_echo_request_s
   uint16_t id;               /* Identifier */
   uint16_t seqno;            /* Sequence Number */
   uint8_t  data[1];          /* Data follows */
-};
+} end_packed_struct;
 
 #define SIZEOF_ICMPV6_ECHO_REQUEST_S(n) \
   (sizeof(struct icmpv6_echo_request_s) - 1 + (n))
 
 /* This the message format for the ICMPv6 Echo Reply message */
 
-struct icmpv6_echo_reply_s
+begin_packed_struct struct icmpv6_echo_reply_s
 {
   uint8_t  type;             /* Message Type: ICMPv6_ECHO_REQUEST */
   uint8_t  code;             /* Further qualifies the ICMP messages */
@@ -273,7 +287,7 @@ struct icmpv6_echo_reply_s
   uint16_t id;               /* Identifier */
   uint16_t seqno;            /* Sequence Number */
   uint8_t  data[1];          /* Data follows */
-};
+} end_packed_struct;
 
 #define SIZEOF_ICMPV6_ECHO_REPLY_S(n) \
   (sizeof(struct icmpv6_echo_reply_s) - 1 + (n))
@@ -311,8 +325,8 @@ struct icmpv6_prefixinfo_s
   uint8_t  optlen;           /* "   " ": Option length: 4 octets */
   uint8_t  preflen;          /* "   " ": Prefix length */
   uint8_t  flags;            /* "   " ": Flags */
-  uint32_t vlifetime;        /* "   " ": Valid lifetime */
-  uint32_t plifetime;        /* Octet 2: Preferred lifetime */
+  uint16_t vlifetime[2];     /* "   " ": Valid lifetime */
+  uint16_t plifetime[2];     /* Octet 2: Preferred lifetime */
   uint16_t reserved[2];      /* "   " ": Reserved */
   uint16_t prefix[8];        /* Octets 3-4: Prefix */
 };
@@ -330,7 +344,16 @@ struct icmpv6_mtu_s
   uint8_t  opttype;          /* Octet 1: Option Type: ICMPv6_OPT_MTU */
   uint8_t  optlen;           /* "   " ": Option length: 1 octet */
   uint16_t reserved;         /* "   " ": Reserved */
-  uint32_t mtu;              /* "   " ": MTU */
+  uint16_t mtu[2];           /* "   " ": MTU */
+};
+
+struct icmpv6_rdnss_s
+{
+  uint8_t  opttype;          /* Octet 1: Option Type: ICMPv6_OPT_RNDSS */
+  uint8_t  optlen;           /* "   " ": Option length: 1 octet */
+  uint16_t reserved;         /* "   " ": Reserved */
+  uint16_t lifetime[2];      /* "   " ": lifetime */
+  uint8_t  servers[1];       /* Octets 2-: Beginning of the DNS Servers */
 };
 
 /* The structure holding the ICMP statistics that are gathered if
@@ -367,4 +390,4 @@ extern "C"
 #ifdef __cplusplus
 }
 #endif
-#endif /* __INCLUDE_NUTTX_NET_ICMPv6_H */
+#endif /* __INCLUDE_NUTTX_NET_ICMPV6_H */

@@ -1,35 +1,22 @@
 /****************************************************************************
  * libs/libc/unistd/lib_execl.c
  *
- *   Copyright (C) 2013, 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,11 +31,14 @@
 #include <unistd.h>
 #include <errno.h>
 
+#include "libc.h"
+
 #ifdef CONFIG_LIBC_EXECFUNCS
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
 /* This is an artificial limit to detect error conditions where an argv[]
  * list is not properly terminated.
  */
@@ -96,11 +86,12 @@
  *   The non-standard binfmt function 'exec()' needs to have (1) a symbol
  *   table that provides the list of symbols exported by the base code, and
  *   (2) the number of symbols in that table.  This information is currently
- *   provided to 'exec()' from 'exec[l|v]()' via NuttX configuration settings:
+ *   provided to 'exec()' from 'exec[l|v]()' via NuttX configuration setting:
  *
  *     CONFIG_LIBC_EXECFUNCS         : Enable exec[l|v] support
  *     CONFIG_EXECFUNCS_SYMTAB_ARRAY : Symbol table name used by exec[l|v]
- *     CONFIG_EXECFUNCS_NSYMBOLS_VAR : Variable holding number of symbols in the table
+ *     CONFIG_EXECFUNCS_NSYMBOLS_VAR : Variable holding number of symbols in
+ *                                     the table
  *
  *   As a result of the above, the current implementations of 'execl()' and
  *   'execv()' suffer from some incompatibilities that may or may not be
@@ -111,11 +102,11 @@
  *   task.
  *
  * Input Parameters:
- *   path - The path to the program to be executed.  If CONFIG_LIB_ENVPATH
+ *   path - The path to the program to be executed.  If CONFIG_LIBC_ENVPATH
  *     is defined in the configuration, then this may be a relative path
  *     from the current working directory.  Otherwise, path must be the
  *     absolute path to the program.
- *   ... - A list of the string arguments to be recevied by the
+ *   ... - A list of the string arguments to be received by the
  *     program.  Zero indicates the end of the list.
  *
  * Returned Value:
@@ -124,10 +115,10 @@
  *
  ****************************************************************************/
 
-int execl(FAR const char *path, ...)
+int execl(FAR const char *path, FAR const char *arg0, ...)
 {
-  FAR char **argv = (FAR char **)NULL;
-  FAR char *arg;
+  FAR char **argv = NULL;
+  FAR char *arg = (FAR char *)arg0;
   size_t nargs;
   va_list ap;
   int argc;
@@ -135,67 +126,57 @@ int execl(FAR const char *path, ...)
 
   /* Count the number of arguments */
 
-  va_start(ap, path);
+  va_start(ap, arg0);
   nargs = 0;
-  do
+
+  while (arg != NULL)
     {
-      /* Check if the next argument is present */
+      /* Yes.. increment the number of arguments.  Here is a sanity
+       * check to prevent running away with an unterminated argv[] list.
+       * MAX_EXECL_ARGS should be sufficiently large that this never
+       * happens in normal usage.
+       */
+
+      if (++nargs > MAX_EXECL_ARGS)
+        {
+          set_errno(E2BIG);
+          va_end(ap);
+          return ERROR;
+        }
 
       arg = va_arg(ap, FAR char *);
-      if (arg)
-        {
-          /* Yes.. increment the number of arguments.  Here is a sanity
-           * check to prevent running away with an unterminated argv[] list.
-           * MAX_EXECL_ARGS should be sufficiently large that this never
-           * happens in normal usage.
-           */
-
-          if (++nargs > MAX_EXECL_ARGS)
-            {
-              set_errno(E2BIG);
-              va_end(ap);
-              return ERROR;
-            }
-        }
     }
-  while (arg);
 
   va_end(ap);
 
   /* Allocate a temporary argv[] array */
 
-  if (nargs > 0)
+  argv = (FAR char **)lib_malloc((nargs + 1) * sizeof(FAR char *));
+  if (argv == NULL)
     {
-      argv = (FAR char **)malloc((nargs + 1) * sizeof(FAR char *));
-      if (argv == (FAR char **)NULL)
-        {
-          set_errno(ENOMEM);
-          return ERROR;
-        }
-
-      /* Collect the arguments into the argv[] array */
-
-      va_start(ap, path);
-      for (argc = 0; argc < nargs; argc++)
-        {
-          argv[argc] = va_arg(ap, FAR char *);
-        }
-
-      argv[nargs] = NULL;
-      va_end(ap);
+      set_errno(ENOMEM);
+      return ERROR;
     }
+
+  argv[0] = (FAR char *)arg0;
+
+  /* Collect the arguments into the argv[] array */
+
+  va_start(ap, arg0);
+  for (argc = 1; argc <= nargs; argc++)
+    {
+      argv[argc] = va_arg(ap, FAR char *);
+    }
+
+  va_end(ap);
 
   /* Then let execv() do the real work */
 
-  ret = execv(path, (FAR char * const *)argv);
+  ret = execv(path, argv);
 
   /* Free the allocated argv[] list */
 
-  if (argv)
-    {
-      free(argv);
-    }
-
+  lib_free(argv);
   return ret;
 }
 

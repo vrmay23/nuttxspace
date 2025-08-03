@@ -1,6 +1,8 @@
 /****************************************************************************
  * fs/aio/aioc_contain.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -25,11 +27,11 @@
 #include <nuttx/config.h>
 
 #include <sched.h>
+#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/sched.h>
 #include <nuttx/fs/fs.h>
-#include <nuttx/net/net.h>
 
 #include "aio/aio.h"
 
@@ -59,51 +61,20 @@
 FAR struct aio_container_s *aio_contain(FAR struct aiocb *aiocbp)
 {
   FAR struct aio_container_s *aioc;
-  union
-  {
-    FAR struct file *filep;
-#ifdef AIO_HAVE_PSOCK
-    FAR struct socket *psock;
-#endif
-    FAR void *ptr;
-  } u;
+  FAR struct file *filep;
 
 #ifdef CONFIG_PRIORITY_INHERITANCE
   struct sched_param param;
 #endif
   int ret;
 
-#ifdef AIO_HAVE_PSOCK
-  if (aiocbp->aio_fildes < CONFIG_NFILE_DESCRIPTORS)
-#endif
+  /* Get the file structure corresponding to the file descriptor. */
+
+  ret = file_get(aiocbp->aio_fildes, &filep);
+  if (ret < 0)
     {
-      /* Get the file structure corresponding to the file descriptor. */
-
-      ret = fs_getfilep(aiocbp->aio_fildes, &u.filep);
-      if (ret < 0)
-        {
-          goto errout;
-        }
-
-      DEBUGASSERT(u.filep != NULL);
+      goto errout;
     }
-#ifdef AIO_HAVE_PSOCK
-  else
-    {
-      /* Get the socket structure corresponding to the socket descriptor */
-
-      u.psock = sockfd_socket(aiocbp->aio_fildes);
-      if (u.psock == NULL)
-        {
-          /* Does not return error information.  EBADF is the most likely
-           * explanation.
-           */
-
-          ret = -EBADF;
-          goto errout;
-        }
-    }
-#endif
 
   /* Allocate the AIO control block container, waiting for one to become
    * available if necessary.  This should not fail except for in the case
@@ -111,35 +82,40 @@ FAR struct aio_container_s *aio_contain(FAR struct aiocb *aiocbp)
    */
 
   aioc = aioc_alloc();
-  if (aioc != NULL)
+  if (aioc == NULL)
     {
-      /* Initialize the container */
+      ret = -ENOMEM;
+      goto err_putfilep;
+    }
 
-      memset(aioc, 0, sizeof(struct aio_container_s));
-      aioc->aioc_aiocbp = aiocbp;
-      aioc->u.ptr       = u.ptr;
-      aioc->aioc_pid    = getpid();
+  /* Initialize the container */
+
+  memset(aioc, 0, sizeof(struct aio_container_s));
+  aioc->aioc_aiocbp = aiocbp;
+  aioc->aioc_filep  = filep;
+  aioc->aioc_pid    = nxsched_getpid();
 
 #ifdef CONFIG_PRIORITY_INHERITANCE
-      DEBUGVERIFY(nxsched_getparam (aioc->aioc_pid, &param));
-      aioc->aioc_prio   = param.sched_priority;
+  DEBUGVERIFY(nxsched_get_param(aioc->aioc_pid, &param));
+  aioc->aioc_prio   = param.sched_priority;
 #endif
 
-      /* Add the container to the pending transfer list. */
+  /* Add the container to the pending transfer list. */
 
-      ret = aio_lock();
-      if (ret < 0)
-        {
-          aioc_free(aioc);
-          goto errout;
-        }
-
-      dq_addlast(&aioc->aioc_link, &g_aio_pending);
-      aio_unlock();
+  ret = aio_lock();
+  if (ret < 0)
+    {
+      aioc_free(aioc);
+      goto err_putfilep;
     }
+
+  dq_addlast(&aioc->aioc_link, &g_aio_pending);
+  aio_unlock();
 
   return aioc;
 
+err_putfilep:
+  file_put(filep);
 errout:
   set_errno(-ret);
   return NULL;
@@ -174,9 +150,12 @@ FAR struct aiocb *aioc_decant(FAR struct aio_container_s *aioc)
     {
       dq_rem(&aioc->aioc_link, &g_aio_pending);
 
-      /* De-cant the AIO control block and return the container to the free list */
+      /* De-cant the AIO control block and return the container to the
+       * free list.
+       */
 
       aiocbp = aioc->aioc_aiocbp;
+      file_put(aioc->aioc_filep);
       aioc_free(aioc);
 
       aio_unlock();

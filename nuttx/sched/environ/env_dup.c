@@ -1,35 +1,22 @@
 /****************************************************************************
  * sched/environ/env_dup.c
  *
- *   Copyright (C) 2007, 2009, 2011, 2013, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,6 +31,7 @@
 #include <sys/types.h>
 #include <sched.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/kmalloc.h>
@@ -60,13 +48,13 @@
  *
  * Description:
  *   Copy the internal environment structure of a task.  This is the action
- *   that is performed when a new task is created: The new task has a private,
- *   exact duplicate of the parent task's environment.
+ *   that is performed when a new task is created: The new task has a
+ *   private, exact duplicate of the parent task's environment.
  *
  * Input Parameters:
- *   group - The child task group to receive the newly allocated copy of the
- *           parent task groups environment structure.
- *
+ *   group - The child task group to receive the newly allocated copy of
+ *           the parent task groups environment structure.
+ *   envcp - Pointer to the environment strings to copy.
  * Returned Value:
  *   zero on success
  *
@@ -75,64 +63,89 @@
  *
  ****************************************************************************/
 
-int env_dup(FAR struct task_group_s *group)
+int env_dup(FAR struct task_group_s *group, FAR char * const *envcp)
 {
-  FAR struct tcb_s *ptcb = this_task();
-  FAR char *envp = NULL;
-  size_t envlen;
+  FAR char **envp = NULL;
+  irqstate_t flags;
+  size_t envc = 0;
+  size_t size;
   int ret = OK;
 
-  DEBUGASSERT(group != NULL && ptcb != NULL && ptcb->group != NULL);
+  DEBUGASSERT(group != NULL);
 
-  /* Pre-emption must be disabled throughout the following because the
-   * environment may be shared.
-   */
+  /* Is there an environment ? */
 
-  sched_lock();
-
-  /* Does the parent task have an environment? */
-
-  if (ptcb->group != NULL && ptcb->group->tg_envp != NULL)
+  if (envcp != NULL && group->tg_envp == NULL)
     {
-      /* Yes.. The parent task has an environment allocation. */
+      /* Pre-emption must be disabled throughout the following because the
+       * environment may be shared.
+       */
 
-      envlen = ptcb->group->tg_envsize;
-      envp   = NULL;
+      flags = enter_critical_section();
+
+      /* Count the strings */
+
+      while (envcp[envc] != NULL)
+        {
+          envc++;
+        }
+
+      group->tg_envc = envc;
+      group->tg_envpc = (envc + SCHED_ENVIRON_RESERVED + 1);
 
       /* A special case is that the parent has an "empty" environment
        * allocation, i.e., there is an allocation in place but it
-       * contains no variable definitions and, hence, envlen == 0.
+       * contains no variable definitions and, hence, envc == 0.
        */
 
-      if (envlen > 0)
+      if (envc > 0)
         {
           /* There is an environment, duplicate it */
 
-          envp = (FAR char *)kumm_malloc(envlen);
+          envp = group_malloc(group, sizeof(*envp) * group->tg_envpc);
           if (envp == NULL)
             {
               /* The parent's environment can not be inherited due to a
                * failure in the allocation of the child environment.
                */
 
-              envlen = 0;
-              ret    = -ENOMEM;
+              ret = -ENOMEM;
             }
           else
             {
+              envp[envc] = NULL;
+
               /* Duplicate the parent environment. */
 
-              memcpy(envp, ptcb->group->tg_envp, envlen);
+              while (envc-- > 0)
+                {
+                  size = strlen(envcp[envc]) + 1;
+                  envp[envc] = group_malloc(group, size);
+                  if (envp[envc] == NULL)
+                    {
+                      while (envp[++envc] != NULL)
+                        {
+                          group_free(group, envp[envc]);
+                        }
+
+                      group_free(group, envp);
+                      envp = NULL;
+                      ret = -ENOMEM;
+                      break;
+                    }
+
+                  strlcpy(envp[envc], envcp[envc], size);
+                }
             }
         }
 
-      /* Save the size and child environment allocation. */
+      /* Save the child environment allocation. */
 
-      group->tg_envsize = envlen;
-      group->tg_envp    = envp;
+      group->tg_envp = envp;
+
+      leave_critical_section(flags);
     }
 
-  sched_unlock();
   return ret;
 }
 

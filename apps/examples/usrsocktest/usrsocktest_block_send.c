@@ -1,37 +1,22 @@
 /****************************************************************************
- * examples/usrsocktest/usrsocktest_block_send.c
- * Send through the socket in blocking mode
+ * apps/examples/usrsocktest/usrsocktest_block_send.c
  *
- *   Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
- *   Authors: Roman Saveljev <roman.saveljev@haltian.com>
- *            Jussi Kivilinna <jussi.kivilinna@haltian.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -49,6 +34,7 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <sys/time.h>
+#include <unistd.h>
 
 #include "defines.h"
 
@@ -80,7 +66,7 @@ static int sd;
  ****************************************************************************/
 
 /****************************************************************************
- * Name: ConnectSend
+ * Name: connect_send
  *
  * Description:
  *   Open socket, connect in blocking mode and send
@@ -96,7 +82,7 @@ static int sd;
  *
  ****************************************************************************/
 
-static void ConnectSend(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void connect_send(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   ssize_t ret;
   size_t datalen;
@@ -162,7 +148,7 @@ static void ConnectSend(FAR struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: NonBlockConnectSend
+ * Name: non_block_connect_send
  *
  * Description:
  *   Open socket, connect in non-blocking mode and send
@@ -178,7 +164,8 @@ static void ConnectSend(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void NonBlockConnectSend(FAR struct usrsocktest_daemon_conf_s *dconf)
+static
+void non_block_connect_send(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   ssize_t ret;
   size_t datalen;
@@ -244,7 +231,7 @@ static void NonBlockConnectSend(FAR struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: SendTimeout
+ * Name: send_timeout
  *
  * Description:
  *   Open socket, connect in blocking mode and send with SO_SNDTIMEO
@@ -260,7 +247,7 @@ static void NonBlockConnectSend(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void SendTimeout(FAR struct usrsocktest_daemon_conf_s *dconf)
+static void send_timeout(FAR struct usrsocktest_daemon_conf_s *dconf)
 {
   ssize_t ret;
   size_t datalen;
@@ -300,8 +287,7 @@ static void SendTimeout(FAR struct usrsocktest_daemon_conf_s *dconf)
 
   tv.tv_sec = 0;
   tv.tv_usec = 100 * 1000;
-  ret = setsockopt(sd, SOL_SOCKET, SO_SNDTIMEO, (FAR const void *)&tv,
-                   sizeof(tv));
+  ret = setsockopt(sd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
   TEST_ASSERT_EQUAL(0, ret);
 
   /* Try send data to remote. */
@@ -333,7 +319,7 @@ static void SendTimeout(FAR struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: BlockSend test group setup
+ * Name: block_send test group setup
  *
  * Description:
  *   Setup function executed before each testcase in this test group
@@ -349,14 +335,14 @@ static void SendTimeout(FAR struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-TEST_SETUP(BlockSend)
+TEST_SETUP(block_send)
 {
   sd = -1;
   started = false;
 }
 
 /****************************************************************************
- * Name: BlockSend test group teardown
+ * Name: block_send test group teardown
  *
  * Description:
  *   Setup function executed after each testcase in this test group
@@ -372,70 +358,71 @@ TEST_SETUP(BlockSend)
  *
  ****************************************************************************/
 
-TEST_TEAR_DOWN(BlockSend)
+TEST_TEAR_DOWN(block_send)
 {
-  int ret;
+  int unused_data ret;
   if (sd >= 0)
     {
       ret = close(sd);
-      assert(ret >= 0);
+      TEST_ASSERT_TRUE(ret >= 0);
     }
+
   if (started)
     {
       ret = usrsocktest_daemon_stop();
-      assert(ret == OK);
+      TEST_ASSERT_EQUAL(ret, OK);
     }
 }
 
-TEST(BlockSend, ConnectSend)
+TEST(block_send, connect_send)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  ConnectSend(&usrsocktest_daemon_config);
+  connect_send(&usrsocktest_daemon_config);
 }
 
-TEST(BlockSend, ConnectSendDelay)
+TEST(block_send, connect_send_delay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  ConnectSend(&usrsocktest_daemon_config);
+  connect_send(&usrsocktest_daemon_config);
 }
 
-TEST(BlockSend, NonBlockConnectSend)
+TEST(block_send, non_block_connect_send)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  NonBlockConnectSend(&usrsocktest_daemon_config);
+  non_block_connect_send(&usrsocktest_daemon_config);
 }
 
-TEST(BlockSend, NonBlockConnectSendDelay)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  usrsocktest_daemon_config.delay_all_responses = true;
-  NonBlockConnectSend(&usrsocktest_daemon_config);
-}
-
-TEST(BlockSend, SendTimeout)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  SendTimeout(&usrsocktest_daemon_config);
-}
-
-TEST(BlockSend, SendTimeoutDelay)
+TEST(block_send, non_block_connect_send_delay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  SendTimeout(&usrsocktest_daemon_config);
+  non_block_connect_send(&usrsocktest_daemon_config);
+}
+
+TEST(block_send, send_timeout)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  send_timeout(&usrsocktest_daemon_config);
+}
+
+TEST(block_send, send_timeout_delay)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  usrsocktest_daemon_config.delay_all_responses = true;
+  send_timeout(&usrsocktest_daemon_config);
 }
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-TEST_GROUP(BlockSend)
+TEST_GROUP(block_send)
 {
-  RUN_TEST_CASE(BlockSend, ConnectSend);
-  RUN_TEST_CASE(BlockSend, ConnectSendDelay);
-  RUN_TEST_CASE(BlockSend, NonBlockConnectSend);
-  RUN_TEST_CASE(BlockSend, NonBlockConnectSendDelay);
-  RUN_TEST_CASE(BlockSend, SendTimeout);
-  RUN_TEST_CASE(BlockSend, SendTimeoutDelay);
+  RUN_TEST_CASE(block_send, connect_send);
+  RUN_TEST_CASE(block_send, connect_send_delay);
+  RUN_TEST_CASE(block_send, non_block_connect_send);
+  RUN_TEST_CASE(block_send, non_block_connect_send_delay);
+  RUN_TEST_CASE(block_send, send_timeout);
+  RUN_TEST_CASE(block_send, send_timeout_delay);
 }

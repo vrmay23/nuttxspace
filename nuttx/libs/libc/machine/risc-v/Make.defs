@@ -1,6 +1,8 @@
 ############################################################################
 # libs/libc/machine/risc-v/Make.defs
 #
+# SPDX-License-Identifier: Apache-2.0
+#
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
 # this work for additional information regarding copyright ownership.  The
@@ -18,6 +20,25 @@
 #
 ############################################################################
 
-ifeq ($(CONFIG_ARCH_RV64GC),y)
-include ${TOPDIR}/libs/libc/machine/risc-v/rv64/Make.defs
+ifeq ($(CONFIG_RISCV_MEMCPY),y)
+ASRCS += arch_memcpy.S
 endif
+
+ifeq ($(CONFIG_RISCV_MEMSET),y)
+ASRCS += arch_memset.S
+endif
+
+ifeq ($(CONFIG_RISCV_STRCMP),y)
+ASRCS += arch_strcmp.S
+endif
+
+ifeq ($(CONFIG_ARCH_SETJMP_H),y)
+ASRCS += arch_setjmp.S
+endif
+
+ifeq ($(CONFIG_LIBC_ARCH_ELF),y)
+CSRCS += arch_elf.c
+endif
+
+DEPPATH += --dep-path machine/risc-v
+VPATH += :machine/risc-v

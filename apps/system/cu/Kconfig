@@ -6,8 +6,6 @@
 menuconfig SYSTEM_CUTERM
 	tristate "CU minimal serial terminal"
 	default n
-	depends on ARCH_HAVE_SERIAL_TERMIOS
-	select SERIAL_TERMIOS
 	---help---
 		Enable the CU serial terminal.  This is a minimalistic
 		implementation of the 'cu' terminal program (part of Taylor UUCP for
@@ -16,7 +14,7 @@ menuconfig SYSTEM_CUTERM
 
 		This terminal might come in handy for other people that have e.g. GS
 		modems, GPS receivers or other devices with text based serial
-		communications attached to their Nuttx systems.
+		communications attached to their NuttX systems.
 
 if SYSTEM_CUTERM
 
@@ -46,5 +44,9 @@ config SYSTEM_CUTERM_PRIORITY
 	default 100
 	---help---
 		This is the task priority that will be used when starting the CU terminal.
+
+config SYSTEM_CUTERM_DISABLE_ERROR_PRINT
+	bool "Disable CU terminal Error Printing"
+	default DEFAULT_SMALL
 
 endif # SYSTEM_CUTERM

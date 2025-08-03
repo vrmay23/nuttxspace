@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/renesas/src/m16c/m16c_lowputc.c
  *
- *   Copyright (C) 2009 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,18 +29,15 @@
 #include <stdint.h>
 #include <nuttx/arch.h>
 
-#include "up_internal.h"
-#include "up_arch.h"
-
+#include "renesas_internal.h"
 #include "chip.h"
-#include "up_internal.h"
 #include "m16c_uart.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Configuration **********************************************************/
+/* Configuration ************************************************************/
 
 #ifndef M16C_XIN_PRESCALER
 #  define M16C_XIN_PRESCALER 1
@@ -153,7 +137,7 @@
 
 #define M16C_MR_VALUE (M16C_MR_SMDBITS|M16C_MR_PARITY|M16C_MR_STOPBITS)
 
-/* Clocking ***************************************************************/
+/* Clocking *****************************************************************/
 
 /* The Bit Rate Generator (BRG) value can be calculated by:
  *
@@ -237,25 +221,27 @@ static inline void up_lowserialsetup(void)
   putreg8(0, M16C_UCON);
 #endif
 
-/* Set interrupt cause=TX complete and continuous receive mode */
+  /* Set interrupt cause=TX complete and continuous receive mode */
 
 #if defined(CONFIG_UART0_SERIAL_CONSOLE)
   regval  = getreg8(M16C_UCON);
-  regval |= (UART_CON_U0IRS|UART_CON_U0RRM);
+  regval |= (UART_CON_U0IRS | UART_CON_U0RRM);
   putreg8(regval, M16C_UCON);
 #elif defined(CONFIG_UART1_SERIAL_CONSOLE)
   regval = getreg8(M16C_UCON);
-  regval |= (UART_CON_U1IRS|UART_CON_U1RRM);
+  regval |= (UART_CON_U1IRS | UART_CON_U1RRM);
   putreg8(regval, M16C_UCON);
 #else
   regval = getreg8(M16C_U2C1);
-  regval |= (UART_C1_U2IRS|UART_C1_U2RRM);
+  regval |= (UART_C1_U2IRS | UART_C1_U2RRM);
   putreg8(regval, M16C_U2C1);
 #endif
 
-  /* Set UART transmit/receive control register 1 to enable transmit and receive */
+  /* Set UART transmit/receive control register 1 to enable transmit and
+   * receive
+   */
 
-  putreg8(UART_C1_TE|UART_C1_RE, M16C_UART_BASE + M16C_UART_C1);
+  putreg8(UART_C1_TE | UART_C1_RE, M16C_UART_BASE + M16C_UART_C1);
 
   /* Set UART transmit/receive mode register data bits, stop bits, parity */
 
@@ -291,7 +277,7 @@ static inline void up_lowserialsetup(void)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: up_lowputc
+ * Name: renesas_lowputc
  *
  * Description:
  *   Output one byte on the serial console.
@@ -299,7 +285,7 @@ static inline void up_lowserialsetup(void)
  ****************************************************************************/
 
 #if defined(HAVE_SERIAL) && !defined(CONFIG_SLCD_CONSOLE)
-void up_lowputc(char ch)
+void renesas_lowputc(char ch)
 {
 #ifdef HAVE_SERIALCONSOLE
   /* Wait until the transmit buffer is empty */
@@ -336,6 +322,6 @@ void up_lowsetup(void)
   /* The LCD is initialized here if the LCD is used for console output.  */
 
 #ifdef CONFIG_SLCD_CONSOLE
-  up_lcdinit();
+  renesas_lcdinit();
 #endif
 }

@@ -1,14 +1,8 @@
 /****************************************************************************
  * include/nuttx/mtd/nand.h
  *
- *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * This logic was based largely on Atmel sample code with modifications for
- * better integration with NuttX.  The Atmel sample code has a BSD
- * compatible license that requires this copyright notice:
- *
- *   Copyright (c) 2012, Atmel Corporation
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2012, Atmel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -53,7 +47,7 @@
 
 #include <nuttx/mtd/mtd.h>
 #include <nuttx/mtd/nand_raw.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -62,6 +56,7 @@
 /****************************************************************************
  * Public Types
  ****************************************************************************/
+
 /* This type represents the state of the upper-half NAND MTD device.  The
  * struct mtd_dev_s must appear at the beginning of the definition so that
  * you can freely cast between pointers to struct mtd_dev_s and struct
@@ -72,7 +67,7 @@ struct nand_dev_s
 {
   struct mtd_dev_s mtd;       /* Externally visible part of the driver */
   FAR struct nand_raw_s *raw; /* Retained reference to the lower half */
-  sem_t exclsem;              /* For exclusive access to the NAND FLASH */
+  mutex_t lock;               /* For exclusive access to the NAND FLASH */
 };
 
 /****************************************************************************
@@ -94,6 +89,23 @@ extern "C"
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: nand_raw_initialize
+ *
+ * Description:
+ *   Initialize NAND without probing.
+ *
+ * Input Parameters:
+ *   raw      - Lower-half, raw NAND FLASH interface
+ *
+ * Returned Value:
+ *   A non-NULL MTD driver instance is returned on success.  NULL is
+ *   returned on any failure.
+ *
+ ****************************************************************************/
+
+FAR struct mtd_dev_s *nand_raw_initialize(FAR struct nand_raw_s *raw);
+
+/****************************************************************************
  * Name: nand_initialize
  *
  * Description:
@@ -103,7 +115,7 @@ extern "C"
  *   raw      - Lower-half, raw NAND FLASH interface
  *
  * Returned Value:
- *   A non-NULL MTD driver intstance is returned on success.  NULL is
+ *   A non-NULL MTD driver instance is returned on success.  NULL is
  *   returned on any failaure.
  *
  ****************************************************************************/

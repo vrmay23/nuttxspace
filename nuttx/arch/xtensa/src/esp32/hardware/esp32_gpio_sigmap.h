@@ -1,26 +1,22 @@
 /****************************************************************************
  * arch/xtensa/src/esp32/hardware/esp32_gpio_sigmap.h
  *
- * Adapted from use in NuttX by:
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Derives from logic originally provided by Espressif Systems:
- *
- *   Copyright 2015-2016 Espressif Systems (Shanghai) PTE LTD
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -211,7 +207,8 @@
 #define RMT_SIG_OUT5_IDX              92
 #define EXT_ADC_START_IDX             93
 #define RMT_SIG_OUT6_IDX              93
-#define CAN_RX_IDX                    94
+#define TWAI_RX_IDX                   94
+#define CAN_RX_IDX                    TWAI_RX_IDX
 #define RMT_SIG_OUT7_IDX              94
 #define I2CEXT1_SCL_IN_IDX            95
 #define I2CEXT1_SCL_OUT_IDX           95
@@ -269,7 +266,8 @@
 #define PWM2_OUT4L_IDX                121
 #define PWM3_CAP1_IN_IDX              122
 #define PWM3_CAP2_IN_IDX              123
-#define CAN_TX_IDX                    123
+#define TWAI_TX_IDX                   123
+#define CAN_TX_IDX                    TWAI_TX_IDX
 #define PWM3_CAP3_IN_IDX              124
 #define CAN_BUS_OFF_ON_IDX            124
 #define CAN_CLKOUT_IDX                125
@@ -435,5 +433,6 @@
 #define SIG_IN_FUNC226_IDX            226
 #define SIG_IN_FUNC227_IDX            227
 #define SIG_IN_FUNC228_IDX            228
+#define SIG_GPIO_OUT_IDX              256
 
 #endif /* __ARCH_XTENSA_SRC_ESP32_HARDWARE_ESP32_GPIO_SIGMAP_H */

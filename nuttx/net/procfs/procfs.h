@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/procfs/procfs.h
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,6 +30,7 @@
 #include <nuttx/config.h>
 #include <sys/types.h>
 #include <nuttx/fs/procfs.h>
+#include <nuttx/net/netconfig.h>
 
 #if defined(CONFIG_FS_PROCFS) && !defined(CONFIG_FS_PROCFS_EXCLUDE_NET)
 
@@ -64,22 +52,6 @@
  * Public Type Definitions
  ****************************************************************************/
 
-/* Describes the /net directory entries */
-
-enum netprocfs_entry_e
-{
-  NETPROCFS_SUBDIR_DEV = 0           /* Multiple instances, e.g. /proc/net/eth0 */
-#ifdef CONFIG_NET_STATISTICS
-  , NETPROCFS_SUBDIR_STAT            /* /proc/net/stat */
-#ifdef CONFIG_NET_MLD
-  , NETPROCFS_SUBDIR_MLD             /* /proc/net/mld */
-#endif
-#endif
-#ifdef CONFIG_NET_ROUTE
-  , NETPROCFS_SUBDIR_ROUTE           /* /proc/net/route */
-#endif
-};
-
 /* This structure describes one open "file" */
 
 struct net_driver_s;                 /* Forward reference */
@@ -90,7 +62,7 @@ struct netprocfs_file_s
   uint8_t lineno;                    /* Line number */
   uint8_t linesize;                  /* Number of valid characters in line[] */
   uint8_t offset;                    /* Offset to first valid character in line[] */
-  uint8_t entry;                     /* See enum netprocfs_entry_e */
+  uint8_t entry;                     /* Entry index of netprocfs_entry_s */
   char line[NET_LINELEN];            /* Pre-allocated buffer for formatted lines */
 };
 
@@ -192,6 +164,52 @@ ssize_t netprocfs_read_netstats(FAR struct netprocfs_file_s *priv,
 
 #if defined(CONFIG_NET_STATISTICS) && defined(CONFIG_NET_MLD)
 ssize_t netprocfs_read_mldstats(FAR struct netprocfs_file_s *priv,
+                                FAR char *buffer, size_t buflen);
+#endif
+
+/****************************************************************************
+ * Name: netprocfs_read_tcpstats
+ *
+ * Description:
+ *   Read and format TCP statistics.
+ *
+ * Input Parameters:
+ *   priv - A reference to the network procfs file structure
+ *   buffer - The user-provided buffer into which network status will be
+ *            returned.
+ *   bulen  - The size in bytes of the user provided buffer.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is returned
+ *   on failure.
+ *
+ ****************************************************************************/
+
+#ifdef NET_TCP_HAVE_STACK
+ssize_t netprocfs_read_tcpstats(FAR struct netprocfs_file_s *priv,
+                                FAR char *buffer, size_t buflen);
+#endif
+
+/****************************************************************************
+ * Name: netprocfs_read_udpstats
+ *
+ * Description:
+ *   Read and format UDP statistics.
+ *
+ * Input Parameters:
+ *   priv - A reference to the network procfs file structure
+ *   buffer - The user-provided buffer into which network status will be
+ *            returned.
+ *   bulen  - The size in bytes of the user provided buffer.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is returned
+ *   on failure.
+ *
+ ****************************************************************************/
+
+#ifdef NET_UDP_HAVE_STACK
+ssize_t netprocfs_read_udpstats(FAR struct netprocfs_file_s *priv,
                                 FAR char *buffer, size_t buflen);
 #endif
 

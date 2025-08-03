@@ -1,6 +1,8 @@
 /****************************************************************************
  * boards/z80/ez80/z20x/src/z20x.h
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -26,7 +28,7 @@
  ****************************************************************************/
 
 #ifndef __ASSEMBLY__
-# include <stdint.h>
+#  include <stdint.h>
 #endif
 
 /****************************************************************************
@@ -106,27 +108,27 @@
  * 0bffff _progend     End of RAM
  */
 
-extern unsigned long _vecstart;
-#define VECSTART     ((uintptr_t)&_vecstart)
+extern uint8_t _vecstart[];
+#define VECSTART     ((uintptr_t)_vecstart)
 
-extern unsigned long _vecend;
-#define VECEND       ((uintptr_t)&_vecend)
+extern uint8_t _vecend[];
+#define VECEND       ((uintptr_t)_vecend)
 
 #define VECSIZE      (VECEND - VECSTART + 1)
 
-extern unsigned long _loaderstart;
-#define LOADERSTART  ((uintptr_t)&_loaderstart)
+extern uint8_t _loaderstart[];
+#define LOADERSTART  ((uintptr_t)_loaderstart)
 
-extern unsigned long _loaderend;
-#define LOADEREND    ((uintptr_t)&_loaderend)
+extern uint8_t _loaderend[];
+#define LOADEREND    ((uintptr_t)_loaderend)
 
 #define LOADERSIZE   (LOADEREND - LOADERSTART + 1)
 
-extern unsigned long _progstart;
-#define PROGSTART    ((uintptr_t)&_progstart)
+extern uint8_t _progstart[];
+#define PROGSTART    ((uintptr_t)_progstart)
 
-extern unsigned long _progend;
-#define PROGEND      ((uintptr_t)&_progend)
+extern uint8_t _progend[];
+#define PROGEND      ((uintptr_t)_progend)
 
 #define PROGSIZE     (PROGEND - PROGSTART + 1)
 
@@ -152,8 +154,7 @@ extern unsigned long _progend;
 #define __STR(s) #s
 #define __XSTR(s) __STR(s)
 
-#define W25_CHARDEV  "/dev/mtd" __XSTR(CONFIG_Z20X_W25_MINOR)
-#define W25_BLOCKDEV "/dev/mtdblock" __XSTR(CONFIG_Z20X_W25_MINOR)
+#define W25_DEV "/dev/mtd" __XSTR(CONFIG_Z20X_W25_MINOR)
 
 /****************************************************************************
  * Public Function Prototypes
@@ -177,7 +178,7 @@ extern "C"
  *   CONFIG_BOARD_LATE_INITIALIZE=y :
  *     Called from board_late_initialize().
  *
- *   CONFIG_BOARD_LATE_INITIALIZE=y && CONFIG_LIB_BOARDCTL=y :
+ *   CONFIG_BOARD_LATE_INITIALIZE=y && CONFIG_BOARDCTL=y :
  *     Called from the NSH library
  *
  ****************************************************************************/

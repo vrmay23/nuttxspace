@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/z80/src/ez80/ez80_rtc.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -28,6 +30,7 @@
 #include <stdbool.h>
 #include <sched.h>
 #include <time.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -38,7 +41,6 @@
 #include <arch/io.h>
 
 #include "chip.h"
-#include "up_arch.h"
 #include "ez80_rtc.h"
 
 #include <arch/board/board.h>
@@ -94,11 +96,6 @@ struct alm_cbinfo_s
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
-/* Interrupt handlers attached to the ALARM EXTI */
-
-static xcpt_t g_alarm_callback;
-static void  *g_callback_arg;
 
 #ifdef CONFIG_RTC_ALARM
 /* Callback to use when an EXTI is activated  */
@@ -289,7 +286,7 @@ static void set_raw_time(FAR const struct rtc_timeregs_s *rtcregs)
   outp(EZ80_RTC_MON, rtcregs->mon);
   outp(EZ80_RTC_YR,  rtcregs->yr);
   outp(EZ80_RTC_CEN, rtcregs->cen);
-  rtc_unlock();
+  rtc_lock();
 }
 
 /****************************************************************************
@@ -306,6 +303,7 @@ static void set_raw_time(FAR const struct rtc_timeregs_s *rtcregs)
  *
  ****************************************************************************/
 
+#ifdef CONFIG_RTC_ALARM
 static void get_raw_alarm(FAR struct rtc_almregs_s *almregs)
 {
   almregs->sec = inp(EZ80_RTC_ASEC);
@@ -313,6 +311,7 @@ static void get_raw_alarm(FAR struct rtc_almregs_s *almregs)
   almregs->hrs = inp(EZ80_RTC_AHRS);
   almregs->dow = inp(EZ80_RTC_ADOW);
 }
+#endif
 
 /****************************************************************************
  * Name: set_raw_alarm
@@ -328,6 +327,7 @@ static void get_raw_alarm(FAR struct rtc_almregs_s *almregs)
  *
  ****************************************************************************/
 
+#ifdef CONFIG_RTC_ALARM
 static void set_raw_alarm(FAR const struct rtc_almregs_s *almregs)
 {
   rtc_unlock();
@@ -335,8 +335,9 @@ static void set_raw_alarm(FAR const struct rtc_almregs_s *almregs)
   outp(EZ80_RTC_AMIN, almregs->min);
   outp(EZ80_RTC_AHRS, almregs->hrs);
   outp(EZ80_RTC_ADOW, almregs->dow);
-  rtc_unlock();
+  rtc_lock();
 }
+#endif
 
 /****************************************************************************
  * Name: ez80_alarm_interrupt

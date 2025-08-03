@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/arm/src/sama5/sam_ssc.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -25,13 +27,13 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
-#include <queue.h>
 #include <debug.h>
 
 #include <arch/board/board.h>
@@ -39,15 +41,15 @@
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
+#include <nuttx/queue.h>
 #include <nuttx/wdog.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/audio/audio.h>
 #include <nuttx/audio/i2s.h>
+#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 
-#include "up_internal.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "chip.h"
 #include "sam_pio.h"
 #include "sam_dmac.h"
@@ -425,7 +427,7 @@ struct sam_buffer_s
 struct sam_transport_s
 {
   DMA_HANDLE dma;             /* SSC DMA handle */
-  WDOG_ID dog;                /* Watchdog that handles DMA timeouts */
+  struct wdog_s dog;          /* Watchdog that handles DMA timeouts */
   sq_queue_t pend;            /* A queue of pending transfers */
   sq_queue_t act;             /* A queue of active transfers */
   sq_queue_t done;            /* A queue of completed transfers */
@@ -442,11 +444,9 @@ struct sam_ssc_s
 {
   struct i2s_dev_s dev;        /* Externally visible I2S interface */
   uintptr_t base;              /* SSC controller register base address */
-  sem_t exclsem;               /* Assures mutually exclusive access to SSC */
+  mutex_t lock;                /* Assures mutually exclusive access to SSC */
   uint8_t datalen;             /* Data width (8, 16, or 32) */
-#ifdef CONFIG_DEBUG_FEATURES
   uint8_t align;               /* Log2 of data width (0, 1, or 3) */
-#endif
   uint8_t pid;                 /* Peripheral ID */
   uint8_t rxfslen;             /* RX frame sync length */
   uint8_t txfslen;             /* TX frame sync length */
@@ -498,7 +498,7 @@ struct sam_ssc_s
 static bool     ssc_checkreg(struct sam_ssc_s *priv, bool wr,
                   uint32_t regval, uint32_t regaddr);
 #else
-# define        ssc_checkreg(priv,wr,regval,regaddr) (false)
+#  define       ssc_checkreg(priv,wr,regval,regaddr) (false)
 #endif
 
 static inline uint32_t ssc_getreg(struct sam_ssc_s *priv,
@@ -531,14 +531,6 @@ static void     ssc_dump_queues(struct sam_transport_s *xpt,
 #  define       ssc_init_buffer(b,s)
 #  define       ssc_dump_buffer(m,b,s)
 #endif
-
-/* Semaphore helpers */
-
-static int      ssc_exclsem_take(struct sam_ssc_s *priv);
-#define         ssc_exclsem_give(priv) nxsem_post(&priv->exclsem)
-
-static int      ssc_bufsem_take(struct sam_ssc_s *priv);
-#define         ssc_bufsem_give(priv) nxsem_post(&priv->bufsem)
 
 /* Buffer container helpers */
 
@@ -580,14 +572,14 @@ static void     ssc_txdma_sampledone(struct sam_ssc_s *priv, int result);
 #endif
 
 #ifdef SSC_HAVE_RX
-static void     ssc_rxdma_timeout(int argc, uint32_t arg, ...);
+static void     ssc_rxdma_timeout(wdparm_t arg);
 static int      ssc_rxdma_setup(struct sam_ssc_s *priv);
 static void     ssc_rx_worker(void *arg);
 static void     ssc_rx_schedule(struct sam_ssc_s *priv, int result);
 static void     ssc_rxdma_callback(DMA_HANDLE handle, void *arg, int result);
 #endif
 #ifdef SSC_HAVE_TX
-static void     ssc_txdma_timeout(int argc, uint32_t arg, ...);
+static void     ssc_txdma_timeout(wdparm_t arg);
 static int      ssc_txdma_setup(struct sam_ssc_s *priv);
 static void     ssc_tx_worker(void *arg);
 static void     ssc_tx_schedule(struct sam_ssc_s *priv, int result);
@@ -669,7 +661,7 @@ static const struct i2s_ops_s g_sscops =
  *
  * Returned Value:
  *   true:  This is the first register access of this type.
- *   flase: This is the same as the preceding register access.
+ *   false: This is the same as the preceding register access.
  *
  ****************************************************************************/
 
@@ -865,46 +857,6 @@ static void ssc_dump_queues(struct sam_transport_s *xpt, const char *msg)
 #endif
 
 /****************************************************************************
- * Name: ssc_exclsem_take
- *
- * Description:
- *   Take the exclusive access semaphore handling any exceptional conditions
- *
- * Input Parameters:
- *   priv - A reference to the SSC peripheral state
- *
- * Returned Value:
- *   Normally OK, but may return -ECANCELED in the rare event that the task
- *   has been canceled.
- *
- ****************************************************************************/
-
-static int ssc_exclsem_take(struct sam_ssc_s *priv)
-{
-  return nxsem_wait_uninterruptible(&priv->exclsem);
-}
-
-/****************************************************************************
- * Name: ssc_bufsem_take
- *
- * Description:
- *   Take the buffer semaphore handling any exceptional conditions
- *
- * Input Parameters:
- *   priv - A reference to the SSC peripheral state
- *
- * Returned Value:
- *   Normally OK, but may return -ECANCELED in the rare event that the task
- *   has been canceled.
- *
- ****************************************************************************/
-
-static int ssc_bufsem_take(struct sam_ssc_s *priv)
-{
-  return nxsem_wait_uninterruptible(&priv->bufsem);
-}
-
-/****************************************************************************
  * Name: ssc_buf_allocate
  *
  * Description:
@@ -934,7 +886,7 @@ static struct sam_buffer_s *ssc_buf_allocate(struct sam_ssc_s *priv)
    * have at least one free buffer container.
    */
 
-  ret = ssc_bufsem_take(priv);
+  ret = nxsem_wait_uninterruptible(&priv->bufsem);
   if (ret < 0)
     {
       return NULL;
@@ -985,7 +937,7 @@ static void ssc_buf_free(struct sam_ssc_s *priv,
 
   /* Wake up any threads waiting for a buffer container */
 
-  ssc_bufsem_give(priv);
+  nxsem_post(&priv->bufsem);
 }
 
 /****************************************************************************
@@ -1183,8 +1135,7 @@ static void ssc_txdma_sampledone(struct sam_ssc_s *priv, int result)
  *   The RX watchdog timeout without completion of the RX DMA.
  *
  * Input Parameters:
- *   argc   - The number of arguments (should be 1)
- *   arg    - The argument (state structure reference cast to uint32_t)
+ *   arg    - The argument
  *
  * Returned Value:
  *   None
@@ -1195,7 +1146,7 @@ static void ssc_txdma_sampledone(struct sam_ssc_s *priv, int result)
  ****************************************************************************/
 
 #ifdef SSC_HAVE_RX
-static void ssc_rxdma_timeout(int argc, uint32_t arg, ...)
+static void ssc_rxdma_timeout(wdparm_t arg)
 {
   struct sam_ssc_s *priv = (struct sam_ssc_s *)arg;
   DEBUGASSERT(priv != NULL);
@@ -1344,8 +1295,8 @@ static int ssc_rxdma_setup(struct sam_ssc_s *priv)
 
   if (!notimeout)
     {
-      ret = wd_start(priv->rx.dog, timeout, ssc_rxdma_timeout,
-                     1, (uint32_t)priv);
+      ret = wd_start(&priv->rx.dog, timeout,
+                     ssc_rxdma_timeout, (wdparm_t)priv);
 
       /* Check if we have successfully started the watchdog timer.  Note
        * that we do nothing in the case of failure to start the timer.  We
@@ -1355,7 +1306,7 @@ static int ssc_rxdma_setup(struct sam_ssc_s *priv)
 
       if (ret < 0)
         {
-          i2serr("ERROR: wd_start failed: %d\n", errno);
+          i2serr("ERROR: wd_start failed: %d\n", ret);
         }
     }
 
@@ -1575,7 +1526,7 @@ static void ssc_rxdma_callback(DMA_HANDLE handle, void *arg, int result)
 
   /* Cancel the watchdog timeout */
 
-  wd_cancel(priv->rx.dog);
+  wd_cancel(&priv->rx.dog);
 
   /* Sample DMA registers at the time of the DMA completion */
 
@@ -1599,8 +1550,7 @@ static void ssc_rxdma_callback(DMA_HANDLE handle, void *arg, int result)
  *   The RX watchdog timeout without completion of the RX DMA.
  *
  * Input Parameters:
- *   argc   - The number of arguments (should be 1)
- *   arg    - The argument (state structure reference cast to uint32_t)
+ *   arg    - The argument
  *
  * Returned Value:
  *   None
@@ -1611,7 +1561,7 @@ static void ssc_rxdma_callback(DMA_HANDLE handle, void *arg, int result)
  ****************************************************************************/
 
 #ifdef SSC_HAVE_TX
-static void ssc_txdma_timeout(int argc, uint32_t arg, ...)
+static void ssc_txdma_timeout(wdparm_t arg)
 {
   struct sam_ssc_s *priv = (struct sam_ssc_s *)arg;
   DEBUGASSERT(priv != NULL);
@@ -1761,8 +1711,8 @@ static int ssc_txdma_setup(struct sam_ssc_s *priv)
 
   if (!notimeout)
     {
-      ret = wd_start(priv->tx.dog, timeout, ssc_txdma_timeout,
-                     1, (uint32_t)priv);
+      ret = wd_start(&priv->tx.dog, timeout,
+                     ssc_txdma_timeout, (wdparm_t)priv);
 
       /* Check if we have successfully started the watchdog timer.  Note
        * that we do nothing in the case of failure to start the timer.  We
@@ -1772,7 +1722,7 @@ static int ssc_txdma_setup(struct sam_ssc_s *priv)
 
       if (ret < 0)
         {
-          i2serr("ERROR: wd_start failed: %d\n", errno);
+          i2serr("ERROR: wd_start failed: %d\n", ret);
         }
     }
 
@@ -1979,7 +1929,7 @@ static void ssc_txdma_callback(DMA_HANDLE handle, void *arg, int result)
 
   /* Cancel the watchdog timeout */
 
-  wd_cancel(priv->tx.dog);
+  wd_cancel(&priv->tx.dog);
 
   /* Sample DMA registers at the time of the DMA completion */
 
@@ -2022,21 +1972,15 @@ static int ssc_checkwidth(struct sam_ssc_s *priv, int bits)
   switch (bits)
     {
     case 8:
-#ifdef CONFIG_DEBUG_FEATURES
       priv->align = 0;
-#endif
       break;
 
     case 16:
-#ifdef CONFIG_DEBUG_FEATURES
       priv->align = 1;
-#endif
       break;
 
     case 32:
-#ifdef CONFIG_DEBUG_FEATURES
       priv->align = 3;
-#endif
       break;
 
     default:
@@ -2197,7 +2141,7 @@ static int ssc_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 #endif
 
   DEBUGASSERT(priv && apb && ((uintptr_t)apb->samp & priv->align) == 0);
-  i2sinfo("apb=%p nmaxbytes=%d arg=%p timeout=%d\n",
+  i2sinfo("apb=%p nmaxbytes=%d arg=%p timeout=%" PRId32 "\n",
           apb, apb->nmaxbytes, arg, timeout);
 
   ssc_init_buffer(apb->samp, apb->nmaxbytes);
@@ -2210,7 +2154,7 @@ static int ssc_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 
   /* Get exclusive access to the SSC driver data */
 
-  ret = ssc_exclsem_take(priv);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       goto errout_with_buf;
@@ -2222,7 +2166,7 @@ static int ssc_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
     {
       i2serr("ERROR: SSC%d has no receiver\n", priv->sscno);
       ret = -EAGAIN;
-      goto errout_with_exclsem;
+      goto errout_with_lock;
     }
 
   /* Add a reference to the audio buffer */
@@ -2250,11 +2194,11 @@ static int ssc_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
   ret = ssc_rxdma_setup(priv);
   DEBUGASSERT(ret == OK);
   leave_critical_section(flags);
-  ssc_exclsem_give(priv);
+  nxmutex_unlock(&priv->lock);
   return OK;
 
-errout_with_exclsem:
-  ssc_exclsem_give(priv);
+errout_with_lock:
+  nxmutex_unlock(&priv->lock);
 
 errout_with_buf:
   ssc_buf_free(priv, bfcontainer);
@@ -2418,7 +2362,7 @@ static int ssc_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
    */
 
   DEBUGASSERT(priv && apb);
-  i2sinfo("apb=%p nbytes=%d arg=%p timeout=%d\n",
+  i2sinfo("apb=%p nbytes=%d arg=%p timeout=%" PRId32 "\n",
           apb, apb->nbytes - apb->curbyte, arg, timeout);
 
   ssc_dump_buffer("Sending", &apb->samp[apb->curbyte],
@@ -2433,7 +2377,7 @@ static int ssc_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 
   /* Get exclusive access to the SSC driver data */
 
-  ret = ssc_exclsem_take(priv);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       goto errout_with_buf;
@@ -2445,7 +2389,7 @@ static int ssc_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
     {
       i2serr("ERROR: SSC%d has no transmitter\n", priv->sscno);
       ret = -EAGAIN;
-      goto errout_with_exclsem;
+      goto errout_with_lock;
     }
 
   /* Add a reference to the audio buffer */
@@ -2473,11 +2417,11 @@ static int ssc_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
   ret = ssc_txdma_setup(priv);
   DEBUGASSERT(ret == OK);
   leave_critical_section(flags);
-  ssc_exclsem_give(priv);
+  nxmutex_unlock(&priv->lock);
   return OK;
 
-errout_with_exclsem:
-  ssc_exclsem_give(priv);
+errout_with_lock:
+  nxmutex_unlock(&priv->lock);
 
 errout_with_buf:
   ssc_buf_free(priv, bfcontainer);
@@ -2915,7 +2859,7 @@ static void ssc_clocking(struct sam_ssc_s *priv)
 
   sam_enableperiph1(priv->pid);
 
-  i2sinfo("PCSR1=%08x PCR=%08x CMR=%08x\n",
+  i2sinfo("PCSR1=%08" PRIx32 " PCR=%08" PRIx32 " CMR=%08" PRIx32 "\n",
           getreg32(SAM_PMC_PCSR1), regval,
           ssc_getreg(priv, SAM_SSC_CMR_OFFSET));
 }
@@ -3007,15 +2951,6 @@ static int ssc_dma_allocate(struct sam_ssc_s *priv)
           i2serr("ERROR: Failed to allocate the RX DMA channel\n");
           goto errout;
         }
-
-      /* Create a watchdog time to catch RX DMA timeouts */
-
-      priv->rx.dog = wd_create();
-      if (!priv->rx.dog)
-        {
-          i2serr("ERROR: Failed to create the RX DMA watchdog\n");
-          goto errout;
-        }
     }
 #endif
 
@@ -3028,15 +2963,6 @@ static int ssc_dma_allocate(struct sam_ssc_s *priv)
       if (!priv->tx.dma)
         {
           i2serr("ERROR: Failed to allocate the TX DMA channel\n");
-          goto errout;
-        }
-
-      /* Create a watchdog time to catch TX DMA timeouts */
-
-      priv->tx.dog = wd_create();
-      if (!priv->tx.dog)
-        {
-          i2serr("ERROR: Failed to create the TX DMA watchdog\n");
           goto errout;
         }
     }
@@ -3070,11 +2996,7 @@ errout:
 static void ssc_dma_free(struct sam_ssc_s *priv)
 {
 #ifdef SSC_HAVE_TX
-  if (priv->tx.dog)
-    {
-       wd_delete(priv->tx.dog);
-    }
-
+  wd_cancel(&priv->tx.dog);
   if (priv->tx.dma)
     {
       sam_dmafree(priv->tx.dma);
@@ -3082,11 +3004,7 @@ static void ssc_dma_free(struct sam_ssc_s *priv)
 #endif
 
 #ifdef SSC_HAVE_RX
-  if (priv->rx.dog)
-    {
-       wd_delete(priv->rx.dog);
-    }
-
+  wd_cancel(&priv->rx.dog);
   if (priv->rx.dma)
     {
       sam_dmafree(priv->rx.dma);
@@ -3243,9 +3161,7 @@ static void ssc0_configure(struct sam_ssc_s *priv)
 
   priv->base    = SAM_SSC0_VBASE;
   priv->datalen = CONFIG_SAMA5_SSC0_DATALEN;
-#ifdef CONFIG_DEBUG_FEATURES
   priv->align   = SAMA5_SSC0_DATAMASK;
-#endif
   priv->pid     = SAM_PID_SSC0;
 }
 #endif
@@ -3384,9 +3300,7 @@ static void ssc1_configure(struct sam_ssc_s *priv)
 
   priv->base    = SAM_SSC1_VBASE;
   priv->datalen = CONFIG_SAMA5_SSC1_DATALEN;
-#ifdef CONFIG_DEBUG_FEATURES
   priv->align   = SAMA5_SSC1_DATAMASK;
-#endif
   priv->pid     = SAM_PID_SSC1;
 }
 #endif
@@ -3424,7 +3338,7 @@ struct i2s_dev_s *sam_ssc_initialize(int port)
    * chip select structures.
    */
 
-  priv = (struct sam_ssc_s *)zalloc(sizeof(struct sam_ssc_s));
+  priv = kmm_zalloc(sizeof(struct sam_ssc_s));
   if (!priv)
     {
       i2serr("ERROR: Failed to allocate a chip select structure\n");
@@ -3432,12 +3346,12 @@ struct i2s_dev_s *sam_ssc_initialize(int port)
     }
 
   /* Set up the initial state for this chip select structure.  Other fields
-   * were zeroed by zalloc().
+   * were zeroed by kmm_zalloc().
    */
 
   /* Initialize the common parts for the SSC device structure  */
 
-  nxsem_init(&priv->exclsem, 0, 1);
+  nxmutex_init(&priv->lock);
   priv->dev.ops = &g_sscops;
   priv->sscno   = port;
 
@@ -3509,7 +3423,8 @@ errout_with_clocking:
   ssc_dma_free(priv);
 
 errout_with_alloc:
-  nxsem_destroy(&priv->exclsem);
+  nxmutex_destroy(&priv->lock);
+  nxsem_destroy(&priv->bufsem);
   kmm_free(priv);
   return NULL;
 }

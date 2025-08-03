@@ -1,35 +1,22 @@
 /****************************************************************************
  * apps/netutils/ftpd/ftpd.h
  *
- *   Copyright (C) 2012 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -50,6 +37,7 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
 /* FPTD Definitions *********************************************************/
 
 #define FTPD_SESSIONFLAG_USER       (1 << 0)  /* Session has a user */
@@ -67,6 +55,7 @@
 /****************************************************************************
  * Public Types
  ****************************************************************************/
+
 /* This enumerates the type of each session */
 
 enum ftpd_sessiontype_e
@@ -92,7 +81,8 @@ union ftpd_sockaddr_u
   struct sockaddr            sa;
 #ifdef CONFIG_NET_IPv6
   struct sockaddr_in6        in6;
-#else
+#endif
+#ifdef CONFIG_NET_IPv4
   struct sockaddr_in         in4;
 #endif
 };
@@ -101,8 +91,8 @@ union ftpd_sockaddr_u
 
 struct ftpd_account_s
 {
-  struct ftpd_account_s     *blink;
-  struct ftpd_account_s     *flink;
+  FAR struct ftpd_account_s *blink;
+  FAR struct ftpd_account_s *flink;
   uint8_t                    flags;    /* See FTPD_ACCOUNTFLAG_* definitions */
   FAR char                  *user;     /* User name */
   FAR char                  *password; /* Un-encrypted password */
@@ -115,8 +105,8 @@ struct ftpd_server_s
 {
   int                        sd;     /* Listen socket descriptor */
   union ftpd_sockaddr_u      addr;   /* Listen address */
-  struct ftpd_account_s     *head;   /* Head of a list of accounts */
-  struct ftpd_account_s     *tail;   /* Tail of a list of accounts */
+  FAR struct ftpd_account_s *head;   /* Head of a list of accounts */
+  FAR struct ftpd_account_s *tail;   /* Tail of a list of accounts */
 };
 
 struct ftpd_stream_s
@@ -130,12 +120,12 @@ struct ftpd_stream_s
 
 struct ftpd_session_s
 {
-  FAR struct ftpd_server_s  *server;
-  FAR struct ftpd_account_s *head;
-  FAR struct ftpd_account_s *curr;
-  uint8_t                    flags;   /* See TPD_SESSIONFLAG_* definitions */
-  int                        rxtimeout;
-  int                        txtimeout;
+  FAR const struct ftpd_server_s  *server;
+  FAR const struct ftpd_account_s *head;
+  bool                             loggedin;
+  uint8_t                          flags;   /* See TPD_SESSIONFLAG_* definitions */
+  int                              rxtimeout;
+  int                              txtimeout;
 
   /* Command */
 
@@ -161,7 +151,7 @@ struct ftpd_session_s
   FAR char                  *renamefrom;
 };
 
-typedef int (*ftpd_cmdhandler_t)(struct ftpd_session_s *);
+typedef int (*ftpd_cmdhandler_t)(FAR struct ftpd_session_s *);
 
 struct ftpd_cmd_s
 {
@@ -178,23 +168,4 @@ struct ftpd_protocol_s
   int value;
 };
 
-/****************************************************************************
- * Public Data
- ****************************************************************************/
-
-#ifdef __cplusplus
-#define EXTERN extern "C"
-extern "C"
-{
-#else
-#define EXTERN extern
-#endif
-
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-#undef EXTERN
-#ifdef __cplusplus
-}
-#endif
 #endif /* __APPS_NETUTILS_FTPD_FTPD_H */

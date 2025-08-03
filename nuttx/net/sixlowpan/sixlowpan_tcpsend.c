@@ -1,6 +1,8 @@
 /****************************************************************************
  * net/sixlowpan/sixlowpan_tcpsend.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -24,6 +26,7 @@
 
 #include <nuttx/config.h>
 
+#include <inttypes.h>
 #include <string.h>
 #include <assert.h>
 #include <errno.h>
@@ -51,7 +54,7 @@
 
 /* Buffer access helpers */
 
-#define TCPBUF(dev)   ((FAR struct tcp_hdr_s *)(&(dev)->d_buf[IPv6_HDRLEN]))
+#define TCPBUF(dev) ((FAR struct tcp_hdr_s *)(&(dev)->d_buf[IPv6_HDRLEN]))
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -75,7 +78,7 @@
 
 struct sixlowpan_send_s
 {
-  FAR struct socket           *s_sock;          /* Internal socket reference */
+  FAR struct tcp_conn_s       *s_conn;          /* Internal connect reference */
   FAR struct devif_callback_s *s_cb;            /* Reference to callback
                                                  * instance */
   sem_t                        s_waitsem;       /* Supports waiting for
@@ -155,7 +158,7 @@ static uint16_t sixlowpan_tcp_chksum(FAR const struct ipv6tcp_hdr_s *ipv6tcp,
   /* Sum payload data. */
 
   sum = chksum(sum, buf, buflen);
-  return (sum == 0) ? 0xffff : htons(sum);
+  return (sum == 0) ? 0xffff : HTONS(sum);
 }
 
 /****************************************************************************
@@ -193,7 +196,7 @@ static int sixlowpan_tcp_header(FAR struct tcp_conn_s *conn,
   ipv6tcp->ipv6.tcf    = 0x00;
   ipv6tcp->ipv6.flow   = 0x00;
   ipv6tcp->ipv6.proto  = IP_PROTO_TCP;
-  ipv6tcp->ipv6.ttl    = IP_TTL;
+  ipv6tcp->ipv6.ttl    = IP_TTL_DEFAULT;
 
   /* The IPv6 header length field does not include the size of IPv6 IP
    * header.
@@ -212,7 +215,8 @@ static int sixlowpan_tcp_header(FAR struct tcp_conn_s *conn,
     }
   else
     {
-      net_ipv6addr_hdrcopy(ipv6tcp->ipv6.srcipaddr, dev->d_ipv6addr);
+      net_ipv6addr_hdrcopy(ipv6tcp->ipv6.srcipaddr,
+                           netdev_ipv6_srcaddr(dev, conn->u.ipv6.raddr));
     }
 
   ninfo("IPv6 length: %d\n",
@@ -256,12 +260,17 @@ static int sixlowpan_tcp_header(FAR struct tcp_conn_s *conn,
     {
       /* Update the TCP received window based on I/O buffer availability */
 
-      uint16_t recvwndo = tcp_get_recvwindow(dev);
+      uint32_t rcvseq = tcp_getsequence(conn->rcvseq);
+      uint32_t recvwndo = tcp_get_recvwindow(dev, conn);
 
       /* Set the TCP Window */
 
       ipv6tcp->tcp.wnd[0] = recvwndo >> 8;
       ipv6tcp->tcp.wnd[1] = recvwndo & 0xff;
+
+      /* Update the Receiver Window */
+
+      conn->rcv_adv = rcvseq + recvwndo;
     }
 
   /* Calculate TCP checksum. */
@@ -282,7 +291,6 @@ static int sixlowpan_tcp_header(FAR struct tcp_conn_s *conn,
  *
  * Input Parameters:
  *   dev    - The structure of the network driver that generated the event.
- *   pvconn - The connection structure associated with the socket
  *   pvpriv - The event handler's private data argument
  *   flags  - Set of events describing why the callback was invoked
  *
@@ -295,11 +303,10 @@ static int sixlowpan_tcp_header(FAR struct tcp_conn_s *conn,
  ****************************************************************************/
 
 static uint16_t tcp_send_eventhandler(FAR struct net_driver_s *dev,
-                                      FAR void *pvconn,
                                       FAR void *pvpriv, uint16_t flags)
 {
-  FAR struct sixlowpan_send_s *sinfo = (FAR struct sixlowpan_send_s *)pvpriv;
-  FAR struct tcp_conn_s *conn = (FAR struct tcp_conn_s *)pvconn;
+  FAR struct sixlowpan_send_s *sinfo = pvpriv;
+  FAR struct tcp_conn_s *conn = sinfo->s_conn;
   struct ipv6tcp_hdr_s ipv6tcp;
   int ret;
 
@@ -310,6 +317,15 @@ static uint16_t tcp_send_eventhandler(FAR struct net_driver_s *dev,
     {
       ninfo("Not a compatible network device\n");
       return flags;
+    }
+
+  /* Check if the IEEE802.15.4 network driver went down */
+
+  if ((flags & NETDEV_DOWN) != 0)
+    {
+      nwarn("WARNING: Device is down\n");
+      sinfo->s_result = -ENOTCONN;
+      goto end_wait;
     }
 
   /* The TCP socket is connected and, hence, should be bound to a device.
@@ -323,16 +339,7 @@ static uint16_t tcp_send_eventhandler(FAR struct net_driver_s *dev,
       return flags;
     }
 
-  /* Check if the IEEE802.15.4 network driver went down */
-
-  if ((flags & NETDEV_DOWN) != 0)
-    {
-      nwarn("WARNING: Device is down\n");
-      sinfo->s_result = -ENOTCONN;
-      goto end_wait;
-    }
-
-  ninfo("flags: %04x acked: %u sent: %u\n",
+  ninfo("flags: %04x acked: %" PRIu32 " sent: %zu\n",
         flags, sinfo->s_acked, sinfo->s_sent);
 
   /* If this packet contains an acknowledgement, then update the count of
@@ -350,7 +357,7 @@ static uint16_t tcp_send_eventhandler(FAR struct net_driver_s *dev,
        */
 
       sinfo->s_acked = tcp_getsequence(tcp->ackno) - sinfo->s_isn;
-      ninfo("ACK: acked=%d sent=%d buflen=%d\n",
+      ninfo("ACK: acked=%" PRId32 " sent=%zd buflen=%zd\n",
             sinfo->s_acked, sinfo->s_sent, sinfo->s_buflen);
 
       /* Have all of the bytes in the buffer been sent and acknowledged? */
@@ -385,8 +392,6 @@ static uint16_t tcp_send_eventhandler(FAR struct net_driver_s *dev,
 
   else if ((flags & TCP_DISCONN_EVENTS) != 0)
     {
-      FAR struct socket *psock = sinfo->s_sock;
-
       nwarn("WARNING: Lost connection\n");
 
       /* We could get here recursively through the callback actions of
@@ -394,12 +399,11 @@ static uint16_t tcp_send_eventhandler(FAR struct net_driver_s *dev,
        * already been disconnected.
        */
 
-      DEBUGASSERT(psock != NULL);
-      if (_SS_ISCONNECTED(psock->s_flags))
+      if (_SS_ISCONNECTED(conn->sconn.s_flags))
         {
           /* Report the disconnection event to all socket clones */
 
-          tcp_lost_connection(psock, sinfo->s_cb, flags);
+          tcp_lost_connection(conn, sinfo->s_cb, flags);
         }
 
       /* Report not connected to the sender */
@@ -445,14 +449,14 @@ static uint16_t tcp_send_eventhandler(FAR struct net_driver_s *dev,
           sndlen = conn->mss;
         }
 
-      winleft = conn->winsize - sinfo->s_sent + sinfo->s_acked;
+      winleft = conn->snd_wnd - sinfo->s_sent + sinfo->s_acked;
       if (sndlen > winleft)
         {
           sndlen = winleft;
         }
 
-      ninfo("s_buflen=%u s_sent=%u mss=%u winsize=%u sndlen=%d\n",
-            sinfo->s_buflen, sinfo->s_sent, conn->mss, conn->winsize,
+      ninfo("s_buflen=%zu s_sent=%zu mss=%u snd_wnd=%u sndlen=%d\n",
+            sinfo->s_buflen, sinfo->s_sent, conn->mss, conn->snd_wnd,
             sndlen);
 
       if (sndlen > 0)
@@ -466,8 +470,8 @@ static uint16_t tcp_send_eventhandler(FAR struct net_driver_s *dev,
            */
 
           seqno = sinfo->s_sent + sinfo->s_isn;
-          ninfo("Sending: sndseq %08lx->%08x\n",
-                (unsigned long)tcp_getsequence(conn->sndseq), seqno);
+          ninfo("Sending: sndseq %08" PRIx32 "->%08" PRIx32 "\n",
+                tcp_getsequence(conn->sndseq), seqno);
 
           tcp_setsequence(conn->sndseq, seqno);
 
@@ -518,9 +522,10 @@ static uint16_t tcp_send_eventhandler(FAR struct net_driver_s *dev,
           g_netstats.tcp.sent++;
 #endif
 
-          ninfo("Sent: acked=%d sent=%d buflen=%d tx_unacked=%d\n",
+          ninfo("Sent: acked=%" PRId32 " sent=%zd "
+                "buflen=%zd tx_unacked=%" PRId32 "\n",
                 sinfo->s_acked, sinfo->s_sent, sinfo->s_buflen,
-                conn->tx_unacked);
+                (uint32_t)conn->tx_unacked);
         }
     }
 
@@ -589,8 +594,6 @@ static int sixlowpan_send_packet(FAR struct socket *psock,
   struct sixlowpan_send_s sinfo;
 
   ninfo("len=%lu timeout=%u\n", (unsigned long)len, timeout);
-  DEBUGASSERT(psock != NULL && dev != NULL && conn != NULL && buf != NULL &&
-              destmac != NULL);
 
   memset(&sinfo, 0, sizeof(struct sixlowpan_send_s));
 
@@ -611,9 +614,8 @@ static int sixlowpan_send_packet(FAR struct socket *psock,
           /* Initialize the send state structure */
 
           nxsem_init(&sinfo.s_waitsem, 0, 0);
-          nxsem_setprotocol(&sinfo.s_waitsem, SEM_PRIO_NONE);
 
-          sinfo.s_sock      = psock;
+          sinfo.s_conn      = conn;
           sinfo.s_result    = -EBUSY;
           sinfo.s_destmac   = destmac;
           sinfo.s_buf       = buf;
@@ -641,7 +643,7 @@ static int sixlowpan_send_packet(FAR struct socket *psock,
           netdev_txnotify_dev(dev);
 
           /* Wait for the send to complete or an error to occur.
-           * net_timedwait will also terminate if a signal is received.
+           * net_sem_timedwait will also terminate if a signal is received.
            */
 
           ninfo("Wait for send complete\n");
@@ -650,9 +652,14 @@ static int sixlowpan_send_packet(FAR struct socket *psock,
             {
               uint32_t acked = sinfo.s_acked;
 
-              ret = net_timedwait(&sinfo.s_waitsem, timeout);
+              ret = net_sem_timedwait(&sinfo.s_waitsem, timeout);
               if (ret != -ETIMEDOUT || acked == sinfo.s_acked)
                 {
+                  if (ret == -ETIMEDOUT)
+                    {
+                      ret = -EAGAIN;
+                    }
+
                   break; /* Timeout without any progress */
                 }
             }
@@ -712,29 +719,27 @@ ssize_t psock_6lowpan_tcp_send(FAR struct socket *psock, FAR const void *buf,
   ninfo("buflen %lu\n", (unsigned long)buflen);
   sixlowpan_dumpbuffer("Outgoing TCP payload", buf, buflen);
 
-  DEBUGASSERT(psock != NULL && psock->s_crefs > 0);
   DEBUGASSERT(psock->s_type == SOCK_STREAM);
 
   /* Make sure that this is a valid socket */
 
-  if (psock == NULL || psock->s_crefs <= 0)
+  if (psock == NULL || psock->s_conn == NULL)
     {
       nerr("ERROR: Invalid socket\n");
       return (ssize_t)-EBADF;
     }
 
+  /* Get the underlying TCP connection structure */
+
+  conn = psock->s_conn;
+
   /* Make sure that this is a connected TCP socket */
 
-  if (psock->s_type != SOCK_STREAM || !_SS_ISCONNECTED(psock->s_flags))
+  if (psock->s_type != SOCK_STREAM || !_SS_ISCONNECTED(conn->sconn.s_flags))
     {
       nerr("ERROR: Not connected\n");
       return (ssize_t)-ENOTCONN;
     }
-
-  /* Get the underlying TCP connection structure */
-
-  conn = (FAR struct tcp_conn_s *)psock->s_conn;
-  DEBUGASSERT(conn != NULL);
 
 #ifdef CONFIG_NET_IPv4
   /* Ignore if not IPv6 domain */
@@ -769,7 +774,7 @@ ssize_t psock_6lowpan_tcp_send(FAR struct socket *psock, FAR const void *buf,
 #ifdef CONFIG_NET_ICMPv6_NEIGHBOR
   /* Make sure that the IP address mapping is in the Neighbor Table */
 
-  ret = icmpv6_neighbor(conn->u.ipv6.raddr);
+  ret = icmpv6_neighbor(dev, conn->u.ipv6.raddr);
   if (ret < 0)
     {
       nerr("ERROR: Not reachable\n");
@@ -793,7 +798,7 @@ ssize_t psock_6lowpan_tcp_send(FAR struct socket *psock, FAR const void *buf,
    */
 
   ret = sixlowpan_send_packet(psock, dev, conn, buf, buflen, &destmac,
-                              _SO_TIMEOUT(psock->s_sndtimeo));
+                              _SO_TIMEOUT(conn->sconn.s_sndtimeo));
   if (ret < 0)
     {
       nerr("ERROR: sixlowpan_send_packet() failed: %d\n", ret);
@@ -807,7 +812,7 @@ ssize_t psock_6lowpan_tcp_send(FAR struct socket *psock, FAR const void *buf,
  * Name: sixlowpan_tcp_send
  *
  * Description:
- *   TCP output comes through three different mechansims.  Either from:
+ *   TCP output comes through three different mechanisms.  Either from:
  *
  *   1. TCP socket output.  For the case of TCP output to an
  *      IEEE802.15.4, the TCP output is caught in the socket
@@ -817,7 +822,7 @@ ssize_t psock_6lowpan_tcp_send(FAR struct socket *psock, FAR const void *buf,
  *   3. TCP output resulting from TX or timer polling
  *
  *   Cases 2 and 3 will be handled here.  Logic in ipv6_tcp_input(),
- *   devif_poll(), and devif_timer() detect if (1) an attempt to return with
+ *   and devif_poll() detect if (1) an attempt to return with
  *   d_len > 0 and (2) that the device is an IEEE802.15.4 MAC network
  *   driver. Under those conditions, this function will be called to create
  *   the IEEE80215.4 frames.
@@ -868,7 +873,7 @@ void sixlowpan_tcp_send(FAR struct net_driver_s *dev,
 
       if (ipv6hdr->ipv6.proto != IP_PROTO_TCP)
         {
-          nwarn("WARNING: Expected TCP prototype: %u vs %s\n",
+          nwarn("WARNING: Expected TCP prototype: %u vs %u\n",
                 ipv6hdr->ipv6.proto, IP_PROTO_TCP);
         }
       else
@@ -902,7 +907,7 @@ void sixlowpan_tcp_send(FAR struct net_driver_s *dev,
           if (hdrlen > dev->d_len)
             {
               nwarn("WARNING:  Dropping small TCP packet: %u < %u\n",
-                    buflen, hdrlen);
+                    dev->d_len, hdrlen);
             }
           else
             {

@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/risc-v/src/litex/litex_clockconfig.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -31,7 +33,7 @@
 #include <nuttx/arch.h>
 #include <arch/board/board.h>
 
-#include "up_arch.h"
+#include "riscv_internal.h"
 #include "litex_clockconfig.h"
 
 /****************************************************************************
@@ -50,7 +52,7 @@ uint32_t litex_get_hfclk(void)
 {
   /* fpga fabric default sys frequency */
 
-  return 100000000UL;
+  return CONFIG_LITEX_SYS_CORE_FREQ_HZ;
 }
 
 /****************************************************************************

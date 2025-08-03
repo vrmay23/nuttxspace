@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/stm32l4/stm32l4_usbdev.c
  *
- *   Copyright (C) 2009-2013, 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.orgr>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,11 +26,13 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -55,7 +44,7 @@
 
 #include <nuttx/irq.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "stm32l4.h"
 #include "stm32l4_gpio.h"
 #include "stm32l4_usbdev.h"
@@ -231,16 +220,6 @@
 #define STM32L4_TRACEINTID_EP0SETUPOUT        0x001f
 #define STM32L4_TRACEINTID_EP0SETUPOUTDATA    0x0020
 
-/* Ever-present MIN and MAX macros */
-
-#ifndef MIN
-#  define MIN(a,b) (a < b ? a : b)
-#endif
-
-#ifndef MAX
-#  define MAX(a,b) (a > b ? a : b)
-#endif
-
 /* Byte ordering in host-based values */
 
 #ifdef CONFIG_ENDIAN_BIG
@@ -252,7 +231,7 @@
 #endif
 
 /****************************************************************************
- * Private Type Definitions
+ * Private Types
  ****************************************************************************/
 
 /* The various states of a control pipe */
@@ -378,10 +357,10 @@ static void stm32l4_putreg(uint16_t val, uint32_t addr);
 static void stm32l4_checksetup(void);
 static void stm32l4_dumpep(int epno);
 #else
-# define stm32l4_getreg(addr)      getreg16(addr)
-# define stm32l4_putreg(val,addr)  putreg16(val,addr)
-# define stm32l4_checksetup()
-# define stm32l4_dumpep(epno)
+#  define stm32l4_getreg(addr)     getreg16(addr)
+#  define stm32l4_putreg(val,addr) putreg16(val,addr)
+#  define stm32l4_checksetup()
+#  define stm32l4_dumpep(epno)
 #endif
 
 /* Low-Level Helpers ********************************************************/
@@ -474,7 +453,7 @@ static void   stm32l4_ep0in(struct stm32l4_usbdev_s *priv);
 static inline void
               stm32l4_ep0done(struct stm32l4_usbdev_s *priv, uint16_t istr);
 static void   stm32l4_lptransfer(struct stm32l4_usbdev_s *priv);
-static int    stm32l4_usbinterrupt(int irq, void *context, FAR void *arg);
+static int    stm32l4_usbinterrupt(int irq, void *context, void *arg);
 
 /* Endpoint helpers *********************************************************/
 
@@ -1358,7 +1337,7 @@ static int stm32l4_wrrequest(struct stm32l4_usbdev_s *priv,
     }
 
   epno = USB_EPNO(privep->ep.eplog);
-  uinfo("epno=%d req=%p: len=%d xfrd=%d nullpkt=%d\n",
+  uinfo("epno=%d req=%p: len=%zu xfrd=%zu nullpkt=%d\n",
         epno, privreq, privreq->req.len, privreq->req.xfrd,
         privep->txnullpkt);
   UNUSED(epno);
@@ -1506,7 +1485,8 @@ static int stm32l4_rdrequest(struct stm32l4_usbdev_s *priv,
       return -ENOENT;
     }
 
-  uinfo("EP%d: len=%d xfrd=%d\n", epno, privreq->req.len, privreq->req.xfrd);
+  uinfo("EP%d: len=%zu xfrd=%zu\n",
+        epno, privreq->req.len, privreq->req.xfrd);
 
   /* Ignore any attempt to receive a zero length packet */
 
@@ -2048,7 +2028,9 @@ static void stm32l4_ep0setup(struct stm32l4_usbdev_s *priv)
         usbtrace(TRACE_INTDECODE(STM32L4_TRACEINTID_GETSETDESC),
                  priv->ctrl.type);
 
-        /* The request seems valid... let the class implementation handle it */
+        /* The request seems valid...
+         * let the class implementation handle it
+         */
 
         stm32l4_dispatchrequest(priv);
         handled = true;
@@ -2069,7 +2051,9 @@ static void stm32l4_ep0setup(struct stm32l4_usbdev_s *priv)
             USB_REQ_RECIPIENT_DEVICE &&
             value.w == 0 && index.w == 0 && len.w == 1)
           {
-            /* The request seems valid... let the class implementation handle it */
+            /* The request seems valid...
+             * let the class implementation handle it
+             */
 
             stm32l4_dispatchrequest(priv);
             handled = true;
@@ -2095,7 +2079,9 @@ static void stm32l4_ep0setup(struct stm32l4_usbdev_s *priv)
         if ((priv->ctrl.type & USB_REQ_RECIPIENT_MASK) ==
             USB_REQ_RECIPIENT_DEVICE && index.w == 0 && len.w == 0)
           {
-             /* The request seems valid... let the class implementation handle it */
+             /* The request seems valid...
+              * let the class implementation handle it
+              */
 
              stm32l4_dispatchrequest(priv);
              handled = true;
@@ -2435,7 +2421,7 @@ static void stm32l4_lptransfer(struct stm32l4_usbdev_s *priv)
  * Name: stm32l4_usbinterrupt
  ****************************************************************************/
 
-static int stm32l4_usbinterrupt(int irq, void *context, FAR void *arg)
+static int stm32l4_usbinterrupt(int irq, void *context, void *arg)
 {
   /* For now there is only one USB controller, but we will always refer to
    * it using a pointer to make any future ports to multiple USB controllers
@@ -2835,7 +2821,7 @@ static int stm32l4_epconfigure(struct usbdev_ep_s *ep,
   if (!ep || !desc)
     {
       usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_INVALIDPARMS), 0);
-      uerr("ERROR: ep=%p desc=%p\n");
+      uerr("ERROR: ep=%p desc=%p\n", ep, desc);
       return -EINVAL;
     }
 #endif
@@ -2973,7 +2959,7 @@ static struct usbdev_req_s *stm32l4_epallocreq(struct usbdev_ep_s *ep)
 
   usbtrace(TRACE_EPALLOCREQ, USB_EPNO(ep->eplog));
 
-  privreq = (struct stm32l4_req_s *)kmm_malloc(sizeof(struct stm32l4_req_s));
+  privreq = kmm_malloc(sizeof(struct stm32l4_req_s));
   if (!privreq)
     {
       usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_ALLOCFAIL), 0);
@@ -3200,6 +3186,7 @@ static int stm32l4_epstall(struct usbdev_ep_s *ep, bool resume)
           priv->ep0state = EP0STATE_STALLED;
         }
 
+      leave_critical_section(flags);
       return -ENODEV;
     }
 
@@ -3245,7 +3232,9 @@ static int stm32l4_epstall(struct usbdev_ep_s *ep, bool resume)
             {
               if (epno == EP0)
                 {
-                  /* After clear the STALL, enable the default endpoint receiver */
+                  /* After clear the STALL,
+                   * enable the default endpoint receiver
+                   */
 
                   stm32l4_seteprxcount(epno, ep->maxpacket);
                 }
@@ -3735,14 +3724,14 @@ static void stm32l4_hwshutdown(struct stm32l4_usbdev_s *priv)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: up_usbinitialize
+ * Name: arm_usbinitialize
  *
  * Description:
  *   Initialize the USB driver
  *
  ****************************************************************************/
 
-void up_usbinitialize(void)
+void arm_usbinitialize(void)
 {
   /* For now there is only one USB controller, but we will always refer to
    * it using a pointer to make any future ports to multiple USB controllers
@@ -3771,19 +3760,19 @@ void up_usbinitialize(void)
     {
       usbtrace(TRACE_DEVERROR(STM32L4_TRACEERR_IRQREGISTRATION),
                (uint16_t)STM32L4_IRQ_USB_FS);
-      up_usbuninitialize();
+      arm_usbuninitialize();
     }
 }
 
 /****************************************************************************
- * Name: up_usbuninitialize
+ * Name: arm_usbuninitialize
  *
  * Description:
  *   Initialize the USB driver
  *
  ****************************************************************************/
 
-void up_usbuninitialize(void)
+void arm_usbuninitialize(void)
 {
   /* For now there is only one USB controller, but we will always refer to
    * it using a pointer to make any future ports to multiple USB controllers
@@ -3867,7 +3856,9 @@ int usbdev_register(struct usbdevclass_driver_s *driver)
     }
   else
     {
-      /* Setup the USB controller -- enabling interrupts at the USB controller */
+      /* Setup the USB controller -- enabling interrupts at
+       * the USB controller
+       */
 
       stm32l4_hwreset(priv);
 
@@ -3875,8 +3866,8 @@ int usbdev_register(struct usbdevclass_driver_s *driver)
 
       up_enable_irq(STM32L4_IRQ_USB_FS);
 
-      /* Enable pull-up to connect the device.  The host should enumerate us
-       * some time after this
+      /* Enable pull-up to connect the device.
+       * The host should enumerate us some time after this
        */
 
       stm32l4_pullup(&priv->usbdev, true);

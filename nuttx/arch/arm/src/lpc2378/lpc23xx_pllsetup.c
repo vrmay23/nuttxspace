@@ -1,12 +1,11 @@
 /****************************************************************************
- * arch/arm/src/lpc2378/lpc23xx_irq.c
+ * arch/arm/src/lpc2378/lpc23xx_pllsetup.c
  *
- *   Copyright (C) 2010 Rommel Marcelo. All rights reserved.
- *   Author: Rommel Marcelo
- *
- * This file is part of the NuttX RTOS:
- *
- *   Copyright (C) 2010, 2014 Gregory Nutt. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2010 Rommel Marcelo. All rights reserved.
+ * SPDX-FileCopyrightText: 2010,2014 Gregory Nutt. All rights reserved.
+ * SPDX-FileContributor: Rommel Marcelo
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,8 +45,8 @@
  *   MEMAP register is set override the settings of the CPU configuration
  *   pins.
  *
- *  CONFIG_LPC2378_EXTMEM_MODE: Code executes from external memory starting at
- *    address 0x8000:0000.
+ *  CONFIG_LPC2378_EXTMEM_MODE: Code executes from external memory starting
+ *    at address 0x8000:0000.
  *
  *  CONFIG_LPC2378_RAM_MODE: Code executes from on-chip RAM at address
  *     0x4000:0000.
@@ -65,12 +64,12 @@
 #include <sys/types.h>
 
 #include "arm.h"
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "lpc2378.h"
 #include "lpc23xx_pinsel.h"
 #include "lpc23xx_scb.h"
 
-void IO_Init(void);
+void io_init(void);
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -158,17 +157,18 @@ void IO_Init(void);
 
 static inline void up_scbpllfeed(void)
 {
-  SCB_PLLFEED = 0xAA;
+  SCB_PLLFEED = 0xaa;
   SCB_PLLFEED = 0x55;
 }
 
 /****************************************************************************
- * Name: ConfigurePLL
+ * Name: configure_pll
  ****************************************************************************/
 
-void ConfigurePLL(void)
+void configure_pll(void)
 {
-  uint32_t MSel, NSel;
+  uint32_t m_sel;
+  uint32_t n_sel;
 
   /* LPC2378 Rev.'-' errata Enable the Ethernet block to enable 16k EnetRAM */
 
@@ -231,9 +231,9 @@ void ConfigurePLL(void)
 
   while ((SCB_PLLSTAT & (1 << 26)) == 0);
 
-  MSel = SCB_PLLSTAT & 0x00007FFF;
-  NSel = (SCB_PLLSTAT & 0x00FF0000) >> 16;
-  while ((MSel != PLL_M) && (NSel != PLL_N));
+  m_sel = SCB_PLLSTAT & 0x00007fff;
+  n_sel = (SCB_PLLSTAT & 0x00ff0000) >> 16;
+  while ((m_sel != PLL_M) && (n_sel != PLL_N));
 
   /* Enable and connect */
 
@@ -244,7 +244,7 @@ void ConfigurePLL(void)
 
   while ((SCB_PLLSTAT & (1 << 25)) == 0);
 
-  /* Set memory accelerater module */
+  /* Set memory accelerator module */
 
   SCB_MAMCR = 0;
   SCB_MAMTIM = CONFIG_LPC2378_MAMTIM_VALUE;
@@ -254,7 +254,5 @@ void ConfigurePLL(void)
 
   SCB_SCS |= 0x01;
 
-  IO_Init();
-
-  return;
+  io_init();
 }

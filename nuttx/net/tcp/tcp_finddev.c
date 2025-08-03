@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/tcp/tcp_finddev.c
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -49,6 +36,7 @@
 #include "netdev/netdev.h"
 #include "inet/inet.h"
 #include "tcp/tcp.h"
+#include "utils/utils.h"
 
 /****************************************************************************
  * Private Functions
@@ -89,7 +77,19 @@ static int tcp_find_ipv4_device(FAR struct tcp_conn_s *conn,
 
   if (net_ipv4addr_cmp(addr, INADDR_ANY))
     {
-      return local ? OK : -EINVAL;
+      if (local)
+        {
+#ifdef CONFIG_NET_BINDTODEVICE
+          if (conn->sconn.s_boundto != 0)
+            {
+              conn->dev = netdev_findbyindex(conn->sconn.s_boundto);
+            }
+#endif
+
+          return OK;
+        }
+
+      return -ECONNREFUSED;
     }
 
   /* We need to select the device that is going to route the TCP packet
@@ -139,7 +139,19 @@ static int tcp_find_ipv6_device(FAR struct tcp_conn_s *conn,
 
   if (net_ipv6addr_cmp(addr, g_ipv6_unspecaddr))
     {
-      return local ? OK : -EINVAL;
+      if (local)
+        {
+#ifdef CONFIG_NET_BINDTODEVICE
+          if (conn->sconn.s_boundto != 0)
+            {
+              conn->dev = netdev_findbyindex(conn->sconn.s_boundto);
+            }
+#endif
+
+          return OK;
+        }
+
+      return -ECONNREFUSED;
     }
 
   /* We need to select the device that is going to route the TCP packet

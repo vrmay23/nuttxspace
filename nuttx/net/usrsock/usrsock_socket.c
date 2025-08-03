@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/usrsock/usrsock_socket.c
  *
- *  Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
- *  Author: Jussi Kivilinna <jussi.kivilinna@haltian.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -59,11 +46,11 @@
  * Private Functions
  ****************************************************************************/
 
-static uint16_t socket_event(FAR struct net_driver_s *dev, FAR void *pvconn,
+static uint16_t socket_event(FAR struct net_driver_s *dev,
                              FAR void *pvpriv, uint16_t flags)
 {
   FAR struct usrsock_reqstate_s *pstate = pvpriv;
-  FAR struct usrsock_conn_s *conn = pvconn;
+  FAR struct usrsock_conn_s *conn = pstate->conn;
 
   if (flags & USRSOCK_EVENT_ABORT)
     {
@@ -73,9 +60,9 @@ static uint16_t socket_event(FAR struct net_driver_s *dev, FAR void *pvconn,
 
       /* Stop further callbacks */
 
-      pstate->cb->flags   = 0;
-      pstate->cb->priv    = NULL;
-      pstate->cb->event   = NULL;
+      pstate->cb->flags = 0;
+      pstate->cb->priv  = NULL;
+      pstate->cb->event = NULL;
 
       /* Wake up the waiting thread */
 
@@ -94,13 +81,17 @@ static uint16_t socket_event(FAR struct net_driver_s *dev, FAR void *pvconn,
 
           conn->state   = USRSOCK_CONN_STATE_READY;
           conn->usockid = pstate->result;
+          if (flags & USRSOCK_EVENT_SENDTO_READY)
+            {
+              conn->flags |= USRSOCK_EVENT_SENDTO_READY;
+            }
         }
 
       /* Stop further callbacks */
 
-      pstate->cb->flags   = 0;
-      pstate->cb->priv    = NULL;
-      pstate->cb->event   = NULL;
+      pstate->cb->flags = 0;
+      pstate->cb->priv  = NULL;
+      pstate->cb->event = NULL;
 
       /* Wake up the waiting thread */
 
@@ -148,7 +139,7 @@ static int do_socket_request(FAR struct usrsock_conn_s *conn, int domain,
   bufs[0].iov_base = (FAR void *)&req;
   bufs[0].iov_len = sizeof(req);
 
-  return usrsockdev_do_request(conn, bufs, ARRAY_SIZE(bufs));
+  return usrsock_do_request(conn, bufs, nitems(bufs));
 }
 
 /****************************************************************************
@@ -189,8 +180,6 @@ static int do_socket_request(FAR struct usrsock_conn_s *conn, int domain,
  *   EPROTONOSUPPORT
  *     The protocol type or the specified protocol is not supported within
  *     this domain.
- *
- * Assumptions:
  *
  ****************************************************************************/
 
@@ -238,7 +227,7 @@ int usrsock_socket(int domain, int type, int protocol,
 
   /* Wait for completion of request. */
 
-  net_lockedwait_uninterruptible(&state.recvsem);
+  net_sem_wait_uninterruptible(&state.recvsem);
 
   if (state.result < 0)
     {
@@ -246,16 +235,12 @@ int usrsock_socket(int domain, int type, int protocol,
       goto errout_teardown_callback;
     }
 
-  psock->s_type = SOCK_USRSOCK_TYPE;
-  psock->s_domain = PF_USRSOCK_DOMAIN;
-  conn->type    = type;
   psock->s_conn = conn;
   conn->crefs   = 1;
 
   usrsock_teardown_request_callback(&state);
 
   net_unlock();
-
   return OK;
 
 errout_teardown_callback:
@@ -263,7 +248,6 @@ errout_teardown_callback:
 errout_free_conn:
   usrsock_free(conn);
   net_unlock();
-
   return err;
 }
 

@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/renesas/src/rx65n/rx65n_schedulesigaction.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -32,8 +34,7 @@
 #include <nuttx/arch.h>
 
 #include "sched/sched.h"
-#include "up_internal.h"
-#include "up_arch.h"
+#include "renesas_internal.h"
 
 /****************************************************************************
  * Public Functions
@@ -46,7 +47,7 @@
  *   This function is called by the OS when one or more
  *   signal handling actions have been queued for execution.
  *   The architecture specific code must configure things so
- *   that the 'igdeliver' callback is executed on the thread
+ *   that the 'sigdeliver' callback is executed on the thread
  *   specified by 'tcb' as soon as possible.
  *
  *   This function may be called from interrupt handling logic.
@@ -70,75 +71,38 @@
  *       currently executing task -- just call the signal
  *       handler now.
  *
+ * Assumptions:
+ *   Called from critical section
+ *
  ****************************************************************************/
 
-void up_schedule_sigaction(struct tcb_s *tcb, sig_deliver_t sigdeliver)
+void up_schedule_sigaction(struct tcb_s *tcb)
 {
-  irqstate_t flags;
+  sinfo("tcb=%p, rtcb=%p current_regs=%p\n", tcb,
+        this_task(), up_current_regs());
 
-  sinfo("tcb=0x%p sigdeliver=0x%p\n", tcb, sigdeliver);
+  /* First, handle some special cases when the signal is
+   * being delivered to the currently executing task.
+   */
 
-  /* Make sure that interrupts are disabled */
-
-  flags = enter_critical_section();
-
-  /* Refuse to handle nested signal actions */
-
-  if (!tcb->xcp.sigdeliver)
+  if (tcb == this_task())
     {
-      /* First, handle some special cases when the signal is
-       * being delivered to the currently executing task.
+      /* CASE 1:  We are not in an interrupt handler and
+       * a task is signalling itself for some reason.
        */
 
-      sinfo("rtcb=0x%p g_current_regs=0x%p\n", this_task(), g_current_regs);
-
-      if (tcb == this_task())
+      if (!up_current_regs())
         {
-          /* CASE 1:  We are not in an interrupt handler and
-           * a task is signalling itself for some reason.
-           */
+          /* In this case just deliver the signal now. */
 
-          if (!g_current_regs)
-            {
-              /* In this case just deliver the signal now. */
-
-              sigdeliver(tcb);
-            }
-
-          /* CASE 2:  We are in an interrupt handler AND the
-           * interrupted task is the same as the one that
-           * must receive the signal, then we will have to modify
-           * the return state as well as the state in the TCB.
-           */
-
-          else
-            {
-              /* Save the return PC and SR and one scratch register
-               * These will be restored by the signal trampoline after
-               * the signals have been delivered.
-               */
-
-              tcb->xcp.sigdeliver   = sigdeliver;
-              tcb->xcp.saved_pc     = g_current_regs[REG_PC];
-
-              /* Then set up to vector to the trampoline with interrupts
-               * disabled
-               */
-
-              g_current_regs[REG_PC]  = (uint32_t)up_sigdeliver;
-
-              /* And make sure that the saved context in the TCB
-               * is the same as the interrupt return context.
-               */
-
-              up_copystate(tcb->xcp.regs, (uint32_t *)&g_current_regs);
-            }
+          (tcb->sigdeliver)(tcb);
+          tcb->sigdeliver = NULL;
         }
 
-      /* Otherwise, we are (1) signaling a task is not running
-       * from an interrupt handler or (2) we are not in an
-       * interrupt handler and the running task is signalling
-       * some non-running task.
+      /* CASE 2:  We are in an interrupt handler AND the
+       * interrupted task is the same as the one that
+       * must receive the signal, then we will have to modify
+       * the return state as well as the state in the TCB.
        */
 
       else
@@ -148,18 +112,45 @@ void up_schedule_sigaction(struct tcb_s *tcb, sig_deliver_t sigdeliver)
            * the signals have been delivered.
            */
 
-          tcb->xcp.sigdeliver    = sigdeliver;
-          tcb->xcp.saved_pc      = tcb->xcp.regs[REG_PC];
-                  tcb->xcp.saved_sr      = tcb->xcp.regs[REG_PSW];
+          tcb->xcp.saved_pc = up_current_regs()[REG_PC];
+          tcb->xcp.saved_sr = up_current_regs()[REG_PSW];
 
           /* Then set up to vector to the trampoline with interrupts
            * disabled
            */
 
-          tcb->xcp.regs[REG_PC]  = (uint32_t)up_sigdeliver;
-          tcb->xcp.regs[REG_PSW]  |=  0x00030000;
+          up_current_regs()[REG_PC]   = (uint32_t)renesas_sigdeliver;
+          up_current_regs()[REG_PSW] |= 0x00030000;
+
+          /* And make sure that the saved context in the TCB
+           * is the same as the interrupt return context.
+           */
+
+          renesas_copystate(tcb->xcp.regs, up_current_regs());
         }
     }
 
-  leave_critical_section(flags);
+  /* Otherwise, we are (1) signaling a task is not running
+   * from an interrupt handler or (2) we are not in an
+   * interrupt handler and the running task is signalling
+   * some non-running task.
+   */
+
+  else
+    {
+      /* Save the return PC and SR and one scratch register
+       * These will be restored by the signal trampoline after
+       * the signals have been delivered.
+       */
+
+      tcb->xcp.saved_pc       = tcb->xcp.regs[REG_PC];
+      tcb->xcp.saved_sr       = tcb->xcp.regs[REG_PSW];
+
+      /* Then set up to vector to the trampoline with interrupts
+       * disabled
+       */
+
+      tcb->xcp.regs[REG_PC]   = (uint32_t)renesas_sigdeliver;
+      tcb->xcp.regs[REG_PSW] |= 0x00030000;
+    }
 }

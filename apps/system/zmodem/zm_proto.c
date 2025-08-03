@@ -1,41 +1,29 @@
 /****************************************************************************
- * system/zmodem/zm_proto.c
+ * apps/system/zmodem/zm_proto.c
  *
- *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * References:
- *   "The ZMODEM Inter Application File Transfer Protocol", Chuck Forsberg,
- *    Omen Technology Inc., October 14, 1988
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
+
+/* References:
+ *   "The ZMODEM Inter Application File Transfer Protocol", Chuck Forsberg,
+ *    Omen Technology Inc., October 14, 1988
+ */
 
 /****************************************************************************
  * Included Files
@@ -44,14 +32,11 @@
 #include <nuttx/config.h>
 
 #include <stdio.h>
-#include <crc16.h>
-#include <crc32.h>
+
+#include <nuttx/crc16.h>
+#include <nuttx/crc32.h>
 
 #include "zm.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
 
 /****************************************************************************
  * Public Data
@@ -69,8 +54,6 @@
  *  CAN characters if they are received by a command interpreter.
  */
 
-#define CANISTR_SIZE (8+10)
-
 const uint8_t g_canistr[CANISTR_SIZE] =
 {
   /* Eight CAN characters */
@@ -85,7 +68,7 @@ const uint8_t g_canistr[CANISTR_SIZE] =
 };
 
 /****************************************************************************
- * Public Function Protypes
+ * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
@@ -199,7 +182,7 @@ int zm_senddata(FAR struct zm_state_s *pzm, FAR const uint8_t *buffer,
     }
 
   term = ZCRCW;
-  zmdbg("zbin=%c, buflen=%d, term=%c flags=%04x\n",
+  zmdbg("zbin=%c, buflen=%zu, term=%c flags=%04x\n",
         zbin, buflen, term, pzm->flags);
 
   /* Transfer the data to the I/O buffer, accumulating the CRC */
@@ -208,7 +191,7 @@ int zm_senddata(FAR struct zm_state_s *pzm, FAR const uint8_t *buffer,
     {
       if (zbin == ZBIN)
         {
-          crc = (uint32_t)crc16part(buffer, 1, (uint16_t)crc);
+          crc = (uint32_t)crc16xmodempart(buffer, 1, (uint16_t)crc);
         }
       else /* zbin = ZBIN32 */
         {
@@ -226,7 +209,7 @@ int zm_senddata(FAR struct zm_state_s *pzm, FAR const uint8_t *buffer,
 
   if (zbin == ZBIN)
     {
-      crc = (uint32_t)crc16part((FAR const uint8_t *)&term, 1, (uint16_t)crc);
+      crc = crc16xmodempart((FAR const uint8_t *)&term, 1, crc);
     }
   else
     {
@@ -265,7 +248,7 @@ int zm_senddata(FAR struct zm_state_s *pzm, FAR const uint8_t *buffer,
  *   necessary.
  *
  *   Hex header:
- *     ZPAD ZPAD ZDLE ZHEX type f3/p0 f2/p1 f1/p2 f0/p3 crc-1 crc-2 CR LF [XON]
+ *     ZPAD ZPAD ZDLE ZHEX type f3/p0 f2/p1 f1/p2 f0/p3 crc1 crc2 CR LF [XON]
  *     Payload length: 16 (14 hex digits, cr, lf, ignoring optional XON)
  *
  * Input Parameters:
@@ -300,19 +283,18 @@ int zm_sendhexhdr(FAR struct zm_state_s *pzm, int type,
 
   /* type */
 
-  crc = crc16part((FAR const uint8_t *)&type, 1, 0);
+  crc = crc16xmodempart((FAR const uint8_t *)&type, 1, 0);
   ptr = zm_puthex8(ptr, type);
 
   /* f3/p0 f2/p1 f1/p2 f0/p3 */
 
-  crc = crc16part(buffer, 4, crc);
+  crc = crc16xmodempart(buffer, 4, crc);
   for (i = 0; i < 4; i++)
     {
       ptr = zm_puthex8(ptr, *buffer++);
     }
 
   /* crc-1 crc-2 */
-  /* REVISIT:  Should this be zm_putzdle()? */
 
   ptr = zm_puthex8(ptr, (crc >> 8) & 0xff);
   ptr = zm_puthex8(ptr, crc & 0xff);
@@ -377,12 +359,12 @@ int zm_sendbin16hdr(FAR struct zm_state_s *pzm, int type,
 
   /* type */
 
-  crc = crc16part((FAR const uint8_t *)&type, 1, 0);
+  crc = crc16xmodempart((FAR const uint8_t *)&type, 1, 0);
   ptr = zm_putzdle(pzm, ptr, type);
 
   /* f3/p0 f2/p1 f1/p2 f0/p3 */
 
-  crc = crc16part(buffer, 4, crc);
+  crc = crc16xmodempart(buffer, 4, crc);
   for (i = 0; i < 4; i++)
     {
       ptr = zm_putzdle(pzm, ptr, *buffer++);
@@ -443,7 +425,7 @@ int zm_sendbin32hdr(FAR struct zm_state_s *pzm, int type,
   /* type */
 
   ptr = zm_putzdle(pzm, ptr, type);
-  crc = crc32part((FAR const uint8_t *)&type, 1, 0xffffffffL);
+  crc = crc32part((FAR const uint8_t *)&type, 1, 0xffffffffl);
 
   /* f3/p0 f2/p1 f1/p2 f0/p3 */
 

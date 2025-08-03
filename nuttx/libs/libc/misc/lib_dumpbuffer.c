@@ -1,35 +1,22 @@
 /****************************************************************************
  * libs/libc/misc/lib_dumpbuffer.c
  *
- *   Copyright (C) 2009, 2011, 2014, 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,39 +31,28 @@
 #include <debug.h>
 
 /****************************************************************************
- * Pre-processor definitions
- ****************************************************************************/
-
-#define _NITEMS   32                 /* 32 bytes displayed per line */
-#define _LINESIZE (3 * _NITEMS + 4)  /* 2 hex chars, ASCII char, 3 spaces, NUL */
-
-/****************************************************************************
- * Private Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: lib_nibble
- *
- * Description:
- *  Convert a binary nibble to a hexadecimal character.
- *
- ****************************************************************************/
-
-static char lib_nibble(unsigned char nibble)
-{
-  if (nibble < 10)
-    {
-      return '0' + nibble;
-    }
-  else
-    {
-      return 'a' + nibble - 10;
-    }
-}
-
-/****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: lib_dumphandler
+ *
+ * Description:
+ *  Do a pretty buffer dump with handler output.
+ *
+ ****************************************************************************/
+
+void lib_dumphandler(FAR const char *msg, FAR const uint8_t *buffer,
+                     unsigned int buflen, lib_dump_handler_t handler,
+                     FAR void *arg)
+{
+  struct iovec buf;
+
+  buf.iov_base = (FAR void *)buffer;
+  buf.iov_len = buflen;
+
+  lib_dumpvhandler(msg, &buf, 1, handler, arg);
+}
 
 /****************************************************************************
  * Name: lib_dumpbuffer
@@ -92,66 +68,29 @@ static char lib_nibble(unsigned char nibble)
 void lib_dumpbuffer(FAR const char *msg, FAR const uint8_t *buffer,
                     unsigned int buflen)
 {
-  char buf[_LINESIZE];
-  unsigned int i;
-  unsigned int j;
-  unsigned int k;
+  struct iovec buf;
 
-  syslog(LOG_INFO, "%s (%p):\n", msg, buffer);
-  for (i = 0; i < buflen; i += _NITEMS)
-    {
-      FAR char *ptr = buf;
+  buf.iov_base = (FAR void *)buffer;
+  buf.iov_len = buflen;
 
-      /* Generate hex values:  2 * _NITEMS + 1 bytes */
+  lib_dumpvbuffer(msg, &buf, 1);
+}
 
-      for (j = 0; j < _NITEMS; j++)
-        {
-          k = i + j;
+/****************************************************************************
+ * Name: lib_dumpfile
+ *
+ * Description:
+ *  Do a pretty buffer dump with fd output.
+ *
+ ****************************************************************************/
 
-          if (j == (_NITEMS / 2))
-            {
-              *ptr++ = ' ';
-            }
+void lib_dumpfile(int fd, FAR const char *msg, FAR const uint8_t *buffer,
+                  unsigned int buflen)
+{
+  struct iovec buf;
 
-          if (k < buflen)
-            {
-              *ptr++ = lib_nibble((buffer[k] >> 4) & 0xf);
-              *ptr++ = lib_nibble(buffer[k] & 0xf);
-            }
-          else
-            {
-              *ptr++ = ' ';
-              *ptr++ = ' ';
-            }
-        }
+  buf.iov_base = (FAR void *)buffer;
+  buf.iov_len = buflen;
 
-      *ptr++ = ' ';  /* Plus 1 byte */
-
-      /* Generate printable characters:  Plus 1 * _NITEMS + 1 bytes */
-
-      for (j = 0; j < _NITEMS; j++)
-        {
-         k = i + j;
-
-          if (j == (_NITEMS / 2))
-            {
-              *ptr++ = ' ';
-            }
-
-          if (k < buflen)
-            {
-              if (buffer[k] >= 0x20 && buffer[k] < 0x7f)
-                {
-                  *ptr++ = buffer[k];
-                }
-              else
-                {
-                  *ptr++ = '.';
-                }
-            }
-        }
-
-      *ptr = '\0';  /* Plus 1 byte */
-      syslog(LOG_INFO, "%04x: %s\n", i, buf);
-   }
+  lib_dumpvfile(fd, msg, &buf, 1);
 }

@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/arm/src/kinetis/kinetis_sdhc.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -24,6 +26,7 @@
 
 #include <nuttx/config.h>
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -43,8 +46,7 @@
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "kinetis.h"
 #include "hardware/kinetis_pinmux.h"
 #include "hardware/kinetis_sim.h"
@@ -166,7 +168,7 @@ struct kinetis_dev_s
   sdio_eventset_t    waitevents;      /* Set of events to be waited for */
   uint32_t           waitints;        /* Interrupt enables for event waiting */
   volatile sdio_eventset_t wkupevent; /* The event that caused the wakeup */
-  WDOG_ID            waitwdog;        /* Watchdog that handles event timeouts */
+  struct wdog_s      waitwdog;        /* Watchdog that handles event timeouts */
 
   /* Callback support */
 
@@ -229,8 +231,6 @@ struct kinetis_sdhcregs_s
 
 /* Low-level helpers ********************************************************/
 
-static int  kinetis_takesem(struct kinetis_dev_s *priv);
-#define     kinetis_givesem(priv) (nxsem_post(&priv->waitsem))
 static void kinetis_configwaitints(struct kinetis_dev_s *priv,
               uint32_t waitints, sdio_eventset_t waitevents,
               sdio_eventset_t wkupevents);
@@ -264,7 +264,7 @@ static void kinetis_datadisable(void);
 static void kinetis_transmit(struct kinetis_dev_s *priv);
 static void kinetis_receive(struct kinetis_dev_s *priv);
 #endif
-static void kinetis_eventtimeout(int argc, uint32_t arg, ...);
+static void kinetis_eventtimeout(wdparm_t arg);
 static void kinetis_endwait(struct kinetis_dev_s *priv,
               sdio_eventset_t wkupevent);
 static void kinetis_endtransfer(struct kinetis_dev_s *priv,
@@ -272,77 +272,76 @@ static void kinetis_endtransfer(struct kinetis_dev_s *priv,
 
 /* Interrupt Handling *******************************************************/
 
-static int  kinetis_interrupt(int irq, void *context, FAR void *arg);
+static int  kinetis_interrupt(int irq, void *context, void *arg);
 
 /* SDIO interface methods ***************************************************/
 
 /* Mutual exclusion */
 
 #ifdef CONFIG_SDIO_MUXBUS
-static int kinetis_lock(FAR struct sdio_dev_s *dev, bool lock);
+static int kinetis_lock(struct sdio_dev_s *dev, bool lock);
 #endif
 
 /* Initialization/setup */
 
-static void kinetis_reset(FAR struct sdio_dev_s *dev);
-static sdio_capset_t kinetis_capabilities(FAR struct sdio_dev_s *dev);
-static sdio_statset_t kinetis_status(FAR struct sdio_dev_s *dev);
-static void kinetis_widebus(FAR struct sdio_dev_s *dev, bool enable);
+static void kinetis_reset(struct sdio_dev_s *dev);
+static sdio_capset_t kinetis_capabilities(struct sdio_dev_s *dev);
+static sdio_statset_t kinetis_status(struct sdio_dev_s *dev);
+static void kinetis_widebus(struct sdio_dev_s *dev, bool enable);
 #ifdef CONFIG_KINETIS_SDHC_ABSFREQ
-static void kinetis_frequency(FAR struct sdio_dev_s *dev,
+static void kinetis_frequency(struct sdio_dev_s *dev,
               uint32_t frequency);
 #endif
-static void kinetis_clock(FAR struct sdio_dev_s *dev,
+static void kinetis_clock(struct sdio_dev_s *dev,
               enum sdio_clock_e rate);
-static int  kinetis_attach(FAR struct sdio_dev_s *dev);
+static int  kinetis_attach(struct sdio_dev_s *dev);
 
 /* Command/Status/Data Transfer */
 
-static int  kinetis_sendcmd(FAR struct sdio_dev_s *dev, uint32_t cmd,
+static int  kinetis_sendcmd(struct sdio_dev_s *dev, uint32_t cmd,
               uint32_t arg);
 
 #ifdef CONFIG_SDIO_BLOCKSETUP
-static void  kinetis_blocksetup(FAR struct sdio_dev_s *dev,
+static void  kinetis_blocksetup(struct sdio_dev_s *dev,
               unsigned int blocksize, unsigned int nblocks);
 #endif
 
 #ifndef CONFIG_KINETIS_SDHC_DMA
-static int  kinetis_recvsetup(FAR struct sdio_dev_s *dev,
-              FAR uint8_t *buffer, size_t nbytes);
-static int  kinetis_sendsetup(FAR struct sdio_dev_s *dev,
-              FAR const uint8_t *buffer, uint32_t nbytes);
+static int  kinetis_recvsetup(struct sdio_dev_s *dev,
+              uint8_t *buffer, size_t nbytes);
+static int  kinetis_sendsetup(struct sdio_dev_s *dev,
+              const uint8_t *buffer, size_t nbytes);
 #endif
 
-static int  kinetis_cancel(FAR struct sdio_dev_s *dev);
+static int  kinetis_cancel(struct sdio_dev_s *dev);
 
-static int  kinetis_waitresponse(FAR struct sdio_dev_s *dev, uint32_t cmd);
-static int  kinetis_recvshortcrc(FAR struct sdio_dev_s *dev, uint32_t cmd,
+static int  kinetis_waitresponse(struct sdio_dev_s *dev, uint32_t cmd);
+static int  kinetis_recvshortcrc(struct sdio_dev_s *dev, uint32_t cmd,
               uint32_t *rshort);
-static int  kinetis_recvlong(FAR struct sdio_dev_s *dev, uint32_t cmd,
+static int  kinetis_recvlong(struct sdio_dev_s *dev, uint32_t cmd,
               uint32_t rlong[4]);
-static int  kinetis_recvshort(FAR struct sdio_dev_s *dev, uint32_t cmd,
+static int  kinetis_recvshort(struct sdio_dev_s *dev, uint32_t cmd,
               uint32_t *rshort);
-static int  kinetis_recvnotimpl(FAR struct sdio_dev_s *dev, uint32_t cmd,
+static int  kinetis_recvnotimpl(struct sdio_dev_s *dev, uint32_t cmd,
               uint32_t *rnotimpl);
 
 /* EVENT handler */
 
-static void kinetis_waitenable(FAR struct sdio_dev_s *dev,
+static void kinetis_waitenable(struct sdio_dev_s *dev,
+              sdio_eventset_t eventset, uint32_t timeout);
+static sdio_eventset_t kinetis_eventwait(struct sdio_dev_s *dev);
+static void kinetis_callbackenable(struct sdio_dev_s *dev,
               sdio_eventset_t eventset);
-static sdio_eventset_t
-            kinetis_eventwait(FAR struct sdio_dev_s *dev, uint32_t timeout);
-static void kinetis_callbackenable(FAR struct sdio_dev_s *dev,
-              sdio_eventset_t eventset);
-static int  kinetis_registercallback(FAR struct sdio_dev_s *dev,
+static int  kinetis_registercallback(struct sdio_dev_s *dev,
               worker_t callback, void *arg);
 
 /* DMA */
 
 #ifdef CONFIG_KINETIS_SDHC_DMA
-static int  kinetis_dmarecvsetup(FAR struct sdio_dev_s *dev,
-              FAR uint8_t *buffer, size_t buflen);
-static int  kinetis_dmasendsetup(FAR struct sdio_dev_s *dev,
-              FAR const uint8_t *buffer, size_t buflen);
+static int  kinetis_dmarecvsetup(struct sdio_dev_s *dev,
+              uint8_t *buffer, size_t buflen);
+static int  kinetis_dmasendsetup(struct sdio_dev_s *dev,
+              const uint8_t *buffer, size_t buflen);
 #endif
 
 /* Initialization/uninitialization/reset ************************************/
@@ -400,6 +399,7 @@ struct kinetis_dev_s g_sdhcdev =
 #endif
 #endif
   },
+  .waitsem = SEM_INITIALIZER(0),
 };
 
 /* Register logging support */
@@ -411,27 +411,6 @@ static struct kinetis_sdhcregs_s g_sampleregs[DEBUG_NSAMPLES];
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: kinetis_takesem
- *
- * Description:
- *   Take the wait semaphore (handling false alarm wakeups due to the receipt
- *   of signals).
- *
- * Input Parameters:
- *   dev - Instance of the SDIO device driver state structure.
- *
- * Returned Value:
- *   Normally OK, but may return -ECANCELED in the rare event that the task
- *   has been canceled.
- *
- ****************************************************************************/
-
-static int kinetis_takesem(struct kinetis_dev_s *priv)
-{
-  return nxsem_wait_uninterruptible(&priv->waitsem);
-}
 
 /****************************************************************************
  * Name: kinetis_configwaitints
@@ -772,7 +751,7 @@ static void kinetis_transmit(struct kinetis_dev_s *priv)
    * (PRSSTAT.BWEN)
    */
 
-  mcinfo("Entry: remaining: %d IRQSTAT: %08x\n",
+  mcinfo("Entry: remaining: %d IRQSTAT: %08" PRIx32 "\n",
          priv->remaining, getreg32(KINETIS_SDHC_IRQSTAT));
 
   while (priv->remaining > 0 &&
@@ -818,7 +797,7 @@ static void kinetis_transmit(struct kinetis_dev_s *priv)
 
   putreg32(SDHC_INT_BWR, KINETIS_SDHC_IRQSTAT);
 
-  mcinfo("Exit: remaining: %d IRQSTAT: %08x\n",
+  mcinfo("Exit: remaining: %d IRQSTAT: %08" PRIx32 "\n",
          priv->remaining, getreg32(KINETIS_SDHC_IRQSTAT));
 }
 #endif
@@ -857,7 +836,7 @@ static void kinetis_receive(struct kinetis_dev_s *priv)
    * ready (BRR)
    */
 
-  mcinfo("Entry: remaining: %d IRQSTAT: %08x\n",
+  mcinfo("Entry: remaining: %d IRQSTAT: %08" PRIx32 "\n",
          priv->remaining, getreg32(KINETIS_SDHC_IRQSTAT));
 
   while (priv->remaining > 0 &&
@@ -909,7 +888,7 @@ static void kinetis_receive(struct kinetis_dev_s *priv)
 
   putreg32(watermark << SDHC_WML_RD_SHIFT, KINETIS_SDHC_WML);
 
-  mcinfo("Exit: remaining: %d IRQSTAT: %08x WML: %08x\n",
+  mcinfo("Exit: remaining: %d IRQSTAT: %08" PRIx32 " WML: %08" PRIx32 "\n",
          priv->remaining, getreg32(KINETIS_SDHC_IRQSTAT),
          getreg32(KINETIS_SDHC_WML));
 }
@@ -923,8 +902,7 @@ static void kinetis_receive(struct kinetis_dev_s *priv)
  *   any other waited-for event occurring.
  *
  * Input Parameters:
- *   argc   - The number of arguments (should be 1)
- *   arg    - The argument (state structure reference cast to uint32_t)
+ *   arg    - The argument
  *
  * Returned Value:
  *   None
@@ -934,11 +912,11 @@ static void kinetis_receive(struct kinetis_dev_s *priv)
  *
  ****************************************************************************/
 
-static void kinetis_eventtimeout(int argc, uint32_t arg, ...)
+static void kinetis_eventtimeout(wdparm_t arg)
 {
   struct kinetis_dev_s *priv = (struct kinetis_dev_s *)arg;
 
-  DEBUGASSERT(argc == 1 && priv != NULL);
+  DEBUGASSERT(priv != NULL);
   DEBUGASSERT((priv->waitevents & SDIOWAIT_TIMEOUT) != 0);
 
   /* Is a data transfer complete event expected? */
@@ -979,7 +957,7 @@ static void kinetis_endwait(struct kinetis_dev_s *priv,
 {
   /* Cancel the watchdog timeout */
 
-  wd_cancel(priv->waitwdog);
+  wd_cancel(&priv->waitwdog);
 
   /* Disable event-related interrupts */
 
@@ -987,7 +965,7 @@ static void kinetis_endwait(struct kinetis_dev_s *priv,
 
   /* Wake up the waiting thread */
 
-  kinetis_givesem(priv);
+  nxsem_post(&priv->waitsem);
 }
 
 /****************************************************************************
@@ -1073,7 +1051,7 @@ static void kinetis_endtransfer(struct kinetis_dev_s *priv,
  *
  ****************************************************************************/
 
-static int kinetis_interrupt(int irq, void *context, FAR void *arg)
+static int kinetis_interrupt(int irq, void *context, void *arg)
 {
   struct kinetis_dev_s *priv = &g_sdhcdev;
   uint32_t enabled;
@@ -1089,7 +1067,8 @@ static int kinetis_interrupt(int irq, void *context, FAR void *arg)
   regval  = getreg32(KINETIS_SDHC_IRQSIGEN);
   enabled = getreg32(KINETIS_SDHC_IRQSTAT) & regval;
 
-  mcinfo("IRQSTAT: %08x IRQSIGEN %08x enabled: %08x\n",
+  mcinfo("IRQSTAT: %08" PRIx32 " IRQSIGEN %08" PRIx32
+         " enabled: %08" PRIx32 "\n",
          getreg32(KINETIS_SDHC_IRQSTAT), regval, enabled);
 
   /* Disable card interrupts to clear the card interrupt to the host
@@ -1219,13 +1198,17 @@ static int kinetis_interrupt(int irq, void *context, FAR void *arg)
  ****************************************************************************/
 
 #ifdef CONFIG_SDIO_MUXBUS
-static int kinetis_lock(FAR struct sdio_dev_s *dev, bool lock)
+static int kinetis_lock(struct sdio_dev_s *dev, bool lock)
 {
   /* Single SDIO instance so there is only one possibility.  The multiplex
    * bus is part of board support package.
    */
 
-  kinetis_muxbus_sdio_lock(lock);
+  /* FIXME: Implement the below function to support bus share:
+   *
+   * kinetis_muxbus_sdio_lock(lock);
+   */
+
   return OK;
 }
 #endif
@@ -1244,9 +1227,9 @@ static int kinetis_lock(FAR struct sdio_dev_s *dev, bool lock)
  *
  ****************************************************************************/
 
-static void kinetis_reset(FAR struct sdio_dev_s *dev)
+static void kinetis_reset(struct sdio_dev_s *dev)
 {
-  FAR struct kinetis_dev_s *priv = (FAR struct kinetis_dev_s *)dev;
+  struct kinetis_dev_s *priv = (struct kinetis_dev_s *)dev;
   uint32_t regval;
 
   /* Disable all interrupts so that nothing interferes with the following. */
@@ -1277,7 +1260,8 @@ static void kinetis_reset(FAR struct sdio_dev_s *dev)
 
   putreg32(SDHC_INT_ALL, KINETIS_SDHC_IRQSTATEN);
 
-  mcinfo("SYSCTL: %08x PRSSTAT: %08x IRQSTATEN: %08x\n",
+  mcinfo("SYSCTL: %08" PRIx32 " PRSSTAT: %08" PRIx32
+         " IRQSTATEN: %08" PRIx32 "\n",
          getreg32(KINETIS_SDHC_SYSCTL), getreg32(KINETIS_SDHC_PRSSTAT),
          getreg32(KINETIS_SDHC_IRQSTATEN));
 
@@ -1295,7 +1279,7 @@ static void kinetis_reset(FAR struct sdio_dev_s *dev)
   priv->xfrflags   = 0;      /* Used to synchronize SDIO and DMA completion events */
 #endif
 
-  wd_cancel(priv->waitwdog); /* Cancel any timeouts */
+  wd_cancel(&priv->waitwdog); /* Cancel any timeouts */
 
   /* Interrupt mode data transfer support */
 
@@ -1318,7 +1302,7 @@ static void kinetis_reset(FAR struct sdio_dev_s *dev)
  *
  ****************************************************************************/
 
-static sdio_capset_t kinetis_capabilities(FAR struct sdio_dev_s *dev)
+static sdio_capset_t kinetis_capabilities(struct sdio_dev_s *dev)
 {
   sdio_capset_t caps = 0;
 
@@ -1347,7 +1331,7 @@ static sdio_capset_t kinetis_capabilities(FAR struct sdio_dev_s *dev)
  *
  ****************************************************************************/
 
-static sdio_statset_t kinetis_status(FAR struct sdio_dev_s *dev)
+static sdio_statset_t kinetis_status(struct sdio_dev_s *dev)
 {
   struct kinetis_dev_s *priv = (struct kinetis_dev_s *)dev;
   return priv->cdstatus;
@@ -1370,7 +1354,7 @@ static sdio_statset_t kinetis_status(FAR struct sdio_dev_s *dev)
  *
  ****************************************************************************/
 
-static void kinetis_widebus(FAR struct sdio_dev_s *dev, bool wide)
+static void kinetis_widebus(struct sdio_dev_s *dev, bool wide)
 {
   uint32_t regval;
 
@@ -1406,7 +1390,7 @@ static void kinetis_widebus(FAR struct sdio_dev_s *dev, bool wide)
  ****************************************************************************/
 
 #ifdef CONFIG_KINETIS_SDHC_ABSFREQ
-static void kinetis_frequency(FAR struct sdio_dev_s *dev, uint32_t frequency)
+static void kinetis_frequency(struct sdio_dev_s *dev, uint32_t frequency)
 {
   uint32_t sdclkfs;
   uint32_t prescaled;
@@ -1542,7 +1526,7 @@ static void kinetis_frequency(FAR struct sdio_dev_s *dev, uint32_t frequency)
  ****************************************************************************/
 
 #ifdef CONFIG_KINETIS_SDHC_ABSFREQ
-static void kinetis_clock(FAR struct sdio_dev_s *dev, enum sdio_clock_e rate)
+static void kinetis_clock(struct sdio_dev_s *dev, enum sdio_clock_e rate)
 {
   uint32_t frequency;
   uint32_t regval;
@@ -1600,7 +1584,7 @@ static void kinetis_clock(FAR struct sdio_dev_s *dev, enum sdio_clock_e rate)
   kinetis_frequency(dev, frequency);
 }
 #else
-static void kinetis_clock(FAR struct sdio_dev_s *dev, enum sdio_clock_e rate)
+static void kinetis_clock(struct sdio_dev_s *dev, enum sdio_clock_e rate)
 {
   uint32_t regval;
 
@@ -1613,7 +1597,7 @@ static void kinetis_clock(FAR struct sdio_dev_s *dev, enum sdio_clock_e rate)
   regval  = getreg32(KINETIS_SDHC_SYSCTL);
   regval &= ~SDHC_SYSCTL_SDCLKEN;
   putreg32(regval, KINETIS_SDHC_SYSCTL);
-  mcinfo("SYSCTRL: %08x\n", getreg32(KINETIS_SDHC_SYSCTL));
+  mcinfo("SYSCTRL: %08" PRIx32 "\n", getreg32(KINETIS_SDHC_SYSCTL));
 
   /* Clear the old prescaler and divisor values so that new ones can be ORed
    * in.
@@ -1641,7 +1625,7 @@ static void kinetis_clock(FAR struct sdio_dev_s *dev, enum sdio_clock_e rate)
             ~(SDHC_SYSCTL_IPGEN | SDHC_SYSCTL_HCKEN | SDHC_SYSCTL_PEREN);
 
           putreg32(regval, KINETIS_SDHC_SYSCTL);
-          mcinfo("SYSCTRL: %08x\n", getreg32(KINETIS_SDHC_SYSCTL));
+          mcinfo("SYSCTRL: %08" PRIx32 "\n", getreg32(KINETIS_SDHC_SYSCTL));
           return;
         }
 
@@ -1687,7 +1671,7 @@ static void kinetis_clock(FAR struct sdio_dev_s *dev, enum sdio_clock_e rate)
     }
 
   putreg32(regval, KINETIS_SDHC_SYSCTL);
-  mcinfo("SYSCTRL: %08x\n", getreg32(KINETIS_SDHC_SYSCTL));
+  mcinfo("SYSCTRL: %08" PRIx32 "\n", getreg32(KINETIS_SDHC_SYSCTL));
 }
 #endif
 
@@ -1705,7 +1689,7 @@ static void kinetis_clock(FAR struct sdio_dev_s *dev, enum sdio_clock_e rate)
  *
  ****************************************************************************/
 
-static int kinetis_attach(FAR struct sdio_dev_s *dev)
+static int kinetis_attach(struct sdio_dev_s *dev)
 {
   int ret;
 
@@ -1747,7 +1731,7 @@ static int kinetis_attach(FAR struct sdio_dev_s *dev)
  *
  ****************************************************************************/
 
-static int kinetis_sendcmd(FAR struct sdio_dev_s *dev, uint32_t cmd,
+static int kinetis_sendcmd(struct sdio_dev_s *dev, uint32_t cmd,
                            uint32_t arg)
 {
   clock_t timeout;
@@ -1854,7 +1838,9 @@ static int kinetis_sendcmd(FAR struct sdio_dev_s *dev, uint32_t cmd,
 
   /* Other bits? What about CMDTYP? */
 
-  mcinfo("cmd: %08x arg: %08x regval: %08x\n", cmd, arg, regval);
+  mcinfo("cmd: %08" PRIx32 " arg: %08" PRIx32
+         " regval: %08" PRIx32 "\n",
+         cmd, arg, regval);
 
   /* The Command Inhibit (CIHB) bit is set in the PRSSTAT bit immediately
    * after the transfer type register is written.  This bit is cleared when
@@ -1866,16 +1852,17 @@ static int kinetis_sendcmd(FAR struct sdio_dev_s *dev, uint32_t cmd,
    */
 
   timeout = SDHC_CMDTIMEOUT;
-  start   = clock_systimer();
+  start   = clock_systime_ticks();
 
   while ((getreg32(KINETIS_SDHC_PRSSTAT) & SDHC_PRSSTAT_CIHB) != 0)
     {
       /* Calculate the elapsed time */
 
-      elapsed = clock_systimer() - start;
+      elapsed = clock_systime_ticks() - start;
       if (elapsed >= timeout)
         {
-          mcerr("ERROR: Timeout cmd: %08x PRSSTAT: %08x\n",
+          mcerr("ERROR: Timeout cmd: %08" PRIx32
+                " PRSSTAT: %08" PRIx32 "\n",
                 cmd, getreg32(KINETIS_SDHC_PRSSTAT));
 
           return -EBUSY;
@@ -1910,9 +1897,9 @@ static int kinetis_sendcmd(FAR struct sdio_dev_s *dev, uint32_t cmd,
  ****************************************************************************/
 
 #ifdef CONFIG_SDIO_BLOCKSETUP
-static void kinetis_blocksetup(FAR struct sdio_dev_s *dev,
-                             unsigned int blocksize,
-                             unsigned int nblocks)
+static void kinetis_blocksetup(struct sdio_dev_s *dev,
+                               unsigned int blocksize,
+                               unsigned int nblocks)
 {
   uint32_t regval;
 
@@ -1950,7 +1937,7 @@ static void kinetis_blocksetup(FAR struct sdio_dev_s *dev,
  ****************************************************************************/
 
 #ifndef CONFIG_KINETIS_SDHC_DMA
-static int kinetis_recvsetup(FAR struct sdio_dev_s *dev, FAR uint8_t *buffer,
+static int kinetis_recvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
                              size_t nbytes)
 {
   struct kinetis_dev_s *priv = (struct kinetis_dev_s *)dev;
@@ -2003,8 +1990,8 @@ static int kinetis_recvsetup(FAR struct sdio_dev_s *dev, FAR uint8_t *buffer,
  ****************************************************************************/
 
 #ifndef CONFIG_KINETIS_SDHC_DMA
-static int kinetis_sendsetup(FAR struct sdio_dev_s *dev,
-                             FAR const uint8_t *buffer, size_t nbytes)
+static int kinetis_sendsetup(struct sdio_dev_s *dev,
+                             const uint8_t *buffer, size_t nbytes)
 {
   struct kinetis_dev_s *priv = (struct kinetis_dev_s *)dev;
 
@@ -2051,7 +2038,7 @@ static int kinetis_sendsetup(FAR struct sdio_dev_s *dev,
  *
  ****************************************************************************/
 
-static int kinetis_cancel(FAR struct sdio_dev_s *dev)
+static int kinetis_cancel(struct sdio_dev_s *dev)
 {
   struct kinetis_dev_s *priv = (struct kinetis_dev_s *)dev;
 #ifdef CONFIG_KINETIS_SDHC_DMA
@@ -2071,7 +2058,7 @@ static int kinetis_cancel(FAR struct sdio_dev_s *dev)
 
   /* Cancel any watchdog timeout */
 
-  wd_cancel(priv->waitwdog);
+  wd_cancel(&priv->waitwdog);
 
   /* If this was a DMA transfer, make sure that DMA is stopped */
 
@@ -2107,7 +2094,7 @@ static int kinetis_cancel(FAR struct sdio_dev_s *dev)
  *
  ****************************************************************************/
 
-static int kinetis_waitresponse(FAR struct sdio_dev_s *dev, uint32_t cmd)
+static int kinetis_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
 {
   clock_t timeout;
   clock_t start;
@@ -2149,16 +2136,17 @@ static int kinetis_waitresponse(FAR struct sdio_dev_s *dev, uint32_t cmd)
    * (except Auto CMD12).
    */
 
-  start = clock_systimer();
+  start = clock_systime_ticks();
 
   while ((getreg32(KINETIS_SDHC_IRQSTAT) & SDHC_INT_CC) == 0)
     {
       /* Calculate the elapsed time */
 
-      elapsed = clock_systimer() - start;
+      elapsed = clock_systime_ticks() - start;
       if (elapsed >= timeout)
         {
-          mcerr("ERROR: Timeout cmd: %08x IRQSTAT: %08x\n",
+          mcerr("ERROR: Timeout cmd: %08" PRIx32
+                " IRQSTAT: %08" PRIx32 "\n",
                 cmd, getreg32(KINETIS_SDHC_IRQSTAT));
 
           return -ETIMEDOUT;
@@ -2169,7 +2157,8 @@ static int kinetis_waitresponse(FAR struct sdio_dev_s *dev, uint32_t cmd)
 
   if ((getreg32(KINETIS_SDHC_IRQSTAT) & errors) != 0)
     {
-      mcerr("ERROR: cmd: %08x errors: %08x IRQSTAT: %08x\n",
+      mcerr("ERROR: cmd: %08" PRIx32 " errors: %08" PRIx32
+            " IRQSTAT: %08" PRIx32 "\n",
             cmd, errors, getreg32(KINETIS_SDHC_IRQSTAT));
       ret = -EIO;
     }
@@ -2195,14 +2184,14 @@ static int kinetis_waitresponse(FAR struct sdio_dev_s *dev, uint32_t cmd)
  *
  * Returned Value:
  *   Number of bytes sent on success; a negated errno on failure.  Here a
- *   failure means only a faiure to obtain the requested response (due to
+ *   failure means only a failure to obtain the requested response (due to
  *   transport problem -- timeout, CRC, etc.).  The implementation only
  *   assures that the response is returned intacta and does not check errors
  *   within the response itself.
  *
  ****************************************************************************/
 
-static int kinetis_recvshortcrc(FAR struct sdio_dev_s *dev, uint32_t cmd,
+static int kinetis_recvshortcrc(struct sdio_dev_s *dev, uint32_t cmd,
                                 uint32_t *rshort)
 {
   uint32_t regval;
@@ -2254,12 +2243,12 @@ static int kinetis_recvshortcrc(FAR struct sdio_dev_s *dev, uint32_t cmd,
       regval = getreg32(KINETIS_SDHC_IRQSTAT);
       if ((regval & SDHC_INT_CTOE) != 0)
         {
-          mcerr("ERROR: Command timeout: %08x\n", regval);
+          mcerr("ERROR: Command timeout: %08" PRIx32 "\n", regval);
           ret = -ETIMEDOUT;
         }
       else if ((regval & SDHC_INT_CCE) != 0)
         {
-          mcerr("ERROR: CRC failure: %08x\n", regval);
+          mcerr("ERROR: CRC failure: %08" PRIx32 "\n", regval);
           ret = -EIO;
         }
     }
@@ -2273,7 +2262,7 @@ static int kinetis_recvshortcrc(FAR struct sdio_dev_s *dev, uint32_t cmd,
   return ret;
 }
 
-static int kinetis_recvlong(FAR struct sdio_dev_s *dev, uint32_t cmd,
+static int kinetis_recvlong(struct sdio_dev_s *dev, uint32_t cmd,
                             uint32_t rlong[4])
 {
   uint32_t regval;
@@ -2293,7 +2282,7 @@ static int kinetis_recvlong(FAR struct sdio_dev_s *dev, uint32_t cmd,
 
   if ((cmd & MMCSD_RESPONSE_MASK) != MMCSD_R2_RESPONSE)
     {
-      mcerr("ERROR: Wrong response CMD=%08x\n", cmd);
+      mcerr("ERROR: Wrong response CMD=%08" PRIx32 "\n", cmd);
       ret = -EINVAL;
     }
   else
@@ -2304,12 +2293,12 @@ static int kinetis_recvlong(FAR struct sdio_dev_s *dev, uint32_t cmd,
       regval = getreg32(KINETIS_SDHC_IRQSTAT);
       if (regval & SDHC_INT_CTOE)
         {
-          mcerr("ERROR: Timeout IRQSTAT: %08x\n", regval);
+          mcerr("ERROR: Timeout IRQSTAT: %08" PRIx32 "\n", regval);
           ret = -ETIMEDOUT;
         }
       else if (regval & SDHC_INT_CCE)
         {
-          mcerr("ERROR: CRC fail IRQSTAT: %08x\n", regval);
+          mcerr("ERROR: CRC fail IRQSTAT: %08" PRIx32 "\n", regval);
           ret = -EIO;
         }
     }
@@ -2339,7 +2328,7 @@ static int kinetis_recvlong(FAR struct sdio_dev_s *dev, uint32_t cmd,
   return ret;
 }
 
-static int kinetis_recvshort(FAR struct sdio_dev_s *dev, uint32_t cmd,
+static int kinetis_recvshort(struct sdio_dev_s *dev, uint32_t cmd,
                              uint32_t *rshort)
 {
   uint32_t regval;
@@ -2360,7 +2349,7 @@ static int kinetis_recvshort(FAR struct sdio_dev_s *dev, uint32_t cmd,
   if ((cmd & MMCSD_RESPONSE_MASK) != MMCSD_R3_RESPONSE &&
       (cmd & MMCSD_RESPONSE_MASK) != MMCSD_R7_RESPONSE)
     {
-      mcerr("ERROR: Wrong response CMD=%08x\n", cmd);
+      mcerr("ERROR: Wrong response CMD=%08" PRIx32 "\n", cmd);
       ret = -EINVAL;
     }
   else
@@ -2373,7 +2362,7 @@ static int kinetis_recvshort(FAR struct sdio_dev_s *dev, uint32_t cmd,
       regval = getreg32(KINETIS_SDHC_IRQSTAT);
       if (regval & SDHC_INT_CTOE)
         {
-          mcerr("ERROR: Timeout IRQSTAT: %08x\n", regval);
+          mcerr("ERROR: Timeout IRQSTAT: %08" PRIx32 "\n", regval);
           ret = -ETIMEDOUT;
         }
     }
@@ -2390,7 +2379,7 @@ static int kinetis_recvshort(FAR struct sdio_dev_s *dev, uint32_t cmd,
 
 /* MMC responses not supported */
 
-static int kinetis_recvnotimpl(FAR struct sdio_dev_s *dev, uint32_t cmd,
+static int kinetis_recvnotimpl(struct sdio_dev_s *dev, uint32_t cmd,
                                uint32_t *rnotimpl)
 {
   /* Just return an error */
@@ -2422,8 +2411,8 @@ static int kinetis_recvnotimpl(FAR struct sdio_dev_s *dev, uint32_t cmd,
  *
  ****************************************************************************/
 
-static void kinetis_waitenable(FAR struct sdio_dev_s *dev,
-                             sdio_eventset_t eventset)
+static void kinetis_waitenable(struct sdio_dev_s *dev,
+                               sdio_eventset_t eventset, uint32_t timeout)
 {
   struct kinetis_dev_s *priv = (struct kinetis_dev_s *)dev;
   uint32_t waitints;
@@ -2452,6 +2441,32 @@ static void kinetis_waitenable(FAR struct sdio_dev_s *dev,
   /* Enable event-related interrupts */
 
   kinetis_configwaitints(priv, waitints, eventset, 0);
+
+  /* Check if the timeout event is specified in the event set */
+
+  if ((priv->waitevents & SDIOWAIT_TIMEOUT) != 0)
+    {
+      int delay;
+      int ret;
+
+      /* Yes.. Handle a corner case */
+
+      if (!timeout)
+        {
+          priv->wkupevent = SDIOWAIT_TIMEOUT;
+          return;
+        }
+
+      /* Start the watchdog timer */
+
+      delay = MSEC2TICK(timeout);
+      ret   = wd_start(&priv->waitwdog, delay,
+                       kinetis_eventtimeout, (wdparm_t)priv);
+      if (ret < 0)
+        {
+          mcerr("ERROR: wd_start failed: %d\n", ret);
+        }
+    }
 }
 
 /****************************************************************************
@@ -2475,8 +2490,7 @@ static void kinetis_waitenable(FAR struct sdio_dev_s *dev,
  *
  ****************************************************************************/
 
-static sdio_eventset_t kinetis_eventwait(FAR struct sdio_dev_s *dev,
-                                       uint32_t timeout)
+static sdio_eventset_t kinetis_eventwait(struct sdio_dev_s *dev)
 {
   struct kinetis_dev_s *priv = (struct kinetis_dev_s *)dev;
   sdio_eventset_t wkupevent = 0;
@@ -2489,31 +2503,6 @@ static sdio_eventset_t kinetis_eventwait(FAR struct sdio_dev_s *dev,
 
   DEBUGASSERT((priv->waitevents != 0 && priv->wkupevent == 0) ||
               (priv->waitevents == 0 && priv->wkupevent != 0));
-
-  /* Check if the timeout event is specified in the event set */
-
-  if ((priv->waitevents & SDIOWAIT_TIMEOUT) != 0)
-    {
-      int delay;
-
-      /* Yes.. Handle a corner case */
-
-      if (!timeout)
-        {
-          return SDIOWAIT_TIMEOUT;
-        }
-
-      /* Start the watchdog timer */
-
-      delay = MSEC2TICK(timeout);
-      ret   = wd_start(priv->waitwdog, delay,
-                       kinetis_eventtimeout,
-                       1, (uint32_t)priv);
-      if (ret < 0)
-        {
-          mcerr("ERROR: wd_start failed: %d\n", ret);
-        }
-    }
 
   /* Loop until the event (or the timeout occurs). Race conditions are
    * avoided by calling kinetis_waitenable prior to triggering the logic
@@ -2529,14 +2518,14 @@ static sdio_eventset_t kinetis_eventwait(FAR struct sdio_dev_s *dev,
        * incremented and there will be no wait.
        */
 
-      ret = kinetis_takesem(priv);
+      ret = nxsem_wait_uninterruptible(&priv->waitsem);
       if (ret < 0)
         {
           /* Task canceled.  Cancel the wdog (assuming it was started) and
            * return an SDIO error.
            */
 
-          wd_cancel(priv->waitwdog);
+          wd_cancel(&priv->waitwdog);
           return SDIOWAIT_ERROR;
         }
 
@@ -2588,8 +2577,8 @@ static sdio_eventset_t kinetis_eventwait(FAR struct sdio_dev_s *dev,
  *
  ****************************************************************************/
 
-static void kinetis_callbackenable(FAR struct sdio_dev_s *dev,
-                                 sdio_eventset_t eventset)
+static void kinetis_callbackenable(struct sdio_dev_s *dev,
+                                   sdio_eventset_t eventset)
 {
   struct kinetis_dev_s *priv = (struct kinetis_dev_s *)dev;
 
@@ -2622,8 +2611,8 @@ static void kinetis_callbackenable(FAR struct sdio_dev_s *dev,
  *
  ****************************************************************************/
 
-static int kinetis_registercallback(FAR struct sdio_dev_s *dev,
-                                  worker_t callback, void *arg)
+static int kinetis_registercallback(struct sdio_dev_s *dev,
+                                    worker_t callback, void *arg)
 {
   struct kinetis_dev_s *priv = (struct kinetis_dev_s *)dev;
 
@@ -2658,8 +2647,8 @@ static int kinetis_registercallback(FAR struct sdio_dev_s *dev,
  ****************************************************************************/
 
 #ifdef CONFIG_KINETIS_SDHC_DMA
-static int kinetis_dmarecvsetup(FAR struct sdio_dev_s *dev,
-                                FAR uint8_t *buffer, size_t buflen)
+static int kinetis_dmarecvsetup(struct sdio_dev_s *dev,
+                                uint8_t *buffer, size_t buflen)
 {
   struct kinetis_dev_s *priv = (struct kinetis_dev_s *)dev;
 
@@ -2718,8 +2707,8 @@ static int kinetis_dmarecvsetup(FAR struct sdio_dev_s *dev,
  ****************************************************************************/
 
 #ifdef CONFIG_KINETIS_SDHC_DMA
-static int kinetis_dmasendsetup(FAR struct sdio_dev_s *dev,
-                              FAR const uint8_t *buffer, size_t buflen)
+static int kinetis_dmasendsetup(struct sdio_dev_s *dev,
+                                const uint8_t *buffer, size_t buflen)
 {
   struct kinetis_dev_s *priv = (struct kinetis_dev_s *)dev;
 
@@ -2826,7 +2815,7 @@ static void kinetis_callback(void *arg)
 
           mcinfo("Queuing callback to %p(%p)\n",
                  priv->callback, priv->cbarg);
-          work_queue(HPWORK, &priv->cbwork, (worker_t)priv->callback,
+          work_queue(HPWORK, &priv->cbwork, priv->callback,
                      priv->cbarg, 0);
         }
       else
@@ -2858,7 +2847,7 @@ static void kinetis_callback(void *arg)
  *
  ****************************************************************************/
 
-FAR struct sdio_dev_s *sdhc_initialize(int slotno)
+struct sdio_dev_s *sdhc_initialize(int slotno)
 {
   uint32_t regval;
 
@@ -2868,21 +2857,6 @@ FAR struct sdio_dev_s *sdhc_initialize(int slotno)
   DEBUGASSERT(slotno == 0);
 
   /* Initialize the SDHC slot structure data structure */
-
-  /* Initialize semaphores */
-
-  nxsem_init(&priv->waitsem, 0, 0);
-
-  /* The waitsem semaphore is used for signaling and, hence, should not have
-   * priority inheritance enabled.
-   */
-
-  nxsem_setprotocol(&priv->waitsem, SEM_PRIO_NONE);
-
-  /* Create a watchdog timer */
-
-  priv->waitwdog = wd_create();
-  DEBUGASSERT(priv->waitwdog);
 
   /* In addition to the system clock, the SDHC module needs a clock for the
    * base for the external card clock.  There are four possible sources for
@@ -2898,7 +2872,7 @@ FAR struct sdio_dev_s *sdhc_initialize(int slotno)
   regval &= ~SIM_SOPT2_SDHCSRC_MASK;
   regval |= SIM_SOPT2_SDHCSRC_CORE;
   putreg32(regval, KINETIS_SIM_SOPT2);
-  mcinfo("SIM_SOPT2: %08x\n", regval);
+  mcinfo("SIM_SOPT2: %08" PRIx32 "\n", regval);
 
   /* Enable clocking to the SDHC module.  Clocking is still disabled in
    * the SYSCTRL register.
@@ -2907,7 +2881,7 @@ FAR struct sdio_dev_s *sdhc_initialize(int slotno)
   regval = getreg32(KINETIS_SIM_SCGC3);
   regval |= SIM_SCGC3_SDHC;
   putreg32(regval, KINETIS_SIM_SCGC3);
-  mcinfo("SIM_SCGC3: %08x\n", regval);
+  mcinfo("SIM_SCGC3: %08" PRIx32 "\n", regval);
 
   /* Configure pins for 1 or 4-bit, wide-bus operation (the chip is capable
    * of 8-bit wide bus operation but D4-D7 are not configured).
@@ -2972,7 +2946,7 @@ FAR struct sdio_dev_s *sdhc_initialize(int slotno)
  *
  ****************************************************************************/
 
-void sdhc_mediachange(FAR struct sdio_dev_s *dev, bool cardinslot)
+void sdhc_mediachange(struct sdio_dev_s *dev, bool cardinslot)
 {
   struct kinetis_dev_s *priv = (struct kinetis_dev_s *)dev;
   sdio_statset_t cdstatus;
@@ -3019,7 +2993,7 @@ void sdhc_mediachange(FAR struct sdio_dev_s *dev, bool cardinslot)
  *
  ****************************************************************************/
 
-void sdhc_wrprotect(FAR struct sdio_dev_s *dev, bool wrprotect)
+void sdhc_wrprotect(struct sdio_dev_s *dev, bool wrprotect)
 {
   struct kinetis_dev_s *priv = (struct kinetis_dev_s *)dev;
   irqstate_t flags;

@@ -1,40 +1,22 @@
 /****************************************************************************
  * apps/netutils/ping/icmpv6_ping.c
  *
- *   Copyright (C) 2018 Pinecone Inc. All rights reserved.
- *   Author: Guiding Li<liguiding@pinecone.net>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Extracted from logic originally written by:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- *   Copyright (C) 2017-2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -52,6 +34,8 @@
 #include <poll.h>
 #include <string.h>
 #include <errno.h>
+#include <signal.h>
+#include <stdbool.h>
 
 #ifdef CONFIG_LIBC_NETDB
 #  include <netdb.h>
@@ -77,11 +61,21 @@
  * separate instance of g_ping6_id in every process space.
  */
 
-static uint16_t g_ping6_id = 0;
+static uint16_t g_ping6_id;
+static volatile bool g_exiting6;
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: sigexit
+ ****************************************************************************/
+
+static void sigexit(int signo)
+{
+  g_exiting6 = true;
+}
 
 /****************************************************************************
  * Name: ping6_newid
@@ -98,14 +92,14 @@ static inline uint16_t ping6_newid(void)
  * Name: ping6_gethostip
  *
  * Description:
- *   Call gethostbyname() to get the IP address associated with a hostname.
+ *   Call getaddrinfo() to get the IP address associated with a hostname.
  *
  * Input Parameters
  *   hostname - The host name to use in the nslookup.
- *   ipv4addr - The location to return the IPv4 address.
+ *   dest     - The location to return the IPv6 address.
  *
  * Returned Value:
- *   Zero (OK) on success; a negated errno value on failure.
+ *   Zero (OK) on success; ERROR on failure.
  *
  ****************************************************************************/
 
@@ -155,7 +149,7 @@ static int ping6_gethostip(FAR const char *hostname,
  ****************************************************************************/
 
 static void icmp6_callback(FAR struct ping6_result_s *result,
-                           int code, int extra)
+                           int code, long extra)
 {
   result->code = code;
   result->extra = extra;
@@ -180,7 +174,7 @@ void icmp6_ping(FAR const struct ping6_info_s *info)
   struct pollfd recvfd;
   FAR uint8_t *iobuffer;
   FAR uint8_t *ptr;
-  int32_t elapsed;
+  long elapsed;
   clock_t kickoff;
   clock_t start;
   socklen_t addrlen;
@@ -191,6 +185,9 @@ void icmp6_ping(FAR const struct ping6_info_s *info)
   int ret;
   int ch;
   int i;
+
+  g_exiting6 = false;
+  signal(SIGINT, sigexit);
 
   /* Initialize result structure */
 
@@ -237,6 +234,11 @@ void icmp6_ping(FAR const struct ping6_info_s *info)
 
   while (result.nrequests < info->count)
     {
+      if (g_exiting6)
+        {
+          break;
+        }
+
       /* Copy the ICMP header into the I/O buffer */
 
       memcpy(iobuffer, &outhdr, SIZEOF_ICMPV6_ECHO_REQUEST_S(0));
@@ -281,7 +283,7 @@ void icmp6_ping(FAR const struct ping6_info_s *info)
           recvfd.events   = POLLIN;
           recvfd.revents  = 0;
 
-          ret = poll(&recvfd, 1, info->timeout - elapsed);
+          ret = poll(&recvfd, 1, info->timeout - elapsed / USEC_PER_MSEC);
           if (ret < 0)
             {
               icmp6_callback(&result, ICMPv6_E_POLL, errno);
@@ -309,34 +311,35 @@ void icmp6_ping(FAR const struct ping6_info_s *info)
               goto done;
             }
 
-          elapsed = (unsigned int)TICK2MSEC(clock() - start);
+          elapsed = TICK2USEC(clock() - start);
           inhdr   = (FAR struct icmpv6_echo_reply_s *)iobuffer;
 
           if (inhdr->type == ICMPv6_ECHO_REPLY)
             {
+#ifndef CONFIG_SIM_NETUSRSOCK
               if (ntohs(inhdr->id) != result.id)
                 {
                   icmp6_callback(&result, ICMPv6_W_IDDIFF, ntohs(inhdr->id));
                   retry = true;
                 }
-              else if (ntohs(inhdr->seqno) > result.seqno)
+              else
+#endif
+              if (ntohs(inhdr->seqno) > result.seqno)
                 {
                   icmp6_callback(&result, ICMPv6_W_SEQNOBIG,
+                                 ntohs(inhdr->seqno));
+                  retry = true;
+                }
+              else if (ntohs(inhdr->seqno) < result.seqno)
+                {
+                  icmp6_callback(&result, ICMPv6_W_SEQNOSMALL,
                                  ntohs(inhdr->seqno));
                   retry = true;
                 }
               else
                 {
                   bool verified = true;
-                  int32_t pktdelay = elapsed;
-
-                  if (ntohs(inhdr->seqno) < result.seqno)
-                    {
-                      icmp6_callback(&result, ICMPv6_W_SEQNOSMALL,
-                                     ntohs(inhdr->seqno));
-                      pktdelay += info->delay;
-                      retry     = true;
-                    }
+                  long pktdelay = elapsed;
 
                   icmp6_callback(&result, ICMPv6_I_ROUNDTRIP, pktdelay);
 
@@ -381,11 +384,12 @@ void icmp6_ping(FAR const struct ping6_info_s *info)
               icmp6_callback(&result, ICMPv6_W_TYPE, inhdr->type);
             }
         }
-      while (retry && info->delay > elapsed && info->timeout > elapsed);
+      while (retry && info->delay > elapsed / USEC_PER_MSEC &&
+             info->timeout > elapsed / USEC_PER_MSEC);
 
       /* Wait if necessary to preserved the requested ping rate */
 
-      elapsed = (unsigned int)TICK2MSEC(clock() - start);
+      elapsed = TICK2MSEC(clock() - start);
       if (elapsed < info->delay)
         {
           struct timespec rqt;
@@ -407,7 +411,7 @@ void icmp6_ping(FAR const struct ping6_info_s *info)
     }
 
 done:
-  icmp6_callback(&result, ICMPv6_I_FINISH, TICK2MSEC(clock() - kickoff));
+  icmp6_callback(&result, ICMPv6_I_FINISH, TICK2USEC(clock() - kickoff));
   close(sockfd);
   free(iobuffer);
 }

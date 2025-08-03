@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/udgram/udgram_server.c
+ * apps/examples/udgram/udgram_server.c
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name Gregory Nutt nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -68,9 +55,11 @@ static inline int check_buffer(unsigned char *buf)
         {
           j = 1;
         }
+
       if (buf[j] != ch)
         {
-          printf("server: Buffer content error for offset=%d, index=%d\n", offset, j);
+          printf("server: Buffer content error for offset=%d, index=%d\n",
+                 offset, j);
           ret = 0;
         }
     }
@@ -104,19 +93,18 @@ int main(int argc, FAR char *argv[])
 
   /* Bind the socket to a local address */
 
-  addrlen = strlen(CONFIG_EXAMPLES_UDGRAM_ADDR);
-  if (addrlen > UNIX_PATH_MAX - 1)
+  addrlen = sizeof(CONFIG_EXAMPLES_UDGRAM_ADDR);
+  if (addrlen > UNIX_PATH_MAX)
     {
-      addrlen = UNIX_PATH_MAX - 1;
+      addrlen = UNIX_PATH_MAX;
     }
 
   server.sun_family = AF_LOCAL;
-  strncpy(server.sun_path, CONFIG_EXAMPLES_UDGRAM_ADDR, addrlen);
-  server.sun_path[addrlen] = '\0';
+  strlcpy(server.sun_path, CONFIG_EXAMPLES_UDGRAM_ADDR, addrlen);
 
   addrlen += sizeof(sa_family_t) + 1;
 
-  if (bind(sockfd, (struct sockaddr*)&server, addrlen) < 0)
+  if (bind(sockfd, (struct sockaddr *)&server, addrlen) < 0)
     {
       printf("server: ERROR bind failure: %d\n", errno);
       return 1;
@@ -129,7 +117,7 @@ int main(int argc, FAR char *argv[])
       printf("server: %d. Receiving up 1024 bytes\n", offset);
       recvlen = addrlen;
       nbytes = recvfrom(sockfd, inbuf, 1024, 0,
-                        (struct sockaddr*)&client, &recvlen);
+                        (struct sockaddr *)&client, &recvlen);
 
       if (nbytes < 0)
         {
@@ -138,10 +126,11 @@ int main(int argc, FAR char *argv[])
           return 1;
         }
 
-      if (recvlen < sizeof(sa_family_t) || recvlen > sizeof(struct sockaddr_un))
+      if (recvlen < sizeof(sa_family_t) ||
+          recvlen > sizeof(struct sockaddr_un))
         {
-          printf("server: %d. ERROR Received %d bytes from client with invalid length %d\n",
-                 offset, nbytes, recvlen);
+          printf("server: %d. ERROR Received %d bytes from client with "
+                 "invalid length %d\n", offset, nbytes, recvlen);
         }
       else if (recvlen == sizeof(sa_family_t))
         {
@@ -158,8 +147,8 @@ int main(int argc, FAR char *argv[])
               printf("server:  ERROR path not NUL terminated\n");
             }
         }
-      else /* if (recvlen > sizeof(sa_family_t)+1 &&
-                  recvlen <= sizeof(struct sockaddr_un)) */
+      else /* if (recvlen > sizeof(sa_family_t) + 1 &&
+            *     recvlen <= sizeof(struct sockaddr_un)) */
         {
           int pathlen = recvlen - sizeof(sa_family_t) - 1;
 

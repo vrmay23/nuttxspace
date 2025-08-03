@@ -1,24 +1,10 @@
 /************************************************************************************************
  * apps/system/zmodem/host/crc16.c
  *
- * This file is a part of NuttX:
- *
- *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * References:
- *
- *   crc16_tab calculated by Mark G. Mendel, Network Systems Corporation.
- *   crc16part() logic derived from article Copyright (C) 1986 Stephen Satchell.
- *
- * "Programmers may incorporate any or all code into their programs,
- *  giving proper credit within the source. Publication of the
- *  source routines is permitted so long as proper credit is given
- *  to Stephen Satchell, Satchell Evaluations and Chuck Forsberg,
- *  Omen Technology."
- *
- * Re-released under the Modified BSD license which, I believe, is consistent with the
- * original authors' intent:
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2013 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 1986 Stephen Satchell.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -49,6 +35,20 @@
  *
  ************************************************************************************************/
 
+/* References:
+ *
+ *   crc16_tab calculated by Mark G. Mendel, Network Systems Corporation.
+ *   crc16part() logic derived from article Copyright (C) 1986 Stephen Satchell.
+ *
+ * "Programmers may incorporate any or all code into their programs,
+ *  giving proper credit within the source. Publication of the
+ *  source routines is permitted so long as proper credit is given
+ *  to Stephen Satchell, Satchell Evaluations and Chuck Forsberg,
+ *  Omen Technology."
+ *
+ * Re-released under the Modified BSD license which, I believe, is consistent with the
+ * original authors' intent.
+ */
 /************************************************************************************************
  * Included Files
  ************************************************************************************************/
@@ -99,11 +99,12 @@ static uint16_t crc16_tab[256] =
   0x6e17,  0x7e36,  0x4e55,  0x5e74,  0x2e93,  0x3eb2,  0x0ed1,  0x1ef0
 };
 
-#define updcrc(cp, crc) ( crc16_tab[((crc >> 8) & 255)] ^ (crc << 8) ^ cp)
+#define updcrc(cp, crc) (crc16_tab[((crc >> 8) & 255)] ^ (crc << 8) ^ cp)
 
 /************************************************************************************************
  * Public Functions
  ************************************************************************************************/
+
 /************************************************************************************************
  * Name: crc16part
  *

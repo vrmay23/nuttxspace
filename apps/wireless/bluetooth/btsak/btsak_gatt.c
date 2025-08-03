@@ -1,42 +1,29 @@
 /****************************************************************************
  * apps/wireless/bluetooth/btsak/btsak_gatt.c
- * Bluetooth Swiss Army Knife -- GATT commands
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author:  Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Based loosely on the i8sak IEEE 802.15.4 program by Anthony Merlino and
- * Sebastien Lorquet.  Commands inspired for btshell example in the
- * Intel/Zephyr Arduino 101 package (BSD license).
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
+
+/* Based loosely on the i8sak IEEE 802.15.4 program by Anthony Merlino and
+ * Sebastien Lorquet.  Commands inspired from btshell example in the
+ * Intel/Zephyr Arduino 101 package (BSD license).
+ */
 
 /****************************************************************************
  * Included Files
@@ -46,6 +33,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <unistd.h>
 
 #include <nuttx/wireless/bluetooth/bt_core.h>
 #include <nuttx/wireless/bluetooth/bt_gatt.h>
@@ -54,18 +42,18 @@
 #include "btsak.h"
 
 /****************************************************************************
- * Private data
+ * Private Data
  ****************************************************************************/
 
 /****************************************************************************
- * Private functions
+ * Private Functions
  ****************************************************************************/
 
 /****************************************************************************
  * Name: btsak_cmd_discover_common
  *
  * Description:
- *   gatt [-h] <discover-cmd> [-h] <addr> public|private [<uuid16>]
+ *   gatt [-h] <discover-cmd> [-h] <addr> public|random [<uuid16>]
  *
  ****************************************************************************/
 
@@ -92,12 +80,13 @@ static void btsak_cmd_discover_common(FAR struct btsak_s *btsak,
   if (argc < argndx)
     {
       fprintf(stderr,
-              "ERROR:  Invalid number of arguments.  Found %d expected at least %u\n",
+              "ERROR:  Invalid number of arguments.  "
+              "Found %d expected at least %u\n",
               argc - 1, argndx - 1);
       btsak_gatt_showusage(btsak->progname, argv[0], EXIT_FAILURE);
     }
 
-  strncpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
+  strlcpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
   btreq.btr_dtype = (uint8_t)type;
 
   ret = btsak_str2addr(argv[1], btreq.btr_dpeer.val);
@@ -154,7 +143,8 @@ static void btsak_cmd_discover_common(FAR struct btsak_s *btsak,
   sockfd = btsak_socket(btsak);
   if (sockfd >= 0)
     {
-      ret = ioctl(sockfd, SIOCBTDISCOVER, (unsigned long)((uintptr_t)&btreq));
+      ret = ioctl(sockfd, SIOCBTDISCOVER,
+                  (unsigned long)((uintptr_t)&btreq));
       if (ret < 0)
         {
           fprintf(stderr, "ERROR:  ioctl(SIOCBTDISCOVER) failed: %d\n",
@@ -221,7 +211,7 @@ static void btsak_cmd_connect_common(FAR struct btsak_s *btsak, int argc,
 
   /* Perform the IOCTL to start/end the connection */
 
-  strncpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
+  strlcpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
 
   sockfd = btsak_socket(btsak);
   if (sockfd >= 0)
@@ -250,7 +240,7 @@ static void btsak_cmd_connect_common(FAR struct btsak_s *btsak, int argc,
  ****************************************************************************/
 
 static void btsak_cmd_read_common(FAR struct btsak_s *btsak, int argc,
-                                     FAR char *argv[], bool multiple)
+                                  FAR char *argv[], bool multiple)
 {
   int i;
   int j;
@@ -264,7 +254,8 @@ static void btsak_cmd_read_common(FAR struct btsak_s *btsak, int argc,
   if (argc < 4 || argc > 5)
     {
       fprintf(stderr,
-              "ERROR:  Invalid number of arguments.  Found %d expected 3 or 4\n",
+              "ERROR:  Invalid number of arguments.  "
+              "Found %d expected 3 or 4\n",
               argc - 1);
       btsak_gatt_showusage(btsak->progname, argv[0], EXIT_FAILURE);
     }
@@ -298,7 +289,7 @@ static void btsak_cmd_read_common(FAR struct btsak_s *btsak, int argc,
 
   /* Perform the IOCTL to start the read */
 
-  strncpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
+  strlcpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
   btreq.btr_rdsize = HCI_GATTRD_DATA;
   btreq.btr_rddata = data;
 
@@ -343,7 +334,7 @@ static void btsak_cmd_read_common(FAR struct btsak_s *btsak, int argc,
  * Name: btsak_cmd_gatt_exchange_mtu
  *
  * Description:
- *   gatt [-h] exchange_mtu [-h] <addr> public|private command
+ *   gatt [-h] exchange_mtu [-h] <addr> public|random command
  *
  ****************************************************************************/
 
@@ -383,12 +374,13 @@ void btsak_cmd_gatt_exchange_mtu(FAR struct btsak_s *btsak, int argc,
 
   /* Perform the IOCTL to start the MTU exchange */
 
-  strncpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
+  strlcpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
 
   sockfd = btsak_socket(btsak);
   if (sockfd >= 0)
     {
-      ret = ioctl(sockfd, SIOCBTEXCHANGE, (unsigned long)((uintptr_t)&btreq));
+      ret = ioctl(sockfd, SIOCBTEXCHANGE,
+                  (unsigned long)((uintptr_t)&btreq));
       if (ret < 0)
         {
           fprintf(stderr, "ERROR:  ioctl(SIOCBTEXCHANGE) failed: %d\n",
@@ -408,11 +400,12 @@ void btsak_cmd_gatt_exchange_mtu(FAR struct btsak_s *btsak, int argc,
  * Name: btsak_cmd_discover
  *
  * Description:
- *   gatt [-h] discover [-h] <addr> public|private <uuid16> command
+ *   gatt [-h] discover [-h] <addr> public|random <uuid16> command
  *
  ****************************************************************************/
 
-void btsak_cmd_discover(FAR struct btsak_s *btsak, int argc, FAR char *argv[])
+void btsak_cmd_discover(FAR struct btsak_s *btsak, int argc,
+                        FAR char *argv[])
 {
   btsak_cmd_discover_common(btsak, argc, argv, GATT_DISCOVER);
 }
@@ -421,7 +414,7 @@ void btsak_cmd_discover(FAR struct btsak_s *btsak, int argc, FAR char *argv[])
  * Name: btsak_cmd_gatt_discover_characteristic
  *
  * Description:
- *   gatt [-h] characteristic [-h] <addr> public|private command
+ *   gatt [-h] characteristic [-h] <addr> public|random command
  *
  ****************************************************************************/
 
@@ -435,7 +428,7 @@ void btsak_cmd_gatt_discover_characteristic(FAR struct btsak_s *btsak,
  * Name: btsak_cmd_gatt_discover_descriptor
  *
  * Description:
- *   gatt [-h] descriptor [-h] <addr> public|private command
+ *   gatt [-h] descriptor [-h] <addr> public|random command
  *
  ****************************************************************************/
 
@@ -449,7 +442,7 @@ void btsak_cmd_gatt_discover_descriptor(FAR struct btsak_s *btsak,
  * Name: btsak_cmd_gatt_read
  *
  * Description:
- *   gatt [-h] read [-h] <addr> public|private <handle> [<offset>] command
+ *   gatt [-h] read [-h] <addr> public|random <handle> [<offset>] command
  *
  ****************************************************************************/
 
@@ -468,7 +461,8 @@ void btsak_cmd_gatt_read(FAR struct btsak_s *btsak, int argc,
  * Name: btsak_cmd_gatt_read_multiple
  *
  * Description:
- *   gatt [-h] read-multiple [-h] <addr> public|private <handle> [<handle> [<handle>]..]
+ *   gatt [-h] read-multiple [-h] <addr> public|random <handle>
+ *        [<handle> [<handle>]..]
  *
  ****************************************************************************/
 
@@ -483,7 +477,8 @@ void btsak_cmd_gatt_read_multiple(FAR struct btsak_s *btsak, int argc,
   if (argc < 4)
     {
       fprintf(stderr,
-              "ERROR:  Invalid number of arguments.  Found %d expected at least 3\n",
+              "ERROR:  Invalid number of arguments.  "
+              "Found %d expected at least 3\n",
               argc - 1);
       btsak_gatt_showusage(btsak->progname, argv[0], EXIT_FAILURE);
     }
@@ -495,7 +490,8 @@ void btsak_cmd_gatt_read_multiple(FAR struct btsak_s *btsak, int argc,
  * Name: btsak_cmd_gatt_write
  *
  * Description:
- *   gatt [-h] write [-h] [-h] <addr> public|private <handle> <byte> [<byte> [<byte>]..]
+ *   gatt [-h] write [-h] [-h] <addr> public|random <handle> <byte>
+ *        [<byte> [<byte>]..]
  *
  ****************************************************************************/
 
@@ -515,7 +511,8 @@ void btsak_cmd_gatt_write(FAR struct btsak_s *btsak, int argc,
   if (argc < 5)
     {
       fprintf(stderr,
-              "ERROR:  Invalid number of arguments.  Found %d expected at least 4\n",
+              "ERROR:  Invalid number of arguments.  "
+              "Found %d expected at least 4\n",
               argc - 1);
       btsak_gatt_showusage(btsak->progname, argv[0], EXIT_FAILURE);
     }
@@ -539,7 +536,7 @@ void btsak_cmd_gatt_write(FAR struct btsak_s *btsak, int argc,
 
   if (btreq.btr_wrnbytes > HCI_GATTWR_DATA)
     {
-      fprintf(stderr, "ERROR:  Too much data.  Limit is %u bytes%s\n",
+      fprintf(stderr, "ERROR:  Too much data.  Limit is %u bytes\n",
               HCI_GATTWR_DATA);
       btsak_gatt_showusage(btsak->progname, argv[0], EXIT_FAILURE);
     }
@@ -551,7 +548,7 @@ void btsak_cmd_gatt_write(FAR struct btsak_s *btsak, int argc,
 
   /* Perform the IOCTL to start the read */
 
-  strncpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
+  strlcpy(btreq.btr_name, btsak->ifname, IFNAMSIZ);
 
   sockfd = btsak_socket(btsak);
   if (sockfd >= 0)
@@ -576,27 +573,26 @@ void btsak_cmd_gatt_write(FAR struct btsak_s *btsak, int argc,
  * Name: btsak_cmd_gatt_connect
  *
  * Description:
- *   gatt [-h] connect [-h] <addr> public|private
+ *   gatt [-h] connect [-h] <addr> public|random
  *
  ****************************************************************************/
 
 void btsak_cmd_connect(FAR struct btsak_s *btsak, int argc,
-                         FAR char *argv[])
+                       FAR char *argv[])
 {
   btsak_cmd_connect_common(btsak, argc, argv, SIOCBTCONNECT);
 }
-
 
 /****************************************************************************
  * Name: btsak_cmd_gatt_connect
  *
  * Description:
- *   gatt [-h] disconnect [-h] <addr> public|private
+ *   gatt [-h] disconnect [-h] <addr> public|random
  *
  ****************************************************************************/
 
 void btsak_cmd_disconnect(FAR struct btsak_s *btsak, int argc,
-                         FAR char *argv[])
+                          FAR char *argv[])
 {
   btsak_cmd_connect_common(btsak, argc, argv, SIOCBTDISCONNECT);
 }

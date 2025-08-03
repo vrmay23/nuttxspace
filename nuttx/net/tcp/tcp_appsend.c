@@ -1,6 +1,8 @@
 /****************************************************************************
  * net/tcp/tcp_appsend.c
  *
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  *   Copyright (C) 2007-2010, 2014 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
@@ -44,6 +46,7 @@
 #include <nuttx/config.h>
 #if defined(CONFIG_NET) && defined(CONFIG_NET_TCP)
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <assert.h>
 #include <debug.h>
@@ -85,13 +88,23 @@ void tcp_appsend(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
 {
   uint8_t hdrlen;
 
-  ninfo("result: %04x d_sndlen: %d conn->tx_unacked: %d\n",
-        result, dev->d_sndlen, conn->tx_unacked);
+  ninfo("result: %04x d_sndlen: %d conn->tx_unacked: %" PRId32 "\n",
+        result, dev->d_sndlen, (uint32_t)conn->tx_unacked);
+
+  /* Need to update the recv window? */
+
+  if (tcp_should_send_recvwindow(conn))
+    {
+      result |= TCP_SNDACK;
+#ifdef CONFIG_NET_TCP_DELAYED_ACK
+      conn->rx_unackseg = 0;
+#endif
+    }
 
 #ifdef CONFIG_NET_TCP_DELAYED_ACK
   /* Did the caller request that an ACK be sent? */
 
-  if ((result & TCP_SNDACK) != 0)
+  else if ((result & TCP_SNDACK) != 0)
     {
       /* Yes.. Handle delayed acknowledgments */
 
@@ -151,25 +164,7 @@ void tcp_appsend(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
    * this TCP connection.
    */
 
-#ifdef CONFIG_NET_IPv4
-#ifdef CONFIG_NET_IPv6
-  if (conn->domain == PF_INET)
-#endif
-    {
-      DEBUGASSERT(IFF_IS_IPv4(dev->d_flags));
-      hdrlen = IPv4TCP_HDRLEN;
-    }
-#endif /* CONFIG_NET_IPv4 */
-
-#ifdef CONFIG_NET_IPv6
-#ifdef CONFIG_NET_IPv4
-  else
-#endif
-    {
-      DEBUGASSERT(IFF_IS_IPv6(dev->d_flags));
-      hdrlen = IPv6TCP_HDRLEN;
-    }
-#endif /* CONFIG_NET_IPv6 */
+  hdrlen = tcpip_hdrsize(conn);
 
   /* Check If the device went down */
 
@@ -215,30 +210,39 @@ void tcp_appsend(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
 
   else
     {
-#ifdef CONFIG_NET_TCP_WRITE_BUFFERS
+      /* The application cannot send more than what is allowed by the
+       * MSS (the minimum of the MSS and the available window).
+       */
+
       DEBUGASSERT(dev->d_sndlen <= conn->mss);
-#else
+
+#if !defined(CONFIG_NET_TCP_WRITE_BUFFERS) || defined(CONFIG_NET_SENDFILE)
+
+#ifdef CONFIG_NET_TCP_WRITE_BUFFERS
+      if (conn->sendfile)
+        {
+#endif
+
       /* If d_sndlen > 0, the application has data to be sent. */
 
       if (dev->d_sndlen > 0)
         {
           /* Remember how much data we send out now so that we know
-           * when everything has been acknowledged.  Just increment the amount
-           * of data sent.  This will be needed in sequence number calculations
-           * and we know that this is not a re-transmission.  Retransmissions
-           * do not go through this path.
+           * when everything has been acknowledged.  Just increment the
+           * amount of data sent.  This will be needed in sequence number
+           * calculations and we know that this is not a re-transmission.
+           * Retransmissions do not go through this path.
            */
 
           conn->tx_unacked += dev->d_sndlen;
-
-          /* The application cannot send more than what is allowed by the
-           * MSS (the minimum of the MSS and the available window).
-           */
-
-          DEBUGASSERT(dev->d_sndlen <= conn->mss);
         }
 
       conn->nrtx = 0;
+
+#ifdef CONFIG_NET_TCP_WRITE_BUFFERS
+        }
+#endif
+
 #endif
 
       /* Then handle the rest of the operation just as for the rexmit case */
@@ -271,51 +275,69 @@ void tcp_rexmit(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
 {
   uint8_t hdrlen;
 
-  ninfo("result: %04x d_sndlen: %d conn->tx_unacked: %d\n",
-        result, dev->d_sndlen, conn->tx_unacked);
+  ninfo("result: %04x d_sndlen: %d conn->tx_unacked: %" PRId32 "\n",
+        result, dev->d_sndlen, (uint32_t)conn->tx_unacked);
 
   /* Get the IP header length associated with the IP domain configured for
    * this TCP connection.
    */
 
-#ifdef CONFIG_NET_IPv4
-#ifdef CONFIG_NET_IPv6
-  if (conn->domain == PF_INET)
-#endif
-    {
-      DEBUGASSERT(IFF_IS_IPv4(dev->d_flags));
-      hdrlen = IPv4TCP_HDRLEN;
-    }
-#endif /* CONFIG_NET_IPv4 */
-
-#ifdef CONFIG_NET_IPv6
-#ifdef CONFIG_NET_IPv4
-  else
-#endif
-    {
-      DEBUGASSERT(IFF_IS_IPv6(dev->d_flags));
-      hdrlen = IPv6TCP_HDRLEN;
-    }
-#endif /* CONFIG_NET_IPv6 */
+  hdrlen = tcpip_hdrsize(conn);
 
   /* If the application has data to be sent, or if the incoming packet had
    * new data in it, we must send out a packet.
    */
 
-#ifdef CONFIG_NET_TCP_WRITE_BUFFERS
+#if defined(CONFIG_NET_TCP_WRITE_BUFFERS) && defined(CONFIG_NET_SENDFILE)
+  if (conn->sendfile)
+#endif
+    {
+#if !defined(CONFIG_NET_TCP_WRITE_BUFFERS) || defined(CONFIG_NET_SENDFILE)
+      if ((result & TCP_REXMIT) != 0 &&
+          dev->d_sndlen > 0 && conn->tx_unacked > 0 &&
+          conn->rexmit_seq > 0)
+        {
+          uint32_t saveseq;
+
+          /* According to RFC 6298 (5.4), retransmit the earliest segment
+           * that has not been acknowledged by the TCP receiver.
+           */
+
+          saveseq = tcp_getsequence(conn->sndseq);
+          tcp_setsequence(conn->sndseq, conn->rexmit_seq);
+
+          tcp_send(dev, conn, TCP_ACK | TCP_PSH, dev->d_sndlen + hdrlen);
+
+          tcp_setsequence(conn->sndseq, saveseq);
+
+          return;
+        }
+#endif
+    }
+
+#if defined(CONFIG_NET_TCP_WRITE_BUFFERS)
   if (dev->d_sndlen > 0)
 #else
   if (dev->d_sndlen > 0 && conn->tx_unacked > 0)
 #endif
     {
+      uint32_t seq;
+
       /* We always set the ACK flag in response packets adding the length of
        * the IP and TCP headers.
        */
 
       tcp_send(dev, conn, TCP_ACK | TCP_PSH, dev->d_sndlen + hdrlen);
+
+      /* Advance sndseq */
+
+      seq = tcp_getsequence(conn->sndseq);
+      tcp_setsequence(conn->sndseq, seq + dev->d_sndlen);
     }
 
-  /* If there is no data to send, just send out a pure ACK if one is requested`. */
+  /* If there is no data to send, just send out a pure ACK if one is
+   * requested.
+   */
 
   else if ((result & TCP_SNDACK) != 0)
     {

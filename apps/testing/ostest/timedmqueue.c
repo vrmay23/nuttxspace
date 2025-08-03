@@ -1,35 +1,22 @@
 /****************************************************************************
- * apps/testing/ostest/mqueue.c
+ * apps/testing/ostest/timedmqueue.c
  *
- *   Copyright (C) 2007-2009, 2011 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,15 +26,16 @@
 
 #include <nuttx/config.h>
 
-#include <stdio.h>
-#include <unistd.h>
-#include <string.h>
+#include <assert.h>
 #include <ctype.h>
-#include <fcntl.h>
-#include <pthread.h>
-#include <mqueue.h>
-#include <sched.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <mqueue.h>
+#include <pthread.h>
+#include <sched.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "ostest.h"
 
@@ -57,13 +45,13 @@
 
 #define TEST_MESSAGE        "This is a test and only a test"
 #if defined(SDCC) || defined(__ZILOG__)
-   /* Cannot use strlen in array size */
+/* Cannot use strlen in array size */
 
 #  define TEST_MSGLEN         (31)
 #else
-   /* Message length is the size of the message plus the null terminator */
+/* Message length is the size of the message plus the null terminator */
 
-#  define TEST_MSGLEN         (strlen(TEST_MESSAGE)+1)
+#  define TEST_MSGLEN         sizeof(TEST_MESSAGE)
 #endif
 
 #define TEST_SEND_NMSGS     (10)
@@ -108,7 +96,7 @@ static void *sender_thread(void *arg)
 
   /* Fill in attributes for message queue */
 
-  attr.mq_maxmsg  = TEST_SEND_NMSGS-1;
+  attr.mq_maxmsg  = TEST_SEND_NMSGS - 1;
   attr.mq_msgsize = TEST_MSGLEN;
   attr.mq_flags   = 0;
 
@@ -123,10 +111,11 @@ static void *sender_thread(void *arg)
    * already created it.
    */
 
-  g_send_mqfd = mq_open("timedmq", O_WRONLY|O_CREAT, 0666, &attr);
+  g_send_mqfd = mq_open("timedmq", O_WRONLY | O_CREAT, 0666, &attr);
   if (g_send_mqfd == (mqd_t)-1)
     {
         printf("sender_thread: ERROR mq_open failed\n");
+        ASSERT(false);
         pthread_exit((pthread_addr_t)1);
     }
 
@@ -138,13 +127,15 @@ static void *sender_thread(void *arg)
 
   for (i = 0; i < TEST_SEND_NMSGS; i++)
     {
-       struct timespec ts;
-       status = clock_gettime(CLOCK_REALTIME, &ts);
-       if (status != 0)
-         {
-           printf("sender_thread: ERROR clock_gettime failed\n");
-         }
-       ts.tv_sec += 5;
+      struct timespec ts;
+      status = clock_gettime(CLOCK_REALTIME, &ts);
+      if (status != 0)
+        {
+          printf("sender_thread: ERROR clock_gettime failed\n");
+          ASSERT(false);
+        }
+
+      ts.tv_sec += 5;
 
       /* The first TEST_SEND_NMSGS-1 send should succeed.  The last
        * one should fail with errno == ETIMEDOUT
@@ -153,21 +144,25 @@ static void *sender_thread(void *arg)
       status = mq_timedsend(g_send_mqfd, msg_buffer, TEST_MSGLEN, 42, &ts);
       if (status < 0)
         {
-          if (i == TEST_SEND_NMSGS-1 && errno == ETIMEDOUT)
+          if (i == TEST_SEND_NMSGS - 1 && errno == ETIMEDOUT)
             {
-              printf("sender_thread: mq_timedsend %d timed out as expected\n", i);
+              printf("sender_thread: mq_timedsend %d "
+                     "timed out as expected\n", i);
             }
           else
             {
-              printf("sender_thread: ERROR mq_timedsend failure=%d on msg %d\n", errno, i);
+              printf("sender_thread: ERROR mq_timedsend "
+                     "failure=%d on msg %d\n", errno, i);
+              ASSERT(false);
               nerrors++;
             }
         }
       else
         {
-          if (i == TEST_SEND_NMSGS-1)
+          if (i == TEST_SEND_NMSGS - 1)
             {
-              printf("sender_thread: ERROR mq_timedsend of msg %d succeeded\n", i);
+              printf("sender_thread: ERROR mq_timedsend of msg %d\n", i);
+              ASSERT(false);
               nerrors++;
             }
           else
@@ -182,10 +177,11 @@ static void *sender_thread(void *arg)
   if (mq_close(g_send_mqfd) < 0)
     {
       printf("sender_thread: ERROR mq_close failed\n");
+      ASSERT(false);
     }
   else
     {
-      g_send_mqfd = NULL;
+      g_send_mqfd = 0;
     }
 
   printf("sender_thread: returning nerrors=%d\n", nerrors);
@@ -205,7 +201,7 @@ static void *receiver_thread(void *arg)
 
   /* Fill in attributes for message queue */
 
-  attr.mq_maxmsg  = TEST_SEND_NMSGS-1;
+  attr.mq_maxmsg  = TEST_SEND_NMSGS - 1;
   attr.mq_msgsize = TEST_MSGLEN;
   attr.mq_flags   = 0;
 
@@ -220,24 +216,27 @@ static void *receiver_thread(void *arg)
    * already created it.
    */
 
-   g_recv_mqfd = mq_open("timedmq", O_RDONLY|O_CREAT, 0666, &attr);
-   if (g_recv_mqfd == (mqd_t)-1)
-     {
-       printf("receiver_thread: ERROR mq_open failed\n");
-       pthread_exit((pthread_addr_t)1);
-     }
-
-   /* Perform the receive TEST_RECEIVE_NMSGS times */
-
-   for (i = 0; i < TEST_RECEIVE_NMSGS; i++)
+  g_recv_mqfd = mq_open("timedmq", O_RDONLY | O_CREAT, 0666, &attr);
+  if (g_recv_mqfd == (mqd_t)-1)
     {
-       struct timespec ts;
-       int status = clock_gettime(CLOCK_REALTIME, &ts);
-       if (status != 0)
-         {
-           printf("sender_thread: ERROR clock_gettime failed\n");
-         }
-       ts.tv_sec += 5;
+      printf("receiver_thread: ERROR mq_open failed\n");
+      ASSERT(false);
+      pthread_exit((pthread_addr_t)1);
+    }
+
+  /* Perform the receive TEST_RECEIVE_NMSGS times */
+
+  for (i = 0; i < TEST_RECEIVE_NMSGS; i++)
+    {
+      struct timespec ts;
+      int status = clock_gettime(CLOCK_REALTIME, &ts);
+      if (status != 0)
+        {
+          printf("sender_thread: ERROR clock_gettime failed\n");
+          ASSERT(false);
+        }
+
+      ts.tv_sec += 5;
 
       /* The first TEST_SEND_NMSGS-1 send should succeed.  The last
        * one should fail with errno == ETIMEDOUT
@@ -247,52 +246,60 @@ static void *receiver_thread(void *arg)
       nbytes = mq_timedreceive(g_recv_mqfd, msg_buffer, TEST_MSGLEN, 0, &ts);
       if (nbytes < 0)
         {
-          if (i == TEST_SEND_NMSGS-1 && errno == ETIMEDOUT)
+          if (i == TEST_SEND_NMSGS - 1 && errno == ETIMEDOUT)
             {
-              printf("receiver_thread: Receive %d timed out as expected\n", i);
+              printf("receiver_thread: Receive %d "
+                     "timed out as expected\n", i);
             }
           else
             {
-              printf("receiver_thread: ERROR mq_timedreceive failure=%d on msg %d\n", errno, i);
+              printf("receiver_thread: ERROR mq_timedreceive "
+                     "failure=%d on msg %d\n", errno, i);
+              ASSERT(false);
               nerrors++;
             }
         }
       else if (nbytes != TEST_MSGLEN)
         {
-          printf("receiver_thread: mq_timedreceive return bad size %d on msg %d\n", nbytes, i);
+          printf("receiver_thread: mq_timedreceive return "
+                 "ERROR bad size %d on msg %d\n", nbytes, i);
+          ASSERT(false);
           nerrors++;
         }
       else if (memcmp(TEST_MESSAGE, msg_buffer, nbytes) != 0)
         {
           int j;
 
-          printf("receiver_thread: mq_timedreceive returned corrupt message on msg %d\n", i);
-          printf("receiver_thread:                  i  Expected Received\n");
+          printf("receiver_thread: mq_timedreceive returned "
+                 "corrupt message on msg %d\n", i);
+          printf("receiver_thread:  i  Expected Received\n");
 
-          for (j = 0; j < TEST_MSGLEN-1; j++)
+          for (j = 0; j < TEST_MSGLEN - 1; j++)
             {
               if (isprint(msg_buffer[j]))
                 {
-                 printf("receiver_thread:                  %2d %02x (%c) %02x (%c)\n",
-                         j, TEST_MESSAGE[j], TEST_MESSAGE[j], msg_buffer[j], msg_buffer[j]);
+                 printf("receiver_thread: %2d %02x (%c) %02x (%c)\n",
+                         j, TEST_MESSAGE[j], TEST_MESSAGE[j],
+                         msg_buffer[j], msg_buffer[j]);
                 }
               else
                 {
-                  printf("receiver_thread:                  %2d %02x (%c) %02x\n",
+                  printf("receiver_thread: %2d %02x (%c) %02x\n",
                          j, TEST_MESSAGE[j], TEST_MESSAGE[j], msg_buffer[j]);
                 }
             }
-          printf("receiver_thread:                  %2d 00      %02x\n",
-                  j, msg_buffer[j]);
+
+          printf("receiver_thread: %2d 00 %02x\n", j, msg_buffer[j]);
         }
-      else if (i == TEST_SEND_NMSGS-1)
+      else if (i == TEST_SEND_NMSGS - 1)
         {
-          printf("receiver_thread: ERROR mq_timedreceive of msg %d succeeded\n", i);
+          printf("receiver_thread: ERROR mq_timedreceive of msg %d\n", i);
+          ASSERT(false);
           nerrors++;
         }
       else
         {
-          printf("receiver_thread: mq_timedreceive succeeded on msg %d\n", i);
+          printf("receiver_thread: mq_timedreceive succeed on msg %d\n", i);
         }
     }
 
@@ -301,11 +308,12 @@ static void *receiver_thread(void *arg)
   if (mq_close(g_recv_mqfd) < 0)
     {
       printf("receiver_thread: ERROR mq_close failed\n");
+      ASSERT(false);
       nerrors++;
     }
   else
     {
-      g_recv_mqfd = NULL;
+      g_recv_mqfd = 0;
     }
 
   printf("receiver_thread: returning nerrors=%d\n", nerrors);
@@ -328,32 +336,36 @@ void timedmqueue_test(void)
   status = pthread_attr_init(&attr);
   if (status != 0)
     {
-      printf("timedmqueue_test: pthread_attr_init failed, status=%d\n",
+      printf("timedmqueue_test: ERROR pthread_attr_init failed, status=%d\n",
              status);
+      ASSERT(false);
     }
 
   status = pthread_attr_setstacksize(&attr, STACKSIZE);
   if (status != 0)
     {
-      printf("timedmqueue_test: pthread_attr_setstacksize failed, status=%d\n",
-             status);
+      printf("timedmqueue_test: ERROR pthread_attr_setstacksize failed, "
+             "status=%d\n", status);
+      ASSERT(false);
     }
 
   status = pthread_create(&sender, &attr, sender_thread, NULL);
   if (status != 0)
     {
-      printf("timedmqueue_test: pthread_create failed, status=%d\n",
+      printf("timedmqueue_test: ERROR pthread_create failed, status=%d\n",
              status);
+      ASSERT(false);
     }
 
   /* Wait for the sending thread to complete */
 
   printf("timedmqueue_test: Waiting for sender to complete\n");
   pthread_join(sender, &result);
-  if (result != (void*)0)
+  if (result != NULL)
     {
       printf("timedmqueue_test: ERROR sender thread exited with %d errors\n",
              (int)((intptr_t)result));
+      ASSERT(false);
     }
 
   /* Start the receiving thread at the default priority */
@@ -362,32 +374,36 @@ void timedmqueue_test(void)
   status = pthread_attr_init(&attr);
   if (status != 0)
     {
-      printf("timedmqueue_test: pthread_attr_init failed, status=%d\n",
+      printf("timedmqueue_test: ERROR pthread_attr_init failed, status=%d\n",
              status);
+      ASSERT(false);
     }
 
   status = pthread_attr_setstacksize(&attr, STACKSIZE);
   if (status != 0)
     {
-      printf("timedmqueue_test: pthread_attr_setstacksize failed, status=%d\n",
-             status);
+      printf("timedmqueue_test: ERROR pthread_attr_setstacksize failed, "
+             "status=%d\n", status);
+      ASSERT(false);
     }
 
   status = pthread_create(&receiver, &attr, receiver_thread, NULL);
   if (status != 0)
     {
-      printf("timedmqueue_test: pthread_create failed, status=%d\n",
+      printf("timedmqueue_test: ERROR pthread_create failed, status=%d\n",
              status);
+      ASSERT(false);
     }
 
   /* Wait for the receiving thread to complete */
 
   printf("timedmqueue_test: Waiting for receiver to complete\n");
   pthread_join(receiver, &result);
-  if (result != (void*)0)
+  if (result != NULL)
     {
-      printf("timedmqueue_test: ERROR receiver thread exited with %d errors\n",
-             (int)((intptr_t)result));
+      printf("timedmqueue_test: ERROR receiver thread exited "
+             "with %d errors\n", (int)((intptr_t)result));
+      ASSERT(false);
     }
 
   /* Make sure that the message queues were properly closed (otherwise, we
@@ -397,18 +413,22 @@ void timedmqueue_test(void)
   if (g_send_mqfd)
     {
       printf("timedmqueue_test: ERROR send mqd_t left open\n");
+      ASSERT(false);
       if (mq_close(g_send_mqfd) < 0)
         {
           printf("timedmqueue_test: ERROR mq_close failed\n");
+          ASSERT(false);
         }
     }
 
   if (g_recv_mqfd)
     {
       printf("timedmqueue_test: ERROR receive mqd_t left open\n");
+      ASSERT(false);
       if (mq_close(g_recv_mqfd) < 0)
         {
           printf("timedmqueue_test: ERROR mq_close failed\n");
+          ASSERT(false);
         }
     }
 
@@ -417,6 +437,7 @@ void timedmqueue_test(void)
   if (mq_unlink("timedmq") < 0)
     {
       printf("timedmqueue_test: ERROR mq_unlink failed\n");
+      ASSERT(false);
     }
 
   printf("timedmqueue_test: Test complete\n");

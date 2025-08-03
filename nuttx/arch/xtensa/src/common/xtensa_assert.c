@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/xtensa/src/common/xtensa_assert.c
  *
- *   Copyright (C) 2016, 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,15 +27,12 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
-#include <stdlib.h>
-#include <assert.h>
 #include <debug.h>
+#include <assert.h>
 
 #include <nuttx/irq.h>
-#include <nuttx/arch.h>
 #include <nuttx/board.h>
 #include <nuttx/syslog/syslog.h>
-#include <nuttx/usb/usbdev_trace.h>
 
 #include <arch/board/board.h>
 
@@ -56,136 +40,8 @@
 #include "xtensa.h"
 
 /****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-/* USB trace dumping */
-
-#ifndef CONFIG_USBDEV_TRACE
-#  undef CONFIG_ARCH_USBDUMP
-#endif
-
-#ifndef CONFIG_BOARD_RESET_ON_ASSERT
-#  define CONFIG_BOARD_RESET_ON_ASSERT 0
-#endif
-
-/****************************************************************************
- * Private Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: assert_tracecallback
- ****************************************************************************/
-
-#ifdef CONFIG_ARCH_USBDUMP
-static int usbtrace_syslog(FAR const char *fmt, ...)
-{
-  va_list ap;
-  int ret;
-
-  /* Let nx_vsyslog do the real work */
-
-  va_start(ap, fmt);
-  ret = nx_vsyslog(LOG_EMERG, fmt, &ap);
-  va_end(ap);
-  return ret;
-}
-
-static int assert_tracecallback(FAR struct usbtrace_s *trace, FAR void *arg)
-{
-  usbtrace_trprintf(usbtrace_syslog, trace->event, trace->value);
-  return 0;
-}
-#endif
-
-/****************************************************************************
- * Name: xtensa_assert
- ****************************************************************************/
-
-static void xtensa_assert(int errorcode) noreturn_function;
-static void xtensa_assert(int errorcode)
-{
-  /* Dump the processor state */
-
-  xtensa_dumpstate();
-
-#ifdef CONFIG_ARCH_USBDUMP
-  /* Dump USB trace data */
-
-  usbtrace_enumerate(assert_tracecallback, NULL);
-#endif
-
-#ifdef CONFIG_BOARD_CRASHDUMP
-  /* Perform board-specific crash dump */
-
-  board_crashdump(up_getsp(), running_task(), filename, lineno);
-#endif
-
-  /* Flush any buffered SYSLOG data (from the above) */
-
-  syslog_flush();
-
-  /* Are we in an interrupt handler or the idle task? */
-
-  if (CURRENT_REGS || running_task()->flink == NULL)
-    {
-      /* Blink the LEDs forever */
-
-      up_irq_save();
-      for (; ; )
-        {
-#if CONFIG_BOARD_RESET_ON_ASSERT >= 1
-          board_reset(CONFIG_BOARD_ASSERT_RESET_VALUE);
-#endif
-#ifdef CONFIG_ARCH_LEDS
-          board_autoled_on(LED_PANIC);
-          up_mdelay(250);
-          board_autoled_off(LED_PANIC);
-          up_mdelay(250);
-#endif
-        }
-    }
-  else
-    {
-      /* Assertions in other contexts only cause the thread to exit */
-
-#if CONFIG_BOARD_RESET_ON_ASSERT >= 2
-      board_reset(CONFIG_BOARD_ASSERT_RESET_VALUE);
-#endif
-      exit(errorcode);
-    }
-}
-
-/****************************************************************************
  * Public Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: up_assert
- ****************************************************************************/
-
-void up_assert(const uint8_t *filename, int lineno)
-{
-#if CONFIG_TASK_NAME_SIZE > 0 && defined(CONFIG_DEBUG_ALERT)
-  struct tcb_s *rtcb = running_task();
-#endif
-
-  board_autoled_on(LED_ASSERTION);
-
-  /* Flush any buffered SYSLOG data (from prior to the assertion) */
-
-  syslog_flush();
-
-#if CONFIG_TASK_NAME_SIZE > 0
-  _alert("Assertion failed at file:%s line: %d task: %s\n",
-        filename, lineno, rtcb->name);
-#else
-  _alert("Assertion failed at file:%s line: %d\n",
-        filename, lineno);
-#endif
-
-  xtensa_assert(EXIT_FAILURE);
-}
 
 /****************************************************************************
  * Name: xtensa_panic
@@ -211,9 +67,11 @@ void up_assert(const uint8_t *filename, int lineno)
 
 void xtensa_panic(int xptcode, uint32_t *regs)
 {
-#if CONFIG_TASK_NAME_SIZE > 0 && defined(CONFIG_DEBUG_ALERT)
-  struct tcb_s *rtcb = running_task();
-#endif
+  struct tcb_s **running_task = &g_running_tasks[this_cpu()];
+
+  (*running_task)->xcp.regs = regs;
+
+  up_set_interrupt_context(true);
 
   /* We get here when a un-dispatch-able, irrecoverable exception occurs */
 
@@ -223,14 +81,10 @@ void xtensa_panic(int xptcode, uint32_t *regs)
 
   syslog_flush();
 
-#if CONFIG_TASK_NAME_SIZE > 0
-  _alert("Unhandled Exception %d task: %s\n", xptcode, rtcb->name);
-#else
-  _alert("Unhandled Exception %d\n", xptcode);
-#endif
+  _alert("Unhandled Exception %d task: %s\n", xptcode,
+         get_task_name(running_task()));
 
-  CURRENT_REGS = regs;
-  xtensa_assert(EXIT_FAILURE); /* Should not return */
+  PANIC_WITH_REGS("panic", regs);  /* Should not return */
   for (; ; );
 }
 
@@ -238,8 +92,8 @@ void xtensa_panic(int xptcode, uint32_t *regs)
  * Name: xtensa_user
  *
  * Description:
- *   PANIC if certain User Exceptions are received received.  All values for
- *   EXCCAUSE are listed below (not all generate PANICs):
+ *   PANIC if certain User Exceptions are received.  All values for EXCCAUSE
+ *   are listed below (not all generate PANICs):
  *
  *   0  IllegalInstructionCause
  *      Illegal instruction
@@ -255,7 +109,7 @@ void xtensa_panic(int xptcode, uint32_t *regs)
  *      Level-1 interrupt as indicated by set level-1 bits in the INTERRUPT
  *      register.
  *   5  AllocaCause
- *      MOVSP instruction, if caller’s registers are not in the register
+ *      MOVSP instruction, if caller's registers are not in the register
  *      file.
  *   6  IntegerDivideByZeroCause
  *      QUOS, QUOU, REMS, or REMU divisor operand is zero.
@@ -278,7 +132,7 @@ void xtensa_panic(int xptcode, uint32_t *regs)
  *   17 InstTLBMultiHitCause
  *      Multiple instruction TLB entries matched
  *   18 InstFetchPrivilegeCause
- *      An instruction fetch referenced a virtual address at a ring leve
+ *      An instruction fetch referenced a virtual address at a ring level
  *      less than CRING.
  *   19 Reserved for Cadence
  *   20 InstFetchProhibitedCause
@@ -316,9 +170,11 @@ void xtensa_panic(int xptcode, uint32_t *regs)
 
 void xtensa_user_panic(int exccause, uint32_t *regs)
 {
-#if CONFIG_TASK_NAME_SIZE > 0 && defined(CONFIG_DEBUG_ALERT)
-  struct tcb_s *rtcb = running_task();
-#endif
+  struct tcb_s **running_task = &g_running_tasks[this_cpu()];
+
+  (*running_task)->xcp.regs = regs;
+
+  up_set_interrupt_context(true);
 
   /* We get here when a un-dispatch-able, irrecoverable exception occurs */
 
@@ -328,13 +184,9 @@ void xtensa_user_panic(int exccause, uint32_t *regs)
 
   syslog_flush();
 
-#if CONFIG_TASK_NAME_SIZE > 0
-  _alert("User Exception: EXCCAUSE=%04x task: %s\n", exccause, rtcb->name);
-#else
-  _alert("User Exception: EXCCAUSE=%04x\n", exccause);
-#endif
+  _alert("User Exception: EXCCAUSE=%04x task: %s\n",
+         exccause, get_task_name(running_task()));
 
-  CURRENT_REGS = regs;
-  xtensa_assert(EXIT_FAILURE); /* Should not return */
+  PANIC_WITH_REGS("user panic", regs); /* Should not return */
   for (; ; );
 }

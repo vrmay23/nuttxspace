@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/audio/vs1053.h
  *
- *   Copyright (C) 2013 Ken Pettit. All rights reserved.
- *   Author: Ken Pettit <pettitkd@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -93,7 +80,7 @@
 #define VS1053_SM_LINE1             0x4000
 #define VS1053_SM_CLK_RANGE         0x8000
 
-/* STATUS register bit definitions ****************************************/
+/* STATUS register bit definitions ******************************************/
 
 #define VS1053_SS_DO_NOT_JUMP       0x8000
 #define VS1053_SS_SWING             0x7000
@@ -115,14 +102,14 @@
 #define VS1053_VER_VS1063           6
 #define VS1053_VER_VS1103           7
 
-/* BASS register bit definitions ******************************************/
+/* BASS register bit definitions ********************************************/
 
 #define VS1053_ST_AMPLITUDE         0xF000
 #define VS1053_ST_FREQLIMIT         0x0F00
 #define VS1053_SB_AMPLITUDE         0x00F0
 #define VS1053_SB_FREQLIMIT         0x000F
 
-/* CLOCKF register bit definitions ****************************************/
+/* CLOCKF register bit definitions ******************************************/
 
 #define VS1053_SC_MULT              0xE000
 #define VS1053_SC_MULT_SHIFT        13
@@ -130,21 +117,21 @@
 #define VS1053_SC_ADD_SHIFT         11
 #define VS1053_SC_FREQ              0x07FF
 
-#define VS1053_SC_MULT_XTALIx10     0
-#define VS1053_SC_MULT_XTALIx20     1
-#define VS1053_SC_MULT_XTALIx25     2
-#define VS1053_SC_MULT_XTALIx30     3
-#define VS1053_SC_MULT_XTALIx35     4
-#define VS1053_SC_MULT_XTALIx40     5
-#define VS1053_SC_MULT_XTALIx45     6
-#define VS1053_SC_MULT_XTALIx50     7
+#define VS1053_SC_MULT_XTALI_X10     0
+#define VS1053_SC_MULT_XTALI_X20     1
+#define VS1053_SC_MULT_XTALI_X25     2
+#define VS1053_SC_MULT_XTALI_X30     3
+#define VS1053_SC_MULT_XTALI_X35     4
+#define VS1053_SC_MULT_XTALI_X40     5
+#define VS1053_SC_MULT_XTALI_X45     6
+#define VS1053_SC_MULT_XTALI_X50     7
 
-#define VS1053_SC_ADD_NONE          0
-#define VS1053_SC_ADD_XTALIx10      1
-#define VS1053_SC_ADD_XTALIx15      2
-#define VS1053_SC_ADD_XTALIx20      3
+#define VS1053_SC_ADD_NONE           0
+#define VS1053_SC_ADD_XTALI_X10      1
+#define VS1053_SC_ADD_XTALI_X15      2
+#define VS1053_SC_ADD_XTALI_X20      3
 
-/* WRAM Addresses **********************************************************/
+/* WRAM Addresses ***********************************************************/
 
 #define VS1053_XRAM_BASE            0x1800      /* X data RAM */
 #define VS1053_XRAM_SIZE            256
@@ -158,7 +145,7 @@
 #define VS1053_IO_BASE              0xC000
 #define VS1053_IO_SIZE              0x4000
 
-/* HDAT1 register values *************************************************/
+/* HDAT1 register values ****************************************************/
 
 #define VS1053_HDAT1_WAV            0x7665      /* "ve" (as in Wave) */
 #define VS1053_HDAT1_ADTS           0x4154      /* "AT" */

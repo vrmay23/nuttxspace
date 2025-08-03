@@ -1,38 +1,22 @@
 /****************************************************************************
  * wireless/ieee802154/mac802154_data.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Copyright (C) 2017 Verge Inc. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *   Author: Anthony Merlino <anthony@vergeaero.com>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -57,7 +41,7 @@
 #include <nuttx/wireless/ieee802154/ieee802154_mac.h>
 
 /****************************************************************************
- * Public MAC Functions
+ * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
@@ -73,7 +57,7 @@
 
 int mac802154_req_data(MACHANDLE mac,
                        FAR const struct ieee802154_frame_meta_s *meta,
-                       FAR struct iob_s *frame, bool allowinterrupt)
+                       FAR struct iob_s *frame)
 {
   FAR struct ieee802154_privmac_s *priv =
     (FAR struct ieee802154_privmac_s *)mac;
@@ -108,7 +92,8 @@ int mac802154_req_data(MACHANDLE mac,
    * sublayer will set the Frame Version to one. [1] pg. 118.
    */
 
-  if ((frame->io_len - frame->io_offset) > IEEE802154_MAX_SAFE_MAC_PAYLOAD_SIZE)
+  if ((frame->io_len - frame->io_offset) >
+       IEEE802154_MAX_SAFE_MAC_PAYLOAD_SIZE)
     {
       *frame_ctrl |= (1 << IEEE802154_FRAMECTRL_SHIFT_VERSION);
     }
@@ -131,16 +116,18 @@ int mac802154_req_data(MACHANDLE mac,
 
       if (meta->destaddr.mode == IEEE802154_ADDRMODE_SHORT)
         {
-          IEEE802154_SADDRCOPY(&frame->io_data[mhr_len], meta->destaddr.saddr);
+          IEEE802154_SADDRCOPY(&frame->io_data[mhr_len],
+                               meta->destaddr.saddr);
           mhr_len += IEEE802154_SADDRSIZE;
         }
       else if (meta->destaddr.mode == IEEE802154_ADDRMODE_EXTENDED)
         {
           int index;
 
-          /* The IEEE 802.15.4 Standard is confusing with regards to byte-order
-           * for * extended address. More research discovers that the extended
-           * address should be sent in reverse-canonical form.
+          /* The IEEE 802.15.4 Standard is confusing with regards to
+           * byte-order for * extended address. More research discovers
+           * that the extended address should be sent in reverse-canonical
+           * form.
            */
 
           for (index = IEEE802154_EADDRSIZE - 1; index >= 0; index--)
@@ -156,17 +143,17 @@ int mac802154_req_data(MACHANDLE mac,
 
   /* From this point on, we need exclusive access to the privmac struct */
 
-  ret = mac802154_lock(priv, allowinterrupt);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       /* Should only fail if interrupted by a signal */
 
-      wlwarn("WARNING: mac802154_takesem failed: %d\n", ret);
+      wlwarn("WARNING: nxmutex_lock failed: %d\n", ret);
       return ret;
     }
 
-  /* If both destination and source addressing information is present, the MAC
-   * sublayer shall compare the destination and source PAN identifiers.
+  /* If both destination and source addressing information is present, the
+   * MAC sublayer shall compare the destination and source PAN identifiers.
    * [1] pg. 41.
    */
 
@@ -206,9 +193,10 @@ int mac802154_req_data(MACHANDLE mac,
         {
           int index;
 
-          /* The IEEE 802.15.4 Standard is confusing with regards to byte-order
-           * for * extended address. More research discovers that the extended
-           * address should be sent in reverse-canonical form.
+          /* The IEEE 802.15.4 Standard is confusing with regards to
+           * byte-order for * extended address. More research discovers
+           * that the extended address should be sent in reverse-canonical
+           * form.
            */
 
           for (index = IEEE802154_EADDRSIZE - 1; index >= 0; index--)
@@ -226,7 +214,7 @@ int mac802154_req_data(MACHANDLE mac,
       if (priv->devmode != IEEE802154_DEVMODE_PANCOORD)
         {
           ret = -EINVAL;
-          goto errout_with_sem;
+          goto errout_with_lock;
         }
     }
 
@@ -252,22 +240,22 @@ int mac802154_req_data(MACHANDLE mac,
 
   /* Allocate the txdesc, waiting if necessary, allow interruptions */
 
-  ret = mac802154_txdesc_alloc(priv, &txdesc, true);
+  ret = mac802154_txdesc_alloc(priv, &txdesc);
   if (ret < 0)
     {
       /* Should only fail if interrupted by a signal while re-acquiring
-       * exclsem.  So the lock is not held if a failure is returned.
+       * lock.  So the lock is not held if a failure is returned.
        */
 
       wlwarn("WARNING: mac802154_txdesc_alloc failed: %d\n", ret);
-      return ret;
+      goto errout_with_lock;
     }
 
-   /* Set the offset to 0 to include the header ( we do not want to
-    * modify the frame until AFTER the last place that -EINTR could
-    * be returned and could generate a retry.  Subsequent error returns
-    * are fatal and no retry should occur.
-    */
+  /* Set the offset to 0 to include the header ( we do not want to
+   * modify the frame until AFTER the last place that -EINTR could
+   * be returned and could generate a retry.  Subsequent error returns
+   * are fatal and no retry should occur.
+   */
 
   frame->io_offset = 0;
 
@@ -278,25 +266,26 @@ int mac802154_req_data(MACHANDLE mac,
   txdesc->frametype = IEEE802154_FRAME_DATA;
   txdesc->ackreq = meta->flags.ackreq;
 
-  /* If the TxOptions parameter specifies that a GTS transmission is required,
-   * the MAC sublayer will determine whether it has a valid GTS as described
-   * 5.1.7.3. If a valid GTS could not be found, the MAC sublayer will discard
-   * the MSDU. If a valid GTS was found, the MAC sublayer will defer, if
-   * necessary, until the GTS. If the TxOptions parameter specifies that a GTS
-   * transmission is not required, the MAC sublayer will transmit the MSDU using
-   * either slotted CSMA-CA in the CAP for a beacon-enabled PAN or unslotted
-   * CSMA-CA for a nonbeacon-enabled PAN. Specifying a GTS transmission in the
-   * TxOptions parameter overrides an indirect transmission request.
-   * [1] pg. 118.
+  /* If the TxOptions parameter specifies that a GTS transmission is
+   * required, the MAC sublayer will determine whether it has a valid GTS as
+   * described 5.1.7.3. If a valid GTS could not be found, the MAC sublayer
+   * will discard the MSDU. If a valid GTS was found, the MAC sublayer will
+   * defer, if necessary, until the GTS. If the TxOptions parameter specifies
+   * that a GTS transmission is not required, the MAC sublayer will transmit
+   * the MSDU using either slotted CSMA-CA in the CAP for a beacon-enabled
+   * PAN or unslotted CSMA-CA for a nonbeacon-enabled PAN. Specifying a GTS
+   * transmission in the TxOptions parameter overrides an indirect
+   * transmission request. [1] pg. 118.
    */
 
   if (meta->flags.usegts)
     {
-      /* TODO: Support GTS transmission. This should just change where we link
+      /* TODO:
+       * Support GTS transmission. This should just change where we link
        * the transaction.  Instead of going in the CSMA transaction list, it
-       * should be linked to the GTS' transaction list. We'll need to check if
-       * the GTS is valid, and then find the GTS, before linking. Note, we also
-       * don't have to try and kick-off any transmission here.
+       * should be linked to the GTS' transaction list. We'll need to check
+       * if the GTS is valid, and then find the GTS, before linking.
+       * Note, we also don't have to try and kick-off any transmission here.
        */
 
       ret = -ENOTSUP;
@@ -304,19 +293,20 @@ int mac802154_req_data(MACHANDLE mac,
     }
   else
     {
-      /* If the TxOptions parameter specifies that an indirect transmission is
-       * required and this primitive is received by the MAC sublayer of a
+      /* If the TxOptions parameter specifies that an indirect transmission
+       * is required and this primitive is received by the MAC sublayer of a
        * coordinator, the data frame is sent using indirect transmission, as
        * described in 5.1.5 and 5.1.6.3. [1]
        */
 
       if (meta->flags.indirect)
         {
-          /* If the TxOptions parameter specifies that an indirect transmission
-           * is required and if the device receiving this primitive is not a
-           * coordinator, the destination address is not present, or the
-           * TxOptions parameter also specifies a GTS transmission, the indirect
-           * transmission option will be ignored. [1]
+          /* If the TxOptions parameter specifies that an indirect
+           * transmission is required and if the device receiving this
+           * primitive is not a coordinator, the destination address is not
+           * present, or the TxOptions parameter also specifies a
+           * GTS transmission, the indirect transmission option will be
+           * ignored. [1]
            *
            * NOTE: We don't just ignore the parameter.  Instead, we throw an
            * error, since this really shouldn't be happening.
@@ -332,7 +322,7 @@ int mac802154_req_data(MACHANDLE mac,
               memcpy(&txdesc->destaddr, &meta->destaddr,
                      sizeof(struct ieee802154_addr_s));
               mac802154_setupindirect(priv, txdesc);
-              mac802154_unlock(priv)
+              nxmutex_unlock(&priv->lock);
             }
           else
             {
@@ -348,7 +338,7 @@ int mac802154_req_data(MACHANDLE mac,
 
           /* We no longer need to have the MAC layer locked. */
 
-          mac802154_unlock(priv)
+          nxmutex_unlock(&priv->lock);
 
           /* Notify the radio driver that there is data available */
 
@@ -359,13 +349,14 @@ int mac802154_req_data(MACHANDLE mac,
   return OK;
 
 errout_with_txdesc:
+
   /* Free TX the descriptor, but preserve the IOB. */
 
   txdesc->frame = NULL;
   mac802154_txdesc_free(priv, txdesc);
 
-errout_with_sem:
-  mac802154_unlock(priv)
+errout_with_lock:
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 

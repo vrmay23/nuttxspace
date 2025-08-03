@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/z80/src/z8/z8_i2c.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -31,7 +33,7 @@
 #include <assert.h>
 #include <debug.h>
 
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/kmalloc.h>
 #include <arch/board/board.h>
@@ -95,10 +97,10 @@ extern uint32_t get_freq(void);
  * Private Data
  ****************************************************************************/
 
-static bool  g_initialized;  /* true:I2C has been initialized */
-static sem_t g_i2csem;       /* Serialize I2C transfers */
+static bool    g_initialized;                   /* true:I2C has been initialized */
+static mutex_t g_i2clock = NXMUTEX_INITIALIZER; /* Serialize I2C transfers */
 
-const struct i2c_ops_s g_ops =
+static const struct i2c_ops_s g_ops =
 {
   z8_i2c_transfer,
 #ifdef CONFIG_I2C_RESET
@@ -282,7 +284,9 @@ static int z8_i2c_read_transfer(FAR struct z8_i2cdev_s *priv,
                   I2CCTL |= I2C_CTL_NAK;
                 }
 
-              /* If this was the last byte, then set STOP and return success */
+              /* If this was the last byte, then set STOP and return
+               * success
+               */
 
               else if (count == 1)
                 {
@@ -495,7 +499,7 @@ static int z8_i2c_transfer(FAR struct i2c_master_s *dev,
 
   /* Get exclusive access to the I2C bus */
 
-  ret = nxsem_wait(&g_i2csem);
+  ret = nxmutex_lock(&g_i2clock);
   if (ret < 0)
     {
       return ret;
@@ -565,7 +569,7 @@ static int z8_i2c_transfer(FAR struct i2c_master_s *dev,
       flags = (nostop) ? Z8_NOSTART : 0;
     }
 
-  nxsem_post(&g_i2csem);
+  nxmutex_unlock(&g_i2clock);
   return ret;
 }
 
@@ -584,7 +588,7 @@ static int z8_i2c_transfer(FAR struct i2c_master_s *dev,
  ****************************************************************************/
 
 #ifdef CONFIG_I2C_RESET
-static int z8_i2c_reset(FAR struct i2c_master_s * dev)
+static int z8_i2c_reset(FAR struct i2c_master_s *dev)
 {
   return OK;
 }
@@ -629,10 +633,6 @@ FAR struct i2c_master_s *z8_i2cbus_initialize(int port)
       PAADDR = 0x02;
       PACTL |= 0xc0;
 
-      /* This semaphore enforces serialized access for I2C transfers */
-
-      nxsem_init(&g_i2csem, 0, 1);
-
       /* Enable I2C -- no interrupts */
 
       I2CCTL = I2C_CTL_IEN;
@@ -640,7 +640,7 @@ FAR struct i2c_master_s *z8_i2cbus_initialize(int port)
 
   /* Now, allocate an I2C instance for this caller */
 
-  i2c = (FAR struct z8_i2cdev_s *)kmm_zalloc(sizeof(FAR struct z8_i2cdev_s));
+  i2c = kmm_zalloc(sizeof(struct z8_i2cdev_s));
   if (i2c)
     {
       /* Initialize the allocated instance */

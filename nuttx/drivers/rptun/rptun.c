@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/rptun/rptun.c
  *
- *   Copyright (C) 2017 Pinecone Inc. All rights reserved.
- *   Author: Guiding Li<liguiding@pinecone.net>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,27 +28,29 @@
 
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdbool.h>
+#include <sys/param.h>
 #include <fcntl.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/board.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/kthread.h>
-#include <nuttx/rptun/openamp.h>
+#include <nuttx/mutex.h>
+#include <nuttx/nuttx.h>
+#include <nuttx/power/pm.h>
 #include <nuttx/rptun/rptun.h>
-#include <nuttx/signal.h>
+#include <nuttx/semaphore.h>
 #include <metal/utilities.h>
+#include <openamp/remoteproc_loader.h>
+#include <openamp/remoteproc_virtio.h>
+#include <rpmsg/rpmsg_internal.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifndef MAX
-#  define MAX(a,b)              ((a) > (b) ? (a) : (b))
-#endif
-
-#ifndef ALIGN_UP
-#  define ALIGN_UP(s, a)        (((s) + (a) - 1) & ~((a) - 1))
-#endif
+#define RPTUN_TIMEOUT_MS            20
 
 /****************************************************************************
  * Private Types
@@ -69,29 +58,19 @@
 
 struct rptun_priv_s
 {
+  struct rpmsg_s               rpmsg;
+  struct rpmsg_virtio_device   rvdev;
   FAR struct rptun_dev_s       *dev;
   struct remoteproc            rproc;
-  struct rpmsg_virtio_device   vdev;
-  struct rpmsg_virtio_shm_pool shm_pool;
-  struct metal_list            bind;
-  struct metal_list            node;
-  int                          pid;
-};
-
-struct rptun_bind_s
-{
-  char              name[RPMSG_NAME_SIZE];
-  uint32_t          dest;
-  struct metal_list node;
-};
-
-struct rptun_cb_s
-{
-  FAR void          *priv;
-  rpmsg_dev_cb_t    device_created;
-  rpmsg_dev_cb_t    device_destroy;
-  rpmsg_bind_cb_t   ns_bind;
-  struct metal_list node;
+  struct rpmsg_virtio_shm_pool pool[2];
+  sem_t                        semtx;
+  sem_t                        semrx;
+  pid_t                        tid;
+  uint16_t                     headrx;
+#ifdef CONFIG_RPTUN_PM
+  struct pm_wakelock_s         wakelock;
+  struct wdog_s                wdog;
+#endif
 };
 
 struct rptun_store_s
@@ -104,26 +83,28 @@ struct rptun_store_s
  * Private Function Prototypes
  ****************************************************************************/
 
-static FAR struct remoteproc *rptun_init(FAR struct remoteproc *rproc,
-                                         FAR struct remoteproc_ops *ops,
-                                         FAR void *arg);
+static FAR struct remoteproc *
+rptun_init(FAR struct remoteproc *rproc,
+           FAR const struct remoteproc_ops *ops,
+           FAR void *arg);
 static void rptun_remove(FAR struct remoteproc *rproc);
-static int rptun_mmap(FAR struct remoteproc *rproc,
-                      FAR metal_phys_addr_t *pa, FAR metal_phys_addr_t *da,
-                      FAR void **va, size_t size, unsigned int attribute,
-                      FAR struct metal_io_region **io_);
+static int rptun_config(struct remoteproc *rproc, void *data);
 static int rptun_start(FAR struct remoteproc *rproc);
 static int rptun_stop(FAR struct remoteproc *rproc);
 static int rptun_notify(FAR struct remoteproc *rproc, uint32_t id);
-
-static void rptun_ns_bind(FAR struct rpmsg_device *rdev,
-                          FAR const char *name, uint32_t dest);
+static FAR struct remoteproc_mem *
+rptun_get_mem(FAR struct remoteproc *rproc,
+              FAR const char *name,
+              metal_phys_addr_t pa,
+              metal_phys_addr_t da,
+              FAR void *va, size_t size,
+              FAR struct remoteproc_mem *buf);
+static int rptun_notify_wait(FAR struct rpmsg_device *rdev, uint32_t id);
 
 static int rptun_dev_start(FAR struct remoteproc *rproc);
-static int rptun_dev_stop(FAR struct remoteproc *rproc);
-static int rptun_dev_ioctl(FAR struct file *filep, int cmd,
-                           unsigned long arg);
+static int rptun_dev_stop(FAR struct remoteproc *rproc, bool stop_ns);
 
+#ifdef CONFIG_RPTUN_LOADER
 static int rptun_store_open(FAR void *store_, FAR const char *path,
                             FAR const void **img_data);
 static void rptun_store_close(FAR void *store_);
@@ -132,82 +113,315 @@ static int rptun_store_load(FAR void *store_, size_t offset,
                             metal_phys_addr_t pa,
                             FAR struct metal_io_region *io,
                             char is_blocking);
+#endif
 
 static metal_phys_addr_t rptun_pa_to_da(FAR struct rptun_dev_s *dev,
                                         metal_phys_addr_t pa);
 static metal_phys_addr_t rptun_da_to_pa(FAR struct rptun_dev_s *dev,
                                         metal_phys_addr_t da);
 
+static int rptun_wait(FAR struct rpmsg_s *rpmsg, FAR sem_t *sem);
+static int rptun_post(FAR struct rpmsg_s *rpmsg, FAR sem_t *sem);
+static int rptun_ioctl(FAR struct rpmsg_s *rpmsg, int cmd,
+                       unsigned long arg);
+static void rptun_panic(FAR struct rpmsg_s *rpmsg);
+static void rptun_dump(FAR struct rpmsg_s *rpmsg);
+static FAR const char *rptun_get_local_cpuname(FAR struct rpmsg_s *rpmsg);
+static FAR const char *rptun_get_cpuname(FAR struct rpmsg_s *rpmsg);
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static struct remoteproc_ops g_rptun_ops =
+static const struct remoteproc_ops g_rptun_ops =
 {
-  .init   = rptun_init,
-  .remove = rptun_remove,
-  .mmap   = rptun_mmap,
-  .start  = rptun_start,
-  .stop   = rptun_stop,
-  .notify = rptun_notify,
+  .init        = rptun_init,
+  .remove      = rptun_remove,
+  .config      = rptun_config,
+  .start       = rptun_start,
+  .stop        = rptun_stop,
+  .notify      = rptun_notify,
+  .get_mem     = rptun_get_mem,
 };
 
-static const struct file_operations g_rptun_devops =
-{
-  .ioctl = rptun_dev_ioctl,
-};
-
-static struct image_store_ops g_rptun_storeops =
+#ifdef CONFIG_RPTUN_LOADER
+static const struct image_store_ops g_rptun_store_ops =
 {
   .open     = rptun_store_open,
   .close    = rptun_store_close,
   .load     = rptun_store_load,
   .features = SUPPORT_SEEK,
 };
+#endif
 
-static sem_t g_rptun_sem = SEM_INITIALIZER(1);
-
-static METAL_DECLARE_LIST(g_rptun_cb);
-static METAL_DECLARE_LIST(g_rptun_priv);
+static const struct rpmsg_ops_s g_rptun_rpmsg_ops =
+{
+  rptun_wait,
+  rptun_post,
+  rptun_ioctl,
+  rptun_panic,
+  rptun_dump,
+  rptun_get_local_cpuname,
+  rptun_get_cpuname,
+};
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
+static int rptun_buffer_nused(FAR struct rpmsg_virtio_device *rvdev, bool rx)
+{
+  FAR struct virtqueue *vq = rx ? rvdev->rvq : rvdev->svq;
+  uint16_t nused;
+  bool is_host = rpmsg_virtio_get_role(rvdev) == RPMSG_HOST;
+
+  if (is_host)
+    {
+      RPTUN_INVALIDATE(vq->vq_ring.used->idx);
+    }
+  else
+    {
+      RPTUN_INVALIDATE(vq->vq_ring.avail->idx);
+    }
+
+  nused = vq->vq_ring.avail->idx - vq->vq_ring.used->idx;
+  if (is_host ^ rx)
+    {
+      return nused;
+    }
+  else
+    {
+      return vq->vq_nentries - nused;
+    }
+}
+
+static void rptun_wakeup_tx(FAR struct rptun_priv_s *priv)
+{
+  int semcount;
+
+  nxsem_get_value(&priv->semtx, &semcount);
+  while (semcount++ < 1)
+    {
+      nxsem_post(&priv->semtx);
+    }
+}
+
+#ifdef CONFIG_RPTUN_PM
+
+#ifdef CONFIG_RPTUN_PM_AUTORELAX
+static void rptun_pm_callback(wdparm_t arg)
+{
+  FAR struct rptun_priv_s *priv = (FAR struct rptun_priv_s *)arg;
+
+  if (priv->rproc.state != RPROC_RUNNING)
+    {
+      return;
+    }
+
+  if (rptun_buffer_nused(&priv->rvdev, false))
+    {
+      rptun_wakeup_tx(priv);
+
+      wd_start(&priv->wdog, MSEC2TICK(RPTUN_TIMEOUT_MS),
+               rptun_pm_callback, (wdparm_t)priv);
+    }
+  else
+    {
+      pm_wakelock_relax(&priv->wakelock);
+    }
+}
+#endif
+
+static inline void rptun_pm_action(FAR struct rptun_priv_s *priv,
+                                   bool stay)
+{
+  irqstate_t flags;
+  int count;
+
+  flags = enter_critical_section();
+
+  count = pm_wakelock_staycount(&priv->wakelock);
+  if (stay && count == 0)
+    {
+      pm_wakelock_stay(&priv->wakelock);
+#ifdef CONFIG_RPTUN_PM_AUTORELAX
+      wd_start(&priv->wdog, MSEC2TICK(RPTUN_TIMEOUT_MS),
+               rptun_pm_callback, (wdparm_t)priv);
+#endif
+    }
+
+#ifndef CONFIG_RPTUN_PM_AUTORELAX
+  if (!stay && count > 0 && rptun_buffer_nused(&priv->rvdev, false) == 0)
+    {
+      pm_wakelock_relax(&priv->wakelock);
+    }
+#endif
+
+  leave_critical_section(flags);
+}
+
+static inline bool rptun_available_rx(FAR struct rptun_priv_s *priv)
+{
+  FAR struct rpmsg_virtio_device *rvdev = &priv->rvdev;
+  FAR struct virtqueue *rvq = rvdev->rvq;
+
+  if (priv->rproc.state != RPROC_RUNNING)
+    {
+      return false;
+    }
+
+  if (rpmsg_virtio_get_role(rvdev) == RPMSG_HOST)
+    {
+      return priv->headrx != rvq->vq_used_cons_idx;
+    }
+  else
+    {
+      return priv->headrx != rvq->vq_available_idx;
+    }
+}
+
+#else
+#  define rptun_pm_action(priv, stay)
+#  define rptun_available_rx(priv) true
+#endif
+
+static inline void rptun_update_rx(FAR struct rptun_priv_s *priv)
+{
+  FAR struct rpmsg_virtio_device *rvdev = &priv->rvdev;
+  FAR struct virtqueue *rvq = rvdev->rvq;
+
+  if (priv->rproc.state != RPROC_RUNNING)
+    {
+      return;
+    }
+
+  if (rpmsg_virtio_get_role(rvdev) == RPMSG_HOST)
+    {
+      RPTUN_INVALIDATE(rvq->vq_ring.used->idx);
+      priv->headrx = rvq->vq_ring.used->idx;
+    }
+  else
+    {
+      RPTUN_INVALIDATE(rvq->vq_ring.avail->idx);
+      priv->headrx = rvq->vq_ring.avail->idx;
+    }
+}
+
+static void rptun_start_worker(FAR void *arg)
+{
+  FAR struct rptun_priv_s *priv = arg;
+
+  if (priv->rproc.state == RPROC_OFFLINE)
+    {
+      rptun_dev_start(&priv->rproc);
+    }
+}
+
+static void rptun_worker(FAR void *arg)
+{
+  FAR struct rptun_priv_s *priv = arg;
+
+  if (rptun_available_rx(priv))
+    {
+      remoteproc_get_notification(&priv->rproc, RPTUN_NOTIFY_ALL);
+    }
+}
+
 static int rptun_thread(int argc, FAR char *argv[])
 {
   FAR struct rptun_priv_s *priv;
-  sigset_t set;
-  int ret;
 
-  priv = (FAR struct rptun_priv_s *)((uintptr_t)strtoul(argv[2], NULL, 0));
+  priv = (FAR struct rptun_priv_s *)((uintptr_t)strtoul(argv[2], NULL, 16));
+  priv->tid = nxsched_gettid();
 
-  sigemptyset(&set);
-  sigaddset(&set, SIGUSR1);
-  nxsig_procmask(SIG_BLOCK, &set, NULL);
+  if (RPTUN_IS_AUTOSTART(priv->dev))
+    {
+      rptun_start_worker(priv);
+    }
 
   while (1)
     {
-      ret = nxsig_timedwait(&set, NULL, NULL);
-      if (ret == SIGUSR1)
-        {
-          remoteproc_get_notification(&priv->rproc, RPTUN_NOTIFY_ALL);
-        }
+      nxsem_wait_uninterruptible(&priv->semrx);
+      rptun_worker(priv);
     }
 
   return 0;
 }
 
+static void rptun_wakeup_rx(FAR struct rptun_priv_s *priv)
+{
+  int semcount;
+
+  nxsem_get_value(&priv->semrx, &semcount);
+  if (semcount < 1)
+    {
+      nxsem_post(&priv->semrx);
+    }
+}
+
+static bool rptun_is_recursive(FAR struct rptun_priv_s *priv)
+{
+  return nxsched_gettid() == priv->tid;
+}
+
+static void rptun_command(FAR struct rptun_priv_s *priv)
+{
+  FAR struct rptun_cmd_s *rptun_cmd = RPTUN_RSC2CMD(priv->rproc.rsc_table);
+  uint32_t cmd;
+
+  if (RPTUN_IS_MASTER(priv->dev))
+    {
+      cmd = rptun_cmd->cmd_slave;
+      rptun_cmd->cmd_slave = 0;
+    }
+  else
+    {
+      cmd = rptun_cmd->cmd_master;
+      rptun_cmd->cmd_master = 0;
+    }
+
+  switch (RPTUN_GET_CMD(cmd))
+    {
+      case RPTUN_CMD_PANIC:
+        PANIC();
+        break;
+
+      default:
+        break;
+    }
+}
+
 static int rptun_callback(FAR void *arg, uint32_t vqid)
 {
   FAR struct rptun_priv_s *priv = arg;
+  FAR struct rpmsg_virtio_device *rvdev = &priv->rvdev;
+  FAR struct virtio_device *vdev = rvdev->vdev;
+  FAR struct virtqueue *svq = rvdev->svq;
+  FAR struct virtqueue *rvq = rvdev->rvq;
 
-  return nxsig_kill(priv->pid, SIGUSR1);
+  rptun_command(priv);
+
+  if (vqid == RPTUN_NOTIFY_ALL ||
+      vqid == vdev->vrings_info[rvq->vq_queue_index].notifyid)
+    {
+      rptun_update_rx(priv);
+      rptun_wakeup_rx(priv);
+    }
+
+  if (vqid == RPTUN_NOTIFY_ALL ||
+      vqid == vdev->vrings_info[svq->vq_queue_index].notifyid)
+    {
+      rptun_wakeup_tx(priv);
+      rptun_pm_action(priv, false);
+    }
+
+  return OK;
 }
 
-static FAR struct remoteproc *rptun_init(FAR struct remoteproc *rproc,
-                                         FAR struct remoteproc_ops *ops,
-                                         FAR void *arg)
+static FAR struct remoteproc *
+rptun_init(FAR struct remoteproc *rproc,
+           FAR const struct remoteproc_ops *ops,
+           FAR void *arg)
 {
   rproc->ops = ops;
   rproc->priv = arg;
@@ -220,50 +434,13 @@ static void rptun_remove(FAR struct remoteproc *rproc)
   rproc->priv = NULL;
 }
 
-static int rptun_mmap(FAR struct remoteproc *rproc,
-                      FAR metal_phys_addr_t *pa, FAR metal_phys_addr_t *da,
-                      FAR void **va, size_t size, unsigned int attribute,
-                      FAR struct metal_io_region **io_)
+static int rptun_config(struct remoteproc *rproc, void *data)
 {
-  FAR struct rptun_priv_s *priv = rproc->priv;
-  FAR struct metal_io_region *io = metal_io_get_region();
+  struct rptun_priv_s *priv = rproc->priv;
 
-  if (*pa != METAL_BAD_PHYS)
+  if (RPTUN_IS_MASTER(priv->dev))
     {
-      *da = rptun_pa_to_da(priv->dev, *pa);
-      *va = metal_io_phys_to_virt(io, *pa);
-      if (!*va)
-        {
-          return -RPROC_EINVAL;
-        }
-    }
-  else if (*da != METAL_BAD_PHYS)
-    {
-      *pa = rptun_da_to_pa(priv->dev, *da);
-      *va = metal_io_phys_to_virt(io, *pa);
-      if (!*va)
-        {
-          return -RPROC_EINVAL;
-        }
-    }
-  else if (*va)
-    {
-      *pa = metal_io_virt_to_phys(io, *va);
-      if (*pa == METAL_BAD_PHYS)
-        {
-          return -RPROC_EINVAL;
-        }
-
-      *da = rptun_pa_to_da(priv->dev, *pa);
-    }
-  else
-    {
-      return -RPROC_EINVAL;
-    }
-
-  if (io_)
-    {
-      *io_ = io;
+      return RPTUN_CONFIG(priv->dev, data);
     }
 
   return 0;
@@ -296,66 +473,296 @@ static int rptun_stop(FAR struct remoteproc *rproc)
 static int rptun_notify(FAR struct remoteproc *rproc, uint32_t id)
 {
   FAR struct rptun_priv_s *priv = rproc->priv;
+  FAR struct rpmsg_virtio_device *rvdev = &priv->rvdev;
+  FAR struct virtio_device *vdev = rvdev->vdev;
+  FAR struct virtqueue *svq = rvdev->svq;
 
-  RPTUN_NOTIFY(priv->dev, RPTUN_NOTIFY_ALL);
+  if (priv->rproc.state == RPROC_RUNNING &&
+      id == vdev->vrings_info[svq->vq_queue_index].notifyid)
+    {
+      rptun_pm_action(priv, true);
+    }
+
+  RPTUN_NOTIFY(priv->dev, id);
+  return 0;
+}
+
+static FAR struct remoteproc_mem *
+rptun_get_mem(FAR struct remoteproc *rproc,
+              FAR const char *name,
+              metal_phys_addr_t pa,
+              metal_phys_addr_t da,
+              FAR void *va, size_t size,
+              FAR struct remoteproc_mem *buf)
+{
+  FAR struct rptun_priv_s *priv = rproc->priv;
+
+  metal_list_init(&buf->node);
+  strlcpy(buf->name, name ? name : "", RPROC_MAX_NAME_LEN);
+  buf->io = metal_io_get_region();
+  buf->size = size;
+
+  if (pa != METAL_BAD_PHYS)
+    {
+      buf->pa = pa;
+      buf->da = rptun_pa_to_da(priv->dev, pa);
+    }
+  else if (da != METAL_BAD_PHYS)
+    {
+      buf->pa = rptun_da_to_pa(priv->dev, da);
+      buf->da = da;
+    }
+  else
+    {
+      buf->pa = metal_io_virt_to_phys(buf->io, va);
+      buf->da = rptun_pa_to_da(priv->dev, buf->pa);
+    }
+
+  if (buf->pa == METAL_BAD_PHYS || buf->da == METAL_BAD_PHYS)
+    {
+      return NULL;
+    }
+
+  return buf;
+}
+
+static int rptun_notify_wait(FAR struct rpmsg_device *rdev, uint32_t id)
+{
+  FAR struct rptun_priv_s *priv = (FAR struct rptun_priv_s *)
+    metal_container_of(rdev, struct rpmsg_s, rdev);
+
+  if (!rptun_is_recursive(priv))
+    {
+      return -EAGAIN;
+    }
+
+  /* Wait to wakeup */
+
+  nxsem_tickwait(&priv->semtx, MSEC2TICK(RPTUN_TIMEOUT_MS));
+  rptun_worker(priv);
 
   return 0;
 }
 
-static void *rptun_get_priv_by_rdev(FAR struct rpmsg_device *rdev)
+static void rptun_dump_buffer(FAR struct rpmsg_virtio_device *rvdev,
+                              bool rx)
 {
-  struct rpmsg_virtio_device *rvdev;
-  struct virtio_device *vdev;
-  struct remoteproc_virtio *rpvdev;
-  struct remoteproc *rproc;
+  FAR struct virtqueue *vq = rx ? rvdev->rvq : rvdev->svq;
+  FAR void *addr;
+  int desc_idx;
+  int num;
+  int i;
 
-  rvdev = metal_container_of(rdev, struct rpmsg_virtio_device, rdev);
-  vdev  = rvdev->vdev;
-  if (!vdev)
+  num = rptun_buffer_nused(rvdev, rx);
+  metal_log(METAL_LOG_EMERGENCY,
+            "    %s buffer, total %d, pending %d\n",
+            rx ? "RX" : "TX", vq->vq_nentries, num);
+
+  for (i = 0; i < num; i++)
     {
-      return NULL;
-    }
-
-  rpvdev = metal_container_of(vdev, struct remoteproc_virtio, vdev);
-  rproc  = rpvdev->priv;
-  if (!rproc)
-    {
-      return NULL;
-    }
-
-  return rproc->priv;
-}
-
-static void rptun_ns_bind(FAR struct rpmsg_device *rdev,
-                          FAR const char *name, uint32_t dest)
-{
-  FAR struct rptun_priv_s *priv = rptun_get_priv_by_rdev(rdev);
-  FAR struct rptun_bind_s *bind;
-
-  bind = kmm_malloc(sizeof(struct rptun_bind_s));
-  if (bind)
-    {
-      FAR struct metal_list *node;
-      FAR struct rptun_cb_s *cb;
-
-      bind->dest = dest;
-      strncpy(bind->name, name, RPMSG_NAME_SIZE);
-
-      nxsem_wait(&g_rptun_sem);
-
-      metal_list_add_tail(&priv->bind, &bind->node);
-
-      metal_list_for_each(&g_rptun_cb, node)
+      if ((rpmsg_virtio_get_role(rvdev) == RPMSG_HOST) ^ rx)
         {
-          cb = metal_container_of(node, struct rptun_cb_s, node);
-          if (cb->ns_bind)
-            {
-              cb->ns_bind(rdev, cb->priv, name, dest);
-            }
+          RPTUN_INVALIDATE(vq->vq_ring.used->idx);
+          desc_idx = (vq->vq_ring.used->idx + i) & (vq->vq_nentries - 1);
+          RPTUN_INVALIDATE(vq->vq_ring.avail->ring[desc_idx]);
+          desc_idx = vq->vq_ring.avail->ring[desc_idx];
+        }
+      else
+        {
+          RPTUN_INVALIDATE(vq->vq_ring.avail->idx);
+          desc_idx = (vq->vq_ring.avail->idx + i) & (vq->vq_nentries - 1);
+          RPTUN_INVALIDATE(vq->vq_ring.used->ring[desc_idx].id);
+          desc_idx = vq->vq_ring.used->ring[desc_idx].id;
         }
 
-      nxsem_post(&g_rptun_sem);
+      addr = metal_io_phys_to_virt(vq->shm_io,
+                                   vq->vq_ring.desc[desc_idx].addr);
+      if (addr)
+        {
+          FAR struct rpmsg_hdr *hdr = addr;
+          FAR struct rpmsg_endpoint *ept;
+
+          ept = rpmsg_get_ept_from_addr(&rvdev->rdev,
+                                        rx ? hdr->dst : hdr->src);
+          if (ept)
+            {
+              metal_log(METAL_LOG_EMERGENCY,
+                        "      %s buffer %p hold by %s\n",
+                        rx ? "RX" : "TX", hdr, ept->name);
+            }
+        }
     }
+}
+
+static int rptun_wait(FAR struct rpmsg_s *rpmsg, FAR sem_t *sem)
+{
+  FAR struct rptun_priv_s *priv = (FAR struct rptun_priv_s *)rpmsg;
+  int ret;
+
+  if (!rptun_is_recursive(priv))
+    {
+      return nxsem_wait_uninterruptible(sem);
+    }
+
+  while (1)
+    {
+      ret = nxsem_trywait(sem);
+      if (ret >= 0)
+        {
+          break;
+        }
+
+      nxsem_wait(&priv->semtx);
+      rptun_worker(priv);
+    }
+
+  return ret;
+}
+
+static int rptun_post(FAR struct rpmsg_s *rpmsg, FAR sem_t *sem)
+{
+  FAR struct rptun_priv_s *priv = (FAR struct rptun_priv_s *)rpmsg;
+  int semcount;
+  int ret;
+
+  nxsem_get_value(sem, &semcount);
+  ret = nxsem_post(sem);
+
+  if (priv && semcount >= 0)
+    {
+      rptun_wakeup_tx(priv);
+    }
+
+  return ret;
+}
+
+static int rptun_ioctl(FAR struct rpmsg_s *rpmsg, int cmd, unsigned long arg)
+{
+  FAR struct rptun_priv_s *priv = (FAR struct rptun_priv_s *)rpmsg;
+  int ret = OK;
+
+  switch (cmd)
+    {
+      case RPTUNIOC_START:
+        if (priv->rproc.state == RPROC_OFFLINE)
+          {
+            ret = rptun_dev_start(&priv->rproc);
+          }
+        else
+          {
+            ret = rptun_dev_stop(&priv->rproc, false);
+            if (ret == OK)
+              {
+                ret = rptun_dev_start(&priv->rproc);
+              }
+          }
+        break;
+      case RPTUNIOC_STOP:
+        ret = rptun_dev_stop(&priv->rproc, true);
+        break;
+      case RPTUNIOC_RESET:
+        RPTUN_RESET(priv->dev, arg);
+        break;
+      default:
+        ret = -ENOTTY;
+        break;
+    }
+
+  return ret;
+}
+
+static void rptun_panic(FAR struct rpmsg_s *rpmsg)
+{
+  FAR struct rptun_priv_s *priv = (FAR struct rptun_priv_s *)rpmsg;
+  FAR struct rptun_cmd_s *cmd = RPTUN_RSC2CMD(priv->rproc.rsc_table);
+
+  if (priv->dev->ops->panic != NULL)
+    {
+      RPTUN_PANIC(priv->dev);
+      return;
+    }
+
+  if (RPTUN_IS_MASTER(priv->dev))
+    {
+      cmd->cmd_master = RPTUN_CMD(RPTUN_CMD_PANIC, 0);
+    }
+  else
+    {
+      cmd->cmd_slave = RPTUN_CMD(RPTUN_CMD_PANIC, 0);
+    }
+
+  rptun_notify(&priv->rproc, RPTUN_NOTIFY_ALL);
+}
+
+static void rptun_dump(FAR struct rpmsg_s *rpmsg)
+{
+  FAR struct rptun_priv_s *priv = (FAR struct rptun_priv_s *)rpmsg;
+  FAR struct rpmsg_virtio_device *rvdev = &priv->rvdev;
+  FAR struct rpmsg_device *rdev = rpmsg->rdev;
+  FAR struct rpmsg_endpoint *ept;
+  FAR struct metal_list *node;
+  bool needlock = true;
+
+  metal_log(METAL_LOG_EMERGENCY, "Remote: %s headrx %d\n",
+            RPTUN_GET_CPUNAME(priv->dev), priv->headrx);
+
+  if (!rvdev->vdev)
+    {
+      return;
+    }
+
+  if (up_interrupt_context() || sched_idletask() ||
+      nxmutex_is_hold(&rdev->lock))
+    {
+      needlock = false;
+    }
+
+  if (needlock)
+    {
+      metal_mutex_acquire(&rdev->lock);
+    }
+
+  metal_log(METAL_LOG_EMERGENCY,
+            "Dump rpmsg info between cpu (master: %s)%s <==> %s:\n",
+            rpmsg_virtio_get_role(rvdev) == RPMSG_HOST ? "yes" : "no",
+            CONFIG_RPMSG_LOCAL_CPUNAME, rpmsg_get_cpuname(rdev));
+
+  metal_log(METAL_LOG_EMERGENCY, "rpmsg vq RX:\n");
+  virtqueue_dump(rvdev->rvq);
+  metal_log(METAL_LOG_EMERGENCY, "rpmsg vq TX:\n");
+  virtqueue_dump(rvdev->svq);
+
+  metal_log(METAL_LOG_EMERGENCY, "  rpmsg ept list:\n");
+
+  metal_list_for_each(&rdev->endpoints, node)
+    {
+      ept = metal_container_of(node, struct rpmsg_endpoint, node);
+      metal_log(METAL_LOG_EMERGENCY, "    ept %s\n", ept->name);
+    }
+
+  metal_log(METAL_LOG_EMERGENCY, "  rpmsg buffer list:\n");
+
+  rptun_dump_buffer(rvdev, true);
+  rptun_dump_buffer(rvdev, false);
+
+  if (needlock)
+    {
+      metal_mutex_release(&rdev->lock);
+    }
+}
+
+static FAR const char *rptun_get_local_cpuname(FAR struct rpmsg_s *rpmsg)
+{
+  FAR struct rptun_priv_s *priv = (FAR struct rptun_priv_s *)rpmsg;
+
+  return RPTUN_GET_LOCAL_CPUNAME(priv->dev);
+}
+
+static FAR const char *rptun_get_cpuname(FAR struct rpmsg_s *rpmsg)
+{
+  FAR struct rptun_priv_s *priv = (FAR struct rptun_priv_s *)rpmsg;
+
+  return RPTUN_GET_CPUNAME(priv->dev);
 }
 
 static int rptun_dev_start(FAR struct remoteproc *rproc)
@@ -363,17 +770,16 @@ static int rptun_dev_start(FAR struct remoteproc *rproc)
   FAR struct rptun_priv_s *priv = rproc->priv;
   FAR struct virtio_device *vdev;
   FAR struct rptun_rsc_s *rsc;
-  FAR struct metal_list *node;
-  FAR struct rptun_cb_s *cb;
   unsigned int role = RPMSG_REMOTE;
   int ret;
 
-  ret = remoteproc_config(&priv->rproc, NULL);
+  ret = remoteproc_config(rproc, NULL);
   if (ret)
     {
       return ret;
     }
 
+#ifdef CONFIG_RPTUN_LOADER
   if (RPTUN_GET_FIRMWARE(priv->dev))
     {
       struct rptun_store_s store =
@@ -382,7 +788,7 @@ static int rptun_dev_start(FAR struct remoteproc *rproc)
       };
 
       ret = remoteproc_load(rproc, RPTUN_GET_FIRMWARE(priv->dev),
-                            &store, &g_rptun_storeops, NULL);
+                            &store, &g_rptun_store_ops, NULL);
       if (ret)
         {
           return ret;
@@ -391,6 +797,7 @@ static int rptun_dev_start(FAR struct remoteproc *rproc)
       rsc = rproc->rsc_table;
     }
   else
+#endif
     {
       rsc = RPTUN_GET_RESOURCE(priv->dev);
       if (!rsc)
@@ -421,32 +828,60 @@ static int rptun_dev_start(FAR struct remoteproc *rproc)
       FAR void *va0;
       FAR void *va1;
       FAR void *shbuf;
+      FAR struct metal_io_region *io;
+      metal_phys_addr_t pa0;
+      metal_phys_addr_t pa1;
 
-      align0 = B2C(rsc->rpmsg_vring0.align);
-      align1 = B2C(rsc->rpmsg_vring1.align);
+      align0 = rsc->rpmsg_vring0.align;
+      align1 = rsc->rpmsg_vring1.align;
 
-      tbsz = ALIGN_UP(sizeof(struct rptun_rsc_s), MAX(align0, align1));
       v0sz = ALIGN_UP(vring_size(rsc->rpmsg_vring0.num, align0), align0);
       v1sz = ALIGN_UP(vring_size(rsc->rpmsg_vring1.num, align1), align1);
 
-      va0 = (char *)rsc + tbsz;
-      va1 = (char *)rsc + tbsz + v0sz;
+      if (rsc->rpmsg_vring0.da == 0 ||
+          rsc->rpmsg_vring0.da == FW_RSC_U32_ADDR_ANY ||
+          rsc->rpmsg_vring1.da == 0 ||
+          rsc->rpmsg_vring1.da == FW_RSC_U32_ADDR_ANY)
+        {
+          tbsz = ALIGN_UP(sizeof(struct rptun_rsc_s), MAX(align0, align1));
 
-      da0 = da1 = METAL_BAD_PHYS;
+          va0 = (FAR char *)rsc + tbsz;
+          va1 = (FAR char *)rsc + tbsz + v0sz;
 
-      remoteproc_mmap(rproc, NULL, &da0, &va0, v0sz, 0, NULL);
-      remoteproc_mmap(rproc, NULL, &da1, &va1, v1sz, 0, NULL);
+          io  = metal_io_get_region();
+          pa0 = metal_io_virt_to_phys(io, va0);
+          pa1 = metal_io_virt_to_phys(io, va1);
 
-      rsc->rpmsg_vring0.da = da0;
-      rsc->rpmsg_vring1.da = da1;
+          da0 = da1 = METAL_BAD_PHYS;
 
-      shbuf   = (FAR char *)rsc + tbsz + v0sz + v1sz;
-      shbufsz = rsc->buf_size *
-                (rsc->rpmsg_vring0.num + rsc->rpmsg_vring1.num);
+          remoteproc_mmap(rproc, &pa0, &da0, v0sz, 0, NULL);
+          remoteproc_mmap(rproc, &pa1, &da1, v1sz, 0, NULL);
 
-      rpmsg_virtio_init_shm_pool(&priv->shm_pool, shbuf, shbufsz);
+          rsc->rpmsg_vring0.da = da0;
+          rsc->rpmsg_vring1.da = da1;
 
-      role = RPMSG_MASTER;
+          shbuf   = (FAR char *)rsc + tbsz + v0sz + v1sz;
+          shbufsz = rsc->config.r2h_buf_size * rsc->rpmsg_vring0.num +
+                    rsc->config.h2r_buf_size * rsc->rpmsg_vring1.num;
+
+          rpmsg_virtio_init_shm_pool(priv->pool, shbuf, shbufsz);
+        }
+      else
+        {
+          da0 = rsc->rpmsg_vring0.da;
+          shbuf = (FAR char *)remoteproc_mmap(rproc, NULL, &da0,
+                                              v0sz, 0, NULL) + v0sz;
+          shbufsz = rsc->config.r2h_buf_size * rsc->rpmsg_vring0.num;
+          rpmsg_virtio_init_shm_pool(&priv->pool[0], shbuf, shbufsz);
+
+          da1 = rsc->rpmsg_vring1.da;
+          shbuf = (FAR char *)remoteproc_mmap(rproc, NULL, &da1,
+                                              v1sz, 0, NULL) + v1sz;
+          shbufsz = rsc->config.h2r_buf_size * rsc->rpmsg_vring1.num;
+          rpmsg_virtio_init_shm_pool(&priv->pool[1], shbuf, shbufsz);
+        }
+
+      role = RPMSG_HOST;
     }
 
   /* Remote proc create */
@@ -457,134 +892,109 @@ static int rptun_dev_start(FAR struct remoteproc *rproc)
       return -ENOMEM;
     }
 
-  ret = rpmsg_init_vdev(&priv->vdev, vdev, rptun_ns_bind,
-                        metal_io_get_region(), &priv->shm_pool);
+  if (priv->pool[1].base)
+    {
+      struct rpmsg_virtio_config config =
+        {
+          RPMSG_BUFFER_SIZE,
+          RPMSG_BUFFER_SIZE,
+          true,
+        };
+
+      ret = rpmsg_init_vdev_with_config(&priv->rvdev, vdev, rpmsg_ns_bind,
+                                        metal_io_get_region(),
+                                        priv->pool,
+                                        &config);
+    }
+  else
+    {
+      ret = rpmsg_init_vdev(&priv->rvdev, vdev, rpmsg_ns_bind,
+                            metal_io_get_region(), priv->pool);
+    }
+
   if (ret)
     {
       remoteproc_remove_virtio(rproc, vdev);
       return ret;
     }
+
+  priv->rvdev.rdev.ns_unbind_cb = rpmsg_ns_unbind;
+  priv->rvdev.notify_wait_cb = rptun_notify_wait;
 
   /* Remote proc start */
 
   ret = remoteproc_start(rproc);
   if (ret)
     {
+      rpmsg_deinit_vdev(&priv->rvdev);
       remoteproc_remove_virtio(rproc, vdev);
+      remoteproc_shutdown(rproc);
       return ret;
     }
-
-  nxsem_wait(&g_rptun_sem);
-
-  /* Add priv to list */
-
-  metal_list_add_tail(&g_rptun_priv, &priv->node);
-
-  /* Broadcast device_created to all registers */
-
-  metal_list_for_each(&g_rptun_cb, node)
-    {
-      cb = metal_container_of(node, struct rptun_cb_s, node);
-      if (cb->device_created)
-        {
-          cb->device_created(&priv->vdev.rdev, cb->priv);
-        }
-    }
-
-  nxsem_post(&g_rptun_sem);
 
   /* Register callback to mbox for receiving remote message */
 
   RPTUN_REGISTER_CALLBACK(priv->dev, rptun_callback, priv);
 
+  rptun_update_rx(priv);
+  rptun_wakeup_rx(priv);
+
+  /* Broadcast device_created to all registers */
+
+  rpmsg_device_created(&priv->rpmsg);
+
+  /* Open tx buffer return callback */
+
+  virtqueue_enable_cb(priv->rvdev.svq);
+
   return 0;
 }
 
-static int rptun_dev_stop(FAR struct remoteproc *rproc)
+static int rptun_dev_stop(FAR struct remoteproc *rproc, bool stop_ns)
 {
   FAR struct rptun_priv_s *priv = rproc->priv;
-  FAR struct metal_list *node;
-  FAR struct rptun_cb_s *cb;
+  FAR struct rpmsg_device *rdev = &priv->rvdev.rdev;
+
+  if (priv->rproc.state == RPROC_OFFLINE)
+    {
+      return OK;
+    }
+  else if (priv->rproc.state == RPROC_CONFIGURED ||
+           priv->rproc.state == RPROC_READY)
+    {
+      return -EBUSY;
+    }
+
+  rdev->support_ns = stop_ns;
 
   /* Unregister callback from mbox */
 
   RPTUN_UNREGISTER_CALLBACK(priv->dev);
 
-  nxsem_wait(&g_rptun_sem);
+  rpmsg_device_destory(&priv->rpmsg);
 
-  /* Remove priv from list */
+  /* Remote proc remove */
 
-  metal_list_del(&priv->node);
-
-  /* Broadcast device_destroy to all registers */
-
-  metal_list_for_each(&g_rptun_cb, node)
-    {
-      cb = metal_container_of(node, struct rptun_cb_s, node);
-      if (cb->device_destroy)
-        {
-          cb->device_destroy(&priv->vdev.rdev, cb->priv);
-        }
-    }
-
-  nxsem_post(&g_rptun_sem);
+  rpmsg_deinit_vdev(&priv->rvdev);
+  remoteproc_remove_virtio(rproc, priv->rvdev.vdev);
 
   /* Remote proc stop and shutdown */
 
   remoteproc_shutdown(rproc);
 
-  /* Remote proc remove */
-
-  remoteproc_remove_virtio(rproc, priv->vdev.vdev);
-  rpmsg_deinit_vdev(&priv->vdev);
-
-  /* Free bind list */
-
-  metal_list_for_each(&priv->bind, node)
-    {
-      struct rptun_bind_s *bind;
-
-      bind = metal_container_of(node, struct rptun_bind_s, node);
-      kmm_free(bind);
-    }
-
-  return 0;
+  return OK;
 }
 
-static int rptun_dev_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
-{
-  FAR struct inode *inode = filep->f_inode;
-  FAR struct rptun_priv_s *priv = inode->i_private;
-  int ret = -ENOTTY;
-
-  switch (cmd)
-    {
-      case RPTUNIOC_START:
-        if (priv->rproc.state == RPROC_OFFLINE)
-          {
-            ret = rptun_dev_start(&priv->rproc);
-          }
-        break;
-
-      case RPTUNIOC_STOP:
-        if (priv->rproc.state != RPROC_OFFLINE)
-          {
-            ret = rptun_dev_stop(&priv->rproc);
-          }
-        break;
-    }
-
-  return ret;
-}
-
-static int rptun_store_open(FAR void *store_, FAR const char *path,
+#ifdef CONFIG_RPTUN_LOADER
+static int rptun_store_open(FAR void *store_,
+                            FAR const char *path,
                             FAR const void **img_data)
 {
   FAR struct rptun_store_s *store = store_;
   int len = 0x100;
   int ret;
 
-  ret = file_open(&store->file, path, O_RDONLY);
+  ret = file_open(&store->file, path, O_RDONLY | O_CLOEXEC);
   if (ret < 0)
     {
       return ret;
@@ -599,7 +1009,13 @@ static int rptun_store_open(FAR void *store_, FAR const char *path,
 
   *img_data = store->buf;
 
-  return file_read(&store->file, store->buf, len);
+  ret = file_read(&store->file, store->buf, len);
+  if (ret < 0)
+    {
+      file_close(&store->file);
+    }
+
+  return ret;
 }
 
 static void rptun_store_close(FAR void *store_)
@@ -618,6 +1034,7 @@ static int rptun_store_load(FAR void *store_, size_t offset,
 {
   FAR struct rptun_store_s *store = store_;
   FAR char *tmp;
+  ssize_t ret;
 
   if (pa == METAL_BAD_PHYS)
     {
@@ -640,8 +1057,15 @@ static int rptun_store_load(FAR void *store_, size_t offset,
     }
 
   file_seek(&store->file, offset, SEEK_SET);
-  return file_read(&store->file, tmp, size);
+  ret = file_read(&store->file, tmp, size);
+  if (ret > 0)
+    {
+      metal_cache_flush(tmp, ret);
+    }
+
+  return ret;
 }
+#endif
 
 static metal_phys_addr_t rptun_pa_to_da(FAR struct rptun_dev_s *dev,
                                         metal_phys_addr_t pa)
@@ -693,117 +1117,13 @@ static metal_phys_addr_t rptun_da_to_pa(FAR struct rptun_dev_s *dev,
  * Public Functions
  ****************************************************************************/
 
-FAR const char *rpmsg_get_cpuname(FAR struct rpmsg_device *rdev)
-{
-  FAR struct rptun_priv_s *priv = rptun_get_priv_by_rdev(rdev);
-
-  return RPTUN_GET_CPUNAME(priv->dev);
-}
-
-int rpmsg_register_callback(FAR void *priv_,
-                            rpmsg_dev_cb_t device_created,
-                            rpmsg_dev_cb_t device_destroy,
-                            rpmsg_bind_cb_t ns_bind)
-{
-  FAR struct metal_list *node;
-  FAR struct metal_list *bnode;
-  FAR struct rptun_cb_s *cb;
-
-  cb = kmm_zalloc(sizeof(struct rptun_cb_s));
-  if (!cb)
-    {
-      return -ENOMEM;
-    }
-
-  cb->priv           = priv_;
-  cb->device_created = device_created;
-  cb->device_destroy = device_destroy;
-  cb->ns_bind        = ns_bind;
-
-  nxsem_wait(&g_rptun_sem);
-
-  metal_list_add_tail(&g_rptun_cb, &cb->node);
-
-  metal_list_for_each(&g_rptun_priv, node)
-    {
-      struct rptun_priv_s *priv;
-
-      priv = metal_container_of(node, struct rptun_priv_s, node);
-      if (device_created)
-        {
-          device_created(&priv->vdev.rdev, priv_);
-        }
-
-      if (ns_bind)
-        {
-          metal_list_for_each(&priv->bind, bnode)
-            {
-              struct rptun_bind_s *bind;
-
-              bind = metal_container_of(bnode, struct rptun_bind_s, node);
-              ns_bind(&priv->vdev.rdev, priv_, bind->name, bind->dest);
-            }
-        }
-    }
-
-  nxsem_post(&g_rptun_sem);
-
-  return 0;
-}
-
-void rpmsg_unregister_callback(FAR void *priv_,
-                               rpmsg_dev_cb_t device_created,
-                               rpmsg_dev_cb_t device_destroy,
-                               rpmsg_bind_cb_t ns_bind)
-{
-  FAR struct metal_list *node;
-  FAR struct metal_list *pnode;
-
-  nxsem_wait(&g_rptun_sem);
-
-  metal_list_for_each(&g_rptun_cb, node)
-    {
-      struct rptun_cb_s *cb = NULL;
-
-      cb = metal_container_of(node, struct rptun_cb_s, node);
-      if (cb->priv == priv_ &&
-          cb->device_created == device_created &&
-          cb->device_destroy == device_destroy &&
-          cb->ns_bind == ns_bind)
-        {
-          if (device_destroy)
-            {
-              metal_list_for_each(&g_rptun_priv, pnode)
-                {
-                  struct rptun_priv_s *priv;
-
-                  priv = metal_container_of(pnode, struct rptun_priv_s, node);
-                  device_destroy(&priv->vdev.rdev, priv_);
-                }
-            }
-
-          metal_list_del(&cb->node);
-          kmm_free(cb);
-        }
-    }
-
-  nxsem_post(&g_rptun_sem);
-}
-
 int rptun_initialize(FAR struct rptun_dev_s *dev)
 {
-  struct metal_init_params params = METAL_INIT_DEFAULTS;
   FAR struct rptun_priv_s *priv;
   FAR char *argv[3];
-  char arg1[16];
+  char arg1[32];
   char name[32];
   int ret;
-
-  ret = metal_init(&params);
-  if (ret)
-    {
-      return ret;
-    }
 
   priv = kmm_zalloc(sizeof(struct rptun_priv_s));
   if (priv == NULL)
@@ -811,58 +1131,60 @@ int rptun_initialize(FAR struct rptun_dev_s *dev)
       return -ENOMEM;
     }
 
-  snprintf(arg1, 16, "0x%" PRIxPTR, (uintptr_t)priv);
+  priv->dev = dev;
+  nxsem_init(&priv->semtx, 0, 0);
+  nxsem_init(&priv->semrx, 0, 0);
 
-  argv[0] = (void *)RPTUN_GET_CPUNAME(dev);
+  remoteproc_init(&priv->rproc, &g_rptun_ops, priv);
+
+  snprintf(name, sizeof(name), "/dev/rptun/%s", RPTUN_GET_CPUNAME(dev));
+  ret = rpmsg_register(name, &priv->rpmsg, &g_rptun_rpmsg_ops);
+  if (ret < 0)
+    {
+      goto err_driver;
+    }
+
+  snprintf(arg1, sizeof(arg1), "%p", priv);
+  argv[0] = (FAR char *)RPTUN_GET_CPUNAME(dev);
   argv[1] = arg1;
   argv[2] = NULL;
 
-  ret = kthread_create("rptun",
-                       CONFIG_RPTUN_PRIORITY,
-                       CONFIG_RPTUN_STACKSIZE,
-                       rptun_thread,
-                       argv);
+  ret = kthread_create("rptun", CONFIG_RPTUN_PRIORITY,
+                       CONFIG_RPTUN_STACKSIZE, rptun_thread, argv);
   if (ret < 0)
     {
-      kmm_free(priv);
-      return ret;
+      goto err_thread;
     }
 
-  priv->pid = ret;
-  priv->dev = dev;
+#ifdef CONFIG_RPTUN_PM
+  snprintf(name, sizeof(name), "rptun-%s", RPTUN_GET_CPUNAME(dev));
+  pm_wakelock_init(&priv->wakelock, name, PM_IDLE_DOMAIN, PM_IDLE);
+#endif
 
-  metal_list_init(&priv->bind);
-  remoteproc_init(&priv->rproc, &g_rptun_ops, priv);
+  return OK;
 
-  if (RPTUN_IS_AUTOSTART(dev))
-    {
-      rptun_dev_start(&priv->rproc);
-    }
+err_thread:
+  rpmsg_unregister(name, &priv->rpmsg);
 
-  snprintf(name, 32, "/dev/rptun/%s", RPTUN_GET_CPUNAME(dev));
-  return register_driver(name, &g_rptun_devops, 0666, priv);
+err_driver:
+  nxsem_destroy(&priv->semtx);
+  nxsem_destroy(&priv->semrx);
+  kmm_free(priv);
+
+  return ret;
 }
 
 int rptun_boot(FAR const char *cpuname)
 {
-  struct file file;
-  char name[32];
-  int ret;
+  return rpmsg_ioctl(cpuname, RPTUNIOC_START, 0);
+}
 
-  if (!cpuname)
-    {
-      return -EINVAL;
-    }
+int rptun_poweroff(FAR const char *cpuname)
+{
+  return rpmsg_ioctl(cpuname, RPTUNIOC_STOP, 0);
+}
 
-  snprintf(name, 32, "/dev/rptun/%s", cpuname);
-  ret = file_open(&file, name, 0, 0);
-  if (ret)
-    {
-      return ret;
-    }
-
-  ret = file_ioctl(&file, RPTUNIOC_START, 0);
-  file_close(&file);
-
-  return ret;
+int rptun_reset(FAR const char *cpuname, int value)
+{
+  return rpmsg_ioctl(cpuname, RPTUNIOC_RESET, value);
 }

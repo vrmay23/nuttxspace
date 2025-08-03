@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/lpc54xx/lpcxpresso-lpc54628/include/board.h
  *
- *   Copyright (C) 2017-2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,7 +33,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Clocking ****************************************************************/
+/* Clocking *****************************************************************/
 
 #undef  BOARD_180MHz
 #define BOARD_220MHz                    1
@@ -176,12 +163,12 @@
 #  define BOARD_SYSTICK_CLOCK    (BOARD_AHB_FREQUENCY / BOARD_SYSTICKCLKDIV)
 #endif
 
-/* Flexcomm0:  USART0 (REVIST) */
+/* Flexcomm0:  USART0 (REVISIT) */
 
 #define BOARD_FLEXCOMM0_CLKSEL   SYSCON_FCLKSEL_FRO12M
 #define BOARD_FLEXCOMM0_FCLK     LPC54_FRO_12MHZ
 
-/* Flexcomm2:  I2C2 (REVIST) */
+/* Flexcomm2:  I2C2 (REVISIT) */
 
 #define BOARD_FLEXCOMM2_CLKSEL   SYSCON_FCLKSEL_FRO12M
 #define BOARD_FLEXCOMM2_FCLK     LPC54_FRO_12MHZ
@@ -248,7 +235,7 @@
 #define BOARD_CLKDIV_SDWIDEXFR  BOARD_SDMMC_CEIL(BOARD_SDMMC_FREQUENCY, 25000000)
 #define BOARD_CLKDIV_SDXFR      BOARD_SDMMC_CEIL(BOARD_SDMMC_FREQUENCY, 25000000)
 
-/* LED definitions *********************************************************/
+/* Clocking *****************************************************************/
 
 /* The LPCXpress-LPC54628 has three user LEDs: D9, D11, and D12.  These
  * LEDs are for application use. They are illuminated when the driving
@@ -280,6 +267,7 @@
  * include/board.h and src/lpc54_autoleds.c.  The LEDs are used to encode
  * OS-related events as follows:
  */
+
                                       /* D9     D11    D12 */
 #define LED_STARTED                0  /* OFF    OFF    OFF */
 #define LED_HEAPALLOCATE           1  /* ON     OFF    OFF */
@@ -327,8 +315,8 @@
 
 /* Flexcomm0/USART0
  *
- * USART0 connects to the serial bridge on LPC4322JET100 and is typically used
- * for the serial console.
+ * USART0 connects to the serial bridge on LPC4322JET100 and is typically
+ * used for the serial console.
  *
  *   BRIDGE_UART_RXD -> P0_29-ISP_FC0_RXD -> P0.29  GPIO_FC0_RXD_SDA_MOSI_2
  *   BRIDGE_UART_TXD <- P0_30-ISP_FC0_TXD <- P0.30  GPIO_FC0_TXD_SCL_MISO_2

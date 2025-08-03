@@ -1,45 +1,26 @@
-/*****************************************************************************
+/****************************************************************************
  * boards/arm/lpc17xx_40xx/pnev5180b/src/lpc17_40_romfs.c
- * This file provides contents of an optional ROMFS volume, mounted at boot.
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *   Author: Michael Jung <mijung@gmx.net>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Based on boards/nucleo-144/src/stm32_romfs_initialize.c
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- *   Copyright (C) 2017 Tomasz Wozniak. All rights reserved.
- *   Author: Tomasz Wozniak <t.wozniak@samsung.com>
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
-/*****************************************************************************
+/****************************************************************************
  * Included Files
  ****************************************************************************/
 
@@ -51,6 +32,7 @@
 #include <debug.h>
 #include <errno.h>
 
+#include <nuttx/fs/fs.h>
 #include <nuttx/drivers/ramdisk.h>
 #include "lpc17_40_romfs.h"
 
@@ -95,14 +77,10 @@ __asm__ (
     \
     ".balign " STR(ROMFS_SECTOR_SIZE) "\n"
     ".globl   romfs_data_end\n"
-"romfs_data_end:\n"
-    ".globl   romfs_data_size\n"
-"romfs_data_size:\n"
-    ".word romfs_data_end - romfs_data_begin\n");
+"romfs_data_end:\n");
 
-extern const uint8_t romfs_data_begin;
-extern const uint8_t romfs_data_end;
-extern const int  romfs_data_size;
+extern const uint8_t romfs_data_begin[];
+extern const uint8_t romfs_data_end[];
 
 /****************************************************************************
  * Public Functions
@@ -119,21 +97,21 @@ extern const int  romfs_data_size;
  *   Zero (OK) on success, a negated errno value on error.
  *
  * Assumptions/Limitations:
- *   Memory addresses [&romfs_data_begin .. &romfs_data_en) should contain
+ *   Memory addresses [romfs_data_begin .. romfs_data_en) should contain
  *   ROMFS volume data, as included in the assembly snippet above.
  *
  ****************************************************************************/
 
 int lpc17_40_romfs_initialize(void)
 {
-  uintptr_t romfs_data_len;
+  size_t romfs_data_len;
   int  ret;
 
   /* Create a ROM disk for the /etc filesystem */
 
-  romfs_data_len = (uintptr_t)&romfs_data_end - (uintptr_t)&romfs_data_begin;
+  romfs_data_len = romfs_data_end - romfs_data_begin;
 
-  ret = romdisk_register(CONFIG_LPC17_40_ROMFS_DEV_MINOR, &romfs_data_begin,
+  ret = romdisk_register(CONFIG_LPC17_40_ROMFS_DEV_MINOR, romfs_data_begin,
                          NSECTORS(romfs_data_len), ROMFS_SECTOR_SIZE);
   if (ret < 0)
     {
@@ -146,12 +124,12 @@ int lpc17_40_romfs_initialize(void)
   finfo("Mounting ROMFS filesystem at target=%s with source=%s\n",
         CONFIG_LPC17_40_ROMFS_MOUNTPOINT, MOUNT_DEVNAME);
 
-  ret = mount(MOUNT_DEVNAME, CONFIG_LPC17_40_ROMFS_MOUNTPOINT,
+  ret = nx_mount(MOUNT_DEVNAME, CONFIG_LPC17_40_ROMFS_MOUNTPOINT,
               "romfs", MS_RDONLY, NULL);
   if (ret < 0)
     {
-      ferr("ERROR: mount(%s,%s,romfs) failed: %d\n",
-           MOUNT_DEVNAME, CONFIG_LPC17_40_ROMFS_MOUNTPOINT, errno);
+      ferr("ERROR: nx_mount(%s,%s,romfs) failed: %d\n",
+           MOUNT_DEVNAME, CONFIG_LPC17_40_ROMFS_MOUNTPOINT, ret);
       return ret;
     }
 

@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/stm32l4/b-l475e-iot01a/src/stm32_timer.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Goden Freemans <godenfreemans@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -64,7 +51,7 @@
  *
  ****************************************************************************/
 
- #ifdef CONFIG_TIMER
+#ifdef CONFIG_TIMER
 int stm32l4_timer_driver_setup(void)
 {
   int ret = OK;
@@ -74,6 +61,7 @@ int stm32l4_timer_driver_setup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to setup TIM1 at /dev/timer0: %d\n",
+             ret);
     }
 #endif
 
@@ -82,7 +70,7 @@ int stm32l4_timer_driver_setup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to setup TIM2 at /dev/timer1: %d\n",
-            ret);
+             ret);
     }
 #endif
 
@@ -91,7 +79,7 @@ int stm32l4_timer_driver_setup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to setup TIM3 at /dev/timer2: %d\n",
-            ret);
+             ret);
     }
 #endif
 
@@ -100,7 +88,7 @@ int stm32l4_timer_driver_setup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to setup TIM2 at /dev/timer3: %d\n",
-            ret);
+             ret);
     }
 #endif
 
@@ -109,7 +97,7 @@ int stm32l4_timer_driver_setup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to setup TIM5 at /dev/timer4: %d\n",
-            ret);
+             ret);
     }
 #endif
 
@@ -118,7 +106,7 @@ int stm32l4_timer_driver_setup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to setup TIM6 at /dev/timer5: %d\n",
-            ret);
+             ret);
     }
 
 #endif
@@ -127,7 +115,7 @@ int stm32l4_timer_driver_setup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to setup TIM7 at /dev/timer6: %d\n",
-            ret);
+             ret);
     }
 #endif
 
@@ -136,14 +124,16 @@ int stm32l4_timer_driver_setup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to setup TIM8 at /dev/timer7: %d\n",
+             ret);
     }
 #endif
+
 #ifdef CONFIG_STM32L4_TIM15
   ret = stm32l4_timer_initialize("/dev/timer8", 15);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to setup TIM15 at /dev/time8: %d\n",
-            ret);
+             ret);
     }
 #endif
 
@@ -152,7 +142,7 @@ int stm32l4_timer_driver_setup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to setup TIM16 at /dev/time9: %d\n",
-            ret);
+             ret);
     }
 #endif
 
@@ -161,7 +151,7 @@ int stm32l4_timer_driver_setup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to setup TIM17 at /dev/time10: %d\n",
-            ret);
+             ret);
     }
 #endif
 

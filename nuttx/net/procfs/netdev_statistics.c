@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/procfs/netdev_statistics.c
  *
- *   Copyright (C) 2015, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,6 +29,8 @@
 #include <sys/types.h>
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
+#include <assert.h>
 #include <debug.h>
 
 #include <netinet/ether.h>
@@ -49,12 +38,23 @@
 #include <nuttx/net/netdev.h>
 #include <nuttx/net/sixlowpan.h>
 
+#include "inet/inet.h"
 #include "netdev/netdev.h"
 #include "utils/utils.h"
 #include "procfs/procfs.h"
 
 #if !defined(CONFIG_DISABLE_MOUNTPOINT) && defined(CONFIG_FS_PROCFS) && \
     !defined(CONFIG_FS_PROCFS_EXCLUDE_NET)
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#ifdef CONFIG_NET_IPv4
+#  define NETSTAT_IPv6_IDX 2
+#else
+#  define NETSTAT_IPv6_IDX 1
+#endif
 
 /****************************************************************************
  * Private Function Prototypes
@@ -72,11 +72,13 @@ static int netprocfs_inet6draddress(FAR struct netprocfs_file_s *netfile);
 static int netprocfs_blank_line(FAR struct netprocfs_file_s *netfile);
 #endif
 #ifdef CONFIG_NETDEV_STATISTICS
-static int netprocfs_rxstatistics_header(FAR struct netprocfs_file_s *netfile);
+static int netprocfs_rxstatistics_header(
+    FAR struct netprocfs_file_s *netfile);
 static int netprocfs_rxstatistics(FAR struct netprocfs_file_s *netfile);
 static int netprocfs_rxpackets_header(FAR struct netprocfs_file_s *netfile);
 static int netprocfs_rxpackets(FAR struct netprocfs_file_s *netfile);
-static int netprocfs_txstatistics_header(FAR struct netprocfs_file_s *netfile);
+static int netprocfs_txstatistics_header(
+    FAR struct netprocfs_file_s *netfile);
 static int netprocfs_txstatistics(FAR struct netprocfs_file_s *netfile);
 static int netprocfs_errors(FAR struct netprocfs_file_s *netfile);
 #endif /* CONFIG_NETDEV_STATISTICS */
@@ -94,7 +96,13 @@ static const linegen_t g_netstat_linegen[] =
   , netprocfs_inet4addresses
 #endif
 #ifdef CONFIG_NET_IPv6
+#  if defined(CONFIG_NETDEV_MULTIPLE_IPv6) && \
+      defined(CONFIG_DESIGNATED_INITIALIZERS)
+  , [NETSTAT_IPv6_IDX ... NETSTAT_IPv6_IDX + CONFIG_NETDEV_MAX_IPv6_ADDR - 1]
+  = netprocfs_inet6address
+#  else
   , netprocfs_inet6address
+#  endif
   , netprocfs_inet6draddress
 #endif
 #if !defined(CONFIG_NET_IPv4) && !defined(CONFIG_NET_IPv6)
@@ -205,9 +213,13 @@ static int netprocfs_linklayer(FAR struct netprocfs_file_s *netfile)
 #if defined(CONFIG_NET_ETHERNET) || defined(CONFIG_DRIVERS_IEEE80211)
       case NET_LL_ETHERNET:
       case NET_LL_IEEE80211:
-        len += snprintf(&netfile->line[len], NET_LINELEN - len,
-                        "%s\tLink encap:Ethernet HWaddr %s",
-                        dev->d_ifname, ether_ntoa(&dev->d_mac.ether));
+        {
+          char hwaddr[20];
+          len += snprintf(&netfile->line[len], NET_LINELEN - len,
+                          "%s\tLink encap:Ethernet HWaddr %s",
+                          dev->d_ifname,
+                          ether_ntoa_r(&dev->d_mac.ether, hwaddr));
+        }
         break;
 #endif
 
@@ -255,7 +267,10 @@ static int netprocfs_linklayer(FAR struct netprocfs_file_s *netfile)
     }
 
   len += snprintf(&netfile->line[len], NET_LINELEN - len,
-                  " at %s\n", status);
+                  " at %s", status);
+
+  len += snprintf(&netfile->line[len], NET_LINELEN - len,
+                  " mtu %d\n", (dev->d_pktsize - dev->d_llhdrlen));
   return len;
 }
 
@@ -269,6 +284,7 @@ static int netprocfs_inet4addresses(FAR struct netprocfs_file_s *netfile)
   FAR struct net_driver_s *dev;
   struct in_addr addr;
   int len = 0;
+  char inetaddr[INET_ADDRSTRLEN];
 
   DEBUGASSERT(netfile != NULL && netfile->dev != NULL);
   dev = netfile->dev;
@@ -277,13 +293,22 @@ static int netprocfs_inet4addresses(FAR struct netprocfs_file_s *netfile)
 
   addr.s_addr = dev->d_ipaddr;
   len += snprintf(&netfile->line[len], NET_LINELEN - len,
-                  "\tinet addr:%s ", inet_ntoa(addr));
+                  "\tinet addr:%s ", inet_ntoa_r(addr, inetaddr,
+                                                 sizeof(inetaddr)));
+#ifdef CONFIG_NET_ARP_ACD
+  if (dev->d_acd.conflict_flag == ARP_ACD_ADDRESS_CONFLICT)
+    {
+      len += snprintf(&netfile->line[len], NET_LINELEN - len,
+                      "(conflict!) ");
+    }
+#endif
 
   /* Show the IPv4 default router address */
 
   addr.s_addr = dev->d_draddr;
   len += snprintf(&netfile->line[len], NET_LINELEN - len,
-                  "DRaddr:%s ", inet_ntoa(addr));
+                  "DRaddr:%s ", inet_ntoa_r(addr, inetaddr,
+                                            sizeof(inetaddr)));
 
   /* Show the IPv4 network mask */
 
@@ -294,7 +319,7 @@ static int netprocfs_inet4addresses(FAR struct netprocfs_file_s *netfile)
 #else
                   "Mask:%s\n\n",  /* Double space at end of device description */
 #endif
-                  inet_ntoa(addr));
+                  inet_ntoa_r(addr, inetaddr, sizeof(inetaddr)));
 
   return len;
 }
@@ -310,18 +335,26 @@ static int netprocfs_inet6address(FAR struct netprocfs_file_s *netfile)
   FAR struct net_driver_s *dev;
   char addrstr[INET6_ADDRSTRLEN];
   uint8_t preflen;
+  int idx = netfile->lineno - NETSTAT_IPv6_IDX;
   int len = 0;
 
   DEBUGASSERT(netfile != NULL && netfile->dev != NULL);
   dev = netfile->dev;
 
+#ifdef CONFIG_NETDEV_MULTIPLE_IPv6
+  if (net_ipv6addr_cmp(dev->d_ipv6[idx].addr, g_ipv6_unspecaddr))
+    {
+      return 0;
+    }
+#endif
+
   /* Convert the 128 network mask to a human friendly prefix length */
 
-  preflen = net_ipv6_mask2pref(dev->d_ipv6netmask);
+  preflen = net_ipv6_mask2pref(dev->d_ipv6[idx].mask);
 
   /* Show the assigned IPv6 address */
 
-  if (inet_ntop(AF_INET6, dev->d_ipv6addr, addrstr, INET6_ADDRSTRLEN))
+  if (inet_ntop(AF_INET6, dev->d_ipv6[idx].addr, addrstr, INET6_ADDRSTRLEN))
     {
       len += snprintf(&netfile->line[len], NET_LINELEN - len,
                       "\tinet6 addr: %s/%d\n", addrstr, preflen);
@@ -340,22 +373,17 @@ static int netprocfs_inet6draddress(FAR struct netprocfs_file_s *netfile)
 {
   FAR struct net_driver_s *dev;
   char addrstr[INET6_ADDRSTRLEN];
-  uint8_t preflen;
   int len = 0;
 
   DEBUGASSERT(netfile != NULL && netfile->dev != NULL);
   dev = netfile->dev;
-
-  /* Convert the 128 network mask to a human friendly prefix length */
-
-  preflen = net_ipv6_mask2pref(dev->d_ipv6netmask);
 
   /* Show the IPv6 default router address */
 
   if (inet_ntop(AF_INET6, dev->d_ipv6draddr, addrstr, INET6_ADDRSTRLEN))
     {
       len += snprintf(&netfile->line[len], NET_LINELEN - len,
-                      "\tinet6 DRaddr: %s/%d\n\n", addrstr, preflen);
+                      "\tinet6 DRaddr: %s\n\n", addrstr);
     }
 
   return len;
@@ -380,11 +408,12 @@ static int netprocfs_blank_line(FAR struct netprocfs_file_s *netfile)
  ****************************************************************************/
 
 #ifdef CONFIG_NETDEV_STATISTICS
-static int netprocfs_rxstatistics_header(FAR struct netprocfs_file_s *netfile)
+static int netprocfs_rxstatistics_header(
+    FAR struct netprocfs_file_s *netfile)
 {
   DEBUGASSERT(netfile != NULL);
-  return snprintf(netfile->line, NET_LINELEN , "\tRX: %-8s %-8s %-8s\n",
-                  "Received", "Fragment", "Errors");
+  return snprintf(netfile->line, NET_LINELEN , "\tRX: %-8s %-8s %-8s %-8s\n",
+                  "Received", "Fragment", "Errors", "Bytes");
 }
 #endif /* CONFIG_NETDEV_STATISTICS */
 
@@ -402,10 +431,12 @@ static int netprocfs_rxstatistics(FAR struct netprocfs_file_s *netfile)
   dev = netfile->dev;
   stats = &dev->d_statistics;
 
-  return snprintf(netfile->line, NET_LINELEN, "\t    %08lx %08lx %08lx\n",
+  return snprintf(netfile->line, NET_LINELEN, \
+                  "\t    %08lx %08lx %08lx %-16llx\n",
                   (unsigned long)stats->rx_packets,
                   (unsigned long)stats->rx_fragments,
-                  (unsigned long)stats->rx_errors);
+                  (unsigned long)stats->rx_errors,
+                  (unsigned long long)stats->rx_bytes);
 }
 #endif /* CONFIG_NETDEV_STATISTICS */
 
@@ -492,12 +523,14 @@ static int netprocfs_rxpackets(FAR struct netprocfs_file_s *netfile)
  ****************************************************************************/
 
 #ifdef CONFIG_NETDEV_STATISTICS
-static int netprocfs_txstatistics_header(FAR struct netprocfs_file_s *netfile)
+static int netprocfs_txstatistics_header(
+    FAR struct netprocfs_file_s *netfile)
 {
   DEBUGASSERT(netfile != NULL);
 
-  return snprintf(netfile->line, NET_LINELEN, "\tTX: %-8s %-8s %-8s %-8s\n",
-                 "Queued", "Sent", "Errors", "Timeouts");
+  return snprintf(netfile->line, NET_LINELEN,
+                 "\tTX: %-8s %-8s %-8s %-8s %-8s\n",
+                 "Queued", "Sent", "Errors", "Timeouts", "Bytes");
 }
 #endif /* CONFIG_NETDEV_STATISTICS */
 
@@ -515,11 +548,13 @@ static int netprocfs_txstatistics(FAR struct netprocfs_file_s *netfile)
   dev = netfile->dev;
   stats = &dev->d_statistics;
 
-  return snprintf(netfile->line, NET_LINELEN, "\t    %08lx %08lx %08lx %08lx\n",
+  return snprintf(netfile->line, NET_LINELEN,
+                  "\t    %08lx %08lx %08lx %08lx %-16llx \n",
                   (unsigned long)stats->tx_packets,
                   (unsigned long)stats->tx_done,
                   (unsigned long)stats->tx_errors,
-                  (unsigned long)stats->tx_timeouts);
+                  (unsigned long)stats->tx_timeouts,
+                  (unsigned long long)stats->tx_bytes);
 }
 #endif /* CONFIG_NETDEV_STATISTICS */
 
@@ -537,7 +572,8 @@ static int netprocfs_errors(FAR struct netprocfs_file_s *netfile)
   dev = netfile->dev;
   stats = &dev->d_statistics;
 
-  return snprintf(netfile->line, NET_LINELEN , "\tTotal Errors: %08x\n\n",
+  return snprintf(netfile->line, NET_LINELEN,
+                  "\tTotal Errors: %08" PRIx32 "\n\n",
                   stats->errors);
 }
 #endif /* CONFIG_NETDEV_STATISTICS */

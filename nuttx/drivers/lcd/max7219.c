@@ -1,38 +1,26 @@
 /****************************************************************************
  * drivers/lcd/max7219.c
- * Driver for the Maxim MAX7219 used for driver 8x8 LED display chains.
  *
- *   Copyright (C) 2017 Alan Carvalho de Assis. All rights reserved.
- *   Author: Alan Carvalho de Assis <acassis@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
+
+/* Driver for the Maxim MAX7219 used for driver 8x8 LED display chains. */
 
 /****************************************************************************
  * Included Files
@@ -44,10 +32,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/bits.h>
 #include <nuttx/spi/spi.h>
 #include <nuttx/lcd/lcd.h>
 #include <nuttx/lcd/max7219.h>
@@ -57,6 +47,7 @@
  ****************************************************************************/
 
 /* Configuration ************************************************************/
+
 /* MAX7219 Configuration Settings:
  *
  * CONFIG_MAX7219_NHORIZONTALBLKS - Specifies the number of physical
@@ -102,6 +93,7 @@
 #endif
 
 /* Color Properties *********************************************************/
+
 /* The MAX7219 chip can handle resolution of 8x8, 16x8, 8x16, 16x16, 24x8,
  * etc.
  */
@@ -130,13 +122,8 @@
 #define LS_BIT               (1 << 0)
 #define MS_BIT               (1 << 7)
 
-#define BIT(nr)              (1 << (nr))
-#define BITS_PER_BYTE         8
-#define BIT_MASK(nr)         (1 << ((nr) % BITS_PER_BYTE))
-#define BIT_BYTE(nr)         ((nr) / BITS_PER_BYTE)
-
 /****************************************************************************
- * Private Type Definition
+ * Private Types
  ****************************************************************************/
 
 /* This structure describes the state of this driver */
@@ -153,9 +140,9 @@ struct max7219_dev_s
   uint8_t contrast;
   uint8_t powered;
 
-  /* The MAX7219 does not support reading from the display memory in SPI mode.
-   * Since there is 1 BPP and access is byte-by-byte, it is necessary to keep
-   * a shadow copy of the framebuffer memory.
+  /* The MAX7219 does not support reading from the display memory in SPI
+   * mode. Since there is 1 BPP and access is byte-by-byte, it is necessary
+   * to keep a shadow copy of the framebuffer memory.
    */
 
   uint8_t fb[MAX7219_FBSIZE];
@@ -172,10 +159,12 @@ static void max7219_deselect(FAR struct spi_dev_s *spi);
 
 /* LCD Data Transfer Methods */
 
-static int max7219_putrun(fb_coord_t row, fb_coord_t col,
-             FAR const uint8_t *buffer, size_t npixels);
-static int max7219_getrun(fb_coord_t row, fb_coord_t col,
-             FAR uint8_t *buffer, size_t npixels);
+static int max7219_putrun(FAR struct lcd_dev_s *dev, fb_coord_t row,
+                          fb_coord_t col, FAR const uint8_t *buffer,
+                          size_t npixels);
+static int max7219_getrun(FAR struct lcd_dev_s *dev, fb_coord_t row,
+                          fb_coord_t col, FAR uint8_t *buffer,
+                          size_t npixels);
 
 /* LCD Configuration */
 
@@ -239,10 +228,10 @@ static const struct fb_videoinfo_s g_videoinfo =
 
 static const struct lcd_planeinfo_s g_planeinfo =
 {
-  max7219_putrun,              /* Put a run into LCD memory */
-  max7219_getrun,              /* Get a run from LCD memory */
-  (FAR uint8_t *)g_runbuffer,  /* Run scratch buffer */
-  MAX7219_BPP,                 /* Bits-per-pixel */
+  .putrun = max7219_putrun,              /* Put a run into LCD memory */
+  .getrun = max7219_getrun,              /* Get a run from LCD memory */
+  .buffer = (FAR uint8_t *)g_runbuffer,  /* Run scratch buffer */
+  .bpp    = MAX7219_BPP,                 /* Bits-per-pixel */
 };
 
 /* This is the standard, NuttX LCD driver object */
@@ -250,6 +239,7 @@ static const struct lcd_planeinfo_s g_planeinfo =
 static struct max7219_dev_s g_max7219dev =
 {
   /* struct lcd_dev_s */
+
   {
     /* LCD Configuration */
 
@@ -282,37 +272,6 @@ static struct max7219_dev_s g_max7219dev =
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-/****************************************************************************
- * __set_bit - Set a bit in memory
- *
- *   nr   - The bit to set
- *   addr - The address to start counting from
- *
- * Unlike set_bit(), this function is non-atomic and may be reordered.
- * If it's called on the same region of memory simultaneously, the effect
- * may be that only one operation succeeds.
- *
- ****************************************************************************/
-
-static inline void __set_bit(int nr, uint8_t * addr)
-{
-  uint8_t mask = BIT_MASK(nr);
-  uint8_t *p = ((uint8_t *) addr) + BIT_BYTE(nr);
-  *p |= mask;
-}
-
-static inline void __clear_bit(int nr, uint8_t * addr)
-{
-  uint8_t mask = BIT_MASK(nr);
-  uint8_t *p = ((uint8_t *) addr) + BIT_BYTE(nr);
-  *p &= ~mask;
-}
-
-static inline int __test_bit(int nr, const volatile uint8_t * addr)
-{
-  return 1 & (addr[BIT_BYTE(nr)] >> (nr & (BITS_PER_BYTE - 1)));
-}
 
 /****************************************************************************
  * Name:  max7219_powerstring
@@ -399,6 +358,7 @@ static void max7219_deselect(FAR struct spi_dev_s *spi)
  * Description:
  *   This method can be used to write a partial raster line to the LCD:
  *
+ *   dev     - The lcd device
  *   row     - Starting row to write to (range: 0 <= row < yres)
  *   col     - Starting column to write to (range: 0 <= col <= xres-npixels)
  *   buffer  - The buffer containing the run to be written to the LCD
@@ -407,14 +367,15 @@ static void max7219_deselect(FAR struct spi_dev_s *spi)
  *
  ****************************************************************************/
 
-static int max7219_putrun(fb_coord_t row, fb_coord_t col,
-                          FAR const uint8_t *buffer, size_t npixels)
+static int max7219_putrun(FAR struct lcd_dev_s *dev, fb_coord_t row,
+                          fb_coord_t col, FAR const uint8_t *buffer,
+                          size_t npixels)
 {
   /* Because of this line of code, we will only be able to support a single
    * MAX7219 device .
    */
 
-  FAR struct max7219_dev_s *priv = &g_max7219dev;
+  FAR struct max7219_dev_s *priv = (FAR struct max7219_dev_s *)dev;
   FAR uint8_t *fbptr;
   FAR uint8_t *ptr;
   uint16_t data;
@@ -472,11 +433,11 @@ static int max7219_putrun(fb_coord_t row, fb_coord_t col,
     {
       if ((*buffer & usrmask) != 0)
         {
-          __set_bit(col % 8 + i, ptr);
+          set_bit(col % 8 + i, ptr);
         }
       else
         {
-          __clear_bit(col % 8 + i, ptr);
+          clear_bit(col % 8 + i, ptr);
         }
 
 #ifdef CONFIG_LCD_PACKEDMSFIRST
@@ -532,6 +493,7 @@ static int max7219_putrun(fb_coord_t row, fb_coord_t col,
  * Description:
  *   This method can be used to read a partial raster line from the LCD:
  *
+ *  dev     - The lcd device
  *  row     - Starting row to read from (range: 0 <= row < yres)
  *  col     - Starting column to read read (range: 0 <= col <= xres-npixels)
  *  buffer  - The buffer in which to return the run read from the LCD
@@ -540,14 +502,15 @@ static int max7219_putrun(fb_coord_t row, fb_coord_t col,
  *
  ****************************************************************************/
 
-static int max7219_getrun(fb_coord_t row, fb_coord_t col,
-                          FAR uint8_t *buffer, size_t npixels)
+static int max7219_getrun(FAR struct lcd_dev_s *dev, fb_coord_t row,
+                          fb_coord_t col, FAR uint8_t *buffer,
+                          size_t npixels)
 {
   /* Because of this line of code, we will only be able to support a single
    * MAX7219 device.
    */
 
-  FAR struct max7219_dev_s *priv = &g_max7219dev;
+  FAR struct max7219_dev_s *priv = (FAR struct max7219_dev_s *)dev;
   FAR uint8_t *fbptr;
   FAR uint8_t *ptr;
   uint8_t usrmask;
@@ -583,7 +546,7 @@ static int max7219_getrun(fb_coord_t row, fb_coord_t col,
 
   for (i = 0; i < pixlen; i++)
     {
-      if (__test_bit(col % 8 + i, ptr))
+      if (test_bit(col % 8 + i, ptr))
         {
           *buffer |= usrmask;
         }
@@ -647,14 +610,17 @@ static int max7219_getvideoinfo(FAR struct lcd_dev_s *dev,
  *
  ****************************************************************************/
 
-static int max7219_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
-                              FAR struct lcd_planeinfo_s *pinfo)
+static int max7219_getplaneinfo(FAR struct lcd_dev_s *dev,
+                                unsigned int planeno,
+                                FAR struct lcd_planeinfo_s *pinfo)
 {
   DEBUGASSERT(dev && pinfo && planeno == 0);
 
   ginfo("planeno: %d bpp: %d\n", planeno, g_planeinfo.bpp);
 
   memcpy(pinfo, &g_planeinfo, sizeof(struct lcd_planeinfo_s));
+  pinfo->dev = dev;
+
   return OK;
 }
 
@@ -682,8 +648,9 @@ static int max7219_getpower(struct lcd_dev_s *dev)
  * Name:  max7219_setpower
  *
  * Description:
- *   Enable/disable LCD panel power (0: full off - CONFIG_LCD_MAXPOWER: full on). On
- *   backlit LCDs, this setting may correspond to the backlight setting.
+ *   Enable/disable LCD panel power (0: full off - CONFIG_LCD_MAXPOWER: full
+ *   on). On backlit LCDs, this setting may correspond to the backlight
+ *   setting.
  *
  ****************************************************************************/
 
@@ -898,7 +865,8 @@ FAR struct lcd_dev_s *max7219_initialize(FAR struct spi_dev_s *spi,
 
   /* Set intensity level configured by the user */
 
-  data = (MAX7219_INTENSITY) | (DISPLAY_INTENSITY(CONFIG_LCD_MAXCONTRAST) << 8);
+  data = (MAX7219_INTENSITY) |
+         (DISPLAY_INTENSITY(CONFIG_LCD_MAXCONTRAST) << 8);
 
   SPI_SNDBLOCK(priv->spi, &data, 2);
 

@@ -1,35 +1,22 @@
 /****************************************************************************
- * boards/arm/stm32/olimex-stm32_h407/src/stm32_sdio.c
+ * boards/arm/stm32/olimex-stm32-h407/src/stm32_sdio.c
  *
- *   Copyright (C) 2016-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -55,6 +42,7 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
 /* Configuration ************************************************************/
 
 /* Card detections requires card support and a card detection GPIO */
@@ -68,9 +56,9 @@
  * Private Data
  ****************************************************************************/
 
-static FAR struct sdio_dev_s *g_sdio_dev;
+static struct sdio_dev_s *g_sdio_dev;
 #ifdef HAVE_NCD
-static bool g_sd_inserted = 0xff; /* Impossible value */
+static bool g_sd_inserted;
 #endif
 
 /****************************************************************************
@@ -86,7 +74,7 @@ static bool g_sd_inserted = 0xff; /* Impossible value */
  ****************************************************************************/
 
 #ifdef HAVE_NCD
-static int stm32_ncd_interrupt(int irq, FAR void *context)
+static int stm32_ncd_interrupt(int irq, void *context)
 {
   bool present;
 
@@ -118,10 +106,6 @@ int stm32_sdio_initialize(void)
   int ret;
 
 #ifdef HAVE_NCD
-  /* Card detect */
-
-  bool cd_status;
-
   /* Configure the card detect GPIO */
 
   stm32_configgpio(GPIO_SDIO_NCD);
@@ -133,6 +117,7 @@ int stm32_sdio_initialize(void)
 #endif
 
   /* Mount the SDIO-based MMC/SD block driver */
+
   /* First, get an instance of the SDIO interface */
 
   finfo("Initializing SDIO slot %d\n", SDIO_SLOTNO);
@@ -160,10 +145,10 @@ int stm32_sdio_initialize(void)
 #ifdef HAVE_NCD
   /* Use SD card detect pin to check if a card is g_sd_inserted */
 
-  cd_status = !stm32_gpioread(GPIO_SDIO_NCD);
-  finfo("Card detect : %d\n", cd_status);
+  g_sd_inserted = !stm32_gpioread(GPIO_SDIO_NCD);
+  finfo("Card detect : %d\n", g_sd_inserted);
 
-  sdio_mediachange(g_sdio_dev, cd_status);
+  sdio_mediachange(g_sdio_dev, g_sd_inserted);
 #else
   /* Assume that the SD card is inserted.  What choice do we have? */
 

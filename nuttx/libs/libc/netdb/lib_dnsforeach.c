@@ -1,35 +1,22 @@
 /****************************************************************************
  * libs/libc/netdb/lib_dnsforeach.c
  *
- *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -81,7 +68,7 @@ static FAR char *find_spaces(FAR char *ptr)
  * Name: dns_foreach_nameserver
  *
  * Description:
- *   Traverse each nameserver entry in the resolv.conf file and perform the
+ *   Traverse each nameserver entry in the resolv.conf file and perform
  *   the provided callback.
  *
  ****************************************************************************/
@@ -95,21 +82,24 @@ int dns_foreach_nameserver(dns_callback_t callback, FAR void *arg)
   char line[DNS_MAX_LINE];
   FAR char *addrstr;
   FAR char *ptr;
+  unsigned int count;
   uint16_t port;
   int keylen;
-  int ret;
+  int ret = OK;
 
   /* Open the resolver configuration file */
 
   stream = fopen(CONFIG_NETDB_RESOLVCONF_PATH, "r");
   if (stream == NULL)
     {
-      ret = -errno;
+      ret = -get_errno();
       nerr("ERROR: Failed to open %s: %d\n",
         CONFIG_NETDB_RESOLVCONF_PATH, ret);
       DEBUGASSERT(ret < 0);
       return ret;
     }
+
+  dns_lock();
 
   keylen = strlen(NETDB_DNS_KEYWORD);
   while (fgets(line, DNS_MAX_LINE, stream) != NULL)
@@ -182,12 +172,13 @@ int dns_foreach_nameserver(dns_callback_t callback, FAR void *arg)
                   tmp = atoi(portstr);
                   if (tmp != 0)
                     {
-                      port = htons(tmp);
+                      port = HTONS(tmp);
                     }
                 }
             }
 #endif /* CONFIG_NETDB_RESOLVCONF_NONSTDPORT */
 
+          memset(&u, 0, sizeof(u));
 #ifdef CONFIG_NET_IPv4
           /* Try to convert the IPv4 address */
 
@@ -199,8 +190,10 @@ int dns_foreach_nameserver(dns_callback_t callback, FAR void *arg)
             {
               u.ipv4.sin_family = AF_INET;
               u.ipv4.sin_port   = port;
+              dns_breaklock(&count);
               ret = callback(arg, (FAR struct sockaddr *)&u.ipv4,
                              sizeof(struct sockaddr_in));
+              dns_restorelock(count);
             }
           else
 #endif
@@ -218,13 +211,15 @@ int dns_foreach_nameserver(dns_callback_t callback, FAR void *arg)
                 {
                   u.ipv6.sin6_family = AF_INET6;
                   u.ipv6.sin6_port   = port;
+                  dns_breaklock(&count);
                   ret = callback(arg, (FAR struct sockaddr *)&u.ipv6,
                                  sizeof(struct sockaddr_in6));
+                  dns_restorelock(count);
                 }
               else
 #endif
                 {
-                  nerr("ERROR: Unrecognized address: %s\n", addrstr)
+                  nerr("ERROR: Unrecognized address: %s\n", addrstr);
                   ret = OK;
                 }
 #ifdef CONFIG_NET_IPv6
@@ -233,33 +228,45 @@ int dns_foreach_nameserver(dns_callback_t callback, FAR void *arg)
 
           if (ret != OK)
             {
-              fclose(stream);
-              return ret;
+              break;
             }
         }
     }
 
+  dns_unlock();
   fclose(stream);
-  return OK;
+  return ret;
 }
 
 #else /* CONFIG_NETDB_RESOLVCONF */
 
 int dns_foreach_nameserver(dns_callback_t callback, FAR void *arg)
 {
+  FAR struct sockaddr *addr;
+  unsigned int count;
   int ret = OK;
+  int i;
 
-  if (g_dns_address)
+  dns_lock();
+  for (i = 0; i < g_dns_nservers; i++)
     {
 #ifdef CONFIG_NET_IPv4
       /* Check for an IPv4 address */
 
-      if (g_dns_server.addr.sa_family == AF_INET)
+      if (g_dns_servers[i].addr.sa_family == AF_INET)
         {
+          struct sockaddr_in copy;
+
+          /* Operate on copy of server address, in case it changes. */
+
+          memcpy(&copy, &g_dns_servers[i].ipv4, sizeof(struct sockaddr_in));
+          addr = (FAR struct sockaddr *)&copy;
+
           /* Perform the callback */
 
-          ret = callback(arg, (FAR struct sockaddr *)&g_dns_server.ipv4,
-                         sizeof(struct sockaddr_in));
+          dns_breaklock(&count);
+          ret = callback(arg, addr, sizeof(struct sockaddr_in));
+          dns_restorelock(count);
         }
       else
 #endif
@@ -267,22 +274,36 @@ int dns_foreach_nameserver(dns_callback_t callback, FAR void *arg)
 #ifdef CONFIG_NET_IPv6
       /* Check for an IPv6 address */
 
-      if (g_dns_server.addr.sa_family == AF_INET6)
+      if (g_dns_servers[i].addr.sa_family == AF_INET6)
         {
+          struct sockaddr_in6 copy;
+
+          /* Operate on copy of server address, in case it changes. */
+
+          memcpy(&copy, &g_dns_servers[i].ipv6, sizeof(struct sockaddr_in6));
+          addr = (FAR struct sockaddr *)&copy;
+
           /* Perform the callback */
 
-          ret = callback(arg, (FAR struct sockaddr *)&g_dns_server.ipv6,
-                         sizeof(struct sockaddr_in6));
+          dns_breaklock(&count);
+          ret = callback(arg, addr, sizeof(struct sockaddr_in6));
+          dns_restorelock(count);
         }
       else
 #endif
         {
           nerr("ERROR: Unsupported family: %d\n",
-                g_dns_server.addr.sa_family);
+                g_dns_servers[i].addr.sa_family);
           ret = -ENOSYS;
+        }
+
+      if (ret != OK)
+        {
+          break;
         }
     }
 
+  dns_unlock();
   return ret;
 }
 

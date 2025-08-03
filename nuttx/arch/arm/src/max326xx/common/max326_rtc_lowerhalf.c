@@ -1,35 +1,22 @@
 /****************************************************************************
- * arch/arm/src/max326xx/max326_rtc_lowerhalf.c
+ * arch/arm/src/max326xx/common/max326_rtc_lowerhalf.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,13 +29,14 @@
 #include <sys/types.h>
 #include <stdbool.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/mutex.h>
 #include <nuttx/timers/rtc.h>
 
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "chip.h"
 #include "max326_rtc.h"
 
@@ -67,8 +55,8 @@
 #ifdef CONFIG_RTC_ALARM
 struct max326_cbinfo_s
 {
-  volatile rtc_alarm_callback_t cb;  /* Callback when the alarm expires */
-  volatile FAR void *priv;           /* Private argument to accompany callback */
+  volatile rtc_alarm_callback_t cb; /* Callback when the alarm expires */
+  volatile void *priv;              /* Private argument to accompany callback */
 };
 #endif
 
@@ -82,13 +70,13 @@ struct max326_lowerhalf_s
    * operations vtable (which may lie in FLASH or ROM)
    */
 
-  FAR const struct rtc_ops_s *ops;
+  const struct rtc_ops_s *ops;
 
   /* Data following is private to this driver and not visible outside of
    * this file.
    */
 
-  sem_t devsem;         /* Threads can only exclusively access the RTC */
+  mutex_t devlock;      /* Threads can only exclusively access the RTC */
 
 #ifdef CONFIG_RTC_ALARM
   /* Alarm callback information */
@@ -109,27 +97,27 @@ struct max326_lowerhalf_s
 
 /* Prototypes for static methods in struct rtc_ops_s */
 
-static int max326_rdtime(FAR struct rtc_lowerhalf_s *lower,
-                        FAR struct rtc_time *rtctime);
-static int max326_settime(FAR struct rtc_lowerhalf_s *lower,
-                         FAR const struct rtc_time *rtctime);
-static bool max326_havesettime(FAR struct rtc_lowerhalf_s *lower);
+static int max326_rdtime(struct rtc_lowerhalf_s *lower,
+                        struct rtc_time *rtctime);
+static int max326_settime(struct rtc_lowerhalf_s *lower,
+                         const struct rtc_time *rtctime);
+static bool max326_havesettime(struct rtc_lowerhalf_s *lower);
 
 #ifdef CONFIG_RTC_ALARM
-static int max326_setalarm(FAR struct rtc_lowerhalf_s *lower,
-                           FAR const struct lower_setalarm_s *alarminfo);
-static int max326_setrelative(FAR struct rtc_lowerhalf_s *lower,
-                             FAR const struct lower_setrelative_s *alarminfo);
-static int max326_cancelalarm(FAR struct rtc_lowerhalf_s *lower,
+static int max326_setalarm(struct rtc_lowerhalf_s *lower,
+                           const struct lower_setalarm_s *alarminfo);
+static int max326_setrelative(struct rtc_lowerhalf_s *lower,
+                           const struct lower_setrelative_s *alarminfo);
+static int max326_cancelalarm(struct rtc_lowerhalf_s *lower,
                              int alarmid);
-static int max326_rdalarm(FAR struct rtc_lowerhalf_s *lower,
-                          FAR struct lower_rdalarm_s *alarminfo);
+static int max326_rdalarm(struct rtc_lowerhalf_s *lower,
+                          struct lower_rdalarm_s *alarminfo);
 #endif
 
 #ifdef CONFIG_RTC_PERIODIC
-static int max326_setperiodic(FAR struct rtc_lowerhalf_s *lower,
-                             FAR const struct lower_setperiodic_s *alarminfo);
-static int max326_cancelperiodic(FAR struct rtc_lowerhalf_s *lower, int id);
+static int max326_setperiodic(struct rtc_lowerhalf_s *lower,
+                           const struct lower_setperiodic_s *alarminfo);
+static int max326_cancelperiodic(struct rtc_lowerhalf_s *lower, int id);
 #endif
 
 /****************************************************************************
@@ -153,19 +141,14 @@ static const struct rtc_ops_s g_rtc_ops =
   .setperiodic    = max326_setperiodic,
   .cancelperiodic = max326_cancelperiodic,
 #endif
-#ifdef CONFIG_RTC_IOCTL
-  .ioctl       = NULL,
-#endif
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  .destroy     = NULL,
-#endif
 };
 
 /* RTC device state */
 
 static struct max326_lowerhalf_s g_rtc_lowerhalf =
 {
-  .ops        = &g_rtc_ops,
+  .ops     = &g_rtc_ops,
+  .devlock = NXMUTEX_INITIALIZER,
 };
 
 /****************************************************************************
@@ -188,12 +171,12 @@ static struct max326_lowerhalf_s g_rtc_lowerhalf =
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static void max326_alarm_callback(FAR void *arg, unsigned int alarmid)
+static void max326_alarm_callback(void *arg, unsigned int alarmid)
 {
-  FAR struct max326_lowerhalf_s *lower;
-  FAR struct max326_cbinfo_s *cbinfo;
+  struct max326_lowerhalf_s *lower;
+  struct max326_cbinfo_s *cbinfo;
   rtc_alarm_callback_t cb;
-  FAR void *priv;
+  void *priv;
 
   DEBUGASSERT(alarmid < RTC_NALARMS);
 
@@ -205,7 +188,7 @@ static void max326_alarm_callback(FAR void *arg, unsigned int alarmid)
    */
 
   cb           = (rtc_alarm_callback_t)cbinfo->cb;
-  priv         = (FAR void *)cbinfo->priv;
+  priv         = (void *)cbinfo->priv;
   DEBUGASSERT(priv != NULL);
 
   cbinfo->cb   = NULL;
@@ -236,18 +219,18 @@ static void max326_alarm_callback(FAR void *arg, unsigned int alarmid)
  *
  ****************************************************************************/
 
-static int max326_rdtime(FAR struct rtc_lowerhalf_s *lower,
-                        FAR struct rtc_time *rtctime)
+static int max326_rdtime(struct rtc_lowerhalf_s *lower,
+                        struct rtc_time *rtctime)
 {
 #if defined(CONFIG_RTC_DATETIME)
   /* This operation depends on the fact that struct rtc_time is cast
    * compatible with struct tm.
    */
 
-  return up_rtc_getdatetime((FAR struct tm *)rtctime);
+  return up_rtc_getdatetime((struct tm *)rtctime);
 
 #elif defined(CONFIG_RTC_HIRES)
-  FAR struct timespec ts;
+  struct timespec ts;
   int ret;
 
   /* Get the higher resolution time */
@@ -255,7 +238,7 @@ static int max326_rdtime(FAR struct rtc_lowerhalf_s *lower,
   ret = up_rtc_gettime(&ts);
   if (ret < 0)
     {
-      goto errout_with_errno;
+      goto errout;
     }
 
   /* Convert the one second epoch time to a struct tm.  This operation
@@ -263,17 +246,17 @@ static int max326_rdtime(FAR struct rtc_lowerhalf_s *lower,
    * compatible.
    */
 
-  if (!gmtime_r(&ts.tv_sec, (FAR struct tm *)rtctime))
+  if (!gmtime_r(&ts.tv_sec, (struct tm *)rtctime))
     {
-      goto errout_with_errno;
+      ret = -get_errno();
+      goto errout;
     }
 
   return OK;
 
-errout_with_errno:
-  ret = get_errno();
-  DEBUGASSERT(ret > 0);
-  return -ret;
+errout:
+  DEBUGASSERT(ret < 0);
+  return ret;
 
 #else
   time_t timer;
@@ -284,7 +267,7 @@ errout_with_errno:
 
   /* Convert the one second epoch time to a struct tm */
 
-  if (!gmtime_r(&timer, (FAR struct tm *)rtctime))
+  if (!gmtime_r(&timer, (struct tm *)rtctime))
     {
       int errcode = get_errno();
       DEBUGASSERT(errcode > 0);
@@ -311,15 +294,15 @@ errout_with_errno:
  *
  ****************************************************************************/
 
-static int max326_settime(FAR struct rtc_lowerhalf_s *lower,
-                         FAR const struct rtc_time *rtctime)
+static int max326_settime(struct rtc_lowerhalf_s *lower,
+                         const struct rtc_time *rtctime)
 {
 #ifdef CONFIG_RTC_DATETIME
   /* This operation depends on the fact that struct rtc_time is cast
    * compatible with struct tm.
    */
 
-  return max326_rtc_setdatetime((FAR const struct tm *)rtctime);
+  return max326_rtc_setdatetime((const struct tm *)rtctime);
 
 #else
   struct timespec ts;
@@ -328,7 +311,7 @@ static int max326_settime(FAR struct rtc_lowerhalf_s *lower,
    * rtc_time is cast compatible with struct tm.
    */
 
-  ts.tv_sec  = mktime((FAR struct tm *)rtctime);
+  ts.tv_sec  = timegm((struct tm *)rtctime);
   ts.tv_nsec = 0;
 
   /* Now set the time (to one second accuracy) */
@@ -351,7 +334,7 @@ static int max326_settime(FAR struct rtc_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static bool max326_havesettime(FAR struct rtc_lowerhalf_s *lower)
+static bool max326_havesettime(struct rtc_lowerhalf_s *lower)
 {
   return true;
 }
@@ -374,17 +357,17 @@ static bool max326_havesettime(FAR struct rtc_lowerhalf_s *lower)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static int max326_setalarm(FAR struct rtc_lowerhalf_s *lower,
-                           FAR const struct lower_setalarm_s *alarminfo)
+static int max326_setalarm(struct rtc_lowerhalf_s *lower,
+                           const struct lower_setalarm_s *alarminfo)
 {
-  FAR struct max326_lowerhalf_s *priv;
-  FAR struct max326_cbinfo_s *cbinfo;
+  struct max326_lowerhalf_s *priv;
+  struct max326_cbinfo_s *cbinfo;
   int ret;
 
   DEBUGASSERT(lower != NULL && alarminfo != NULL && alarminfo->id == 0);
-  priv = (FAR struct max326_lowerhalf_s *)lower;
+  priv = (struct max326_lowerhalf_s *)lower;
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
@@ -397,7 +380,7 @@ static int max326_setalarm(FAR struct rtc_lowerhalf_s *lower,
 
       /* Convert the RTC time to a timespec (1 second accuracy) */
 
-      ts.tv_sec   = mktime((FAR struct tm *)&alarminfo->time);
+      ts.tv_sec   = timegm((struct tm *)&alarminfo->time);
       ts.tv_nsec  = 0;
 
       /* Remember the callback information */
@@ -416,8 +399,7 @@ static int max326_setalarm(FAR struct rtc_lowerhalf_s *lower,
         }
     }
 
-  nxsem_post(&priv->devsem);
-
+  nxmutex_unlock(&priv->devlock);
   return ret;
 }
 #endif
@@ -440,19 +422,20 @@ static int max326_setalarm(FAR struct rtc_lowerhalf_s *lower,
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static int max326_setrelative(FAR struct rtc_lowerhalf_s *lower,
-                             FAR const struct lower_setrelative_s *alarminfo)
+static int max326_setrelative(struct rtc_lowerhalf_s *lower,
+                             const struct lower_setrelative_s *alarminfo)
 {
-  FAR struct max326_lowerhalf_s *priv;
-  FAR struct max326_cbinfo_s *cbinfo;
+  struct max326_lowerhalf_s *priv;
+  struct max326_cbinfo_s *cbinfo;
 #if defined(CONFIG_RTC_DATETIME)
   struct tm time;
 #endif
-  FAR struct timespec ts;
+  struct timespec ts;
   int ret = -EINVAL;
+  irqstate_t flags;
 
   DEBUGASSERT(lower != NULL && alarminfo != NULL && alarminfo->id == 0);
-  priv = (FAR struct max326_lowerhalf_s *)lower;
+  priv = (struct max326_lowerhalf_s *)lower;
 
   if (alarminfo->id == 0 && alarminfo->reltime > 0)
     {
@@ -460,7 +443,7 @@ static int max326_setrelative(FAR struct rtc_lowerhalf_s *lower,
        * about being suspended and working on an old time.
        */
 
-      sched_lock();
+      flags = enter_critical_section();
 
       /* Get the current time in seconds */
 
@@ -470,11 +453,11 @@ static int max326_setrelative(FAR struct rtc_lowerhalf_s *lower,
       ret = up_rtc_getdatetime(&time);
       if (ret < 0)
         {
-          sched_unlock();
+          leave_critical_section(flags);
           return ret;
         }
 
-      ts.tv_sec  = mktime(&time);
+      ts.tv_sec  = timegm(&time);
       ts.tv_nsec = 0;
 
 #elif defined(CONFIG_RTC_HIRES)
@@ -483,7 +466,7 @@ static int max326_setrelative(FAR struct rtc_lowerhalf_s *lower,
       ret = up_rtc_gettime(&ts);
       if (ret < 0)
         {
-          sched_unlock();
+          leave_critical_section(flags);
           return ret;
         }
 #else
@@ -514,7 +497,7 @@ static int max326_setrelative(FAR struct rtc_lowerhalf_s *lower,
           cbinfo->priv = NULL;
         }
 
-      sched_unlock();
+      leave_critical_section(flags);
     }
 
   return ret;
@@ -539,14 +522,14 @@ static int max326_setrelative(FAR struct rtc_lowerhalf_s *lower,
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static int max326_cancelalarm(FAR struct rtc_lowerhalf_s *lower, int alarmid)
+static int max326_cancelalarm(struct rtc_lowerhalf_s *lower, int alarmid)
 {
-  FAR struct max326_lowerhalf_s *priv;
-  FAR struct max326_cbinfo_s *cbinfo;
+  struct max326_lowerhalf_s *priv;
+  struct max326_cbinfo_s *cbinfo;
 
   DEBUGASSERT(lower != NULL);
   DEBUGASSERT(alarmid == 0);
-  priv = (FAR struct max326_lowerhalf_s *)lower;
+  priv = (struct max326_lowerhalf_s *)lower;
 
   /* Nullify callback information to reduce window for race conditions */
 
@@ -577,8 +560,8 @@ static int max326_cancelalarm(FAR struct rtc_lowerhalf_s *lower, int alarmid)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static int max326_rdalarm(FAR struct rtc_lowerhalf_s *lower,
-                         FAR struct lower_rdalarm_s *alarminfo)
+static int max326_rdalarm(struct rtc_lowerhalf_s *lower,
+                         struct lower_rdalarm_s *alarminfo)
 {
   int ret = -EINVAL;
 
@@ -598,15 +581,11 @@ static int max326_rdalarm(FAR struct rtc_lowerhalf_s *lower,
         {
           /* Extract integer seconds from the b32_t value */
 
-           time_t sec = (time_t)(b32toi(ftime));
+          time_t sec = (time_t)(b32toi(ftime));
 
-           /* Convert to struct rtc_time (aka struct tm) */
+          /* Convert to struct rtc_time (aka struct tm) */
 
-#ifdef CONFIG_LIBC_LOCALTIME
-          localtime_r(&sec, (FAR struct tm *)alarminfo->time);
-#else
-          gmtime_r(&sec, (FAR struct tm *)alarminfo->time);
-#endif
+          localtime_r(&sec, (struct tm *)alarminfo->time);
           ret = OK;
         }
     }
@@ -619,8 +598,9 @@ static int max326_rdalarm(FAR struct rtc_lowerhalf_s *lower,
  * Name: max326_periodic_callback
  *
  * Description:
- *   This is the function that is called from the RTC driver when the periodic
- *   wakeup goes off.  It just invokes the upper half drivers callback.
+ *   This is the function that is called from the RTC driver when the
+ *   periodic wakeup goes off. It just invokes the upper half drivers
+ *   callback.
  *
  * Input Parameters:
  *   None
@@ -633,16 +613,16 @@ static int max326_rdalarm(FAR struct rtc_lowerhalf_s *lower,
 #ifdef CONFIG_RTC_PERIODIC
 static int max326_periodic_callback(void)
 {
-  FAR struct max326_lowerhalf_s *lower;
+  struct max326_lowerhalf_s *lower;
   struct lower_setperiodic_s *cbinfo;
   rtc_wakeup_callback_t cb;
-  FAR void *priv;
+  void *priv;
 
-  lower = (FAR struct max326_lowerhalf_s *)&g_rtc_lowerhalf;
+  lower = (struct max326_lowerhalf_s *)&g_rtc_lowerhalf;
 
   cbinfo = &lower->periodic;
   cb     = (rtc_wakeup_callback_t)cbinfo->cb;
-  priv   = (FAR void *)cbinfo->priv;
+  priv   = (void *)cbinfo->priv;
 
   /* Perform the callback */
 
@@ -674,27 +654,25 @@ static int max326_periodic_callback(void)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_PERIODIC
-static int max326_setperiodic(FAR struct rtc_lowerhalf_s *lower,
-                             FAR const struct lower_setperiodic_s *alarminfo)
+static int max326_setperiodic(struct rtc_lowerhalf_s *lower,
+                             const struct lower_setperiodic_s *alarminfo)
 {
-  FAR struct max326_lowerhalf_s *priv;
+  struct max326_lowerhalf_s *priv;
   int ret;
 
   DEBUGASSERT(lower != NULL && alarminfo != NULL);
-  priv = (FAR struct max326_lowerhalf_s *)lower;
+  priv = (struct max326_lowerhalf_s *)lower;
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
     }
 
   memcpy(&priv->periodic, alarminfo, sizeof(struct lower_setperiodic_s));
-
   ret = max326_rtc_setperiodic(&alarminfo->period, max326_periodic_callback);
 
-  nxsem_post(&priv->devsem);
-
+  nxmutex_unlock(&priv->devlock);
   return ret;
 }
 #endif
@@ -716,17 +694,17 @@ static int max326_setperiodic(FAR struct rtc_lowerhalf_s *lower,
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_PERIODIC
-static int max326_cancelperiodic(FAR struct rtc_lowerhalf_s *lower, int id)
+static int max326_cancelperiodic(struct rtc_lowerhalf_s *lower, int id)
 {
-  FAR struct max326_lowerhalf_s *priv;
+  struct max326_lowerhalf_s *priv;
   int ret;
 
   DEBUGASSERT(lower != NULL);
-  priv = (FAR struct max326_lowerhalf_s *)lower;
+  priv = (struct max326_lowerhalf_s *)lower;
 
   DEBUGASSERT(id == 0);
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
@@ -734,8 +712,7 @@ static int max326_cancelperiodic(FAR struct rtc_lowerhalf_s *lower, int id)
 
   ret = max326_rtc_cancelperiodic();
 
-  nxsem_post(&priv->devsem);
-
+  nxmutex_unlock(&priv->devlock);
   return ret;
 }
 #endif
@@ -766,11 +743,9 @@ static int max326_cancelperiodic(FAR struct rtc_lowerhalf_s *lower, int id)
  *
  ****************************************************************************/
 
-FAR struct rtc_lowerhalf_s *max326_rtc_lowerhalf(void)
+struct rtc_lowerhalf_s *max326_rtc_lowerhalf(void)
 {
-  nxsem_init(&g_rtc_lowerhalf.devsem, 0, 1);
-
-  return (FAR struct rtc_lowerhalf_s *)&g_rtc_lowerhalf;
+  return (struct rtc_lowerhalf_s *)&g_rtc_lowerhalf;
 }
 
 #endif /* CONFIG_RTC_DRIVER */

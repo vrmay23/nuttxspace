@@ -1,14 +1,10 @@
 /****************************************************************************
  * arch/arm/src/tms570/tms570_lowputc.c
  *
- *   Copyright (C) 2015, 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * Includes some logic from TI sample which has a compatible three-clause
- * BSD license and:
- *
- *   Copyright (c) 2012, Texas Instruments Incorporated
- *   All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2015,2018 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2012 Texas Instruments Incorporated
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,14 +42,15 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
+#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/irq.h>
+#include <nuttx/arch.h>
 #include <arch/board/board.h>
+#include <nuttx/spinlock.h>
 
-#include "up_internal.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "hardware/tms570_sci.h"
 #include "hardware/tms570_iomm.h"
 #include "tms570_lowputc.h"
@@ -62,7 +59,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Configuration **********************************************************/
+/* Configuration ************************************************************/
 
 /* Select SCI parameters for the selected console */
 
@@ -84,6 +81,12 @@
 #  error "No CONFIG_SCIn_SERIAL_CONSOLE Setting"
 #  undef HAVE_SERIAL_CONSOLE
 #endif
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+static spinlock_t g_tms570_lowputc_lock = SP_UNLOCKED;
 
 /****************************************************************************
  * Public Data
@@ -117,22 +120,22 @@ static void tms570_sci_initialize(uint32_t base)
   uint32_t reg;
 
   reg = 0x83e70b13u;
-  putreg32(reg,TMS570_IOMM_KICK0);
+  putreg32(reg, TMS570_IOMM_KICK0);
 
   reg = 0x95a4f1e0u;
-  putreg32(reg,TMS570_IOMM_KICK1);
+  putreg32(reg, TMS570_IOMM_KICK1);
 
   reg = (2 << 16);
-  putreg32(reg,TMS570_IOMM_PINMMR7);
+  putreg32(reg, TMS570_IOMM_PINMMR7);
 
   reg = (2 << 0);
-  putreg32(reg,TMS570_IOMM_PINMMR8);
+  putreg32(reg, TMS570_IOMM_PINMMR8);
 
   reg = 0;
-  putreg32(reg,TMS570_IOMM_KICK0);
+  putreg32(reg, TMS570_IOMM_KICK0);
 
   reg = 0;
-  putreg32(reg,TMS570_IOMM_KICK1);
+  putreg32(reg, TMS570_IOMM_KICK1);
 #endif
 
   /* Bring SCI1 out of reset */
@@ -141,6 +144,7 @@ static void tms570_sci_initialize(uint32_t base)
   putreg32(SCI_GCR0_RESET, base + TMS570_SCI_GCR0_OFFSET);
 
   /* Configure pins */
+
   /* Pin Function Register: RX is receive pin, TX is transmit pin. */
 
   putreg32(SCI_PIO_RX | SCI_PIO_TX, base + TMS570_SCI_FUN_OFFSET);
@@ -177,42 +181,30 @@ static void tms570_sci_initialize(uint32_t base)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: up_lowputc
+ * Name: arm_lowputc
  *
  * Description:
  *   Output one byte on the serial console
  *
  ****************************************************************************/
 
-void up_lowputc(char ch)
+void arm_lowputc(char ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
   irqstate_t flags;
 
-  for (; ; )
-    {
-      /* Wait for the transmitter to be available */
+  /* Wait for the transmitter to be available */
 
-      while ((getreg32(TMS570_CONSOLE_BASE + TMS570_SCI_FLR_OFFSET) &
-        SCI_FLR_TXRDY) == 0);
+  flags = spin_lock_irqsave(&g_tms570_lowputc_lock);
 
-      /* Disable interrupts so that the test and the transmission are
-       * atomic.
-       */
+  while ((getreg32(TMS570_CONSOLE_BASE + TMS570_SCI_FLR_OFFSET) &
+    SCI_FLR_TXRDY) == 0);
 
-      flags = enter_critical_section();
-      if ((getreg32(TMS570_CONSOLE_BASE + TMS570_SCI_FLR_OFFSET) &
-        SCI_FLR_TXRDY) != 0)
-        {
-          /* Send the character */
+  /* Send the character */
 
-          putreg32((uint32_t)ch, TMS570_CONSOLE_BASE + TMS570_SCI_TD_OFFSET);
-          leave_critical_section(flags);
-          return;
-        }
+  putreg32((uint32_t)ch, TMS570_CONSOLE_BASE + TMS570_SCI_TD_OFFSET);
 
-      leave_critical_section(flags);
-    }
+  spin_unlock_irqrestore(&g_tms570_lowputc_lock, flags);
 #endif
 }
 
@@ -224,21 +216,11 @@ void up_lowputc(char ch)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      up_lowputc('\r');
-    }
-
-  up_lowputc(ch);
+  arm_lowputc(ch);
 #endif
-  return ch;
 }
 
 /****************************************************************************
@@ -272,19 +254,19 @@ void tms570_lowsetup(void)
 #endif
 }
 
-/************************************************************************************
+/****************************************************************************
  * Name: tms570_sci_configure
  *
  * Description:
  *   Configure an SCI for non-interrupt driven operation
  *
- ************************************************************************************/
+ ****************************************************************************/
 
-int tms570_sci_configure(uint32_t base, FAR const struct sci_config_s *config)
+int tms570_sci_configure(uint32_t base,
+                         const struct sci_config_s *config)
 {
-  float32 divb7;
+  float    divb7;
   uint32_t intpart;
-  float32 frac;
   uint32_t p;
   uint32_t m;
   uint32_t u;
@@ -317,7 +299,7 @@ int tms570_sci_configure(uint32_t base, FAR const struct sci_config_s *config)
    * STOP=?        Depends on configuration settings
    * CLOCK=1       The internal SCICLK is the clock source
    * LIN=0         LIN mode is disabled
-   * SWRST=0       SCI is initiailized and held in reset state
+   * SWRST=0       SCI is initialized and held in reset state
    * SLEEP=0       Sleep mode is disabled
    * ADAPT=0       Automatic baud rate adjustment is disabled
    * MBUF=0        The multi-buffer mode is disabled.
@@ -330,7 +312,8 @@ int tms570_sci_configure(uint32_t base, FAR const struct sci_config_s *config)
    * TXENA=1       Transmitter is enabled
    */
 
-  gcr1 = (SCI_GCR1_TIMING | SCI_GCR1_CLOCK | SCI_GCR1_RXENA | SCI_GCR1_TXENA);
+  gcr1 = (SCI_GCR1_TIMING | SCI_GCR1_CLOCK |
+          SCI_GCR1_RXENA | SCI_GCR1_TXENA);
 
   DEBUGASSERT(config->parity >= 0 && config->parity <= 2);
   if (config->parity == 1)
@@ -348,7 +331,8 @@ int tms570_sci_configure(uint32_t base, FAR const struct sci_config_s *config)
     }
 
   gcr1 = 0;
-  gcr1 = (SCI_GCR1_TIMING | SCI_GCR1_CLOCK | SCI_GCR1_RXENA | SCI_GCR1_TXENA);
+  gcr1 = (SCI_GCR1_TIMING | SCI_GCR1_CLOCK |
+          SCI_GCR1_RXENA | SCI_GCR1_TXENA);
   putreg32(gcr1, base + TMS570_SCI_GCR1_OFFSET);
 
   p    = (uint32_t)intpart - 1;

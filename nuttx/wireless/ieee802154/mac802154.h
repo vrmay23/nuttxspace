@@ -1,42 +1,22 @@
 /****************************************************************************
  * wireless/ieee802154/mac802154.h
  *
- *   Copyright (C) 2016 Sebastien Lorquet. All rights reserved.
- *   Copyright (C) 2017 Verge Inc. All rights reserved.
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
- *   Author: Anthony Merlino <anthony@vergeaero.com>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- *   The naming and comments for various fields are taken directly
- *   from the IEEE 802.15.4 2011 standard.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -58,6 +38,14 @@
  * Public Data Types
  ****************************************************************************/
 
+#ifdef __cplusplus
+#define EXTERN extern "C"
+extern "C"
+{
+#else
+#define EXTERN extern
+#endif
+
 /* Callback operations to notify the next highest layer of various
  * asynchronous events, usually triggered by some previous request or
  * response invoked by the upper layer.
@@ -68,15 +56,16 @@ struct mac802154_maccb_s
   FAR struct mac802154_maccb_s *flink;  /* Implements a singly linked list */
   uint8_t prio;                         /* RX frame callback priority */
 
-  /* Callback for various MLME or MCPS service events.  Return value represents
-   * whether the callback accepts the primitive. >= 0 means the callback has
-   * accepted the primitive and is responsible for calling
-   * ieee802154_primitive_free(). In the case of DATA.indication primitive, only
-   * one callback can accept the frame. The callbacks are stored in order of
-   * receiver priority defined by the 'prio' field above. All other
-   * notifications are offered to all callbacks and all can accept and free
-   * separately since the primitive will not be freed until the nclients count
-   * reaches 0. */
+  /* Callback for various MLME or MCPS service events.
+   * Return value represents whether the callback accepts the primitive.
+   * >= 0 means the callback has accepted the primitive and is responsible
+   * for calling ieee802154_primitive_free(). In the case of DATA.indication
+   * primitive, only one callback can accept the frame. The callbacks are
+   * stored in order of receiver priority defined by the 'prio' field above.
+   * All other notifications are offered to all callbacks and all can accept
+   * and free separately since the primitive will not be freed until the
+   * nclients count reaches 0.
+   */
 
   CODE int (*notify)(FAR struct mac802154_maccb_s *maccb,
                      FAR struct ieee802154_primitive_s *primitive);
@@ -88,7 +77,7 @@ struct mac802154_maccb_s
 
 struct iob_s;  /* Forward reference */
 
- /****************************************************************************
+/****************************************************************************
  * Name: mac802154_bind
  *
  * Description:
@@ -151,7 +140,7 @@ int mac802154_get_mhrlen(MACHANDLE mac,
 
 int mac802154_req_data(MACHANDLE mac,
                        FAR const struct ieee802154_frame_meta_s *meta,
-                       FAR struct iob_s *frame, bool allowinterrupt);
+                       FAR struct iob_s *frame);
 
 /****************************************************************************
  * Name: mac802154_req_purge
@@ -223,13 +212,13 @@ int mac802154_req_gts(MACHANDLE mac, FAR struct ieee802154_gts_req_s *req);
  *
  *   NOTE: The standard specifies that confirmation should be provided via
  *   via the asynchronous MLME-RESET.confirm primitive.  However, in our
- *   implementation we synchronously return the value immediately. Therefore,
- *   we merge the functionality of the MLME-RESET.request and MLME-RESET.confirm
- *   primitives together.
+ *   implementation we synchronously return the value immediately.
+ *   Therefore, we merge the functionality of the MLME-RESET.request and
+ *   MLME-RESET.confirm primitives together.
  *
  * Input Parameters:
- *   mac          - Handle to the MAC layer instance
- *   reset_attr   - Whether or not to reset the MAC PIB attributes to defaults
+ *   mac         - Handle to the MAC layer instance
+ *   reset_attr  - Whether or not to reset the MAC PIB attributes to defaults
  *
  ****************************************************************************/
 
@@ -275,8 +264,8 @@ int mac802154_req_scan(MACHANDLE mac, FAR struct ieee802154_scan_req_s *req);
  *
  *   NOTE: The standard specifies that the attribute value should be returned
  *   via the asynchronous MLME-GET.confirm primitive.  However, in our
- *   implementation, we synchronously return the value immediately.Therefore, we
- *   merge the functionality of the MLME-GET.request and MLME-GET.confirm
+ *   implementation, we synchronously return the value immediately.Therefore,
+ *   we merge the functionality of the MLME-GET.request and MLME-GET.confirm
  *   primitives together.
  *
  ****************************************************************************/
@@ -292,10 +281,11 @@ int mac802154_req_get(MACHANDLE mac, enum ieee802154_attr_e ,
  *   indicated MAC PIB attribute.
  *
  *   NOTE: The standard specifies that confirmation should be indicated via
- *   the asynchronous MLME-SET.confirm primitive.  However, in our implementation
- *   we synchronously return the status from the request. Therefore, we do merge
- *   the functionality of the MLME-SET.request and MLME-SET.confirm primitives
- *   together.
+ *   the asynchronous MLME-SET.confirm primitive.
+ *   However, in our implementation we synchronously return the status from
+ *   the request.
+ *   Therefore, we do merge the functionality of the MLME-SET.request and
+ *   MLME-SET.confirm primitives together.
  *
  ****************************************************************************/
 
@@ -312,7 +302,8 @@ int mac802154_req_set(MACHANDLE mac, enum ieee802154_attr_e ,
  *
  ****************************************************************************/
 
-int mac802154_req_start(MACHANDLE mac, FAR struct ieee802154_start_req_s *req);
+int mac802154_req_start(MACHANDLE mac,
+                        FAR struct ieee802154_start_req_s *req);
 
 /****************************************************************************
  * Name: mac802154_req_sync

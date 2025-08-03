@@ -1,6 +1,8 @@
 /****************************************************************************
  * net/arp/arp_notify.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -72,12 +74,7 @@ void arp_wait_setup(in_addr_t ipaddr, FAR struct arp_notify_s *notify)
   notify->nt_ipaddr = ipaddr;
   notify->nt_result = -ETIMEDOUT;
 
-  /* This semaphore is used for signaling and, hence, should not have
-   * priority inheritance enabled.
-   */
-
   nxsem_init(&notify->nt_sem, 0, 0);
-  nxsem_setprotocol(&notify->nt_sem, SEM_PRIO_NONE);
 
   /* Add the wait structure to the list with interrupts disabled */
 
@@ -158,7 +155,7 @@ int arp_wait(FAR struct arp_notify_s *notify, unsigned int timeout)
 
   /* And wait for the ARP response (or a timeout). */
 
-  net_timedwait_uninterruptible(&notify->nt_sem, timeout);
+  net_sem_timedwait_uninterruptible(&notify->nt_sem, timeout);
 
   /* Then get the real result of the transfer */
 
@@ -181,13 +178,16 @@ int arp_wait(FAR struct arp_notify_s *notify, unsigned int timeout)
  *
  * Assumptions:
  *   This function is called from the MAC device driver indirectly through
- *   arp_arpin() will execute with the network locked.
+ *   arp_input() will execute with the network locked.
  *
  ****************************************************************************/
 
 void arp_notify(in_addr_t ipaddr)
 {
   FAR struct arp_notify_s *curr;
+  irqstate_t flags;
+
+  flags = enter_critical_section();
 
   /* Find an entry with the matching IP address in the list of waiters */
 
@@ -207,6 +207,8 @@ void arp_notify(in_addr_t ipaddr)
           break;
         }
     }
+
+  leave_critical_section(flags);
 }
 
 #endif /* CONFIG_NET_ARP_SEND */

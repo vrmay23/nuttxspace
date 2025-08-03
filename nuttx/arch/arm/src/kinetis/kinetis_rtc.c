@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/kinetis/kinetis_rtc.c
  *
- *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
- *   Author:  Matias v01d <phreakuencies@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,16 +28,18 @@
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
 #include <nuttx/timers/rtc.h>
+#include <nuttx/spinlock.h>
 #include <arch/board/board.h>
 
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <assert.h>
+#include <debug.h>
 #include <errno.h>
 
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "kinetis_config.h"
 #include "chip.h"
 #include "hardware/kinetis_rtc.h"
@@ -73,6 +62,10 @@
 /****************************************************************************
  * Private Data
  ****************************************************************************/
+
+#ifdef CONFIG_RTC_HIRES
+static spinlock_t g_rtc_lock = SP_UNLOCKED;
+#endif
 
 #ifdef CONFIG_RTC_ALARM
 static alarmcb_t g_alarmcb;
@@ -104,7 +97,7 @@ volatile bool g_rtc_enabled = false;
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_RTC_INFO
-static void rtc_dumpregs(FAR const char *msg)
+static void rtc_dumpregs(const char *msg)
 {
   rtcinfo("%s:\n", msg);
   rtcinfo("   TSR: %08x\n", getreg32(KINETIS_RTC_TSR));
@@ -142,7 +135,7 @@ static void rtc_dumpregs(FAR const char *msg)
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_RTC_INFO
-static void rtc_dumptime(FAR struct tm *tp, FAR const char *msg)
+static void rtc_dumptime(struct tm *tp, const char *msg)
 {
   rtcinfo("%s:\n", msg);
   rtcinfo("  tm_sec: %08x\n", tp->tm_sec);
@@ -172,14 +165,14 @@ static void rtc_dumptime(FAR struct tm *tp, FAR const char *msg)
  ****************************************************************************/
 
 #if defined(CONFIG_RTC_ALARM)
-static int kinetis_rtc_interrupt(int irq, void *context, FAR void *arg)
+static int kinetis_rtc_interrupt(int irq, void *context, void *arg)
 {
- uint16_t rtc_sr;
+  uint16_t rtc_sr;
 
   /* if alarm */
 
-  rtc_sr = getreg32( KINETIS_RTC_SR);
-  if (rtc_sr & RTC_SR_TAF )
+  rtc_sr = getreg32(KINETIS_RTC_SR);
+  if (rtc_sr & RTC_SR_TAF)
     {
       if (g_alarmcb != NULL)
         {
@@ -209,7 +202,7 @@ static int kinetis_rtc_interrupt(int irq, void *context, FAR void *arg)
 #endif
 
 /****************************************************************************
- * Name: RTC_Reset
+ * Name: rtc_reset
  *
  * Description:
  *    Reset the RTC to known state
@@ -222,16 +215,16 @@ static int kinetis_rtc_interrupt(int irq, void *context, FAR void *arg)
  *
  ****************************************************************************/
 
-static inline void RTC_Reset(void)
+static inline void rtc_reset(void)
 {
-    putreg32(( RTC_CR_SWR | getreg32(KINETIS_RTC_CR)),KINETIS_RTC_CR);
-    putreg32((~RTC_CR_SWR & getreg32(KINETIS_RTC_CR)),KINETIS_RTC_CR);
+  putreg32((RTC_CR_SWR | getreg32(KINETIS_RTC_CR)), KINETIS_RTC_CR);
+  putreg32((~RTC_CR_SWR & getreg32(KINETIS_RTC_CR)), KINETIS_RTC_CR);
 
-   /* Set TSR register to 0x1 to avoid the timer invalid (TIF) bit being
-    * set in the SR register
-    */
+  /* Set TSR register to 0x1 to avoid the timer invalid (TIF) bit being
+   * set in the SR register
+   */
 
-    putreg32(1,KINETIS_RTC_TSR);
+  putreg32(1, KINETIS_RTC_TSR);
 }
 
 /****************************************************************************
@@ -243,7 +236,7 @@ static inline void RTC_Reset(void)
  *
  * Description:
  *   Initialize the hardware RTC irq.
-*    This only needs to be called once when first used.
+ *   This only needs to be called once when first used.
  *
  * Input Parameters:
  *   None
@@ -260,11 +253,11 @@ int up_rtc_irq_attach(void)
 
   if (!rtc_irq_state)
     {
-      rtc_irq_state=true;
+      rtc_irq_state = true;
 
       /* Clear TAF if pending */
 
-      rtc_sr = getreg32( KINETIS_RTC_SR);
+      rtc_sr = getreg32(KINETIS_RTC_SR);
       if ((rtc_sr & RTC_SR_TAF) != 0)
         {
           putreg32(0, KINETIS_RTC_TAR);
@@ -324,8 +317,8 @@ int up_rtc_initialize(void)
        */
 
       regval = getreg32(KINETIS_RTC_MCLR);
-      if ((CONFIG_RTC_MAGICL == regval ) &&
-          (CONFIG_RTC_MAGICH == getreg32(KINETIS_RTC_MCHR)) )
+      if ((CONFIG_RTC_MAGICL == regval) &&
+          (CONFIG_RTC_MAGICH == getreg32(KINETIS_RTC_MCHR)))
 #endif
         {
           rtc_valid = true;
@@ -343,7 +336,7 @@ int up_rtc_initialize(void)
   else
     {
       rtcinfo("Do setup\n");
-      RTC_Reset();
+      rtc_reset();
 
 #ifdef KINETIS_RTC_GEN2
       /* Configure the RTC to be initialized */
@@ -354,21 +347,21 @@ int up_rtc_initialize(void)
 
       /* Setup the update mode and supervisor access mode */
 
-      putreg32((~(RTC_CR_UM|RTC_CR_SUP) & getreg32(KINETIS_RTC_CR)),
+      putreg32((~(RTC_CR_UM | RTC_CR_SUP) & getreg32(KINETIS_RTC_CR)),
                KINETIS_RTC_CR);
 
       /* Disable counters (just in case) */
 
       putreg32(0, KINETIS_RTC_SR);
 
-      /* Enable oscilator - must have Vbat else hard fault */
+      /* Enable oscillator - must have Vbat else hard fault */
 
-      putreg32((BOARD_RTC_CAP | RTC_CR_OSCE ), KINETIS_RTC_CR);
+      putreg32((BOARD_RTC_CAP | RTC_CR_OSCE), KINETIS_RTC_CR);
 
-     /* TODO - add capability to accurately tune RTC
-      * This is a per individual board customization and requires
-      * parameters to be configurable and stored in non-volatile eg flash.
-      */
+      /* TODO - add capability to accurately tune RTC
+       * This is a per individual board customization and requires
+       * parameters to be configurable and stored in non-volatile eg flash.
+       */
 
       /* TODO: delay some time (1024 cycles? would be 30ms) */
     }
@@ -436,7 +429,7 @@ time_t up_rtc_time(void)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_HIRES
-int up_rtc_gettime(FAR struct timespec *tp)
+int up_rtc_gettime(struct timespec *tp)
 {
   irqstate_t flags;
   uint32_t seconds;
@@ -448,7 +441,7 @@ int up_rtc_gettime(FAR struct timespec *tp)
    * wrapped-around.
    */
 
-  flags = enter_critical_section();
+  flags = spin_lock_irqsave(&g_rtc_lock);
   do
     {
       prescaler = getreg32(KINETIS_RTC_TPR);
@@ -457,7 +450,7 @@ int up_rtc_gettime(FAR struct timespec *tp)
     }
   while (prescaler > prescaler2);
 
-  leave_critical_section(flags);
+  spin_unlock_irqrestore(&g_rtc_lock, flags);
 
   /* Build seconds + nanoseconds from seconds and prescaler register */
 
@@ -482,16 +475,16 @@ int up_rtc_gettime(FAR struct timespec *tp)
  *
  ****************************************************************************/
 
-int up_rtc_settime(FAR const struct timespec *tp)
+int up_rtc_settime(const struct timespec *tp)
 {
   irqstate_t flags;
   uint32_t seconds;
   uint32_t prescaler;
 
   seconds = tp->tv_sec;
-  prescaler = tp->tv_nsec * (CONFIG_RTC_FREQUENCY / 1000000000);
+  prescaler = tp->tv_nsec / (1000000000 / CONFIG_RTC_FREQUENCY);
 
-  flags = enter_critical_section();
+  flags = spin_lock_irqsave(&g_rtc_lock);
 
   putreg32(0, KINETIS_RTC_SR);  /* Disable counter */
 
@@ -500,7 +493,7 @@ int up_rtc_settime(FAR const struct timespec *tp)
 
   putreg32(RTC_SR_TCE, KINETIS_RTC_SR); /* Re-enable counter */
 
-  leave_critical_section(flags);
+  spin_unlock_irqrestore(&g_rtc_lock, flags);
 
   return OK;
 }
@@ -521,7 +514,7 @@ int up_rtc_settime(FAR const struct timespec *tp)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-int kinetis_rtc_setalarm(FAR const struct timespec *tp, alarmcb_t callback)
+int kinetis_rtc_setalarm(const struct timespec *tp, alarmcb_t callback)
 {
   /* Is there already something waiting on the ALARM? */
 
@@ -587,7 +580,7 @@ int kinetis_rtc_cancelalarm(void)
 }
 #endif
 
-/************************************************************************************
+/****************************************************************************
  * Name: kinetis_rtc_rdalarm
  *
  * Description:
@@ -599,10 +592,10 @@ int kinetis_rtc_cancelalarm(void)
  * Returned Value:
  *   Zero (OK) on success; a negated errno on failure
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-int kinetis_rtc_rdalarm(FAR struct timespec *tp)
+int kinetis_rtc_rdalarm(struct timespec *tp)
 {
   DEBUGASSERT(tp != NULL);
 

@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/pwlines/pwlines_update.c
+ * apps/examples/pwlines/pwlines_update.c
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,6 +29,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/param.h>
+#include <inttypes.h>
 #include <unistd.h>
 #include <string.h>
 #include <debug.h>
@@ -64,10 +53,6 @@
 #  define CLEAR_WIDTH (CONFIG_EXAMPLES_PWLINES_LINEWIDTH + 2)
 #else
 #  define CLEAR_WIDTH CONFIG_EXAMPLES_PWLINES_LINEWIDTH
-#endif
-
-#ifndef MIN
-#  define MIN(a,b) (a < b ? a : b)
 #endif
 
 /****************************************************************************
@@ -123,32 +108,37 @@ void pwlines_circle(FAR struct pwlines_state_s *st)
         }
 
       /* Back off the radius to account for the thickness of border line
-       * and with a big fudge factor that will (hopefully) prevent the corners
-       * of the lines from overwriting the border.  This is overly complicated
-       * here because we don't assume anything about the screen resolution or
-       * the borderwidth or the line thickness (and there are certainly some
-       * smarter ways to do this).
+       * and with a big fudge factor that will (hopefully) prevent the
+       * corners of the lines from overwriting the border.  This is overly
+       * complicated here because we don't assume anything about the screen
+       * resolution or the borderwidth or the line thickness (and there are
+       * certainly some smarter ways to do this).
        */
 
       if (maxradius > (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 80))
         {
-          wndo->radius = maxradius - (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 40);
+          wndo->radius = maxradius -
+                         (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 40);
         }
       else if (maxradius > (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 60))
         {
-          wndo->radius = maxradius - (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 30);
+          wndo->radius = maxradius -
+                         (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 30);
         }
       else if (maxradius > (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 40))
         {
-          wndo->radius = maxradius - (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 20);
+          wndo->radius = maxradius -
+                         (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 20);
         }
       else if (maxradius > (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 20))
         {
-          wndo->radius = maxradius - (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 10);
+          wndo->radius = maxradius -
+                         (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 10);
         }
       else if (maxradius > (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 10))
         {
-          wndo->radius = maxradius - (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 5);
+          wndo->radius = maxradius -
+                         (CONFIG_EXAMPLES_PWLINES_BORDERWIDTH + 5);
         }
       else
         {
@@ -201,13 +191,16 @@ void pwlines_update(FAR struct pwlines_state_s *st)
       vector.pt2.x = wndo->center.x - halfx;
       vector.pt2.y = wndo->center.y - halfy;
 
-      printf("Angle: %08x vector: (%d,%d)->(%d,%d)\n",
-             wndo->angle, vector.pt1.x, vector.pt1.y, vector.pt2.x, vector.pt2.y);
+      printf("Angle: %08" PRIx32 " vector: (%d,%d)->(%d,%d)\n",
+             (uint32_t)wndo->angle, vector.pt1.x, vector.pt1.y,
+             vector.pt2.x, vector.pt2.y);
 
-      /* Clear the previous line by overwriting it with the circle face color */
+      /* Clear the previous line by overwriting it with the circle face
+       * color
+       */
 
-      ret = nx_drawline(wndo->hwnd, &wndo->previous, CLEAR_WIDTH, st->facecolor,
-                        NX_LINECAP_NONE);
+      ret = nx_drawline(wndo->hwnd, &wndo->previous, CLEAR_WIDTH,
+                        st->facecolor, NX_LINECAP_NONE);
       if (ret < 0)
         {
           printf("pwlines_update: nx_drawline failed clearing: %d\n", ret);
@@ -222,7 +215,6 @@ void pwlines_update(FAR struct pwlines_state_s *st)
         {
           printf("pwlines_update: nx_drawline failed clearing: %d\n", ret);
         }
-
 
 #ifdef CONFIG_NX_ANTIALIASING
       /* If anti-aliasing is enabled, then we must clear a slightly

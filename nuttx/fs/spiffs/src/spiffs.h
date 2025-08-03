@@ -1,8 +1,8 @@
 /****************************************************************************
- * fs/spiffs.h/spiffs.h
+ * fs/spiffs/src/spiffs.h
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2018 Gregory Nutt
  *
  * This is a port of version 0.3.7 of SPIFFS by Peter Andersion.  That
  * version was originally released under the MIT license but is here re-
@@ -55,9 +55,9 @@ extern "C"
 
 #include <sys/types.h>
 #include <sys/mount.h>
-#include <queue.h>
 
-#include <nuttx/semaphore.h>
+#include <nuttx/queue.h>
+#include <nuttx/mutex.h>
 #include <nuttx/mtd/mtd.h>
 
 /****************************************************************************
@@ -67,10 +67,6 @@ extern "C"
 /* Flags on open file/directory options */
 
 #define SFO_FLAG_UNLINKED               (1 << 0)
-
-/* Re-entrant semaphore definitions */
-
-#define SPIFFS_NO_HOLDER                ((pid_t)-1)
 
 /****************************************************************************
  * Public Types
@@ -102,20 +98,13 @@ typedef int32_t(*spiffs_read_t)(uint32_t addr, uint32_t size, uint8_t * dst);
 
 /* spi write call function type */
 
-typedef int32_t(*spiffs_write_t)(uint32_t addr, uint32_t size, uint8_t * src);
+typedef int32_t(*spiffs_write_t)(uint32_t addr,
+                                 uint32_t size,
+                                 uint8_t * src);
 
 /* spi erase call function type */
 
 typedef int32_t(*spiffs_erase_t)(uint32_t addr, uint32_t size);
-
-/* Re-entrant semaphore */
-
-struct spiffs_sem_s
-{
-  sem_t    sem;                     /* The actual semaphore */
-  pid_t    holder;                  /* Current older (-1 if not held) */
-  uint16_t count;                   /* Number of counts held */
-};
 
 /* spiffs SPI configuration struct */
 
@@ -126,7 +115,7 @@ struct spiffs_file_s;               /* Forward reference */
 struct spiffs_s
 {
   struct mtd_geometry_s geo;        /* FLASH geometry */
-  struct spiffs_sem_s exclsem;      /* Supports mutually exclusive access */
+  rmutex_t lock;                    /* Supports mutually exclusive access */
   dq_queue_t objq;                  /* A doubly linked list of open file objects */
   FAR struct mtd_dev_s *mtd;        /* The contained MTD interface */
   FAR uint8_t *lu_work;             /* Primary work buffer, size of a logical page */

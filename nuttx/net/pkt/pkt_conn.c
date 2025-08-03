@@ -1,38 +1,22 @@
 /****************************************************************************
  * net/pkt/pkt_conn.c
  *
- *   Copyright (C) 2014, 2016-2017, 2020 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Large parts of this file were leveraged from uIP logic:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- *   Copyright (c) 2001-2003, Adam Dunkels.
- *   All rights reserved.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote
- *    products derived from this software without specific prior
- *    written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
- * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
- * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -49,7 +33,8 @@
 
 #include <arch/irq.h>
 
-#include <nuttx/semaphore.h>
+#include <nuttx/kmalloc.h>
+#include <nuttx/mutex.h>
 #include <nuttx/net/netconfig.h>
 #include <nuttx/net/net.h>
 #include <nuttx/net/netdev.h>
@@ -57,6 +42,7 @@
 
 #include "devif/devif.h"
 #include "pkt/pkt.h"
+#include "utils/utils.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -67,41 +53,24 @@
    (addr1[2] == addr2[2]) && (addr1[3] == addr2[3]) && \
    (addr1[4] == addr2[4]) && (addr1[5] == addr2[5]))
 
+#ifndef CONFIG_NET_PKT_MAX_CONNS
+#  define CONFIG_NET_PKT_MAX_CONNS 0
+#endif
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
 /* The array containing all packet socket connections */
 
-static struct pkt_conn_s g_pkt_connections[CONFIG_NET_PKT_CONNS];
-
-/* A list of all free packet socket connections */
-
-static dq_queue_t g_free_pkt_connections;
-static sem_t g_free_sem;
+NET_BUFPOOL_DECLARE(g_pkt_connections, sizeof(struct pkt_conn_s),
+                    CONFIG_NET_PKT_PREALLOC_CONNS,
+                    CONFIG_NET_PKT_ALLOC_CONNS, CONFIG_NET_PKT_MAX_CONNS);
+static mutex_t g_free_lock = NXMUTEX_INITIALIZER;
 
 /* A list of all allocated packet socket connections */
 
 static dq_queue_t g_active_pkt_connections;
-
-/****************************************************************************
- * Private Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: _pkt_semtake() and _pkt_semgive()
- *
- * Description:
- *   Take/give semaphore
- *
- ****************************************************************************/
-
-static inline void _pkt_semtake(FAR sem_t *sem)
-{
-  net_lockedwait_uninterruptible(sem);
-}
-
-#define _pkt_semgive(sem) nxsem_post(sem)
 
 /****************************************************************************
  * Public Functions
@@ -118,21 +87,6 @@ static inline void _pkt_semtake(FAR sem_t *sem)
 
 void pkt_initialize(void)
 {
-  int i;
-
-  /* Initialize the queues */
-
-  dq_init(&g_free_pkt_connections);
-  dq_init(&g_active_pkt_connections);
-  nxsem_init(&g_free_sem, 0, 1);
-
-  for (i = 0; i < CONFIG_NET_PKT_CONNS; i++)
-    {
-      /* Mark the connection closed and move it to the free list */
-
-      g_pkt_connections[i].ifindex = 0;
-      dq_addlast(&g_pkt_connections[i].node, &g_free_pkt_connections);
-    }
 }
 
 /****************************************************************************
@@ -148,22 +102,19 @@ FAR struct pkt_conn_s *pkt_alloc(void)
 {
   FAR struct pkt_conn_s *conn;
 
-  /* The free list is protected by a semaphore (that behaves like a mutex). */
+  /* The free list is protected by a mutex. */
 
-  _pkt_semtake(&g_free_sem);
-  conn = (FAR struct pkt_conn_s *)dq_remfirst(&g_free_pkt_connections);
+  nxmutex_lock(&g_free_lock);
+
+  conn = NET_BUFPOOL_TRYALLOC(g_pkt_connections);
   if (conn)
     {
-      /* Make sure that the connection is marked as uninitialized */
-
-      conn->ifindex = 0;
-
       /* Enqueue the connection into the active list */
 
-      dq_addlast(&conn->node, &g_active_pkt_connections);
+      dq_addlast(&conn->sconn.node, &g_active_pkt_connections);
     }
 
-  _pkt_semgive(&g_free_sem);
+  nxmutex_unlock(&g_free_lock);
   return conn;
 }
 
@@ -178,20 +129,21 @@ FAR struct pkt_conn_s *pkt_alloc(void)
 
 void pkt_free(FAR struct pkt_conn_s *conn)
 {
-  /* The free list is protected by a semaphore (that behaves like a mutex). */
+  /* The free list is protected by a mutex. */
 
   DEBUGASSERT(conn->crefs == 0);
 
-  _pkt_semtake(&g_free_sem);
+  nxmutex_lock(&g_free_lock);
 
   /* Remove the connection from the active list */
 
-  dq_rem(&conn->node, &g_active_pkt_connections);
+  dq_rem(&conn->sconn.node, &g_active_pkt_connections);
 
-  /* Free the connection */
+  /* Free the connection. */
 
-  dq_addlast(&conn->node, &g_free_pkt_connections);
-  _pkt_semgive(&g_free_sem);
+  NET_BUFPOOL_FREE(g_pkt_connections, conn);
+
+  nxmutex_unlock(&g_free_lock);
 }
 
 /****************************************************************************
@@ -199,23 +151,21 @@ void pkt_free(FAR struct pkt_conn_s *conn)
  *
  * Description:
  *   Find a connection structure that is the appropriate connection to be
- *   used with the provided Ethernet header
+ *   used with the provided network device
  *
  * Assumptions:
  *   This function is called from network logic at with the network locked.
  *
  ****************************************************************************/
 
-FAR struct pkt_conn_s *pkt_active(FAR struct eth_hdr_s *buf)
+FAR struct pkt_conn_s *pkt_active(FAR struct net_driver_s *dev)
 {
   FAR struct pkt_conn_s *conn =
     (FAR struct pkt_conn_s *)g_active_pkt_connections.head;
 
   while (conn)
     {
-      /* FIXME lmac in conn should have been set by pkt_bind() */
-
-      if (eth_addr_cmp(buf->dest, conn->lmac))
+      if (dev->d_ifindex == conn->ifindex)
         {
           /* Matching connection found.. return a reference to it */
 
@@ -224,7 +174,7 @@ FAR struct pkt_conn_s *pkt_active(FAR struct eth_hdr_s *buf)
 
       /* Look at the next active connection */
 
-      conn = (FAR struct pkt_conn_s *)conn->node.flink;
+      conn = (FAR struct pkt_conn_s *)conn->sconn.node.flink;
     }
 
   return conn;
@@ -249,7 +199,7 @@ FAR struct pkt_conn_s *pkt_nextconn(FAR struct pkt_conn_s *conn)
     }
   else
     {
-      return (FAR struct pkt_conn_s *)conn->node.flink;
+      return (FAR struct pkt_conn_s *)conn->sconn.node.flink;
     }
 }
 

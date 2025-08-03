@@ -1,18 +1,11 @@
 /****************************************************************************
  * arch/arm/src/sama5/sam_pmecc.c
  *
- *   Copyright (C) 2013, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * References:
- *   SAMA5D3 Series Data Sheet
- *   Atmel NoOS sample code.
- *
- * All of the detailed PMECC operations are taken directly from the Atmel
- * NoOS sample code.  The Atmel sample code has a BSD compatible license
- * that requires this copyright notice:
- *
- *   Copyright (c) 2012, Atmel Corporation
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2017 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2013 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2012 Atmel Corporation
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.orgr>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,6 +36,11 @@
  *
  ****************************************************************************/
 
+/* References:
+ *   SAMA5D3 Series Data Sheet
+ *   Atmel NoOS sample code.
+ */
+
 /****************************************************************************
  * Included Files
  ****************************************************************************/
@@ -58,7 +56,7 @@
 
 #include <nuttx/mtd/nand_model.h>
 #include <nuttx/mtd/nand_scheme.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 
 #include "sam_pmecc.h"
 #include "sam_nand.h"
@@ -134,7 +132,7 @@ struct sam_pmecc_s
 {
   bool configured;           /* True: Configured for some HSMC NAND bank */
 #if NAND_NPMECC_BANKS > 1
-  sem_t exclem;              /* For mutually exclusive access to the PMECC */
+  mutex_t lock;              /* For mutually exclusive access to the PMECC */
   uint8_t cs;                /* Currently configured for this bank */
 #endif
   bool    sector1k;          /* True: 1024B sector size; False: 512B sector size */
@@ -145,11 +143,11 @@ struct sam_pmecc_s
 
 /* This is the type of the ROM detection/correction function
  *
- * REVISIT:  Where are the types Pmecc and Pmerrloc?
+ * REVISIT:  Where are the types pmecc and pmerrloc?
  */
 
 #ifdef CONFIG_SAMA5_PMECC_EMBEDDEDALGO
-typedef uint32_t (*pmecc_correctionalgo_t)(Pmecc *, Pmerrloc *,
+typedef uint32_t (*pmecc_correctionalgo_t)(pmecc *, pmerrloc *,
                                            struct pmecc_desc_s *desc,
                                            uint32_t isr, uintptr_t data);
 #endif
@@ -171,7 +169,10 @@ static uint32_t pmecc_correctionalgo(uint32_t isr, uintptr_t data);
 
 /* PMECC state data */
 
-static struct sam_pmecc_s g_pmecc;
+static struct sam_pmecc_s g_pmecc =
+{
+  .lock = NXMUTEX_INITIALIZER,
+};
 
 /* Maps BCH_ERR correctability register value to number of errors per
  * sector.
@@ -466,7 +467,7 @@ static uint32_t pmecc_getsigma(void)
 
           /* Init smu[i+1] with 0 */
 
-          for (k = 0; k < (2 * PMECC_MAX_CORRECTABILITY + 1); k ++)
+          for (k = 0; k < (2 * PMECC_MAX_CORRECTABILITY + 1); k++)
             {
               g_pmecc.desc.smu[i + 1][k] = 0;
             }
@@ -999,28 +1000,6 @@ static int pmecc_pagelayout(uint16_t datasize, uint16_t eccsize)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: pmecc_initialize
- *
- * Description:
- *   Perform one-time PMECC initialization.  This must be called before any
- *   other PMECC interfaces are used.
- *
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-#if NAND_NPMECC_BANKS > 1
-void pmecc_initialize(void)
-{
-  nxsem_init(&g_pmecc.exclsem, 0, 1);
-}
-#endif
-
-/****************************************************************************
  * Name: pmecc_configure
  *
  * Description:
@@ -1281,7 +1260,7 @@ int pmecc_configure(struct sam_nandcs_s *priv, bool protected)
 #if NAND_NPMECC_BANKS > 1
 int pmecc_lock(void)
 {
-  return nxsem_wait_uninterruptible(&g_pmecc.exclsem);
+  return nxmutex_lock(&g_pmecc.lock);
 }
 #endif
 
@@ -1302,7 +1281,7 @@ int pmecc_lock(void)
 #if NAND_NPMECC_BANKS > 1
 void pmecc_unlock(void)
 {
-  nxsem_post(&g_pmecc.exclsem);
+  nxmutex_unlock(&g_pmecc.lock);
 }
 #endif
 
@@ -1328,7 +1307,7 @@ void pmecc_unlock(void)
 int pmecc_correction(uint32_t isr, uintptr_t data)
 {
 #ifdef CONFIG_SAMA5_PMECC_EMBEDDEDALGO
-  /* REVISIT:  Whare are the types Pmecc and Pmerrloc?
+  /* REVISIT:  Whare are the types pmecc and pmerrloc?
    * REVISIT:  Check returned value
    */
 

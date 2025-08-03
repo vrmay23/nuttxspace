@@ -1,6 +1,7 @@
 /****************************************************************************
  * net/devif/ipv4_input.c
- * Device driver IPv4 packet receipt interface
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
  *
  *   Copyright (C) 2007-2009, 2013-2015, 2018-2019 Gregory Nutt. All rights
  *     reserved.
@@ -94,6 +95,7 @@
 #include <nuttx/net/netstats.h>
 #include <nuttx/net/ip.h>
 
+#include "arp/arp.h"
 #include "inet/inet.h"
 #include "tcp/tcp.h"
 #include "udp/udp.h"
@@ -103,221 +105,37 @@
 
 #include "ipforward/ipforward.h"
 #include "devif/devif.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-/* Macros */
-
-#define BUF                  ((FAR struct ipv4_hdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev)])
-#define FBUF                 ((FAR struct ipv4_hdr_s *)&g_reassembly_buffer[0])
-
-/* IP fragment re-assembly.
- *
- * REVISIT:  There are multiple issues with the current implementation:
- * 1. IPv4 reassembly is untested.
- * 2. Currently can only work with Ethernet due to the definition of
- *    IPv4_REASS_BUFSIZE.
- * 3. Since there is only a single reassembly buffer, IPv4 reassembly cannot
- *    be used in a context where multiple network devices may be concurrently
- *    re-assembling packets.
- */
-
-#define IP_MF                0x20  /* See IP_FLAG_MOREFRAGS */
-#define IPv4_REASS_BUFSIZE   (CONFIG_NET_ETH_PKTSIZE - ETH_HDRLEN)
-#define IPv4_REASS_LASTFRAG  0x01
+#include "nat/nat.h"
+#include "ipfilter/ipfilter.h"
+#include "ipfrag/ipfrag.h"
+#include "utils/utils.h"
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
-#ifdef CONFIG_NET_IPv4_REASSEMBLY
-
-static uint8_t g_reassembly_buffer[IPv4_REASS_BUFSIZE];
-static uint8_t g_reassembly_bitmap[IPv4_REASS_BUFSIZE / (8 * 8)];
-
-static const uint8_t g_bitmap_bits[8] =
-{
-  0xff, 0x7f, 0x3f, 0x1f, 0x0f, 0x07, 0x03, 0x01
-};
-
-static uint16_t g_reassembly_len;
-static uint8_t g_reassembly_flags;
-
-#endif /* CONFIG_NET_IPv4_REASSEMBLY */
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: devif_reassembly
+ * Name: ipv4_in
  *
  * Description:
- *   IP fragment reassembly: not well-tested.
+ *   Receive an IPv4 packet from the network device.  Verify and forward to
+ *   L3 packet handling logic if the packet is destined for us.
  *
- * Assumptions:
+ *   This is the iob buffer version of ipv4_input(),
+ *   this function will support send/receive iob vectors directly between
+ *   the driver and l3/l4 stack to avoid unnecessary memory copies,
+ *   especially on hardware that supports Scatter/gather, which can
+ *   greatly improve performance
+ *   this function will uses d_iob as packets input which used by some
+ *   NICs such as celluler net driver.
  *
- ****************************************************************************/
-
-#ifdef CONFIG_NET_IPv4_REASSEMBLY
-static uint8_t devif_reassembly(FAR struct net_driver_s *dev)
-{
-  FAR struct ipv4_hdr_s *ipv4  = BUF;
-  FAR struct ipv4_hdr_s *fipv4 = FBUF;
-  uint16_t offset;
-  uint16_t len;
-  uint16_t i;
-
-  /* If g_reassembly_timer is zero, no packet is present in the buffer, so
-   * we write the IP header of the fragment into the reassembly buffer.  The
-   * timer is updated with the maximum age.
-   */
-
-  if (!g_reassembly_timer)
-    {
-      memcpy(g_reassembly_buffer, &ipv4->vhl, IPv4_HDRLEN);
-      g_reassembly_timer = CONFIG_NET_IPv4_REASS_MAXAGE;
-      g_reassembly_flags = 0;
-
-      /* Clear the bitmap. */
-
-      memset(g_reassembly_bitmap, 0, sizeof(g_reassembly_bitmap));
-    }
-
-  /* Check if the incoming fragment matches the one currently present
-   * in the reassembly buffer. If so, we proceed with copying the
-   * fragment into the buffer.
-   */
-
-  if (net_ipv4addr_hdrcmp(ipv4->srcipaddr, fipv4->srcipaddr) &&
-      net_ipv4addr_hdrcmp(ipv4->destipaddr, fipv4->destipaddr) &&
-      ipv4->ipid[0] == fipv4->ipid[0] && ipv4->ipid[1] == fipv4->ipid[1])
-    {
-      len    = ((uint16_t)ipv4->len[0] << 8) + (uint16_t)ipv4->len[1] -
-               (uint16_t)(ipv4->vhl & 0x0f) * 4;
-      offset = (((ipv4->ipoffset[0] & 0x3f) << 8) + ipv4->ipoffset[1]) * 8;
-
-      /* If the offset or the offset + fragment length overflows the
-       * reassembly buffer, we discard the entire packet.
-       */
-
-      if (offset > IPv4_REASS_BUFSIZE || offset + len > IPv4_REASS_BUFSIZE)
-        {
-          g_reassembly_timer = 0;
-          goto nullreturn;
-        }
-
-      /* Copy the fragment into the reassembly buffer, at the right offset. */
-
-      memcpy(&g_reassembly_buffer[IPv4_HDRLEN + offset],
-             (FAR char *)ipv4 + (int)((ipv4->vhl & 0x0f) * 4), len);
-
-      /* Update the bitmap. */
-
-      if (offset / (8 * 8) == (offset + len) / (8 * 8))
-        {
-          /* If the two endpoints are in the same byte, we only update that byte. */
-
-          g_reassembly_bitmap[offset / (8 * 8)] |=
-            g_bitmap_bits[(offset / 8) & 7] &
-              ~g_bitmap_bits[((offset + len) / 8) & 7];
-        }
-      else
-        {
-          /* If the two endpoints are in different bytes, we update the bytes
-           * in the endpoints and fill the stuff in between with 0xff.
-           */
-
-          g_reassembly_bitmap[offset / (8 * 8)] |=
-            g_bitmap_bits[(offset / 8) & 7];
-
-          for (i = 1 + offset / (8 * 8); i < (offset + len) / (8 * 8); ++i)
-            {
-              g_reassembly_bitmap[i] = 0xff;
-            }
-
-          g_reassembly_bitmap[(offset + len) / (8 * 8)] |=
-            ~g_bitmap_bits[((offset + len) / 8) & 7];
-        }
-
-      /* If this fragment has the More Fragments flag set to zero, we know that
-       * this is the last fragment, so we can calculate the size of the entire
-       * packet. We also set the IP_REASS_FLAG_LASTFRAG flag to indicate that
-       * we have received the final fragment.
-       */
-
-      if ((ipv4->ipoffset[0] & IP_MF) == 0)
-        {
-          g_reassembly_flags |= IPv4_REASS_LASTFRAG;
-          g_reassembly_len = offset + len;
-        }
-
-      /* Finally, we check if we have a full packet in the buffer. We do this
-       * by checking if we have the last fragment and if all bits in the bitmap
-       * are set.
-       */
-
-      if (g_reassembly_flags & IPv4_REASS_LASTFRAG)
-        {
-          /* Check all bytes up to and including all but the last byte in
-           * the bitmap.
-           */
-
-          for (i = 0; i < g_reassembly_len / (8 * 8) - 1; ++i)
-            {
-              if (g_reassembly_bitmap[i] != 0xff)
-                {
-                  goto nullreturn;
-                }
-            }
-
-          /* Check the last byte in the bitmap. It should contain just the
-           * right amount of bits.
-           */
-
-          if (g_reassembly_bitmap[g_reassembly_len / (8 * 8)] !=
-              (uint8_t)~g_bitmap_bits[g_reassembly_len / 8 & 7])
-            {
-              goto nullreturn;
-            }
-
-          /* If we have come this far, we have a full packet in the buffer,
-           * so we allocate a ipv4 and copy the packet into it. We also reset
-           * the timer.
-           */
-
-          g_reassembly_timer = 0;
-          memcpy(ipv4, fipv4, g_reassembly_len);
-
-          /* Pretend to be a "normal" (i.e., not fragmented) IP packet from
-           * now on.
-           */
-
-          ipv4->ipoffset[0] = ipv4->ipoffset[1] = 0;
-          ipv4->len[0] = g_reassembly_len >> 8;
-          ipv4->len[1] = g_reassembly_len & 0xff;
-          ipv4->ipchksum = 0;
-          ipv4->ipchksum = ~(ipv4_chksum(dev));
-
-          return g_reassembly_len;
-        }
-    }
-
-nullreturn:
-  return 0;
-}
-#endif /* CONFIG_NET_IPv4_REASSEMBLY */
-
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: ipv4_input
- *
- * Description:
+ * Input Parameters:
+ *   dev   - The device on which the packet was received and which contains
+ *           the IPv4 packet.
  *
  * Returned Value:
  *   OK    - The packet was processed (or dropped) and can be discarded.
@@ -328,12 +146,16 @@ nullreturn:
  *
  ****************************************************************************/
 
-int ipv4_input(FAR struct net_driver_s *dev)
+static int ipv4_in(FAR struct net_driver_s *dev)
 {
-  FAR struct ipv4_hdr_s *ipv4 = BUF;
+  FAR struct ipv4_hdr_s *ipv4 = IPv4BUF;
   in_addr_t destipaddr;
-  uint16_t llhdrlen;
   uint16_t totlen;
+  int ret = OK;
+
+  /* Handle ARP on input then give the IPv4 packet to the network layer */
+
+  arp_ipin(dev);
 
   /* This is where the input processing starts. */
 
@@ -365,14 +187,17 @@ int ipv4_input(FAR struct net_driver_s *dev)
 
   /* Get the size of the packet minus the size of link layer header */
 
-  llhdrlen = NET_LL_HDRLEN(dev);
-  if ((llhdrlen + IPv4_HDRLEN) > dev->d_len)
+  if (IPv4_HDRLEN > dev->d_len)
     {
       nwarn("WARNING: Packet shorter than IPv4 header\n");
       goto drop;
     }
 
-  dev->d_len -= llhdrlen;
+  /* Make sure that all packet processing logic knows that there is an IPv4
+   * packet in the device buffer.
+   */
+
+  IFF_SET_IPv4(dev->d_flags);
 
   /* Check the size of the packet.  If the size reported to us in d_len is
    * smaller the size reported in the IP header, we assume that the packet
@@ -382,11 +207,12 @@ int ipv4_input(FAR struct net_driver_s *dev)
    */
 
   totlen = (ipv4->len[0] << 8) + ipv4->len[1];
-  if (totlen <= dev->d_len)
+  if (totlen < dev->d_len)
     {
+      iob_update_pktlen(dev->d_iob, totlen, false);
       dev->d_len = totlen;
     }
-  else
+  else if (totlen > dev->d_len)
     {
       nwarn("WARNING: IP packet shorter than length in IP header\n");
       goto drop;
@@ -396,19 +222,26 @@ int ipv4_input(FAR struct net_driver_s *dev)
 
   if ((ipv4->ipoffset[0] & 0x3f) != 0 || ipv4->ipoffset[1] != 0)
     {
-#ifdef CONFIG_NET_IPv4_REASSEMBLY
-      dev->d_len = devif_reassembly(dev);
-      if (dev->d_len == 0)
-#endif
+#ifdef CONFIG_NET_IPFRAG
+      if (ipv4_fragin(dev) == OK)
         {
-#ifdef CONFIG_NET_STATISTICS
-          g_netstats.ipv4.drop++;
-          g_netstats.ipv4.fragerr++;
-#endif
-          nwarn("WARNING: IP fragment dropped\n");
-          goto drop;
+          return OK;
         }
+
+#endif
+#ifdef CONFIG_NET_STATISTICS
+      g_netstats.ipv4.drop++;
+      g_netstats.ipv4.fragerr++;
+#endif
+      nwarn("WARNING: IP fragment dropped\n");
+      goto drop;
     }
+
+#ifdef CONFIG_NET_NAT44
+  /* Try NAT inbound, rule matching will be performed in NAT module. */
+
+  ipv4_nat_inbound(dev, ipv4);
+#endif
 
   /* Get the destination IP address in a friendlier form */
 
@@ -428,18 +261,16 @@ int ipv4_input(FAR struct net_driver_s *dev)
       /* Forward broadcast packets */
 
       ipv4_forward_broadcast(dev, ipv4);
-#endif
-      return udp_ipv4_input(dev);
-    }
-  else
-#endif
-#ifdef CONFIG_NET_ICMP
-  /* In other cases, the device must be assigned a non-zero IP address. */
 
-  if (net_ipv4addr_cmp(dev->d_ipaddr, INADDR_ANY))
-    {
-      nwarn("WARNING: No IP address assigned\n");
-      goto drop;
+      /* Process the incoming packet if not forwardable */
+
+      if (dev->d_len > 0)
+#endif
+        {
+          ret = udp_ipv4_input(dev);
+        }
+
+      goto done;
     }
   else
 #endif
@@ -458,8 +289,16 @@ int ipv4_input(FAR struct net_driver_s *dev)
       /* Forward broadcast packets */
 
       ipv4_forward_broadcast(dev, ipv4);
+
+      /* Process the incoming packet if not forwardable */
+
+      if (dev->d_len > 0)
 #endif
-      return udp_ipv4_input(dev);
+        {
+          ret = udp_ipv4_input(dev);
+        }
+
+      goto done;
     }
   else
 #endif
@@ -479,6 +318,13 @@ int ipv4_input(FAR struct net_driver_s *dev)
           /* Forward multicast packets */
 
           ipv4_forward_broadcast(dev, ipv4);
+
+          /* Return success if the packet was forwarded. */
+
+          if (dev->d_len == 0)
+            {
+              goto done;
+            }
 #endif
         }
       else
@@ -489,8 +335,7 @@ int ipv4_input(FAR struct net_driver_s *dev)
 #ifdef CONFIG_NET_IPFORWARD
           /* Try to forward the packet */
 
-          int ret = ipv4_forward(dev, ipv4);
-          if (ret >= 0)
+          if (ipv4_forward(dev, ipv4) >= 0)
             {
               /* The packet was forwarded.  Return success; d_len will
                * be set appropriately by the forwarding logic:  Cleared
@@ -499,16 +344,24 @@ int ipv4_input(FAR struct net_driver_s *dev)
                * it was received on.
                */
 
-              return OK;
+              goto done;
             }
           else
+#endif
+#if defined(NET_UDP_HAVE_STACK) && defined(CONFIG_NET_BINDTODEVICE)
+          /* If the protocol specific socket option NET_BINDTODEVICE
+           * is selected, then we must forward all UDP packets to the bound
+           * socket.
+           */
+
+          if (ipv4->proto != IP_PROTO_UDP)
 #endif
             {
               /* Not destined for us and not forwardable... Drop the
                * packet.
                */
 
-              nwarn("WARNING: Not destined for us; not forwardable... "
+              ninfo("WARNING: Not destined for us; not forwardable... "
                     "Dropping!\n");
 
 #ifdef CONFIG_NET_STATISTICS
@@ -518,8 +371,19 @@ int ipv4_input(FAR struct net_driver_s *dev)
             }
         }
     }
+#ifdef CONFIG_NET_ICMP
 
-  if (ipv4_chksum(dev) != 0xffff)
+  /* In other cases, the device must be assigned a non-zero IP address. */
+
+  else if (net_ipv4addr_cmp(dev->d_ipaddr, INADDR_ANY))
+    {
+      nwarn("WARNING: No IP address assigned\n");
+      goto drop;
+    }
+#endif
+
+#ifdef CONFIG_NET_IPV4_CHECKSUMS
+  if (ipv4_chksum(IPv4BUF) != 0xffff)
     {
       /* Compute and check the IP header checksum. */
 
@@ -530,12 +394,15 @@ int ipv4_input(FAR struct net_driver_s *dev)
       nwarn("WARNING: Bad IP checksum\n");
       goto drop;
     }
+#endif
 
-  /* Make sure that all packet processing logic knows that there is an IPv4
-   * packet in the device buffer.
-   */
-
-  IFF_SET_IPv4(dev->d_flags);
+#ifdef CONFIG_NET_IPFILTER
+  if (ipv4_filter_in(dev) != IPFILTER_TARGET_ACCEPT)
+    {
+      ninfo("Drop/Reject INPUT packet due to filter.\n");
+      goto done;
+    }
+#endif
 
   /* Now process the incoming packet according to the protocol. */
 
@@ -579,9 +446,24 @@ int ipv4_input(FAR struct net_driver_s *dev)
         goto drop;
     }
 
+#ifdef CONFIG_NET_IPFILTER
+  ipfilter_out(dev);
+#endif
+
+#if defined(CONFIG_NET_IPFORWARD) || defined(CONFIG_NET_IPFILTER) || \
+    (defined(CONFIG_NET_BROADCAST) && defined(NET_UDP_HAVE_STACK))
+done:
+#endif
+
+#ifdef CONFIG_NET_IPFRAG
+  ip_fragout(dev);
+#endif
+
+  devif_out(dev);
+
   /* Return and let the caller do any pending transmission. */
 
-  return OK;
+  return ret;
 
   /* Drop the packet.  NOTE that OK is returned meaning that the
    * packet has been processed (although processed unsuccessfully).
@@ -591,4 +473,57 @@ drop:
   dev->d_len = 0;
   return OK;
 }
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: ipv4_input
+ *
+ * Description:
+ *   Receive an IPv4 packet from the network device.  Verify and forward to
+ *   L3 packet handling logic if the packet is destined for us.
+ *
+ * Input Parameters:
+ *   dev   - The device on which the packet was received and which contains
+ *           the IPv4 packet.
+ *
+ * Returned Value:
+ *   OK    - The packet was processed (or dropped) and can be discarded.
+ *   ERROR - Hold the packet and try again later.  There is a listening
+ *           socket but no receive in place to catch the packet yet.  The
+ *           device's d_len will be set to zero in this case as there is
+ *           no outgoing data.
+ *
+ ****************************************************************************/
+
+int ipv4_input(FAR struct net_driver_s *dev)
+{
+  FAR uint8_t *buf;
+  int ret;
+
+  /* Store reception timestamp if enabled and not provided by hardware. */
+
+#if defined(CONFIG_NET_TIMESTAMP) && !defined(CONFIG_ARCH_HAVE_NETDEV_TIMESTAMP)
+  clock_gettime(CLOCK_REALTIME, &dev->d_rxtime);
+#endif
+
+  if (dev->d_iob != NULL)
+    {
+      buf = dev->d_buf;
+
+      /* Set the device buffer to l2 */
+
+      dev->d_buf = NETLLBUF;
+      ret = ipv4_in(dev);
+
+      dev->d_buf = buf;
+
+      return ret;
+    }
+
+  return netdev_input(dev, ipv4_in, true);
+}
+
 #endif /* CONFIG_NET_IPv4 */

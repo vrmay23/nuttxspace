@@ -1,38 +1,22 @@
 /****************************************************************************
  * boards/arm/stm32/hymini-stm32v/src/stm32_r61505u.c
  *
- *   Copyright (C) 2009, 2011, 2013, 2018 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *            Laurent Latil <laurent@latil.nom.fr>
- *            C. Faure 2013-05-15
- *            - Adapted initialization from SSD1289 to r61505u
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,6 +30,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -54,7 +39,7 @@
 #include <nuttx/spi/spi.h>
 #include <nuttx/lcd/lcd.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "stm32.h"
 #include "hymini-stm32v.h"
 
@@ -85,7 +70,10 @@
 
 #define LCD_BL_TIMER_PERIOD 8999
 
-/* LCD is connected to the FSMC_Bank1_NOR/SRAM1 and NE1 is used as ship select signal */
+/* LCD is connected to the FSMC_Bank1_NOR/SRAM1 and NE1 is used as ship
+ * select signal
+ */
+
 /* RS <==> A16 */
 
 #define LCD_REG          (*((volatile unsigned short *) 0x60000000)) /* RS = 0 */
@@ -132,17 +120,18 @@ static void lcd_clear(uint16_t color);
 
 /* LCD Data Transfer Methods */
 
-static int lcd_putrun(fb_coord_t row, fb_coord_t col, FAR const uint8_t *buffer,
-             size_t npixels);
-static int lcd_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t *buffer,
-             size_t npixels);
+static int lcd_putrun(struct lcd_dev_s *dev, fb_coord_t row, fb_coord_t col,
+                      const uint8_t *buffer, size_t npixels);
+static int lcd_getrun(struct lcd_dev_s *dev, fb_coord_t row, fb_coord_t col,
+                      uint8_t *buffer, size_t npixels);
 
 /* LCD Configuration */
 
-static int lcd_getvideoinfo(FAR struct lcd_dev_s *dev,
-             FAR struct fb_videoinfo_s *vinfo);
-static int lcd_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
-             FAR struct lcd_planeinfo_s *pinfo);
+static int lcd_getvideoinfo(struct lcd_dev_s *dev,
+                            struct fb_videoinfo_s *vinfo);
+static int lcd_getplaneinfo(struct lcd_dev_s *dev,
+                            unsigned int planeno,
+                            struct lcd_planeinfo_s *pinfo);
 
 /* LCD RGB Mapping */
 
@@ -161,7 +150,8 @@ static int lcd_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
 static int lcd_getpower(struct lcd_dev_s *dev);
 static int lcd_setpower(struct lcd_dev_s *dev, int power);
 static int lcd_getcontrast(struct lcd_dev_s *dev);
-static int lcd_setcontrast(struct lcd_dev_s *dev, unsigned int contrast);
+static int lcd_setcontrast(struct lcd_dev_s *dev,
+                           unsigned int contrast);
 
 /* Initialization (LCD ctrl / backlight) */
 
@@ -187,11 +177,11 @@ static const uint16_t fsmc_gpios[] =
   /* D0... D15 */
 
   GPIO_NPS_D0, GPIO_NPS_D1, GPIO_NPS_D2, GPIO_NPS_D3,
-  GPIO_NPS_D4, GPIO_NPS_D5, GPIO_NPS_D6, GPIO_NPS_D7, GPIO_NPS_D8, GPIO_NPS_D9,
-  GPIO_NPS_D10, GPIO_NPS_D11, GPIO_NPS_D12, GPIO_NPS_D13, GPIO_NPS_D14,
-  GPIO_NPS_D15,
+  GPIO_NPS_D4, GPIO_NPS_D5, GPIO_NPS_D6, GPIO_NPS_D7,
+  GPIO_NPS_D8, GPIO_NPS_D9, GPIO_NPS_D10, GPIO_NPS_D11,
+  GPIO_NPS_D12, GPIO_NPS_D13, GPIO_NPS_D14, GPIO_NPS_D15,
 
-  /* NOE, NWE  */
+  /* NOE, NWE */
 
   GPIO_NPS_NOE, GPIO_NPS_NWE,
 
@@ -229,10 +219,10 @@ static const struct fb_videoinfo_s g_videoinfo =
 
 static const struct lcd_planeinfo_s g_planeinfo =
 {
-  .putrun = lcd_putrun,   /* Put a run into LCD memory */
-  .getrun = lcd_getrun,   /* Get a run from LCD memory */
-  .buffer = (uint8_t*) g_runbuffer, /* Run scratch buffer */
-  .bpp    = LCD_BPP,      /* Bits-per-pixel */
+  .putrun = lcd_putrun,              /* Put a run into LCD memory */
+  .getrun = lcd_getrun,              /* Get a run from LCD memory */
+  .buffer = (uint8_t *) g_runbuffer, /* Run scratch buffer */
+  .bpp    = LCD_BPP,                 /* Bits-per-pixel */
 };
 
 /* This is the standard, NuttX LCD driver object */
@@ -246,6 +236,7 @@ static struct mylcd_dev_s g_lcddev =
     .getplaneinfo = lcd_getplaneinfo,
 
     /* LCD RGB Mapping -- Not supported */
+
     /* Cursor Controls -- Not supported */
 
     /* LCD Specific Controls */
@@ -306,8 +297,8 @@ static void stm32_selectlcd(void)
 
   /* Bank1 NOR/SRAM timing register configuration */
 
-  putreg32(FSMC_BTR_ADDSET(2)  | FSMC_BTR_ADDHLD(0) |FSMC_BTR_DATAST(2) |
-           FSMC_BTR_BUSTURN(0) | FSMC_BTR_CLKDIV(0) | FSMC_BTR_DATLAT(0) |
+  putreg32(FSMC_BTR_ADDSET(2)  | FSMC_BTR_ADDHLD(1) | FSMC_BTR_DATAST(2) |
+           FSMC_BTR_BUSTURN(1) | FSMC_BTR_CLKDIV(1) | FSMC_BTR_DATLAT(2) |
            FSMC_BTR_ACCMODA,
            STM32_FSMC_BTR1);
 
@@ -409,19 +400,19 @@ static inline void lcd_gramselect(void)
 static void lcd_setcursor(unsigned int x, unsigned int y)
 {
 #if defined(CONFIG_LCD_PORTRAIT) || defined (CONFIG_LCD_RPORTRAIT)
-# if defined (CONFIG_LCD_RPORTRAIT)
+#  if defined (CONFIG_LCD_RPORTRAIT)
   x = (LCD_XRES - 1) - x;
   y = (LCD_YRES - 1) - y;
-# endif
-  write_reg(0x20,x); /* Row */
-  write_reg(0x21,y); /* Line */
+#  endif
+  write_reg(0x20, x); /* Row */
+  write_reg(0x21, y); /* Line */
 #endif
 
 #if defined(CONFIG_LCD_LANDSCAPE)
   y = (LCD_YRES - 1) - y;
 
-  write_reg(0x20,x); /* Row */
-  write_reg(0x21,y); /* Line */
+  write_reg(0x20, x); /* Row */
+  write_reg(0x21, y); /* Line */
 #endif
 }
 
@@ -439,11 +430,11 @@ static void lcd_setcursor(unsigned int x, unsigned int y)
  *
  ****************************************************************************/
 
-static int lcd_putrun(fb_coord_t row, fb_coord_t col, FAR const uint8_t *buffer,
-                      size_t npixels)
+static int lcd_putrun(struct lcd_dev_s *dev, fb_coord_t row, fb_coord_t col,
+                      const uint8_t *buffer, size_t npixels)
 {
   int i;
-  FAR const uint16_t *src = (FAR const uint16_t*) buffer;
+  const uint16_t *src = (const uint16_t *) buffer;
 
   /* Buffer must be provided and aligned to a 16-bit address boundary */
 
@@ -476,10 +467,10 @@ static int lcd_putrun(fb_coord_t row, fb_coord_t col, FAR const uint8_t *buffer,
  *
  ****************************************************************************/
 
-static int lcd_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t *buffer,
-                      size_t npixels)
+static int lcd_getrun(struct lcd_dev_s *dev, fb_coord_t row, fb_coord_t col,
+                      uint8_t *buffer, size_t npixels)
 {
-  FAR uint16_t *dest = (FAR uint16_t*) buffer;
+  uint16_t *dest = (uint16_t *) buffer;
   int i;
 
   /* Buffer must be provided and aligned to a 16-bit address boundary */
@@ -511,12 +502,13 @@ static int lcd_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t *buffer,
  *
  ****************************************************************************/
 
-static int lcd_getvideoinfo(FAR struct lcd_dev_s *dev,
-                            FAR struct fb_videoinfo_s *vinfo)
+static int lcd_getvideoinfo(struct lcd_dev_s *dev,
+                            struct fb_videoinfo_s *vinfo)
 {
   DEBUGASSERT(dev && vinfo);
   ginfo("fmt: %d xres: %d yres: %d nplanes: %d\n",
-        g_videoinfo.fmt, g_videoinfo.xres, g_videoinfo.yres, g_videoinfo.nplanes);
+        g_videoinfo.fmt, g_videoinfo.xres,
+        g_videoinfo.yres, g_videoinfo.nplanes);
 
   memcpy(vinfo, &g_videoinfo, sizeof(struct fb_videoinfo_s));
   return OK;
@@ -530,13 +522,14 @@ static int lcd_getvideoinfo(FAR struct lcd_dev_s *dev,
  *
  ****************************************************************************/
 
-static int lcd_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
-                            FAR struct lcd_planeinfo_s *pinfo)
+static int lcd_getplaneinfo(struct lcd_dev_s *dev, unsigned int planeno,
+                            struct lcd_planeinfo_s *pinfo)
 {
   DEBUGASSERT(dev && pinfo && planeno == 0);
   ginfo("planeno: %d bpp: %d\n", planeno, g_planeinfo.bpp);
 
   memcpy(pinfo, &g_planeinfo, sizeof(struct lcd_planeinfo_s));
+  pinfo->dev = dev;
   return OK;
 }
 
@@ -544,7 +537,8 @@ static int lcd_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
  * Name:  lcd_getpower
  *
  * Description:
- *   Get the LCD panel power status (0: full off - CONFIG_LCD_MAXPOWER: full on). On
+ *   Get the LCD panel power status
+ *   (0: full off - CONFIG_LCD_MAXPOWER: full on). On
  *   backlit LCDs, this setting may correspond to the backlight setting.
  *
  ****************************************************************************/
@@ -559,7 +553,8 @@ static int lcd_getpower(struct lcd_dev_s *dev)
  * Name:  lcd_setpower
  *
  * Description:
- *   Enable/disable LCD panel power (0: full off - CONFIG_LCD_MAXPOWER: full on).
+ *   Enable/disable LCD panel power
+ *  (0: full off - CONFIG_LCD_MAXPOWER: full on).
  *   Used here to set pwm duty on timer used for backlight.
  *
  ****************************************************************************/
@@ -586,7 +581,8 @@ static int lcd_setpower(struct lcd_dev_s *dev, int power)
        * maximum power setting.
        */
 
-      duty = ((uint32_t)LCD_BL_TIMER_PERIOD * (uint32_t)power) / CONFIG_LCD_MAXPOWER;
+      duty = ((uint32_t)LCD_BL_TIMER_PERIOD * (uint32_t)power) /
+              CONFIG_LCD_MAXPOWER;
       if (duty >= LCD_BL_TIMER_PERIOD)
         {
           duty = LCD_BL_TIMER_PERIOD - 1;
@@ -647,93 +643,93 @@ static int lcd_setcontrast(struct lcd_dev_s *dev, unsigned int contrast)
 
 static inline void lcd_initialize(void)
 {
-  /* Second release on 3/5  ,luminance is acceptable,water wave appear during camera
-   * preview
+  /* Second release on 3/5  ,luminance is acceptable,water wave appear
+   * during camera preview
    */
 
-  write_reg(0x07,0x0000);
-  up_mdelay(5);              /* Delay 50 ms */
-  write_reg(0x12,0x011C);    /* Why need to set several times? */
-  write_reg(0xA4,0x0001);    /* NVM */
-  write_reg(0x08,0x000F);
-  write_reg(0x0A,0x0008);
-  write_reg(0x0D,0x0008);
+  write_reg(0x07, 0x0000);
+  up_mdelay(5);               /* Delay 50 ms */
+  write_reg(0x12, 0x011c);    /* Why need to set several times? */
+  write_reg(0xa4, 0x0001);    /* NVM */
+  write_reg(0x08, 0x000f);
+  write_reg(0x0a, 0x0008);
+  write_reg(0x0d, 0x0008);
 
   /* GAMMA CONTROL */
 
-  write_reg(0x30,0x0707);
-  write_reg(0x31,0x0007);
-  write_reg(0x32,0x0603);
-  write_reg(0x33,0x0700);
-  write_reg(0x34,0x0202);
-  write_reg(0x35,0x0002);
-  write_reg(0x36,0x1F0F);
-  write_reg(0x37,0x0707);
-  write_reg(0x38,0x0000);
-  write_reg(0x39,0x0000);
-  write_reg(0x3A,0x0707);
-  write_reg(0x3B,0x0000);
-  write_reg(0x3C,0x0007);
-  write_reg(0x3D,0x0000);
-  up_mdelay(5);              /* Delay 50 ms */
-  write_reg(0x07,0x0001);
-  write_reg(0x17,0x0001);    /* Power supply startup enable */
-  up_mdelay(5);              /* Delay 50 ms */
+  write_reg(0x30, 0x0707);
+  write_reg(0x31, 0x0007);
+  write_reg(0x32, 0x0603);
+  write_reg(0x33, 0x0700);
+  write_reg(0x34, 0x0202);
+  write_reg(0x35, 0x0002);
+  write_reg(0x36, 0x1f0f);
+  write_reg(0x37, 0x0707);
+  write_reg(0x38, 0x0000);
+  write_reg(0x39, 0x0000);
+  write_reg(0x3a, 0x0707);
+  write_reg(0x3b, 0x0000);
+  write_reg(0x3c, 0x0007);
+  write_reg(0x3d, 0x0000);
+  up_mdelay(5);               /* Delay 50 ms */
+  write_reg(0x07, 0x0001);
+  write_reg(0x17, 0x0001);    /* Power supply startup enable */
+  up_mdelay(5);               /* Delay 50 ms */
 
   /* Power control */
 
-  write_reg(0x10,0x17A0);
-  write_reg(0x11,0x0217);    /* Feference voltage VC[2:0]   Vciout = 1.00*Vcivl */
-  write_reg(0x12,0x011E);    /* Vreg1out = Vcilvl*1.80   is it the same as Vgama1out ?  */
-  write_reg(0x13,0x0F00);    /* VDV[4:0]-->VCOM Amplitude VcomL = VcomH - Vcom Ampl */
-  write_reg(0x2A,0x0000);
-  write_reg(0x29,0x000A);    /* Vcomh = VCM1[4:0]*Vreg1out    gate source voltage?? */
-  write_reg(0x12,0x013E);    /* Power supply on */
+  write_reg(0x10, 0x17a0);
+  write_reg(0x11, 0x0217);    /* Feference voltage VC[2:0]   Vciout = 1.00*Vcivl */
+  write_reg(0x12, 0x011e);    /* Vreg1out = Vcilvl*1.80   is it the same as Vgama1out ?  */
+  write_reg(0x13, 0x0f00);    /* VDV[4:0]-->VCOM Amplitude VcomL = VcomH - Vcom Ampl */
+  write_reg(0x2a, 0x0000);
+  write_reg(0x29, 0x000a);    /* Vcomh = VCM1[4:0]*Vreg1out    gate source voltage?? */
+  write_reg(0x12, 0x013e);    /* Power supply on */
 
   /* Coordinates Control */
 
-  write_reg(0x50,0x0000);
-  write_reg(0x51,0x00EF);
-  write_reg(0x52,0x0000);
-  write_reg(0x53,0x013F);
+  write_reg(0x50, 0x0000);
+  write_reg(0x51, 0x00ef);
+  write_reg(0x52, 0x0000);
+  write_reg(0x53, 0x013f);
 
   /* Panel Image Control */
 
-  write_reg(0x60,0x2700);
-  write_reg(0x61,0x0001);
-  write_reg(0x6A,0x0000);
-  write_reg(0x80,0x0000);
+  write_reg(0x60, 0x2700);
+  write_reg(0x61, 0x0001);
+  write_reg(0x6a, 0x0000);
+  write_reg(0x80, 0x0000);
 
   /* Partial Image Control */
 
-  write_reg(0x81,0x0000);
-  write_reg(0x82,0x0000);
-  write_reg(0x83,0x0000);
-  write_reg(0x84,0x0000);
-  write_reg(0x85,0x0000);
+  write_reg(0x81, 0x0000);
+  write_reg(0x82, 0x0000);
+  write_reg(0x83, 0x0000);
+  write_reg(0x84, 0x0000);
+  write_reg(0x85, 0x0000);
 
   /* Panel Interface Control */
 
-  write_reg(0x90,0x0013);    /* Frequency */
-  write_reg(0x92,0x0300);
-  write_reg(0x93,0x0005);
-  write_reg(0x95,0x0000);
-  write_reg(0x97,0x0000);
-  write_reg(0x98,0x0000);
+  write_reg(0x90, 0x0013);    /* Frequency */
+  write_reg(0x92, 0x0300);
+  write_reg(0x93, 0x0005);
+  write_reg(0x95, 0x0000);
+  write_reg(0x97, 0x0000);
+  write_reg(0x98, 0x0000);
 
-  write_reg(0x01,0x0100);
-  write_reg(0x02,0x0700);
-  write_reg(0x03,0x1030);
-  write_reg(0x04,0x0000);
-  write_reg(0x0C,0x0000);
-  write_reg(0x0F,0x0000);
-  write_reg(0x20,0x0000);
-  write_reg(0x21,0x0000);
-  write_reg(0x07,0x0021);
+  write_reg(0x01, 0x0100);
+  write_reg(0x02, 0x0700);
+  write_reg(0x03, 0x1030);
+  write_reg(0x04, 0x0000);
+  write_reg(0x0c, 0x0000);
+  write_reg(0x0f, 0x0000);
+  write_reg(0x20, 0x0000);
+  write_reg(0x21, 0x0000);
+  write_reg(0x07, 0x0021);
   up_mdelay(20);             /* Delay 200 ms */
-  write_reg(0x07,0x0061);
+  write_reg(0x07, 0x0061);
   up_mdelay(20);             /* Delay 200 ms */
-  write_reg(0x07,0x0173);
+  write_reg(0x07, 0x0173);
   up_mdelay(20);             /* Delay 200 ms */
 }
 
@@ -806,15 +802,18 @@ static void lcd_backlight(void)
 
   /* Set the capture compare register value (50% duty) */
 
-  // FIXME should be set to 0  (appl needs to call setpower to change it)
+  /* FIXME should be set to 0
+   *  (appl needs to call setpower to change it)
+   */
+
   g_lcddev.power = (CONFIG_LCD_MAXPOWER + 1) / 2;
   putreg16((LCD_BL_TIMER_PERIOD + 1) / 2, STM32_TIM3_CCR2);
 
   /* Select the output polarity level == HIGH */
 
-  ccer &= !ATIM_CCER_CC2P;
+  ccer &= ~ATIM_CCER_CC2P;
 
-  /* Enable channel 2*/
+  /* Enable channel 2 */
 
   ccer |= ATIM_CCER_CC2E;
 
@@ -827,7 +826,7 @@ static void lcd_backlight(void)
 
   modifyreg16(STM32_TIM3_CR1, 0, ATIM_CR1_ARPE);
 
-  /* Enable Backlight Timer !!!!*/
+  /* Enable Backlight Timer !!!! */
 
   modifyreg16(STM32_TIM3_CR1, 0, ATIM_CR1_CEN);
 
@@ -864,9 +863,9 @@ static void lcd_backlight(void)
  * Name:  board_lcd_initialize
  *
  * Description:
- *   Initialize the LCD video hardware.  The initial state of the LCD is fully
- *   initialized, display memory cleared, and the LCD ready to use, but with the power
- *   setting at 0 (full off).
+ *   Initialize the LCD video hardware.  The initial state of the LCD is
+ *   fully initialized, display memory cleared, and the LCD ready to use,
+ *   but with the power setting at 0 (full off).
  *
  ****************************************************************************/
 
@@ -913,12 +912,12 @@ int board_lcd_initialize(void)
  * Name:  board_lcd_getdev
  *
  * Description:
- *   Return a a reference to the LCD object for the specified LCD.  This allows support
- *   for multiple LCD devices.
+ *   Return a a reference to the LCD object for the specified LCD.
+ *   This allows support for multiple LCD devices.
  *
  ****************************************************************************/
 
-FAR struct lcd_dev_s *board_lcd_getdev(int lcddev)
+struct lcd_dev_s *board_lcd_getdev(int lcddev)
 {
   DEBUGASSERT(lcddev == 0);
   return &g_lcddev.dev;

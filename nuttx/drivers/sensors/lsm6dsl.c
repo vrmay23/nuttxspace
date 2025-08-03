@@ -1,17 +1,13 @@
 /****************************************************************************
  * drivers/sensors/lsm6dsl.c
  *
- *   Copyright (C) 2018 Inc. All rights reserved.
- *   Author: Ben vd Veen <disruptivesolutionsnl@gmail.com>
- *   Alias: DisruptiveNL
- *
- * Based on:
- *
- *   Copyright (C) 2016 Omni Hoverboards Inc. All rights reserved.
- *   Author: Paul Alexander Patience <paul-a.patience@polymtl.ca>
- *
- *   Copyright (C) 2016, 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2018 Inc. All rights reserved.
+ * SPDX-FileCopyrightText: 2016 Omni Hoverboards Inc. All rights reserved.
+ * SPDX-FileCopyrightText: 2016, 2019 Gregory Nutt. All rights reserved.
+ * SPDX-FileContributor: Ben vd Veen <disruptivesolutionsnl@gmail.com>
+ * SPDX-FileContributor: Paul Alexander Patience <paul-a.patience@polymtl.ca>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,9 +44,11 @@
 
 #include <nuttx/config.h>
 
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/random.h>
@@ -65,9 +63,12 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifndef CONFIG_LSM6DSL_I2C_FREQUENCY
-#  define CONFIG_LSM6DSL_I2C_FREQUENCY 400000
-#endif
+/* Self test limits. */
+
+#define LSM6DSL_MIN_ST_LIMIT_MG   50.0f      /* Accelerator min limit */
+#define LSM6DSL_MAX_ST_LIMIT_MG   1700.0f    /* Accelerator max limit */
+#define LSM6DSL_MIN_ST_LIMIT_MDPS 150000.0f  /* Gyroscope min limit */
+#define LSM6DSL_MAX_ST_LIMIT_MDPS 700000.0f  /* Gyroscope max limit */
 
 /****************************************************************************
  * Private Function Prototypes
@@ -85,8 +86,6 @@ static int lsm6dsl_modifyreg8(FAR struct lsm6dsl_dev_s *priv,
 
 /* Other Helpers */
 
-static int lsm6dsl_find_minimum(int16_t a[], int n);
-static int lsm6dsl_find_maximum(int16_t a[], int n);
 static bool lsm6dsl_isbitset(int8_t b, int8_t n);
 
 /* Accelerometer Operations */
@@ -100,10 +99,8 @@ static int lsm6dsl_selftest(FAR struct lsm6dsl_dev_s *priv, uint32_t mode);
 
 /* Character Driver Methods */
 
-static int lsm6dsl_open(FAR struct file *filep);
-static int lsm6dsl_close(FAR struct file *filep);
-static ssize_t lsm6dsl_read(FAR struct file *filep,
-                            FAR char *buffer, size_t buflen);
+static ssize_t lsm6dsl_read(FAR struct file *filep, FAR char *buffer,
+                            size_t buflen);
 static ssize_t lsm6dsl_write(FAR struct file *filep,
                              FAR const char *buffer, size_t buflen);
 static int lsm6dsl_ioctl(FAR struct file *filep, int cmd,
@@ -127,16 +124,12 @@ static double g_gyrofactor = 0;
 
 static const struct file_operations g_fops =
 {
-  lsm6dsl_open,
-  lsm6dsl_close,
-  lsm6dsl_read,
-  lsm6dsl_write,
-  NULL,
-  lsm6dsl_ioctl,
-  NULL
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL
-#  endif
+  NULL,            /* open */
+  NULL,            /* close */
+  lsm6dsl_read,    /* read */
+  lsm6dsl_write,   /* write */
+  NULL,            /* seek */
+  lsm6dsl_ioctl,   /* ioctl */
 };
 
 static const struct lsm6dsl_ops_s g_lsm6dsl_sensor_ops =
@@ -302,58 +295,6 @@ static int lsm6dsl_modifyreg8(FAR struct lsm6dsl_dev_s *priv,
 }
 
 /****************************************************************************
- * Name: lsm6dsl_find_minimum
- *
- * Description:
- *   Find the minimum value in an array of numbers.
- *
- ****************************************************************************/
-
-static int lsm6dsl_find_minimum(int16_t a[], int n)
-{
-  int c;
-  int min = a[0];
-  int index = 0;
-
-  for (c = 1; c < n; c++)
-    {
-      if (a[c] < min)
-        {
-          index = c;
-          min = a[c];
-        }
-    }
-
-  return index;
-}
-
-/****************************************************************************
- * Name: lsm6dsl_find_maximum
- *
- * Description:
- *   Find the maximum value in an array of numbers.
- *
- ****************************************************************************/
-
-static int lsm6dsl_find_maximum(int16_t am[], int n)
-{
-  int c;
-  int max = am[0];
-  int index = 0;
-
-  for (c = 1; c < n; c++)
-    {
-      if (am[c] > max)
-        {
-          index = c;
-          max = am[c];
-        }
-    }
-
-  return index;
-}
-
-/****************************************************************************
  * Name: lsm6dsl_sensor_config
  *
  * Description:
@@ -428,7 +369,9 @@ static int lsm6dsl_sensor_start(FAR struct lsm6dsl_dev_s *priv)
 
   sninfo("Starting....");
 
-  /* Accelerometer config registers Turn on the accelerometer: 833Hz, +- 16g */
+  /* Accelerometer config registers:
+   * Turn on the accelerometer: 833Hz, +- 16g
+   */
 
   lsm6dsl_writereg8(priv, LSM6DSL_CTRL1_XL, 0x74);
   g_accelerofactor = 0.488;
@@ -523,20 +466,9 @@ static int lsm6dsl_selftest(FAR struct lsm6dsl_dev_s *priv, uint32_t mode)
   int16_t avr_xst = 0;
   int16_t avr_yst = 0;
   int16_t avr_zst = 0;
-
-  int16_t min_x = 0;
-  int16_t min_y = 0;
-  int16_t min_z = 0;
-  int16_t max_x = 0;
-  int16_t max_y = 0;
-  int16_t max_z = 0;
-
-  int16_t min_xst = 0;
-  int16_t min_yst = 0;
-  int16_t min_zst = 0;
-  int16_t max_xst = 0;
-  int16_t max_yst = 0;
-  int16_t max_zst = 0;
+  int16_t test_x  = 0;
+  int16_t test_y  = 0;
+  int16_t test_z  = 0;
 
   int16_t raw_x = 0;
   int16_t raw_y = 0;
@@ -545,6 +477,9 @@ static int lsm6dsl_selftest(FAR struct lsm6dsl_dev_s *priv, uint32_t mode)
   int16_t raw_xst = 0;
   int16_t raw_yst = 0;
   int16_t raw_zst = 0;
+
+  float st_limit_min = 0.0;
+  float st_limit_max = 0.0;
 
   /* mode = 0 then add hex 0x06 to OUT registers */
 
@@ -566,6 +501,8 @@ static int lsm6dsl_selftest(FAR struct lsm6dsl_dev_s *priv, uint32_t mode)
       lsm6dsl_writereg8(priv, LSM6DSL_CTRL2_G, 0x00);
       lsm6dsl_writereg8(priv, LSM6DSL_CTRL3_C, 0x44);
       g_accelerofactor = (0.122 / 1000);
+      st_limit_min = LSM6DSL_MIN_ST_LIMIT_MG;
+      st_limit_max = LSM6DSL_MAX_ST_LIMIT_MG;
     }
   else
     {
@@ -577,6 +514,8 @@ static int lsm6dsl_selftest(FAR struct lsm6dsl_dev_s *priv, uint32_t mode)
       lsm6dsl_writereg8(priv, LSM6DSL_CTRL2_G, 0x5c);
       lsm6dsl_writereg8(priv, LSM6DSL_CTRL3_C, 0x44);
       g_gyrofactor = (70 / 1000); /* 2000dps */
+      st_limit_min = LSM6DSL_MIN_ST_LIMIT_MDPS;
+      st_limit_max = LSM6DSL_MAX_ST_LIMIT_MDPS;
     }
 
   lsm6dsl_writereg8(priv, LSM6DSL_CTRL4_C, 0x00);
@@ -801,90 +740,57 @@ static int lsm6dsl_selftest(FAR struct lsm6dsl_dev_s *priv, uint32_t mode)
   avr_yst = (int16_t) avr_yst / samples;
   avr_zst = (int16_t) avr_zst / samples;
 
-  min_x = OUTX_NOST[lsm6dsl_find_minimum(OUTX_NOST, samples)];
-  min_y = OUTY_NOST[lsm6dsl_find_minimum(OUTY_NOST, samples)];
-  min_z = OUTZ_NOST[lsm6dsl_find_minimum(OUTZ_NOST, samples)];
-
-  max_x = OUTX_NOST[lsm6dsl_find_maximum(OUTX_NOST, samples)];
-  max_y = OUTY_NOST[lsm6dsl_find_maximum(OUTY_NOST, samples)];
-  max_z = OUTZ_NOST[lsm6dsl_find_maximum(OUTZ_NOST, samples)];
-
-  min_xst = OUTX_ST[lsm6dsl_find_minimum(OUTX_ST, samples)];
-  min_yst = OUTY_ST[lsm6dsl_find_minimum(OUTY_ST, samples)];
-  min_zst = OUTZ_ST[lsm6dsl_find_minimum(OUTZ_ST, samples)];
-
-  max_xst = OUTX_ST[lsm6dsl_find_maximum(OUTX_ST, samples)];
-  max_yst = OUTY_ST[lsm6dsl_find_maximum(OUTY_ST, samples)];
-  max_zst = OUTZ_ST[lsm6dsl_find_maximum(OUTZ_ST, samples)];
-
-  sninfo("stdev_x: -%d %d +%d\n", avr_x - min_x, avr_x, max_x - avr_x);
-  sninfo("stdev_y: -%d %d +%d\n", avr_y - min_y, avr_y, max_y - avr_y);
-  sninfo("stdev_z: -%d %d +%d\n", avr_z - min_z, avr_z, max_z - avr_z);
-
-  sninfo("stdev_xst: -%d %d +%d\n", avr_xst - min_xst, avr_xst,
-         max_xst - avr_xst);
-  sninfo("stdev_yst: -%d %d +%d\n", avr_yst - min_yst, avr_yst,
-         max_yst - avr_yst);
-  sninfo("stdev_zst: -%d %d +%d\n", avr_zst - min_zst, avr_zst,
-         max_zst - avr_zst);
-
   sninfo("avr_x: %d\n", avr_x);
   sninfo("avr_y: %d\n", avr_y);
   sninfo("avr_z: %d\n", avr_z);
-  sninfo("min_x: %d\n", min_x);
-  sninfo("max_x: %d\n", max_x);
-  sninfo("min_xst: %d\n", min_xst);
-  sninfo("max_xst: %d\n", max_xst);
+
+  test_x = fabs(avr_xst - avr_xst);
+  test_y = fabs(avr_yst - avr_yst);
+  test_z = fabs(avr_zst - avr_zst);
 
   /* Validation Question is placed at ST FAE because the equation in the
    * datasheet is doubtful.
    */
 
-  if ((avr_x >= min_x && avr_x <= max_x) &&
-      (avr_xst >= min_xst && avr_xst <= max_xst))
+  if (test_x >= st_limit_min && test_x <= st_limit_max)
     {
       sninfo("PASSED NOST AND ST FOR X!\n");
     }
   else
     {
       sninfo("FAILED NOST AND ST FOR X!\n");
-      sninfo("[ %d - %d ]", min_x, min_xst);
-      sninfo(" <=\n ");
-      sninfo("[ %d - %d ]", avr_x, avr_xst);
-      sninfo(" <=\n ");
-      sninfo("[ %d - %d ]", max_x, max_xst);
+      sninfo("[test_x: %d min: %f - max: %f ]"
+            , test_x
+            , st_limit_min
+            , st_limit_max);
       sninfo("\n");
     }
 
-  if ((avr_y >= min_y && avr_y <= max_y) &&
-      (avr_yst >= min_yst && avr_yst <= max_yst))
+  if (test_y >= st_limit_min && test_y <= st_limit_max)
     {
       sninfo("PASSED NOST AND ST FOR Y!\n");
     }
   else
     {
       sninfo("FAILED NOST AND ST FOR Y!\n");
-      sninfo("[ %d - %d ]", min_y, min_yst);
-      sninfo(" <=\n ");
-      sninfo("[ %d - %d ]", avr_y, avr_yst);
-      sninfo(" <=\n ");
-      sninfo("[ %d - %d ]", max_y, max_yst);
+      sninfo("[test_y: %d min: %f - max: %f ]"
+            , test_y
+            , st_limit_min
+            , st_limit_max);
       sninfo("\n");
     }
 
-  if ((avr_z >= min_z && avr_z <= max_z) &&
-      (avr_zst >= min_zst && avr_zst <= max_zst))
+  if (test_z >= st_limit_min && test_z <= st_limit_max)
     {
       sninfo("PASSED NOST AND ST FOR Z!\n");
     }
   else
     {
       sninfo("FAILED NOST AND ST FOR Z!\n");
-      sninfo("[ %d - %d ]", min_z, min_zst);
-      sninfo(" <=\n ");
-      sninfo("[ %d - %d ]", avr_z, avr_zst);
-      sninfo(" <=\n ");
-      sninfo("[ %d - %d ]", max_z, max_zst);
+      sninfo("[test_z: %d min: %f - max: %f ]"
+            , test_z
+            , st_limit_min
+            , st_limit_max);
       sninfo("\n");
     }
 
@@ -1037,33 +943,6 @@ static int lsm6dsl_sensor_read(FAR struct lsm6dsl_dev_s *priv,
 }
 
 /****************************************************************************
- * Name: lsm6dsl_open
- *
- * Description:
- *   This method is called when the device is opened.
- *
- ****************************************************************************/
-
-static int lsm6dsl_open(FAR struct file *filep)
-{
-  sninfo("Device LSM6DSL opened!!\r\n");
-  return OK;
-}
-
-/****************************************************************************
- * Name: lsm6dsl_close
- *
- * Description:
- *   This method is called when the device is closed.
- *
- ****************************************************************************/
-
-static int lsm6dsl_close(FAR struct file *filep)
-{
-  return OK;
-}
-
-/****************************************************************************
  * Name: lsm6dsl_read
  *
  * Description:
@@ -1090,11 +969,9 @@ static ssize_t lsm6dsl_read(FAR struct file *filep,
 
   /* Sanity check */
 
-  DEBUGASSERT(filep != NULL);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode != NULL);
-  priv = (FAR struct lsm6dsl_dev_s *)inode->i_private;
+  priv = inode->i_private;
 
   DEBUGASSERT(priv != NULL);
   DEBUGASSERT(priv->datareg == LSM6DSL_OUTX_L_G_SHIFT ||
@@ -1212,11 +1089,9 @@ static int lsm6dsl_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Sanity check */
 
-  DEBUGASSERT(filep != NULL);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode != NULL);
-  priv = (FAR struct lsm6dsl_dev_s *)inode->i_private;
+  priv = inode->i_private;
 
   DEBUGASSERT(priv != NULL);
 
@@ -1297,7 +1172,7 @@ static int lsm6dsl_register(FAR const char *devpath,
 
   /* Initialize the device's structure */
 
-  priv = (FAR struct lsm6dsl_dev_s *)kmm_malloc(sizeof(*priv));
+  priv = kmm_malloc(sizeof(*priv));
   if (priv == NULL)
     {
       snerr("ERROR: Failed to allocate instance\n");

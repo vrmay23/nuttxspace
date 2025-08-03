@@ -1,57 +1,42 @@
-/************************************************************************************************
+/****************************************************************************
  * arch/arm/src/samv7/hardware/sam_uart.h
- * Universal Asynchronous Receiver Transmitter (UART) and Universal Synchronous Asynchronous
- * Receiver Transmitter (USART) definitions for the SAMV71.
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- ************************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_SAMV7_HARDWARE_SAM_UART_H
 #define __ARCH_ARM_SRC_SAMV7_HARDWARE_SAM_UART_H
 
-/************************************************************************************************
+/****************************************************************************
  * Included Files
- ************************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 
 #include "arch/samv7/chip.h"
 #include "hardware/sam_memorymap.h"
 
-/************************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- ************************************************************************************************/
+ ****************************************************************************/
 
-/* UART register offsets ************************************************************************/
+/* UART register offsets ****************************************************/
 
 #define SAM_UART_CR_OFFSET           0x0000 /* Control Register (Common) */
 #define SAM_UART_MR_OFFSET           0x0004 /* Mode Register (Common) */
@@ -88,7 +73,7 @@
 #define SAM_UART_WPSR_OFFSET         0x00e8 /* Write Protect Status Register (USART only) */
                                             /* 0x00ec-0x00fc: Reserved (USART) */
 
-/* UART register addresses **********************************************************************/
+/* UART register addresses **************************************************/
 
 #if SAMV7_NUART > 0
 #  define SAM_UART0_CR               (SAM_UART0_BASE+SAM_UART_CR_OFFSET)
@@ -251,7 +236,7 @@
 #  define SAM_USART2_WPSR            (SAM_USART2_BASE+SAM_UART_WPSR_OFFSET)
 #endif
 
-/* UART register bit definitions ****************************************************************/
+/* UART register bit definitions ********************************************/
 
 /* UART Control Register */
 
@@ -265,7 +250,7 @@
 #define UART_CR_STTBRK               (1 << 9)  /* Bit 9:  Start Break (USART, UART mode only) */
 #define UART_CR_STPBRK               (1 << 10) /* Bit 10: Stop Break (USART, UART mode only) */
 #define UART_CR_STTTO                (1 << 11) /* Bit 11: Start Time-out (USART, UART mode only) */
-#define UART_CR_REQCLR               (1 << 12) /* Bit 12:Request Clear (UART only) */
+#define UART_CR_REQCLR               (1 << 12) /* Bit 12: Request Clear (UART only) */
 #define UART_CR_SENDA                (1 << 12) /* Bit 12: Send Address (USART, UART mode only) */
 #define UART_CR_RETTO                (1 << 15) /* Bit 15: Rearm Time-out (USART, UART mode only) */
 #define UART_CR_RTSEN                (1 << 18) /* Bit 18: Request to Send Enable (USART, UART mode only) */
@@ -283,8 +268,11 @@
 #  define UART_MR_MODE_RS485         (1  << UART_MR_MODE_SHIFT) /* RS485 */
 #  define UART_MR_MODE_HWHS          (2  << UART_MR_MODE_SHIFT) /* Hardware Handshaking */
 #  define UART_MR_MODE_LON           (9  << UART_MR_MODE_SHIFT) /* LON */
+#  define UART_MR_MODE_LINMSTR       (10 << UART_MR_MODE_SHIFT) /* LIN Master */
+#  define UART_MR_MODE_LINSLV        (11 << UART_MR_MODE_SHIFT) /* LIN Slave */
 #  define UART_MR_MODE_SPIMSTR       (14 << UART_MR_MODE_SHIFT) /* SPI Master (SPI mode only) */
 #  define UART_MR_MODE_SPISLV        (15 << UART_MR_MODE_SHIFT) /* SPI Slave (SPI mode only) */
+
 #define UART_MR_DFILTER              (1 << 4)  /* Bit 4: Receiver Digital Filter (UART only) */
 #define UART_MR_USCLKS_SHIFT         (4)       /* Bits 4-5: Clock Selection (USART only) */
 #define UART_MR_USCLKS_MASK          (3 << UART_MR_USCLKS_SHIFT)
@@ -292,12 +280,14 @@
 #  define UART_MR_USCLKS_MCKDIV      (1 << UART_MR_USCLKS_SHIFT) /* MCK/DIV (DIV = 8) */
 #  define UART_MR_USCLKS_PCK         (2 << UART_MR_USCLKS_SHIFT) /* PMC programmable clock (PCK), UART mode */
 #  define UART_MR_USCLKS_SCK         (3 << UART_MR_USCLKS_SHIFT) /* SCK */
+
 #define UART_MR_CHRL_SHIFT           (6)       /* Bits 6-7: Character Length (USART only) */
 #define UART_MR_CHRL_MASK            (3 << UART_MR_CHRL_SHIFT)
 #  define UART_MR_CHRL_5BITS         (0 << UART_MR_CHRL_SHIFT) /* 5 bits), UART mode only */
 #  define UART_MR_CHRL_6BITS         (1 << UART_MR_CHRL_SHIFT) /* 6 bits), UART mode only */
 #  define UART_MR_CHRL_7BITS         (2 << UART_MR_CHRL_SHIFT) /* 7 bits), UART mode only */
 #  define UART_MR_CHRL_8BITS         (3 << UART_MR_CHRL_SHIFT) /* 8 bits */
+
 #define UART_MR_SYNC                 (1 << 8)  /* Bit 8: Synchronous Mode Select (USART, UART mode only) */
 #define UART_MR_CPHA                 (1 << 8)  /* Bit 8: SPI Clock Phase (USART, SPI mode only) */
 #define UART_MR_PAR_SHIFT            (9)       /* Bits 9-11: Parity Type (Common, UART mode) */
@@ -308,18 +298,21 @@
 #  define UART_MR_PAR_MARK           (3 << UART_MR_PAR_SHIFT) /* Mark: parity forced to 1 (Common) */
 #  define UART_MR_PAR_NONE           (4 << UART_MR_PAR_SHIFT) /* No parity (Common) */
 #  define UART_MR_PAR_MULTIDROP      (6 << UART_MR_PAR_SHIFT) /* Multidrop mode (USART only) */
+
 #define UART_MR_BRSRCCK              (1 << 12) /* Bit 12: Baud Rate Source Clock (UART only) */
 #define UART_MR_NBSTOP_SHIFT         (12)      /* Bits 12-13: Number of Stop Bits (USART, UART mode only) */
 #define UART_MR_NBSTOP_MASK          (3 << UART_MR_NBSTOP_SHIFT)
 #  define UART_MR_NBSTOP_1           (0 << UART_MR_NBSTOP_SHIFT) /* 1 stop bit 1 stop bit */
 #  define UART_MR_NBSTOP_1p5         (1 << UART_MR_NBSTOP_SHIFT) /* 1.5 stop bits */
 #  define UART_MR_NBSTOP_2           (2 << UART_MR_NBSTOP_SHIFT) /* 2 stop bits 2 stop bits */
+
 #define UART_MR_CHMODE_SHIFT         (14)      /* Bits 14-15: Channel Mode (Common, UART mode) */
 #define UART_MR_CHMODE_MASK          (3 << UART_MR_CHMODE_SHIFT)
 #  define UART_MR_CHMODE_NORMAL      (0 << UART_MR_CHMODE_SHIFT) /* Normal Mode */
 #  define UART_MR_CHMODE_ECHO        (1 << UART_MR_CHMODE_SHIFT) /* Automatic Echo */
 #  define UART_MR_CHMODE_LLPBK       (2 << UART_MR_CHMODE_SHIFT) /* Local Loopback */
 #  define UART_MR_CHMODE_RLPBK       (3 << UART_MR_CHMODE_SHIFT) /* Remote Loopback */
+
 #define UART_MR_MSBF                 (1 << 16) /* Bit 16: Most Significant Bit first (USART, UART mode only) */
 #define UART_MR_CPOL                 (1 << 16) /* Bit 16: SPI Clock Polarity (USART, SPI mode only) */
 #define UART_MR_MODE9                (1 << 17) /* Bit 17: 9-bit Character Length (USART, UART mode only) */
@@ -332,8 +325,10 @@
 #define UART_MR_MODSYNC              (1 << 30) /* Bit 30: Manchester Synchronization Mode (USART only) */
 #define UART_MR_ONEBIT               (1 << 31) /* Bit 31: Start Frame Delimiter Selector (USART only) */
 
-/* UART Interrupt Enable Register, UART Interrupt Disable Register, UART Interrupt Mask
- * Register, and UART Status Register common bit field definitions
+/* UART Interrupt Enable Register,
+ * UART Interrupt Disable Register,
+ * UART Interrupt Mask Register,
+ * and UART Status Register common bit field definitions
  */
 
 #define UART_INT_RXRDY               (1 << 0)  /* Bit 0:  RXRDY Interrupt (Common) */
@@ -341,7 +336,7 @@
 #define UART_INT_RXBRK               (1 << 2)  /* Bit 2:  Break Received/End of Break (USART, UART mode only) */
 #define UART_INT_OVRE                (1 << 5)  /* Bit 5:  Overrun Error Interrupt (Common) */
 #define UART_INT_FRAME               (1 << 6)  /* Bit 6:  Framing Error Interrupt (Common, UART mode) */
-#define UART_INT_LSF                 (1 << 6)  /* Bit 6:   LON Short Frame Error Interrupt Enablee (USART, LON mode only) */
+#define UART_INT_LSF                 (1 << 6)  /* Bit 6:  LON Short Frame Error Interrupt Enablee (USART, LON mode only) */
 #define UART_INT_PARE                (1 << 7)  /* Bit 7:  Parity Error Interrupt (Common, UART mode) */
 #define UART_INT_LCRCE               (1 << 7)  /* Bit 7:  LON CRC Error Interrupt Enablee (USART, LON mode only) */
 #define UART_INT_TIMEOUT             (1 << 8)  /* Bit 8:  Time-out Interrupt (USART, UART mode only) */
@@ -363,6 +358,8 @@
 #define UART_INT_LINCE               (1 << 28) /* Bit 28: LIN Checksum Error Interrupt (USART, LIN mode only) */
 #define UART_INT_LBLOVFE             (1 << 28) /* Bit 28: LON Backlog Overflow Error Interrupt Enable (USART, LON mode only) */
 #define UART_INT_LINSNRE             (1 << 29) /* Bit 29: LIN Slave Not Responding Error Interrupt (USART, LIN mode only) */
+#define UART_INT_LINSTE              (1 << 30) /* Bit 30: LIN Synch Tolerance Error Interrupt (USART, LIN mode only) */
+#define UART_INT_LINHTE              (1 << 31) /* Bit 31: LIN Header Timeout Error Interrupt (USART, LIN mode only) */
 
 #define UART_INT_ALLINTS             0x3f08e7e7
 
@@ -384,7 +381,7 @@
 #endif
 #define UART_THR_TXCHR_SHIFT         (0)       /* Bits 0-8: Character to be Transmitted (USART only) */
 #define UART_THR_TXCHR_MASK          (0x1ff << UART_THR_TXCHR_SHIFT)
-#define UART_THR_TXSYNH              (1 << 15) /* Bit 15: Sync Field to be tran (USART only) */
+#define UART_THR_TXSYNH              (1 << 15) /* Bit 15: Sync Field to be Transmitted (USART only) */
 
 /* UART Baud Rate Generator Register */
 
@@ -420,7 +417,8 @@
 #define UART_TTGR_PCYCLE_MASK        (0xffffff << UART_TTGR_PCYCLE_SHIFT)
 
 /* USART FI DI RATIO Register (LON_MODE)
- * REVISIT: In the preliminary datasheet, these bit fields are identified, but there no no
+ * REVISIT: In the preliminary datasheet,
+ * these bit fields are identified, but there no no
  * defined address for the FIDL register.
  */
 
@@ -438,6 +436,7 @@
 #  define UART_MAN_TXPP_ALLZERO      (1 << UART_MAN_TXPP_SHIFT) /* ALL_ZERO */
 #  define UART_MAN_TXPP_ZEROONE      (2 << UART_MAN_TXPP_SHIFT) /* ZERO_ONE */
 #  define UART_MAN_TXPP_ONEZERO      (3 << UART_MAN_TXPP_SHIFT) /* ONE_ZERO */
+
 #define UART_MAN_TXMPOL              (1 << 12) /* Bit 12: Transmitter Manchester Polarity (USART only) */
 #define UART_MAN_RXPL_SHIFT          (16)      /* Bits 16-19: Receiver Preamble Length (USART only) */
 #define UART_MAN_RXPL_MASK           (15 << UART_MAN_RXPL_SHIFT)
@@ -448,6 +447,7 @@
 #  define UART_MAN_RXPP_ALLZERO      (1 << UART_MAN_RXPP_SHIFT) /* ALL_ZERO */
 #  define UART_MAN_RXPP_ZEROONE      (2 << UART_MAN_RXPP_SHIFT) /* ZERO_ONE */
 #  define UART_MAN_RXPP_ONEZERO      (3 << UART_MAN_RXPP_SHIFT) /* ONE_ZERO */
+
 #define UART_MAN_RXMPOL              (1 << 28) /* Bit 28: Receiver Manchester Polarity (USART only) */
 #define UART_MAN_ONE                 (1 << 29) /* Bit 29: Must Be Set to 1 */
 #define UART_MAN_DRIFT               (1 << 30) /* Bit 30: Drift compensation (USART only) */
@@ -460,6 +460,7 @@
 #  define UART_LINMR_NACT_PUBLISH    (0 << UART_LINMR_NACT_SHIFT) /* USART transmits response */
 #  define UART_LINMR_NACT_SUBSCRIBE  (1 << UART_LINMR_NACT_SHIFT) /* USART receives response */
 #  define UART_LINMR_NACT_IGNORE     (2 << UART_LINMR_NACT_SHIFT) /* USART does not transmit or receive response */
+
 #define UART_LINMR_PARDIS            (1 << 2)  /* Bit 2:  Parity Disable */
 #define UART_LINMR_CHKDIS            (1 << 3)  /* Bit 3:  Checksum Disable */
 #define UART_LINMR_CHKTYP            (1 << 4)  /* Bit 4:  Checksum Type */
@@ -491,7 +492,7 @@
 #define UART_LONMR_TCOL              (1 << 2)  /* Bit 2:  Terminate Frame upon Collision Notification */
 #define UART_LONMR_CDTAIL            (1 << 3)  /* Bit 3:  LON Collision Detection on Frame Tail */
 #define UART_LONMR_DMAM              (1 << 4)  /* Bit 4:  LON DMA Mode */
-#define UART_LONMR_LCDS              (1 << 5)  /* Bit 5: LON Collision Detection Source */
+#define UART_LONMR_LCDS              (1 << 5)  /* Bit 5:  LON Collision Detection Source */
 #define UART_LONMR_EOFS_SHIFT        (16)      /* Bits 16-23: End of Frame Condition Size */
 #define UART_LONMR_EOFS_MASK         (0xff << UART_LONMR_EOFS_SHIFT)
 #  define UART_LONMR_EOFS(n)         ((uint32_t)(n) << UART_LONMR_EOFS_SHIFT)
@@ -559,16 +560,16 @@
 #define UART_WPSR_WPVSRC_SHIFT       (8)       /* Bits 8-23: Write Protect Violation Source (USART only) */
 #define UART_WPSR_WPVSRC_MASK        (0xffff << UART_WPSR_WPVSRC_SHIFT)
 
-/************************************************************************************************
+/****************************************************************************
  * Public Types
- ************************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************************
+/****************************************************************************
  * Public Data
- ************************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************************
- * Public Functions
- ************************************************************************************************/
+/****************************************************************************
+ * Public Functions Prototypes
+ ****************************************************************************/
 
 #endif /* __ARCH_ARM_SRC_SAMV7_HARDWARE_SAM_UART_H */

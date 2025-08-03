@@ -1,39 +1,26 @@
 ############################################################################
 # apps/builtin/Makefile
 #
-#   Copyright (C) 2011-2012, 2018 Gregory Nutt. All rights reserved.
-#   Author: Gregory Nutt <gnutt@nuttx.org>
+# SPDX-License-Identifier: Apache-2.0
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
 #
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in
-#    the documentation and/or other materials provided with the
-#    distribution.
-# 3. Neither the name NuttX nor the names of its contributors may be
-#    used to endorse or promote products derived from this software
-#    without specific prior written permission.
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
-# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
-# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
 #
 ############################################################################
 
--include $(TOPDIR)/Make.defs
+include $(APPDIR)/Make.defs
 
 # Source and object files
 
@@ -43,41 +30,55 @@ CSRCS = builtin_list.c exec_builtin.c
 
 PDATLIST = $(strip $(call RWILDCARD, registry, *.pdat))
 BDATLIST = $(strip $(call RWILDCARD, registry, *.bdat))
-
-registry$(DELIM).updated:
-	$(Q) $(MAKE) -C registry .updated TOPDIR="$(TOPDIR)" APPDIR="$(APPDIR)"
+ifeq ($(CONFIG_WINDOWS_NATIVE),y)
+	PDATLIST  := $(subst /,\,$(PDATLIST))
+	BDATLIST  := $(subst /,\,$(BDATLIST))
+endif
 
 builtin_list.c: builtin_list.h builtin_proto.h
 
+registry$(DELIM).updated:
+	$(Q) touch registry$(DELIM).updated
+
+define CONFILE
+    if [ -n "$(strip $(2))" ]; then cat $(2) >> $1; fi
+endef
+
 builtin_list.h: registry$(DELIM).updated
-	$(call DELFILE, .xx_builtin_list.h)
-	$(Q) touch .xx_builtin_list.h
-ifneq ($(BDATLIST),)
-	$(call CATFILE, .xx_builtin_list.h, $(BDATLIST))
+ifeq ($(BDATLIST),)
+	$(call DELFILE, builtin_list.h)
+	$(Q) touch builtin_list.h
+else
+	$(shell echo '' > builtin_list.h)
+	$(call SPLITVARIABLE,BDA,$(BDATLIST),50) \
+	$(foreach BATCH, $(BDA_TOTAL), \
+	  	$(shell $(call CONFILE, builtin_list.h, $(BDA_$(BATCH)))) \
+	)
 endif
-	$(Q) mv .xx_builtin_list.h builtin_list.h
 
 builtin_proto.h: registry$(DELIM).updated
-	$(call DELFILE, .xx_builtin_proto.h)
-	$(Q) touch .xx_builtin_proto.h
-ifneq ($(PDATLIST),)
-	$(call CATFILE, .xx_builtin_proto.h, $(PDATLIST))
+ifeq ($(PDATLIST),)
+	$(call DELFILE, builtin_proto.h)
+	$(Q) touch builtin_proto.h
+else
+	$(shell echo '' > builtin_proto.h)
+	$(call SPLITVARIABLE,PDA,$(PDATLIST),50) \
+	$(foreach BATCH, $(PDA_TOTAL), \
+	  	$(shell $(call CONFILE, builtin_proto.h, $(PDA_$(BATCH)))) \
+	)
 endif
-	$(Q) mv .xx_builtin_proto.h builtin_proto.h
-
-context::
-	$(Q) $(MAKE) -C registry context TOPDIR="$(TOPDIR)" APPDIR="$(APPDIR)"
 
 depend:: builtin_list.h builtin_proto.h
 
 clean::
-	$(Q) $(MAKE) -C registry clean TOPDIR="$(TOPDIR)" APPDIR="$(APPDIR)"
-	$(call DELFILE, .xx_builtin_list.h)
-	$(call DELFILE, .xx_builtin_proto.h)
-
-distclean::
-	$(Q) $(MAKE) -C registry distclean TOPDIR="$(TOPDIR)" APPDIR="$(APPDIR)"
 	$(call DELFILE, builtin_list.h)
 	$(call DELFILE, builtin_proto.h)
+
+clean_context::
+	$(call DELFILE, $(PDATLIST))
+	$(call DELFILE, $(BDATLIST))
+
+distclean:: clean_context clean
+	$(call DELFILE, registry$(DELIM).updated)
 
 include $(APPDIR)/Application.mk

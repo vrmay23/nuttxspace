@@ -276,6 +276,22 @@ config ARCH_CHIP_STM32L475VC
 	---help---
 		STM32 L4 Cortex M4, 256Kb FLASH, 96+32 Kb SRAM, LQFP64
 
+config ARCH_CHIP_STM32L476JG
+	bool "STM32L476JG"
+	select STM32L4_STM32L476XX
+	select STM32L4_FLASH_CONFIG_G
+	select STM32L4_IO_CONFIG_J
+	---help---
+		STM32 L4 Cortex M4, 1024Kb FLASH, 96+32 Kb SRAM
+
+config ARCH_CHIP_STM32L476JE
+	bool "STM32L476JE"
+	select STM32L4_STM32L476XX
+	select STM32L4_FLASH_CONFIG_E
+	select STM32L4_IO_CONFIG_J
+	---help---
+		STM32 L4 Cortex M4, 512Kb FLASH, 96+32 Kb SRAM
+
 config ARCH_CHIP_STM32L476RG
 	bool "STM32L476RG"
 	select STM32L4_STM32L476XX
@@ -428,9 +444,105 @@ config ARCH_CHIP_STM32L4A6AG
 	---help---
 		STM32 L4 Cortex M4, AES, HASH, 1024Kb FLASH, 320 Kb SRAM
 
+config ARCH_CHIP_STM32L4R5VG
+	bool "STM32L4R5VG"
+	select STM32L4_STM32L4R5XX
+	select STM32L4_FLASH_CONFIG_G
+	select STM32L4_IO_CONFIG_V
+	---help---
+		STM32 L4+ Cortex M4, 1024Kb FLASH, 640 Kb SRAM
+
+config ARCH_CHIP_STM32L4R5QG
+	bool "STM32L4R5QG"
+	select STM32L4_STM32L4R5XX
+	select STM32L4_FLASH_CONFIG_G
+	select STM32L4_IO_CONFIG_Q
+	---help---
+		STM32 L4+ Cortex M4, 1024Kb FLASH, 640 Kb SRAM
+
+config ARCH_CHIP_STM32L4R5ZG
+	bool "STM32L4R5ZG"
+	select STM32L4_STM32L4R5XX
+	select STM32L4_FLASH_CONFIG_G
+	select STM32L4_IO_CONFIG_Z
+	---help---
+		STM32 L4+ Cortex M4, 1024Kb FLASH, 640 Kb SRAM
+
+config ARCH_CHIP_STM32L4R5AG
+	bool "STM32L4R5AG"
+	select STM32L4_STM32L4R5XX
+	select STM32L4_FLASH_CONFIG_G
+	select STM32L4_IO_CONFIG_A
+	---help---
+		STM32 L4+ Cortex M4, 1024Kb FLASH, 640 Kb SRAM
+
+config ARCH_CHIP_STM32L4R5VI
+	bool "STM32L4R5VI"
+	select STM32L4_STM32L4R5XX
+	select STM32L4_FLASH_CONFIG_I
+	select STM32L4_IO_CONFIG_V
+	---help---
+		STM32 L4+ Cortex M4, 2048Kb FLASH, 640 Kb SRAM
+
+config ARCH_CHIP_STM32L4R5QI
+	bool "STM32L4R5QI"
+	select STM32L4_STM32L4R5XX
+	select STM32L4_FLASH_CONFIG_I
+	select STM32L4_IO_CONFIG_Q
+	---help---
+		STM32 L4+ Cortex M4, 2048Kb FLASH, 640 Kb SRAM
+
 config ARCH_CHIP_STM32L4R5ZI
 	bool "STM32L4R5ZI"
 	select STM32L4_STM32L4R5XX
+	select STM32L4_FLASH_CONFIG_I
+	select STM32L4_IO_CONFIG_Z
+	---help---
+		STM32 L4+ Cortex M4, 2048Kb FLASH, 640 Kb SRAM
+
+config ARCH_CHIP_STM32L4R5AI
+	bool "STM32L4R5AI"
+	select STM32L4_STM32L4R5XX
+	select STM32L4_FLASH_CONFIG_I
+	select STM32L4_IO_CONFIG_A
+	---help---
+		STM32 L4+ Cortex M4, 2048Kb FLASH, 640 Kb SRAM
+
+config ARCH_CHIP_STM32L4R9VG
+	bool "STM32L4R9VG"
+	select STM32L4_STM32L4R9XX
+	select STM32L4_FLASH_CONFIG_G
+	select STM32L4_IO_CONFIG_V
+	---help---
+		STM32 L4+ Cortex M4, 1024Kb FLASH, 640 Kb SRAM
+
+config ARCH_CHIP_STM32L4R9ZG
+	bool "STM32L4R9ZG"
+	select STM32L4_STM32L4R9XX
+	select STM32L4_FLASH_CONFIG_G
+	select STM32L4_IO_CONFIG_Z
+	---help---
+		STM32 L4+ Cortex M4, 1024Kb FLASH, 640 Kb SRAM
+
+config ARCH_CHIP_STM32L4R9AG
+	bool "STM32L4R9AG"
+	select STM32L4_STM32L4R9XX
+	select STM32L4_FLASH_CONFIG_G
+	select STM32L4_IO_CONFIG_A
+	---help---
+		STM32 L4+ Cortex M4, 1024Kb FLASH, 640 Kb SRAM
+
+config ARCH_CHIP_STM32L4R9VI
+	bool "STM32L4R9VI"
+	select STM32L4_STM32L4R9XX
+	select STM32L4_FLASH_CONFIG_I
+	select STM32L4_IO_CONFIG_V
+	---help---
+		STM32 L4+ Cortex M4, 2048Kb FLASH, 640 Kb SRAM
+
+config ARCH_CHIP_STM32L4R9ZI
+	bool "STM32L4R9ZI"
+	select STM32L4_STM32L4R9XX
 	select STM32L4_FLASH_CONFIG_I
 	select STM32L4_IO_CONFIG_Z
 	---help---
@@ -475,6 +587,7 @@ config STM32L4_STM32L4X3
 	bool
 	default n
 	select ARCH_HAVE_FPU
+	select STM32L4_HAVE_LPUART1
 	select STM32L4_HAVE_USART1
 	select STM32L4_HAVE_USART2
 	select STM32L4_HAVE_USART3 if !(STM32L4_STM32L432XX || STM32L4_STM32L442XX)
@@ -490,6 +603,7 @@ config STM32L4_STM32L4X5
 	bool
 	default n
 	select ARCH_HAVE_FPU
+	select STM32L4_HAVE_LPUART1
 	select STM32L4_HAVE_USART1
 	select STM32L4_HAVE_USART2
 	select STM32L4_HAVE_USART3
@@ -520,6 +634,7 @@ config STM32L4_STM32L4X6
 	bool
 	default n
 	select ARCH_HAVE_FPU
+	select STM32L4_HAVE_LPUART1
 	select STM32L4_HAVE_USART1
 	select STM32L4_HAVE_USART2
 	select STM32L4_HAVE_USART3
@@ -550,6 +665,7 @@ config STM32L4_STM32L4XR
 	bool
 	default n
 	select ARCH_HAVE_FPU
+	select STM32L4_HAVE_LPUART1
 	select STM32L4_HAVE_USART1
 	select STM32L4_HAVE_USART2
 	select STM32L4_HAVE_USART3
@@ -903,6 +1019,26 @@ config STM32L4_SRAM3_HEAP
 		NOTE: you must also select an appropriate number of memory regions in the
 		'Memory Management' section.
 
+config STM32L4_USE_LEGACY_PINMAP
+	bool "Use the legacy pinmap with GPIO_SPEED_xxx included."
+	default y
+	---help---
+		In the past, pinmap files included GPIO_SPEED_xxxMhz. These speed
+		settings should have come from the board.h as it describes the wiring
+		of the SoC to the board. The speed is really slew rate control and
+		therefore is related to the layout and can only be properly set
+		in board.h.
+
+		STM32L4_USE_LEGACY_PINMAP is provided, to allow lazy migration to
+		using pinmaps without speeds. The work required to do this can be aided
+		by running tools/stm32_pinmap_tool.py. The tools will take a board.h
+		file and a legacy pinmap and output the required changes that one needs
+		to make to a board.h file.
+
+		Eventually, STM32L4_USE_LEGACY_PINMAP will be deprecated and the legacy
+		pinmaps removed from NuttX. Any new boards added should set
+		STM32L4_USE_LEGACY_PINMAP=n and fully define the pins in board.h
+
 comment "STM32L4 Peripherals"
 
 menu "STM32L4 Peripheral Support"
@@ -1031,6 +1167,10 @@ config STM32L4_HAVE_TIM17
 	bool
 	default n
 
+config STM32L4_HAVE_LPUART1
+	bool
+	default n
+
 config STM32L4_HAVE_USART1
 	bool
 	default n
@@ -1095,6 +1235,11 @@ config STM32L4_SAI
 config STM32L4_SPI
 	bool
 	default n
+
+config STM32L4_PWM
+	bool
+	default n
+	select ARCH_HAVE_PWM_PULSECOUNT
 
 config STM32L4_USART
 	bool
@@ -1395,6 +1540,13 @@ config STM32L4_SPI3
 	select SPI
 	select STM32L4_SPI
 
+config STM32L4_LPUART1
+	bool "LPUART1"
+	default n
+	depends on STM32L4_HAVE_LPUART1
+	select ARCH_HAVE_SERIAL_TERMIOS
+	select STM32L4_USART
+
 config STM32L4_USART2
 	bool "USART2"
 	default n
@@ -1660,7 +1812,7 @@ config STM32L4_FLASH_PREFETCH
 config STM32L4_FLASH_WORKAROUND_DATA_CACHE_CORRUPTION_ON_RWW
 	bool "Workaround for FLASH data cache corruption"
 	default n
-	depends on STM32L4_STM32L475XX || STM32L4_STM32L476XX || STM32L4_STM32L486XX || STM32L4_STM32L496XX || STM32L4_STM32L4A6XX
+	depends on STM32L4_STM32L4X5 || STM32L4_STM32L4X6 || STM32L4_STM32L4XR
 	---help---
 		Enable the workaround to fix flash data cache corruption when reading
 		from one flash bank while writing on other flash bank.  See your STM32
@@ -1712,7 +1864,7 @@ menu "RTC Configuration"
 config STM32L4_RTC_MAGIC_REG
 	int "BKP register"
 	default 0
-	range  0 31
+	range 0 31
 	---help---
 		The BKP register used to store/check the Magic value to determine if
 		RTC is already setup
@@ -1917,8 +2069,7 @@ config STM32L4_TIM1_PWM
 	bool "TIM1 PWM"
 	default n
 	depends on STM32L4_TIM1
-	select PWM
-	select ARCH_HAVE_PWM_PULSECOUNT
+	select STM32L4_PWM
 	---help---
 		Reserve timer 1 for use by PWM
 
@@ -2157,8 +2308,7 @@ config STM32L4_TIM2_PWM
 	bool "TIM2 PWM"
 	default n
 	depends on STM32L4_TIM2
-	select PWM
-	select ARCH_HAVE_PWM_PULSECOUNT
+	select STM32L4_PWM
 	---help---
 		Reserve timer 2 for use by PWM
 
@@ -2337,8 +2487,7 @@ config STM32L4_TIM3_PWM
 	bool "TIM3 PWM"
 	default n
 	depends on STM32L4_TIM3
-	select PWM
-	select ARCH_HAVE_PWM_PULSECOUNT
+	select STM32L4_PWM
 	---help---
 		Reserve timer 3 for use by PWM
 
@@ -2517,8 +2666,7 @@ config STM32L4_TIM4_PWM
 	bool "TIM4 PWM"
 	default n
 	depends on STM32L4_TIM4
-	select PWM
-	select ARCH_HAVE_PWM_PULSECOUNT
+	select STM32L4_PWM
 	---help---
 		Reserve timer 4 for use by PWM
 
@@ -2697,8 +2845,7 @@ config STM32L4_TIM5_PWM
 	bool "TIM5 PWM"
 	default n
 	depends on STM32L4_TIM5
-	select PWM
-	select ARCH_HAVE_PWM_PULSECOUNT
+	select STM32L4_PWM
 	---help---
 		Reserve timer 5 for use by PWM
 
@@ -2877,8 +3024,7 @@ config STM32L4_TIM8_PWM
 	bool "TIM8 PWM"
 	default n
 	depends on STM32L4_TIM8
-	select PWM
-	select ARCH_HAVE_PWM_PULSECOUNT
+	select STM32L4_PWM
 	---help---
 		Reserve timer 8 for use by PWM
 
@@ -3117,7 +3263,7 @@ config STM32L4_TIM15_PWM
 	bool "TIM15 PWM"
 	default n
 	depends on STM32L4_TIM15
-	select PWM
+	select STM32L4_PWM
 	---help---
 		Reserve timer 15 for use by PWM
 
@@ -3263,7 +3409,7 @@ config STM32L4_TIM16_PWM
 	bool "TIM16 PWM"
 	default n
 	depends on STM32L4_TIM16
-	select PWM
+	select STM32L4_PWM
 	---help---
 		Reserve timer 16 for use by PWM
 
@@ -3364,7 +3510,7 @@ config STM32L4_TIM17_PWM
 	bool "TIM17 PWM"
 	default n
 	depends on STM32L4_TIM17
-	select PWM
+	select STM32L4_PWM
 	---help---
 		Reserve timer 17 for use by PWM
 
@@ -3582,7 +3728,7 @@ endif # STM32L4_LPTIM2_PWM
 config STM32L4_PWM_MULTICHAN
 	bool "PWM Multiple Output Channels"
 	default n
-	depends on STM32L4_TIM1_PWM || STM32L4_TIM2_PWM || STM32L4_TIM3_PWM || STM32L4_TIM4_PWM || STM32L4_TIM5_PWM || STM32L4_TIM8_PWM || STM32L4_TIM15_PWM || STM32L4_TIM16_PWM || STM32L4_TIM17_PWM || STM32L4_LPTIM1_PWM || STM32L4_LPTIM2_PWM
+	depends on STM32L4_PWM
 	select ARCH_HAVE_PWM_MULTICHAN
 	---help---
 		Specifies that the PWM driver supports multiple output
@@ -3603,32 +3749,40 @@ config STM32L4_TIM1_ADC
 		channel it is assigned to.
 
 choice
-	prompt "Select TIM1 ADC channel"
+	prompt "Select ADC to trigger"
 	default STM32L4_TIM1_ADC1
 	depends on STM32L4_TIM1_ADC
 
 config STM32L4_TIM1_ADC1
-	bool "TIM1 ADC channel 1"
+	bool "TIM1 trigger ADC1"
 	depends on STM32L4_ADC1
 	select STM32L4_HAVE_ADC1_TIMER
 	---help---
 		Reserve TIM1 to trigger ADC1
 
 config STM32L4_TIM1_ADC2
-	bool "TIM1 ADC channel 2"
+	bool "TIM1 trigger ADC2"
 	depends on STM32L4_ADC2
 	select STM32L4_HAVE_ADC2_TIMER
 	---help---
 		Reserve TIM1 to trigger ADC2
 
 config STM32L4_TIM1_ADC3
-	bool "TIM1 ADC channel 3"
+	bool "TIM1 trigger ADC3"
 	depends on STM32L4_ADC3
 	select STM32L4_HAVE_ADC3_TIMER
 	---help---
 		Reserve TIM1 to trigger ADC3
 
 endchoice
+
+config STM32L4_TIM1_ADC_CHAN
+	int "TIM1 channel"
+	default 1
+	range 1 4
+	depends on STM32L4_TIM1_ADC
+	---help---
+		Values 1:CC1 2:CC2 3:CC3 4:CC4
 
 config STM32L4_TIM2_ADC
 	bool "TIM2 ADC"
@@ -3645,32 +3799,40 @@ config STM32L4_TIM2_ADC
 		channel it is assigned to.
 
 choice
-	prompt "Select TIM2 ADC channel"
+	prompt "Select ADC to trigger"
 	default STM32L4_TIM2_ADC1
 	depends on STM32L4_TIM2_ADC
 
 config STM32L4_TIM2_ADC1
-	bool "TIM2 ADC channel 1"
+	bool "TIM2 trigger ADC1"
 	depends on STM32L4_ADC1
 	select STM32L4_HAVE_ADC1_TIMER
 	---help---
 		Reserve TIM2 to trigger ADC1
 
 config STM32L4_TIM2_ADC2
-	bool "TIM2 ADC channel 2"
+	bool "TIM2 trigger ADC2"
 	depends on STM32L4_ADC2
 	select STM32L4_HAVE_ADC2_TIMER
 	---help---
 		Reserve TIM2 to trigger ADC2
 
 config STM32L4_TIM2_ADC3
-	bool "TIM2 ADC channel 3"
+	bool "TIM2 trigger ADC3"
 	depends on STM32L4_ADC3
 	select STM32L4_HAVE_ADC3_TIMER
 	---help---
 		Reserve TIM2 to trigger ADC3
 
 endchoice
+
+config STM32L4_TIM2_ADC_CHAN
+	int "TIM2 channel"
+	default 1
+	range 1 4
+	depends on STM32L4_TIM2_ADC
+	---help---
+		Values 1:CC1 2:CC2 3:CC3 4:CC4
 
 config STM32L4_TIM3_ADC
 	bool "TIM3 ADC"
@@ -3687,32 +3849,40 @@ config STM32L4_TIM3_ADC
 		channel it is assigned to.
 
 choice
-	prompt "Select TIM3 ADC channel"
+	prompt "Select ADC to trigger"
 	default STM32L4_TIM3_ADC1
 	depends on STM32L4_TIM3_ADC
 
 config STM32L4_TIM3_ADC1
-	bool "TIM3 ADC channel 1"
+	bool "TIM3 trigger ADC1"
 	depends on STM32L4_ADC1
 	select STM32L4_HAVE_ADC1_TIMER
 	---help---
 		Reserve TIM3 to trigger ADC1
 
 config STM32L4_TIM3_ADC2
-	bool "TIM3 ADC channel 2"
+	bool "TIM3 trigger ADC2"
 	depends on STM32L4_ADC2
 	select STM32L4_HAVE_ADC2_TIMER
 	---help---
 		Reserve TIM3 to trigger ADC2
 
 config STM32L4_TIM3_ADC3
-	bool "TIM3 ADC channel 3"
+	bool "TIM3 trigger ADC3"
 	depends on STM32L4_ADC3
 	select STM32L4_HAVE_ADC3_TIMER
 	---help---
 		Reserve TIM3 to trigger ADC3
 
 endchoice
+
+config STM32L4_TIM3_ADC_CHAN
+	int "TIM3 channel"
+	default 1
+	range 1 4
+	depends on STM32L4_TIM3_ADC
+	---help---
+		Values 1:CC2 2:CC2 3:CC3 4:CC4
 
 config STM32L4_TIM4_ADC
 	bool "TIM4 ADC"
@@ -3729,32 +3899,40 @@ config STM32L4_TIM4_ADC
 		channel it is assigned to.
 
 choice
-	prompt "Select TIM4 ADC channel"
+	prompt "Select ADC to trigger"
 	default STM32L4_TIM4_ADC1
 	depends on STM32L4_TIM4_ADC
 
 config STM32L4_TIM4_ADC1
-	bool "TIM4 ADC channel 1"
+	bool "TIM4 trigger ADC1"
 	depends on STM32L4_ADC1
 	select STM32L4_HAVE_ADC1_TIMER
 	---help---
 		Reserve TIM4 to trigger ADC1
 
 config STM32L4_TIM4_ADC2
-	bool "TIM4 ADC channel 2"
+	bool "TIM4 trigger ADC2"
 	depends on STM32L4_ADC2
 	select STM32L4_HAVE_ADC2_TIMER
 	---help---
 		Reserve TIM4 to trigger ADC2
 
 config STM32L4_TIM4_ADC3
-	bool "TIM4 ADC channel 3"
+	bool "TIM4 trigger ADC3"
 	depends on STM32L4_ADC3
 	select STM32L4_HAVE_ADC3_TIMER
 	---help---
 		Reserve TIM4 to trigger ADC3
 
 endchoice
+
+config STM32L4_TIM4_ADC_CHAN
+	int "TIM4 channel"
+	default 1
+	range 1 4
+	depends on STM32L4_TIM4_ADC
+	---help---
+		Values 1:CC2 2:CC2 3:CC3 4:CC4
 
 config STM32L4_TIM6_ADC
 	bool "TIM6 ADC"
@@ -3771,32 +3949,40 @@ config STM32L4_TIM6_ADC
 		channel it is assigned to.
 
 choice
-	prompt "Select TIM6 ADC channel"
+	prompt "Select ADC to trigger"
 	default STM32L4_TIM6_ADC1
 	depends on STM32L4_TIM6_ADC
 
 config STM32L4_TIM6_ADC1
-	bool "TIM6 ADC channel 1"
+	bool "TIM6 trigger ADC1"
 	depends on STM32L4_ADC1
 	select STM32L4_HAVE_ADC1_TIMER
 	---help---
 		Reserve TIM6 to trigger ADC1
 
 config STM32L4_TIM6_ADC2
-	bool "TIM6 ADC channel 2"
+	bool "TIM6 trigger ADC2"
 	depends on STM32L4_ADC2
 	select STM32L4_HAVE_ADC2_TIMER
 	---help---
 		Reserve TIM6 to trigger ADC2
 
 config STM32L4_TIM6_ADC3
-	bool "TIM6 ADC channel 3"
+	bool "TIM6 trigger ADC3"
 	depends on STM32L4_ADC3
 	select STM32L4_HAVE_ADC3_TIMER
 	---help---
 		Reserve TIM6 to trigger ADC3
 
 endchoice
+
+config STM32L4_TIM6_ADC_CHAN
+	int "TIM6 channel"
+	default 1
+	range 1 4
+	depends on STM32L4_TIM6_ADC
+	---help---
+		Values 1:CC2 2:CC2 3:CC3 4:CC4
 
 config STM32L4_TIM8_ADC
 	bool "TIM8 ADC"
@@ -3813,32 +3999,40 @@ config STM32L4_TIM8_ADC
 		channel it is assigned to.
 
 choice
-	prompt "Select TIM8 ADC channel"
+	prompt "Select ADC to trigger"
 	default STM32L4_TIM8_ADC1
 	depends on STM32L4_TIM8_ADC
 
 config STM32L4_TIM8_ADC1
-	bool "TIM8 ADC channel 1"
+	bool "TIM8 trigger ADC1"
 	depends on STM32L4_ADC1
 	select STM32L4_HAVE_ADC1_TIMER
 	---help---
 		Reserve TIM8 to trigger ADC1
 
 config STM32L4_TIM8_ADC2
-	bool "TIM8 ADC channel 2"
+	bool "TIM8 trigger ADC2"
 	depends on STM32L4_ADC2
 	select STM32L4_HAVE_ADC2_TIMER
 	---help---
 		Reserve TIM8 to trigger ADC2
 
 config STM32L4_TIM8_ADC3
-	bool "TIM8 ADC channel 3"
+	bool "TIM8 trigger ADC3"
 	depends on STM32L4_ADC3
 	select STM32L4_HAVE_ADC3_TIMER
 	---help---
 		Reserve TIM8 to trigger ADC3
 
 endchoice
+
+config STM32L4_TIM8_ADC_CHAN
+	int "TIM8 channel"
+	default 1
+	range 1 4
+	depends on STM32L4_TIM8_ADC
+	---help---
+		Values 1:CC2 2:CC2 3:CC3 4:CC4
 
 config STM32L4_TIM15_ADC
 	bool "TIM15 ADC"
@@ -3855,32 +4049,40 @@ config STM32L4_TIM15_ADC
 		channel it is assigned to.
 
 choice
-	prompt "Select TIM15 ADC channel"
+	prompt "Select ADC to trigger"
 	default STM32L4_TIM15_ADC1
 	depends on STM32L4_TIM15_ADC
 
 config STM32L4_TIM15_ADC1
-	bool "TIM15 ADC channel 1"
+	bool "TIM15 trigger ADC1"
 	depends on STM32L4_ADC1
 	select STM32L4_HAVE_ADC1_TIMER
 	---help---
 		Reserve TIM15 to trigger ADC1
 
 config STM32L4_TIM15_ADC2
-	bool "TIM15 ADC channel 2"
+	bool "TIM15 trigger ADC2"
 	depends on STM32L4_ADC2
 	select STM32L4_HAVE_ADC2_TIMER
 	---help---
 		Reserve TIM15 to trigger ADC2
 
 config STM32L4_TIM15_ADC3
-	bool "TIM15 ADC channel 3"
+	bool "TIM15 trigger ADC3"
 	depends on STM32L4_ADC3
 	select STM32L4_HAVE_ADC3_TIMER
 	---help---
 		Reserve TIM15 to trigger ADC3
 
 endchoice
+
+config STM32L4_TIM15_ADC_CHAN
+	int "TIM15 channel"
+	default 1
+	range 1 4
+	depends on STM32L4_TIM15_ADC
+	---help---
+		Values 1:CC2 2:CC2 3:CC3 4:CC4
 
 config STM32L4_HAVE_ADC1_TIMER
 	bool
@@ -3898,14 +4100,6 @@ config STM32L4_ADC1_SAMPLE_FREQUENCY
 	---help---
 		ADC1 sampling frequency.  Default:  100Hz
 
-config STM32L4_ADC1_TIMTRIG
-	int "ADC1 Timer Trigger"
-	default 0
-	range 0 4
-	depends on STM32L4_HAVE_ADC1_TIMER
-	---help---
-		Values 0:CC1 1:CC2 2:CC3 3:CC4 4:TRGO
-
 config STM32L4_ADC2_SAMPLE_FREQUENCY
 	int "ADC2 Sampling Frequency"
 	default 100
@@ -3913,28 +4107,12 @@ config STM32L4_ADC2_SAMPLE_FREQUENCY
 	---help---
 		ADC2 sampling frequency.  Default:  100Hz
 
-config STM32L4_ADC2_TIMTRIG
-	int "ADC2 Timer Trigger"
-	default 0
-	range 0 4
-	depends on STM32L4_HAVE_ADC2_TIMER
-	---help---
-		Values 0:CC1 1:CC2 2:CC3 3:CC4 4:TRGO
-
 config STM32L4_ADC3_SAMPLE_FREQUENCY
 	int "ADC3 Sampling Frequency"
 	default 100
 	depends on STM32L4_HAVE_ADC3_TIMER
 	---help---
 		ADC3 sampling frequency.  Default:  100Hz
-
-config STM32L4_ADC3_TIMTRIG
-	int "ADC3 Timer Trigger"
-	default 0
-	range 0 4
-	depends on STM32L4_HAVE_ADC3_TIMER
-	---help---
-		Values 0:CC1 1:CC2 2:CC3 3:CC4 4:TRGO
 
 config STM32L4_TIM1_DAC
 	bool "TIM1 DAC"
@@ -5021,6 +5199,74 @@ endmenu # Timer Configuration
 menu "ADC Configuration"
 	depends on STM32L4_ADC
 
+config STM32L4_ADC_MAX_SAMPLES
+	int "The maximum number of channels that can be sampled"
+	default 16
+	---help---
+		The maximum number of samples which can be handled without
+		overrun depends on various factors. This is the user's
+		responsibility to correctly select this value.
+		Since the interface to update the sampling time is available
+		for all supported devices, the user can change the default
+		values in the board initialization logic and avoid ADC overrun.
+
+config STM32L4_ADC_NO_STARTUP_CONV
+	bool "Do not start conversion when opening ADC device"
+	default n
+	---help---
+		Do not start conversion when opening ADC device.
+
+config STM32L4_ADC_NOIRQ
+	bool "Do not use default ADC interrupts"
+	default n
+	---help---
+		Do not use default ADC interrupts handlers.
+
+config STM32L4_ADC_SMPR
+	int "ADC sample time"
+	default 0
+	range 0 7
+	---help---
+		ADC sample time
+		  0 -   2.5 ADC clock cycles
+			1 -   6.5 ADC clock cycles
+			2 -  12.5 ADC clock cycles
+			3 -  24.5 ADC clock cycles
+			4 -  47.5 ADC clock cycles
+			5 -  92.5 ADC clock cycles
+			6 - 247.5 ADC clock cycles
+			7 - 640.5 ADC clock cycles
+
+config STM32L4_ADC_LL_OPS
+	bool "ADC low-level operations"
+	default n
+	---help---
+		Enable low-level ADC ops.
+
+config STM32L4_ADC1_RESOLUTION
+	int "ADC1 resolution"
+	depends on STM32L4_ADC1
+	default 0
+	range 0 3
+	---help---
+		ADC1 resolution. 0 - 12 bit, 1 - 10 bit, 2 - 8 bit, 3 - 6 bit
+
+config STM32L4_ADC2_RESOLUTION
+	int "ADC2 resolution"
+	depends on STM32L4_ADC2
+	default 0
+	range 0 3
+	---help---
+		ADC2 resolution. 0 - 12 bit, 1 - 10 bit, 2 - 8 bit, 3 - 6 bit
+
+config STM32L4_ADC3_RESOLUTION
+	int "ADC3 resolution"
+	depends on STM32L4_ADC3
+	default 0
+	range 0 3
+	---help---
+		ADC3 resolution. 0 - 12 bit, 1 - 10 bit, 2 - 8 bit, 3 - 6 bit
+
 config STM32L4_ADC1_DMA
 	bool "ADC1 DMA"
 	depends on STM32L4_ADC1
@@ -5029,6 +5275,24 @@ config STM32L4_ADC1_DMA
 		If DMA is selected, then the ADC may be configured to support
 		DMA transfer, which is necessary if multiple channels are read
 		or if very high trigger frequencies are used.
+
+config STM32L4_ADC1_DMA_CFG
+	int "ADC1 DMA configuration"
+	depends on STM32L4_ADC1_DMA
+	range 0 1
+	default 1
+	---help---
+		0 - ADC1 DMA in One Shot Mode, 1 - ADC1 DMA in Circular Mode
+
+config STM32L4_ADC1_DMA_BATCH
+	int "ADC1 DMA number of conversions"
+	depends on STM32L4_ADC1 && STM32L4_ADC1_DMA
+	default 1
+	---help---
+		This option allows you to select the number of regular group conversions
+		that will trigger a DMA callback transerring data to the upper-half driver.
+		By default, this value is 1, which means that data is transferred after
+		each group conversion.
 
 config STM32L4_ADC2_DMA
 	bool "ADC2 DMA"
@@ -5039,6 +5303,24 @@ config STM32L4_ADC2_DMA
 		DMA transfer, which is necessary if multiple channels are read
 		or if very high trigger frequencies are used.
 
+config STM32L4_ADC2_DMA_CFG
+	int "ADC2 DMA configuration"
+	depends on STM32L4_ADC2_DMA
+	range 0 1
+	default 1
+	---help---
+		0 - ADC2 DMA in One Shot Mode, 1 - ADC2 DMA in Circular Mode
+
+config STM32L4_ADC2_DMA_BATCH
+	int "ADC2 DMA number of conversions"
+	depends on STM32L4_ADC2 && STM32L4_ADC2_DMA
+	default 1
+	---help---
+		This option allows you to select the number of regular group conversions
+		that will trigger a DMA callback transerring data to the upper-half driver.
+		By default, this value is 1, which means that data is transferred after
+		each group conversion.
+
 config STM32L4_ADC3_DMA
 	bool "ADC3 DMA"
 	depends on STM32L4_ADC3
@@ -5047,6 +5329,48 @@ config STM32L4_ADC3_DMA
 		If DMA is selected, then the ADC may be configured to support
 		DMA transfer, which is necessary if multiple channels are read
 		or if very high trigger frequencies are used.
+
+config STM32L4_ADC3_DMA_CFG
+	int "ADC3 DMA configuration"
+	depends on STM32L4_ADC3_DMA
+	range 0 1
+	default 1
+	---help---
+		0 - ADC3 DMA in One Shot Mode, 1 - ADC3 DMA in Circular Mode
+
+config STM32L4_ADC3_DMA_BATCH
+	int "ADC2 DMA number of conversions"
+	depends on STM32L4_ADC3 && STM32L4_ADC3_DMA
+	default 1
+	---help---
+		This option allows you to select the number of regular group conversions
+		that will trigger a DMA callback transerring data to the upper-half driver.
+		By default, this value is 1, which means that data is transferred after
+		each group conversion.
+
+config STM32L4_ADC1_INJ_CHAN
+	int "ADC1 configured injected channels"
+	depends on STM32L4_ADC1
+	range 0 4
+	default 0
+	---help---
+		Number of configured ADC1 injected channels.
+
+config STM32L4_ADC2_INJ_CHAN
+	int "ADC2 configured injected channels"
+	depends on STM32L4_ADC2
+	range 0 4
+	default 0
+	---help---
+		Number of configured ADC2 injected channels.
+
+config STM32L4_ADC3_INJ_CHAN
+	int "ADC3 configured injected channels"
+	depends on STM32L4_ADC3
+	range 0 4
+	default 0
+	---help---
+		Number of configured ADC3 injected channels.
 
 config STM32L4_ADC1_OUTPUT_DFSDM
 	bool "ADC1 output to DFSDM"
@@ -5068,6 +5392,172 @@ config STM32L4_ADC3_OUTPUT_DFSDM
 	default n
 	---help---
 		Route ADC3 output directly to DFSDM parallel inputs.
+
+menu "STM32L4 ADCx triggering Configuration"
+
+config STM32L4_ADC1_EXTTRIG
+	int "ADC1 External trigger configuration for regular channels"
+	default 0
+	range 0 4
+	depends on STM32L4_ADC1
+	---help---
+		Values 0: Hardware trigger detection disabled
+		       1: Hardware trigger detection on the rising edge
+		       2: Hardware trigger detection on the falling edge
+		       3: Hardware trigger detection on the rising and falling edges
+
+if STM32L4_ADC1_EXTTRIG > 0
+
+config STM32L4_ADC1_EXTSEL
+	int "ADC1 External trigger selection for regular group"
+	default 0
+	range 0 15
+	depends on STM32L4_ADC1
+	---help---
+		 Select the external event used to trigger the start of conversion of
+		 a regular group. See Reference Manual for more information.
+
+endif
+
+config STM32L4_ADC2_EXTTRIG
+	int "ADC2 External trigger configuration for regular channels"
+	default 0
+	range 0 4
+	depends on STM32L4_ADC2
+	---help---
+		Values 0: Hardware trigger detection disabled
+		       1: Hardware trigger detection on the rising edge
+		       2: Hardware trigger detection on the falling edge
+		       3: Hardware trigger detection on the rising and falling edges
+
+if STM32L4_ADC2_EXTTRIG > 0
+
+config STM32L4_ADC2_EXTSEL
+	int "ADC2 External trigger selection for regular group"
+	default 0
+	range 0 15
+	depends on STM32L4_ADC2
+	---help---
+		 Select the external event used to trigger the start of conversion of
+		 a regular group. See Reference Manual for more information.
+
+endif
+
+config STM32L4_ADC3_EXTTRIG
+	int "ADC3 External trigger configuration for regular channels"
+	default 0
+	range 0 4
+	depends on STM32L4_ADC3
+	---help---
+		Values 0: Hardware trigger detection disabled
+		       1: Hardware trigger detection on the rising edge
+		       2: Hardware trigger detection on the falling edge
+		       3: Hardware trigger detection on the rising and falling edges
+
+if STM32L4_ADC3_EXTTRIG > 0
+
+config STM32L4_ADC3_EXTSEL
+	int "ADC3 External trigger selection for regular group"
+	default 0
+	range 0 15
+	depends on STM32L4_ADC3
+	---help---
+		 Select the external event used to trigger the start of conversion of
+		 a regular group. See Reference Manual for more information.
+
+endif
+
+if STM32L4_ADC1_INJ_CHAN > 0
+
+config STM32L4_ADC1_JEXTTRIG
+	int "ADC1 External Trigger Enable and Polarity Selection for injected channels"
+	default 0
+	range 0 4
+	depends on STM32L4_ADC1
+	---help---
+		Values 0: Hardware and software trigger detection disabled, JQDIS=0
+		          (queue enabled)
+		       0: Hardware trigger detection disabled, JQDIS=1 (queue disabled)
+		       1: Hardware trigger detection on the rising edge
+		       2: Hardware trigger detection on the falling edge
+		       3: Hardware trigger detection on the rising and falling edges
+
+if STM32L4_ADC1_JEXTTRIG > 0
+
+config STM32L4_ADC1_JEXTSEL
+	int "ADC1 External Trigger Selection for injected group"
+	default 0
+	range 0 15
+	depends on STM32L4_ADC1
+	---help---
+		Select the external event used to trigger the start of conversion of an
+		injected group
+
+endif
+
+endif
+
+if STM32L4_ADC2_INJ_CHAN > 0
+
+config STM32L4_ADC2_JEXTTRIG
+	int "ADC2 External Trigger Enable and Polarity Selection for injected channels"
+	default 0
+	range 0 4
+	depends on STM32L4_ADC2
+	---help---
+		Values 0: Hardware and software trigger detection disabled, JQDIS=0
+		          (queue enabled)
+		       0: Hardware trigger detection disabled, JQDIS=1 (queue disabled)
+		       1: Hardware trigger detection on the rising edge
+		       2: Hardware trigger detection on the falling edge
+		       3: Hardware trigger detection on the rising and falling edges
+
+if STM32L4_ADC2_JEXTTRIG > 0
+
+config STM32L4_ADC2_JEXTSEL
+	int "ADC2 External Trigger Selection for injected group"
+	default 0
+	range 0 5
+	depends on STM32L4_ADC2
+	---help---
+		Select the external event used to trigger the start of conversion of an
+		injected group
+
+endif
+
+endif
+
+if STM32L4_ADC3_INJ_CHAN > 0
+
+config STM32L4_ADC3_JEXTTRIG
+	int "ADC3 External Trigger Enable and Polarity Selection for injected channels"
+	default 0
+	range 0 4
+	depends on STM32L4_ADC3
+	---help---
+		Values 0: Hardware and software trigger detection disabled, JQDIS=0
+		          (queue enabled)
+		       0: Hardware trigger detection disabled, JQDIS=1 (queue disabled)
+		       1: Hardware trigger detection on the rising edge
+		       2: Hardware trigger detection on the falling edge
+		       3: Hardware trigger detection on the rising and falling edges
+
+if STM32L4_ADC3_JEXTTRIG > 0
+
+config STM32L4_ADC3_JEXTSEL
+	int "ADC3 External Trigger Selection for injected group"
+	default 0
+	range 0 5
+	depends on STM32L4_ADC3
+	---help---
+		Select the external event used to trigger the start of conversion of an
+		injected group
+
+endif
+
+endif
+
+endmenu #STM32L4 ADCx triggering Configuration
 
 endmenu
 
@@ -5145,6 +5635,12 @@ config STM32L4_DAC2_OUTPUT_ADC
 	---help---
 		Route DAC2 output to ADC input instead of external pin.
 
+config STM32L4_DAC_LL_OPS
+	bool "DAC low-level operations"
+	default n
+	---help---
+		Enable low-level DAC ops.
+
 endmenu
 
 menu "DFSDM Configuration"
@@ -5189,8 +5685,53 @@ config STM32L4_SERIALDRIVER
 config STM32L4_1WIREDRIVER
 	bool
 
-menu "U[S]ART Configuration"
+menu "[LP]U[S]ART Configuration"
 	depends on STM32L4_USART
+
+choice
+	prompt "LPUART1 Driver Configuration"
+	default STM32L4_LPUART1_SERIALDRIVER
+	depends on STM32L4_LPUART1
+
+config STM32L4_LPUART1_SERIALDRIVER
+	bool "Standard serial driver"
+	select LPUART1_SERIALDRIVER
+	select STM32L4_SERIALDRIVER
+
+config STM32L4_LPUART1_1WIREDRIVER
+	bool "1-Wire driver"
+	select STM32L4_1WIREDRIVER
+
+endchoice # LPUART1 Driver Configuration
+
+if LPUART1_SERIALDRIVER
+
+config LPUART1_RS485
+	bool "RS-485 on LPUART1"
+	default n
+	depends on STM32L4_LPUART1
+	---help---
+		Enable RS-485 interface on LPUART1. Your board config will have to
+		provide GPIO_LPUART1_RS485_DIR pin definition. Currently it cannot be
+		used with LPUART1_RXDMA.
+
+config LPUART1_RS485_DIR_POLARITY
+	int "LPUART1 RS-485 DIR pin polarity"
+	default 1
+	range 0 1
+	depends on LPUART1_RS485
+	---help---
+		Polarity of DIR pin for RS-485 on LPUART1. Set to state on DIR pin which
+		enables TX (0 - low / nTXEN, 1 - high / TXEN).
+
+config LPUART1_RXDMA
+	bool "LPUART1 Rx DMA"
+	default n
+	depends on STM32L4_LPUART1 && (STM32L4_DMA1 || STM32L4_DMA2 || STM32L4_DMAMUX)
+	---help---
+		In high data rate usage, Rx DMA may eliminate Rx overrun errors
+
+endif # LPUART1_SERIALDRIVER
 
 choice
 	prompt "USART1 Driver Configuration"
@@ -5473,9 +6014,10 @@ config STM32L4_SERIALBRK_BSDCOMPAT
 	---help---
 		Enable using GPIO on the TX pin to send a BSD compatible break:
 		TIOCSBRK will start the break and TIOCCBRK will end the break.
-		The current STM32 U[S]ARTS have no way to leave the break (TX=LOW)
-		on because the SW starts the break and then the HW automatically clears
-		the break. This makes it is difficult to sent a long break.
+		The current STM32L4 U[S]ARTS have no way to leave the break on
+		(TX=LOW) because software starts the break and then the hardware
+		automatically clears the break. This makes it difficult to send
+		a long break.
 
 config STM32L4_USART_SINGLEWIRE
 	bool "Single Wire Support"

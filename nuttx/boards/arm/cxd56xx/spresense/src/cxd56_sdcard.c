@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/cxd56xx/spresense/src/cxd56_sdcard.c
  *
- *   Copyright 2018 Sony Semiconductor Solutions Corporation
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
- *    the names of its contributors may be used to endorse or promote
- *    products derived from this software without specific prior written
- *    permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,7 +26,6 @@
 
 #include <nuttx/config.h>
 
-#include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <stdint.h>
@@ -49,12 +35,13 @@
 #include <debug.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/fs/fs.h>
 #include <nuttx/mmcsd.h>
 #include <nuttx/sdio.h>
 #include <nuttx/wqueue.h>
 
 #include "chip.h"
-#include "up_arch.h"
+#include "arm_internal.h"
 
 #include <arch/board/board.h>
 #include <arch/chip/pin.h>
@@ -84,7 +71,9 @@ struct cxd56_sdhci_state_s
 {
   struct sdio_dev_s *sdhci;   /* R/W device handle */
   bool initialized;           /* TRUE: SDHCI block driver is initialized */
+#ifdef CONFIG_MMCSD_HAVE_CARDDETECT
   bool inserted;              /* TRUE: card is inserted */
+#endif
 };
 
 /****************************************************************************
@@ -97,7 +86,8 @@ static struct work_s g_sdcard_work;
 #endif
 
 static struct pm_cpu_freqlock_s g_hv_lock =
-  PM_CPUFREQLOCK_INIT(PM_CPUFREQLOCK_TAG('S','D',0), PM_CPUFREQLOCK_FLAG_HV);
+  PM_CPUFREQLOCK_INIT(PM_CPUFREQLOCK_TAG('S', 'D', 0),
+                      PM_CPUFREQLOCK_FLAG_HV);
 
 /****************************************************************************
  * Private Functions
@@ -111,7 +101,7 @@ static struct pm_cpu_freqlock_s g_hv_lock =
  *
  ****************************************************************************/
 
-static void board_sdcard_enable(FAR void *arg)
+static void board_sdcard_enable(void *arg)
 {
   struct stat stat_sdio;
   int ret = OK;
@@ -130,7 +120,7 @@ static void board_sdcard_enable(FAR void *arg)
       finfo("Initializing SDHC slot 0\n");
 
       g_sdhci.sdhci = cxd56_sdhci_initialize(0);
-      if (!g_sdhci.sdhci)
+      if (g_sdhci.sdhci == NULL)
         {
           _err("ERROR: Failed to initialize SDHC slot 0\n");
           goto release_frequency_lock;
@@ -138,7 +128,7 @@ static void board_sdcard_enable(FAR void *arg)
 
       /* If not initialize SD slot */
 
-      if (!stat("/dev/mmcsd0", &stat_sdio) == 0)
+      if (nx_stat("/dev/mmcsd0", &stat_sdio, 1) != 0)
         {
           /* Now bind the SDHC interface to the MMC/SD driver */
 
@@ -148,7 +138,7 @@ static void board_sdcard_enable(FAR void *arg)
           if (ret != OK)
             {
               _err("ERROR: Failed to bind SDHC to the MMC/SD driver: %d\n",
-                                                                      ret);
+                   ret);
               goto release_frequency_lock;
             }
 
@@ -159,31 +149,20 @@ static void board_sdcard_enable(FAR void *arg)
 
       cxd56_sdhci_mediachange(g_sdhci.sdhci);
 
-      if (stat("/dev/mmcsd0", &stat_sdio) == 0)
-        {
-          if (S_ISBLK(stat_sdio.st_mode))
-            {
-              ret = mount("/dev/mmcsd0", "/mnt/sd0", "vfat", 0, NULL);
-              if (ret == 0)
-                {
-                  finfo("Successfully mount a SDCARD via the MMC/SD driver\n");
-                }
-              else
-                {
-                  _err("ERROR: Failed to mount the SDCARD. %d\n", errno);
-                  goto release_frequency_lock;
-                }
-            }
-        }
+#ifdef CONFIG_CXD56_SDCARD_AUTOMOUNT
+      /* Let the automounter know about the insertion event */
+
+      board_automount_event(0, board_sdcard_inserted(0));
+#endif /* CONFIG_CXD56_SDCARD_AUTOMOUNT */
 
       g_sdhci.initialized = true;
     }
 
 release_frequency_lock:
 
-    /* Release frequency lock */
+  /* Release frequency lock */
 
-    up_pm_release_freqlock(&g_hv_lock);
+  up_pm_release_freqlock(&g_hv_lock);
 }
 
 /****************************************************************************
@@ -194,25 +173,21 @@ release_frequency_lock:
  *
  ****************************************************************************/
 
-static void board_sdcard_disable(FAR void *arg)
+static void board_sdcard_disable(void *arg)
 {
-  int ret;
-
   if (g_sdhci.initialized)
     {
-      /* un-mount */
-
-      ret = umount("/mnt/sd0");
-      if (ret < 0)
-        {
-          ferr("ERROR: Failed to unmount the SD Card: %d\n", errno);
-        }
-
       /* Report the new state to the SDIO driver */
 
       cxd56_sdhci_mediachange(g_sdhci.sdhci);
 
       cxd56_sdhci_finalize(0);
+
+#ifdef CONFIG_CXD56_SDCARD_AUTOMOUNT
+      /* Let the automounter know about the removal event */
+
+      board_automount_event(0, board_sdcard_inserted(0));
+#endif /* CONFIG_CXD56_SDCARD_AUTOMOUNT */
 
       g_sdhci.initialized = false;
     }
@@ -220,37 +195,14 @@ static void board_sdcard_disable(FAR void *arg)
 
 #ifdef CONFIG_MMCSD_HAVE_CARDDETECT
 /****************************************************************************
- * Name: board_sdcard_inserted
- *
- * Description:
- *   Check if a card is inserted into the selected SDHCI slot
- *
- ****************************************************************************/
-
-static bool board_sdcard_inserted(int slotno)
-{
-  bool removed;
-
-  /* Get the state of the GPIO pin */
-
-  removed = cxd56_gpio_read(PIN_SDIO_CD);
-  finfo("Slot %d inserted: %s\n", slotno, removed ? "NO" : "YES");
-
-  return !removed;
-}
-
-/****************************************************************************
  * Name: board_sdcard_detect_int
  *
  * Description:
  *   Card detect interrupt handler
  *
- * TODO: Any way to automatically moun/unmount filesystem based on card
- * detect status?  Yes... send a message or signal to an application.
- *
  ****************************************************************************/
 
-static int board_sdcard_detect_int(int irq, FAR void *context, FAR void *arg)
+static int board_sdcard_detect_int(int irq, void *context, void *arg)
 {
   bool inserted;
 
@@ -283,7 +235,7 @@ static int board_sdcard_detect_int(int irq, FAR void *context, FAR void *arg)
 
       if (up_interrupt_context())
         {
-          DEBUGASSERT(work_available(&g_sdcard_work));
+          work_cancel(HPWORK, &g_sdcard_work);
           if (inserted)
             {
               work_queue(HPWORK, &g_sdcard_work, board_sdcard_enable,
@@ -306,18 +258,9 @@ static int board_sdcard_detect_int(int irq, FAR void *context, FAR void *arg)
               board_sdcard_disable(NULL);
             }
         }
-
-      /* Re-configure Interrupt pin */
-
-      cxd56_gpioint_config(PIN_SDIO_CD,
-                           inserted ?
-                           GPIOINT_PSEUDO_EDGE_RISE :
-                           GPIOINT_PSEUDO_EDGE_FALL,
-                           board_sdcard_detect_int,
-                           NULL);
     }
 
-    return OK;
+  return OK;
 }
 #endif
 
@@ -336,6 +279,9 @@ static int board_sdcard_detect_int(int irq, FAR void *context, FAR void *arg)
 int board_sdcard_initialize(void)
 {
   int ret = OK;
+#ifdef CONFIG_MMCSD_HAVE_CARDDETECT
+  int irq;
+#endif
 
 #ifdef CONFIG_SDCARD_TXS02612_PORT0
   /* Select port0 for SD-Card (default) */
@@ -355,23 +301,24 @@ int board_sdcard_initialize(void)
   /* Configure Interrupt pin with internal pull-up */
 
   cxd56_pin_config(PINCONF_SDIO_CD_GPIO);
-  ret = cxd56_gpioint_config(PIN_SDIO_CD,
-                             GPIOINT_PSEUDO_EDGE_FALL,
-                             board_sdcard_detect_int,
-                             NULL);
-  if (ret < 0)
+  irq = cxd56_gpioint_config(PIN_SDIO_CD, GPIOINT_PSEUDO_EDGE_BOTH,
+                             board_sdcard_detect_int, NULL);
+
+  /* Disable wakeup from SD Card detect interrupt */
+
+  if ((CXD56_IRQ_EXDEVICE_0 <= irq) && (irq <= CXD56_IRQ_EXDEVICE_11))
     {
-      _err("ERROR: Failed to configure GPIO int. \n");
+      up_pm_clr_bootmask(PM_BOOT_GPIO_MASK(irq));
     }
+
+  /* Handle the case when SD card is already inserted */
+
+  board_sdcard_detect_int(PIN_SDIO_CD, NULL, NULL);
 
   /* Enabling Interrupt */
 
   cxd56_gpioint_enable(PIN_SDIO_CD);
 #else
-  /* Initialize Card insert status */
-
-  g_sdhci.inserted = true;
-
   /* Enable SDC */
 
   board_sdcard_enable(NULL);
@@ -394,18 +341,15 @@ int board_sdcard_finalize(void)
 
   /* At first, Disable interrupt of the card detection */
 
-  if (g_sdhci.inserted)
-    {
-      board_sdcard_disable(NULL);
-    }
-
-  g_sdhci.inserted = false;
-
 #ifdef CONFIG_MMCSD_HAVE_CARDDETECT
   /* Disabling Interrupt */
 
   cxd56_gpioint_disable(PIN_SDIO_CD);
+
+  g_sdhci.inserted = false;
 #endif
+
+  board_sdcard_disable(NULL);
 
   /* Disable SDIO pin configuration */
 
@@ -527,3 +471,25 @@ void board_sdcard_set_high_voltage(void)
 void board_sdcard_set_low_voltage(void)
 {
 }
+
+#ifdef CONFIG_MMCSD_HAVE_CARDDETECT
+/****************************************************************************
+ * Name: board_sdcard_inserted
+ *
+ * Description:
+ *   Check if a card is inserted into the selected SDHCI slot
+ *
+ ****************************************************************************/
+
+bool board_sdcard_inserted(int slotno)
+{
+  bool removed;
+
+  /* Get the state of the GPIO pin */
+
+  removed = cxd56_gpio_read(PIN_SDIO_CD);
+  finfo("Slot %d inserted: %s\n", slotno, removed ? "NO" : "YES");
+
+  return !removed;
+}
+#endif

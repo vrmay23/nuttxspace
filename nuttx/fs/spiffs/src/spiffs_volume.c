@@ -1,9 +1,8 @@
 /****************************************************************************
- * fs/spiffs.h/spiffs_volume.c
- * SPIFFS Utility Functions for Volume and File Object Support
+ * fs/spiffs/src/spiffs_volume.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2018 Gregory Nutt
  *
  * This is a port of version 0.3.7 of SPIFFS by Peter Andersion.  That
  * version was originally released under the MIT license but is here re-
@@ -49,9 +48,12 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <fcntl.h>
+#include <inttypes.h>
+#include <assert.h>
 
 #include <nuttx/kmalloc.h>
 
+#include "fs_heap.h"
 #include "spiffs.h"
 #include "spiffs_core.h"
 #include "spiffs_cache.h"
@@ -245,7 +247,8 @@ ssize_t spiffs_fobj_flush(FAR struct spiffs_s *fs,
 
       if (fobj->cache_page)
         {
-          spiffs_cacheinfo("Flushing cache page %d for objid=%d offset=%d size=%d\n",
+          spiffs_cacheinfo("Flushing cache page %d for objid=%d "
+                           "offset=%" PRIu32 " size=%d\n",
                            fobj->cache_page->cpndx, fobj->objid,
                            fobj->cache_page->offset, fobj->cache_page->size);
 
@@ -253,7 +256,7 @@ ssize_t spiffs_fobj_flush(FAR struct spiffs_s *fs,
             spiffs_fobj_write(fs, fobj,
                               spiffs_get_cache_page(fs, spiffs_get_cache(fs),
                                                     fobj->cache_page->cpndx),
-                              fobj->cache_page->offset, fobj->cache_page->size);
+                           fobj->cache_page->offset, fobj->cache_page->size);
           if (nwritten < 0)
             {
               ferr("ERROR: spiffs_fobj_write failed %d\n", (int)nwritten);
@@ -486,5 +489,5 @@ void spiffs_fobj_free(FAR struct spiffs_s *fs,
 
   /* Then free the file object itself (which contains the lock we hold) */
 
-  kmm_free(fobj);
+  fs_heap_free(fobj);
 }

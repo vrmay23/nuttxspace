@@ -1,35 +1,22 @@
 /****************************************************************************
- * drivers/rgbled.c
+ * drivers/leds/rgbled.c
  *
- *   Copyright (C) 2016-2018 Gregory Nutt. All rights reserved.
- *   Author: Alan Carvalho de Assis <acassis@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,7 +30,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
@@ -56,14 +42,14 @@
 #include <nuttx/arch.h>
 #include <nuttx/timers/pwm.h>
 #include <nuttx/leds/rgbled.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 
 #include <arch/irq.h>
 
 #ifdef CONFIG_RGBLED
 
 /****************************************************************************
- * Private Type Definitions
+ * Private Types
  ****************************************************************************/
 
 /* This structure describes the state of the upper half driver */
@@ -72,7 +58,7 @@ struct rgbled_upperhalf_s
 {
   uint8_t           crefs;    /* The number of times the device has been opened */
   volatile bool     started;  /* True: pulsed output is being generated */
-  sem_t             exclsem;  /* Supports mutual exclusion */
+  mutex_t           lock;     /* Supports mutual exclusion */
   FAR struct pwm_lowerhalf_s *devledr;
   FAR struct pwm_lowerhalf_s *devledg;
   FAR struct pwm_lowerhalf_s *devledb;
@@ -104,12 +90,6 @@ static const struct file_operations g_rgbledops =
   rgbled_close, /* close */
   rgbled_read,  /* read */
   rgbled_write, /* write */
-  NULL,         /* seek */
-  NULL,         /* ioctl */
-  NULL          /* poll */
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL        /* unlink */
-#endif
 };
 
 /****************************************************************************
@@ -135,7 +115,7 @@ static int rgbled_open(FAR struct file *filep)
 
   /* Get exclusive access to the device structures */
 
-  ret = nxsem_wait(&upper->exclsem);
+  ret = nxmutex_lock(&upper->lock);
   if (ret < 0)
     {
       lcderr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -153,7 +133,7 @@ static int rgbled_open(FAR struct file *filep)
       /* More than 255 opens; uint8_t overflows to zero */
 
       ret = -EMFILE;
-      goto errout_with_sem;
+      goto errout_with_lock;
     }
 
   /* Save the new open count on success */
@@ -161,8 +141,8 @@ static int rgbled_open(FAR struct file *filep)
   upper->crefs = tmp;
   ret = OK;
 
-errout_with_sem:
-  nxsem_post(&upper->exclsem);
+errout_with_lock:
+  nxmutex_unlock(&upper->lock);
 
 errout:
   return ret;
@@ -186,7 +166,7 @@ static int rgbled_close(FAR struct file *filep)
 
   /* Get exclusive access to the device structures */
 
-  ret = nxsem_wait(&upper->exclsem);
+  ret = nxmutex_lock(&upper->lock);
   if (ret < 0)
     {
       lcderr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -202,7 +182,7 @@ static int rgbled_close(FAR struct file *filep)
       upper->crefs--;
     }
 
-  nxsem_post(&upper->exclsem);
+  nxmutex_unlock(&upper->lock);
   ret = OK;
 
 errout:
@@ -290,7 +270,6 @@ static unsigned short rgbled_lightness(unsigned char color_level)
 static ssize_t rgbled_write(FAR struct file *filep, FAR const char *buffer,
                             size_t buflen)
 {
-
   FAR struct inode *inode = filep->f_inode;
   FAR struct rgbled_upperhalf_s *upper = inode->i_private;
   FAR struct pwm_lowerhalf_s *ledr = upper->devledr;
@@ -382,7 +361,7 @@ static ssize_t rgbled_write(FAR struct file *filep, FAR const char *buffer,
 
 #ifdef CONFIG_PWM_MULTICHAN
   memset(&pwm, 0, sizeof(struct pwm_info_s));
-  pwm.frequency = 100;
+  pwm.frequency = CONFIG_RGBLED_PWM_FREQ;
 
   i = 0;
   pwm.channels[i].duty = red;
@@ -455,7 +434,7 @@ static ssize_t rgbled_write(FAR struct file *filep, FAR const char *buffer,
       ledb->ops->start(ledb, &pwm);
     }
 #else
-  pwm.frequency = 100;
+  pwm.frequency = CONFIG_RGBLED_PWM_FREQ;
 
   pwm.duty = red;
   ledr->ops->start(ledr, &pwm);
@@ -525,7 +504,7 @@ int rgbled_register(FAR const char *path, FAR struct pwm_lowerhalf_s *ledr,
    * kmm_zalloc())
    */
 
-  nxsem_init(&upper->exclsem, 0, 1);
+  nxmutex_init(&upper->lock);
   upper->devledr = ledr;
   upper->devledg = ledg;
   upper->devledb = ledb;

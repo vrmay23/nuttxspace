@@ -1,46 +1,33 @@
 /****************************************************************************
  * drivers/input/tsc2007.c
  *
- *   Copyright (C) 2011-2012, 2016-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * References:
- *   "1.2V to 3.6V, 12-Bit, Nanopower, 4-Wire Micro TOUCH SCREEN CONTROLLER
- *    with I2C Interface," SBAS405A March 2007, Revised, March 2009, Texas
- *    Instruments Incorporated
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
 /* The TSC2007 is an analog interface circuit for a human interface touch
  * screen device. All peripheral functions are controlled through the command
  * byte and onboard state machines.
+ *
+ * References:
+ *   "1.2V to 3.6V, 12-Bit, Nanopower, 4-Wire Micro TOUCH SCREEN CONTROLLER
+ *    with I2C Interface," SBAS405A March 2007, Revised, March 2009, Texas
+ *    Instruments Incorporated
  */
 
 /****************************************************************************
@@ -66,6 +53,7 @@
 #include <nuttx/arch.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/i2c/i2c_master.h>
+#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/random.h>
@@ -79,7 +67,9 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
 /* Configuration ************************************************************/
+
 /* Reference counting is partially implemented, but not needed in the
  * current design.
  */
@@ -95,6 +85,7 @@
 #define CONFIG_TSC2007_ACTIVATE 1
 
 /* Driver support ***********************************************************/
+
 /* This format is used to construct the /dev/input[n] device driver path.  It
  * defined here so that it will be used consistently in all places.
  */
@@ -164,7 +155,7 @@ struct tsc2007_dev_s
   uint8_t nwaiters;                    /* Number of threads waiting for TSC2007 data */
   uint8_t id;                          /* Current touch point ID */
   volatile bool penchange;             /* An unreported event is buffered */
-  sem_t devsem;                        /* Manages exclusive access to this structure */
+  mutex_t devlock;                     /* Manages exclusive access to this structure */
   sem_t waitsem;                       /* Used to wait for the availability of data */
 
   FAR struct tsc2007_config_s *config; /* Board configuration data */
@@ -177,7 +168,7 @@ struct tsc2007_dev_s
    * retained in the f_priv field of the 'struct file'.
    */
 
-  struct pollfd *fds[CONFIG_TSC2007_NPOLLWAITERS];
+  FAR struct pollfd *fds[CONFIG_TSC2007_NPOLLWAITERS];
 };
 
 /****************************************************************************
@@ -200,9 +191,11 @@ static int tsc2007_interrupt(int irq, FAR void *context);
 
 static int tsc2007_open(FAR struct file *filep);
 static int tsc2007_close(FAR struct file *filep);
-static ssize_t tsc2007_read(FAR struct file *filep, FAR char *buffer, size_t len);
+static ssize_t tsc2007_read(FAR struct file *filep, FAR char *buffer,
+                            size_t len);
 static int tsc2007_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
-static int tsc2007_poll(FAR struct file *filep, struct pollfd *fds, bool setup);
+static int tsc2007_poll(FAR struct file *filep, FAR struct pollfd *fds,
+                        bool setup);
 
 /****************************************************************************
  * Private Data
@@ -210,14 +203,16 @@ static int tsc2007_poll(FAR struct file *filep, struct pollfd *fds, bool setup);
 
 /* This the vtable that supports the character driver interface */
 
-static const struct file_operations tsc2007_fops =
+static const struct file_operations g_tsc2007_fops =
 {
   tsc2007_open,    /* open */
   tsc2007_close,   /* close */
   tsc2007_read,    /* read */
-  0,               /* write */
-  0,               /* seek */
+  NULL,            /* write */
+  NULL,            /* seek */
   tsc2007_ioctl,   /* ioctl */
+  NULL,            /* mmap */
+  NULL,            /* truncate */
   tsc2007_poll     /* poll */
 };
 
@@ -244,7 +239,13 @@ static struct tsc2007_dev_s *g_tsc2007list;
 
 static void tsc2007_notify(FAR struct tsc2007_dev_s *priv)
 {
-  int i;
+  /* If there are threads waiting on poll() for TSC2007 data to become
+   * available, then wake them up now.  NOTE: we wake up all waiting
+   * threads because we do not know that they are going to do.  If they
+   * all try to read the data, then some make end up blocking after all.
+   */
+
+  poll_notify(priv->fds, CONFIG_TSC2007_NPOLLWAITERS, POLLIN);
 
   /* If there are threads waiting for read data, then signal one of them
    * that the read data is available.
@@ -258,23 +259,6 @@ static void tsc2007_notify(FAR struct tsc2007_dev_s *priv)
 
       nxsem_post(&priv->waitsem);
     }
-
-  /* If there are threads waiting on poll() for TSC2007 data to become available,
-   * then wake them up now.  NOTE: we wake up all waiting threads because we
-   * do not know that they are going to do.  If they all try to read the data,
-   * then some make end up blocking after all.
-   */
-
-  for (i = 0; i < CONFIG_TSC2007_NPOLLWAITERS; i++)
-    {
-      struct pollfd *fds = priv->fds[i];
-      if (fds)
-        {
-          fds->revents |= POLLIN;
-          iinfo("Report events: %02x\n", fds->revents);
-          nxsem_post(fds->sem);
-        }
-    }
 }
 
 /****************************************************************************
@@ -287,7 +271,7 @@ static int tsc2007_sample(FAR struct tsc2007_dev_s *priv,
   irqstate_t flags;
   int ret = -EAGAIN;
 
-  /* Interrupts me be disabled when this is called to (1) prevent posting
+  /* Interrupts must be disabled when this is called to (1) prevent posting
    * of semaphores from interrupt handlers, and (2) to prevent sampled data
    * from changing until it has been reported.
    */
@@ -317,11 +301,11 @@ static int tsc2007_sample(FAR struct tsc2007_dev_s *priv,
           priv->id++;
         }
       else if (sample->contact == CONTACT_DOWN)
-       {
+        {
           /* First report -- next report will be a movement */
 
-         priv->sample.contact = CONTACT_MOVE;
-       }
+          priv->sample.contact = CONTACT_MOVE;
+        }
 
       priv->penchange = false;
       ret = OK;
@@ -341,7 +325,7 @@ static int tsc2007_waitsample(FAR struct tsc2007_dev_s *priv,
   irqstate_t flags;
   int ret;
 
-  /* Interrupts me be disabled when this is called to (1) prevent posting
+  /* Interrupts must be disabled when this is called to (1) prevent posting
    * of semaphores from interrupt handlers, and (2) to prevent sampled data
    * from changing until it has been reported.
    *
@@ -349,7 +333,6 @@ static int tsc2007_waitsample(FAR struct tsc2007_dev_s *priv,
    * from getting control while we muck with the semaphores.
    */
 
-  sched_lock();
   flags = enter_critical_section();
 
   /* Now release the semaphore that manages mutually exclusive access to
@@ -357,7 +340,7 @@ static int tsc2007_waitsample(FAR struct tsc2007_dev_s *priv,
    * run, but they cannot run yet because pre-emption is disabled.
    */
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
 
   /* Try to get the a sample... if we cannot, then wait on the semaphore
    * that is posted when new sample data is available.
@@ -379,11 +362,11 @@ static int tsc2007_waitsample(FAR struct tsc2007_dev_s *priv,
     }
 
   /* Re-acquire the semaphore that manages mutually exclusive access to
-   * the device structure.  We may have to wait here.  But we have our sample.
-   * Interrupts and pre-emption will be re-enabled while we wait.
+   * the device structure.  We may have to wait here.  But we have our
+   * sample.  Interrupts and pre-emption will be re-enabled while we wait.
    */
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
 
 errout:
   /* Then re-enable interrupts.  We might get interrupt here and there
@@ -392,14 +375,6 @@ errout:
    */
 
   leave_critical_section(flags);
-
-  /* Restore pre-emption.  We might get suspended here but that is okay
-   * because we already have our sample.  Note:  this means that if there
-   * were two threads reading from the TSC2007 for some reason, the data
-   * might be read out of order.
-   */
-
-  sched_unlock();
   return ret;
 }
 
@@ -410,42 +385,43 @@ errout:
 #ifdef CONFIG_TSC2007_ACTIVATE
 static int tsc2007_activate(FAR struct tsc2007_dev_s *priv, uint8_t cmd)
 {
-   struct i2c_msg_s msg;
-   uint8_t data;
-   int ret;
+  struct i2c_msg_s msg;
+  uint8_t data;
+  int ret;
 
   /* Send the setup command (with no ACK) followed by the A/D converter
    * activation command (ACKed).
    */
 
-   data          = TSC2007_SETUP;
+  data          = TSC2007_SETUP;
 
-   msg.frequency = priv->config->frequency;   /* I2C frequency */
-   msg.addr      = priv->config->address;     /* 7-bit address */
-   msg.flags     = 0;                         /* Write transaction, beginning with START */
-   msg.buffer    = &data;                     /* Transfer from this address */
-   msg.length    = 1;                         /* Send one byte following the address */
+  msg.frequency = priv->config->frequency;   /* I2C frequency */
+  msg.addr      = priv->config->address;     /* 7-bit address */
+  msg.flags     = 0;                         /* Write transaction, beginning with START */
+  msg.buffer    = &data;                     /* Transfer from this address */
+  msg.length    = 1;                         /* Send one byte following the address */
 
-   /* Ignore errors from the setup command (because it is not ACKed) */
+  /* Ignore errors from the setup command (because it is not ACKed) */
 
-   I2C_TRANSFER(priv->i2c, &msg, 1);
+  I2C_TRANSFER(priv->i2c, &msg, 1);
 
-   /* Now activate the A/D converter */
+  /* Now activate the A/D converter */
 
-   data          = cmd;
+  data          = cmd;
 
-   msg.frequency = priv->config->frequency;   /* I2C frequency */
-   msg.addr      = priv->config->address;     /* 7-bit address */
-   msg.flags     = 0;                         /* Write transaction, beginning with START */
-   msg.buffer    = &data;                     /* Transfer from this address */
-   msg.length    = 1;                         /* Send one byte following the address */
+  msg.frequency = priv->config->frequency;   /* I2C frequency */
+  msg.addr      = priv->config->address;     /* 7-bit address */
+  msg.flags     = 0;                         /* Write transaction, beginning with START */
+  msg.buffer    = &data;                     /* Transfer from this address */
+  msg.length    = 1;                         /* Send one byte following the address */
 
-   ret = I2C_TRANSFER(priv->i2c, &msg, 1);
-   if (ret < 0)
-     {
-       ierr("ERROR: I2C_TRANSFER failed: %d\n", ret);
-     }
-   return ret;
+  ret = I2C_TRANSFER(priv->i2c, &msg, 1);
+  if (ret < 0)
+    {
+      ierr("ERROR: I2C_TRANSFER failed: %d\n", ret);
+    }
+
+  return ret;
 }
 #else
 #  define tsc2007_activate(p,c)
@@ -457,9 +433,9 @@ static int tsc2007_activate(FAR struct tsc2007_dev_s *priv, uint8_t cmd)
 
 static int tsc2007_transfer(FAR struct tsc2007_dev_s *priv, uint8_t cmd)
 {
-   struct i2c_msg_s msg;
-   uint8_t data12[2];
-   int ret;
+  struct i2c_msg_s msg;
+  uint8_t data12[2];
+  int ret;
 
   /* "A conversion/write cycle begins when the master issues the address
    *  byte containing the slave address of the TSC2007, with the eighth bit
@@ -473,18 +449,18 @@ static int tsc2007_transfer(FAR struct tsc2007_dev_s *priv, uint8_t cmd)
    *  STOP condition...
    */
 
-   msg.frequency = priv->config->frequency;   /* I2C frequency */
-   msg.addr      = priv->config->address;     /* 7-bit address */
-   msg.flags     = 0;                         /* Write transaction, beginning with START */
-   msg.buffer    = &cmd;                      /* Transfer from this address */
-   msg.length    = 1;                         /* Send one byte following the address */
+  msg.frequency = priv->config->frequency;   /* I2C frequency */
+  msg.addr      = priv->config->address;     /* 7-bit address */
+  msg.flags     = 0;                         /* Write transaction, beginning with START */
+  msg.buffer    = &cmd;                      /* Transfer from this address */
+  msg.length    = 1;                         /* Send one byte following the address */
 
-   ret = I2C_TRANSFER(priv->i2c, &msg, 1);
-   if (ret < 0)
-     {
-       ierr("ERROR: I2C_TRANSFER failed: %d\n", ret);
-       return ret;
-     }
+  ret = I2C_TRANSFER(priv->i2c, &msg, 1);
+  if (ret < 0)
+    {
+      ierr("ERROR: I2C_TRANSFER failed: %d\n", ret);
+      return ret;
+    }
 
   /* "The input multiplexer channel for the A/D converter is selected when
    *  bits C3 through C0 are clocked in. If the selected channel is an X-,Y-,
@@ -501,7 +477,7 @@ static int tsc2007_transfer(FAR struct tsc2007_dev_s *priv, uint8_t cmd)
    *  least 10ms before attempting to read data from the TSC2007...
    */
 
-  nxsig_usleep(10*1000);
+  nxsig_usleep(10 * 1000);
 
   /* "Data access begins with the master issuing a START condition followed
    *  by the address byte ... with R/W = 1.
@@ -510,35 +486,35 @@ static int tsc2007_transfer(FAR struct tsc2007_dev_s *priv, uint8_t cmd)
    *  slave issues an acknowledge. The first byte of serial data then follows
    *  (D11-D4, MSB first).
    *
-   * "After the first byte has been sent by the slave, it releases the SDA line
-   *  for the master to issue an acknowledge.  The slave responds with the
-   *  second byte of serial data upon receiving the acknowledge from the master
-   *  (D3-D0, followed by four 0 bits). The second byte is followed by a NOT
-   *  acknowledge bit (ACK = 1) from the master to indicate that the last
-   *  data byte has been received...
+   * "After the first byte has been sent by the slave, it releases the SDA
+   *  line for the master to issue an acknowledge.  The slave responds with
+   *  the second byte of serial data upon receiving the acknowledge from the
+   *  master (D3-D0, followed by four 0 bits). The second byte is followed by
+   *  a NOT acknowledge bit (ACK = 1) from the master to indicate that the
+   *  last data byte has been received...
    */
 
-   msg.frequency = priv->config->frequency;   /* I2C frequency */
-   msg.addr      = priv->config->address;     /* 7-bit address */
-   msg.flags     = I2C_M_READ;                /* Read transaction, beginning with START */
-   msg.buffer    = data12;                    /* Transfer to this address */
-   msg.length    = 2;                         /* Read two bytes following the address */
+  msg.frequency = priv->config->frequency;   /* I2C frequency */
+  msg.addr      = priv->config->address;     /* 7-bit address */
+  msg.flags     = I2C_M_READ;                /* Read transaction, beginning with START */
+  msg.buffer    = data12;                    /* Transfer to this address */
+  msg.length    = 2;                         /* Read two bytes following the address */
 
-   ret = I2C_TRANSFER(priv->i2c, &msg, 1);
-   if (ret < 0)
-     {
-       ierr("ERROR: I2C_TRANSFER failed: %d\n", ret);
-       return ret;
-     }
+  ret = I2C_TRANSFER(priv->i2c, &msg, 1);
+  if (ret < 0)
+    {
+      ierr("ERROR: I2C_TRANSFER failed: %d\n", ret);
+      return ret;
+    }
 
   /* Get the MS 8 bits from the first byte and the remaining LS 4 bits from
    * the second byte.  The valid range of data is then from 0 to 4095 with
    * the LSB unit corresponding to Vref/4096.
    */
 
-   ret = (unsigned int)data12[0] << 4 | (unsigned int)data12[1] >> 4;
-   iinfo("data: 0x%04x\n", ret);
-   return ret;
+  ret = (unsigned int)data12[0] << 4 | (unsigned int)data12[1] >> 4;
+  iinfo("data: 0x%04x\n", ret);
+  return ret;
 }
 
 /****************************************************************************
@@ -558,6 +534,10 @@ static void tsc2007_worker(FAR void *arg)
 
   DEBUGASSERT(priv != NULL);
 
+  /* Get exclusive access to the driver data structure */
+
+  nxmutex_lock(&priv->devlock);
+
   /* Get a pointer the callbacks for convenience (and so the code is not so
    * ugly).
    */
@@ -573,8 +553,9 @@ static void tsc2007_worker(FAR void *arg)
 
   if (!pendown)
     {
-      /* Ignore the interrupt if the pen was already down (CONTACT_NONE == pen up and
-       * already reported.  CONTACT_UP == pen up, but not reported)
+      /* Ignore the interrupt if the pen was already down (CONTACT_NONE ==
+       * pen up and already reported.  CONTACT_UP == pen up, but not
+       * reported)
        */
 
       if (priv->sample.contact == CONTACT_NONE)
@@ -584,13 +565,13 @@ static void tsc2007_worker(FAR void *arg)
     }
 
   /* It is a pen down event.  If the last loss-of-contact event has not been
-   * processed yet, then we have to ignore the pen down event (or else it will
-   * look like a drag event)
+   * processed yet, then we have to ignore the pen down event (or else it
+   * will look like a drag event)
    */
 
   else if (priv->sample.contact == CONTACT_UP)
     {
-       goto errout;
+      goto errout;
     }
   else
     {
@@ -598,47 +579,50 @@ static void tsc2007_worker(FAR void *arg)
        *
        * "A resistive touch screen operates by applying a voltage across a
        *  resistor network and measuring the change in resistance at a given
-       *  point on the matrix where the screen is touched by an input (stylus,
-       *  pen, or finger). The change in the resistance ratio marks the location
-       *  on the touch screen.
+       *  point on the matrix where the screen is touched by an input
+       *  (stylus, pen, or finger). The change in the resistance ratio marks
+       *  the location on the touch screen.
        *
-       * "The 4-wire touch screen panel works by applying a voltage across the
-       *  vertical or horizontal resistive network.  The A/D converter converts
-       *  the voltage measured at the point where the panel is touched. A measurement
-       *  of the Y position of the pointing device is made by connecting the X+
-       *  input to a data converter chip, turning on the Y+ and Y- drivers, and
-       *  digitizing the voltage seen at the X+ input ..."
+       * "The 4-wire touch screen panel works by applying a voltage across
+       *  the vertical or horizontal resistive network.  The A/D converter
+       *  converts the voltage measured at the point where the panel is
+       *  touched. A measurement of the Y position of the pointing device is
+       *  made by connecting the X+ input to a data converter chip, turning
+       *  on the Y+ and Y- drivers, and digitizing the voltage seen at the
+       *  X+ input ..."
        *
-       * "... it is recommended that whenever the host writes to the TSC2007, the
-       *  master processor masks the interrupt associated to PENIRQ. This masking
-       *  prevents false triggering of interrupts when the PENIRQ line is disabled
-       *  in the cases previously listed."
+       * "... it is recommended that whenever the host writes to the TSC2007,
+       *  the master processor masks the interrupt associated to PENIRQ.
+       *  This masking prevents false triggering of interrupts when the
+       *  PENIRQ line is disabled in the cases previously listed."
        */
 
       tsc2007_activate(priv, TSC2007_ACTIVATE_X);
       y = tsc2007_transfer(priv, TSC2007_MEASURE_Y);
 
-
       /* "Voltage is then applied to the other axis, and the A/D converter
-       *  converts the voltage representing the X position on the screen. This
-       *  process provides the X and Y coordinates to the associated processor."
+       *  converts the voltage representing the X position on the screen.
+       *  This process provides the X and Y coordinates to the associated
+       *  processor."
        */
 
       tsc2007_activate(priv, TSC2007_ACTIVATE_Y);
       x = tsc2007_transfer(priv, TSC2007_MEASURE_X);
 
-      /* "... To determine pen or finger touch, the pressure of the touch must be
-       *  determined. ... There are several different ways of performing this
-       *  measurement. The TSC2007 supports two methods. The first method requires
-       *  knowing the X-plate resistance, the measurement of the X-position, and two
-       *  additional cross panel measurements (Z2 and Z1) of the touch screen."
+      /* "... To determine pen or finger touch, the pressure of the touch
+       *  must be determined. ... There are several different ways of
+       *  performing this measurement. The TSC2007 supports two methods.  The
+       *  first method requires knowing the X-plate resistance, the
+       *  measurement of the X-position, and two additional cross panel
+       *  measurements (Z2 and Z1) of the touch screen."
        *
        *  Rtouch = Rxplate * (X / 4096)* (Z2/Z1 - 1)
        *
        * "The second method requires knowing both the X-plate and Y-plate
        *  resistance, measurement of X-position and Y-position, and Z1 ..."
        *
-       *  Rtouch = Rxplate * (X / 4096) * (4096/Z1 - 1) - Ryplate * (1 - Y/4096)
+       *  Rtouch = Rxplate * (X / 4096) * (4096/Z1 - 1) -
+       *           Ryplate * (1 - Y/4096)
        *
        * Read Z1 and Z2 values.
        */
@@ -728,6 +712,7 @@ static void tsc2007_worker(FAR void *arg)
 
 errout:
   config->enable(config, true);
+  nxmutex_unlock(&priv->devlock);
 }
 
 /****************************************************************************
@@ -793,15 +778,14 @@ static int tsc2007_open(FAR struct file *filep)
   uint8_t                   tmp;
   int                       ret;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct tsc2007_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       ierr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -816,7 +800,7 @@ static int tsc2007_open(FAR struct file *filep)
       /* More than 255 opens; uint8_t overflows to zero */
 
       ret = -EMFILE;
-      goto errout_with_sem;
+      goto errout_with_lock;
     }
 
   /* When the reference increments to 1, this is the first open event
@@ -827,8 +811,8 @@ static int tsc2007_open(FAR struct file *filep)
 
   priv->crefs = tmp;
 
-errout_with_sem:
-  nxsem_post(&priv->devsem);
+errout_with_lock:
+  nxmutex_unlock(&priv->devlock);
   return ret;
 #else
   return OK;
@@ -846,15 +830,14 @@ static int tsc2007_close(FAR struct file *filep)
   FAR struct tsc2007_dev_s *priv;
   int                       ret;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct tsc2007_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       ierr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -871,7 +854,7 @@ static int tsc2007_close(FAR struct file *filep)
       priv->crefs--;
     }
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
 #endif
   return OK;
 }
@@ -880,7 +863,8 @@ static int tsc2007_close(FAR struct file *filep)
  * Name: tsc2007_read
  ****************************************************************************/
 
-static ssize_t tsc2007_read(FAR struct file *filep, FAR char *buffer, size_t len)
+static ssize_t tsc2007_read(FAR struct file *filep, FAR char *buffer,
+                            size_t len)
 {
   FAR struct inode          *inode;
   FAR struct tsc2007_dev_s  *priv;
@@ -888,11 +872,10 @@ static ssize_t tsc2007_read(FAR struct file *filep, FAR char *buffer, size_t len
   struct tsc2007_sample_s    sample;
   int                        ret;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct tsc2007_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Verify that the caller has provided a buffer large enough to receive
    * the touch data.
@@ -909,7 +892,7 @@ static ssize_t tsc2007_read(FAR struct file *filep, FAR char *buffer, size_t len
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       ierr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -930,7 +913,7 @@ static ssize_t tsc2007_read(FAR struct file *filep, FAR char *buffer, size_t len
         {
           ret = -EAGAIN;
           goto errout;
-       }
+        }
 
       /* Wait for sample data */
 
@@ -980,16 +963,20 @@ static ssize_t tsc2007_read(FAR struct file *filep, FAR char *buffer, size_t len
         {
           /* Loss of contact */
 
-          report->point[0].flags  = TOUCH_DOWN | TOUCH_ID_VALID | TOUCH_POS_VALID;
+          report->point[0].flags  = TOUCH_DOWN | TOUCH_ID_VALID |
+                                    TOUCH_POS_VALID;
         }
       else /* if (sample->contact == CONTACT_MOVE) */
         {
           /* Movement of the same contact */
 
-          report->point[0].flags  = TOUCH_MOVE | TOUCH_ID_VALID | TOUCH_POS_VALID;
+          report->point[0].flags  = TOUCH_MOVE | TOUCH_ID_VALID |
+                                    TOUCH_POS_VALID;
         }
 
-      /* A pressure measurement of zero means that pressure is not available */
+      /* A pressure measurement of zero means that pressure is not
+       * available.
+       */
 
       if (report->point[0].pressure != 0)
         {
@@ -1000,7 +987,7 @@ static ssize_t tsc2007_read(FAR struct file *filep, FAR char *buffer, size_t len
   ret = SIZEOF_TOUCH_SAMPLE_S(1);
 
 errout:
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return ret;
 }
 
@@ -1015,15 +1002,14 @@ static int tsc2007_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   int                       ret;
 
   iinfo("cmd: %d arg: %ld\n", cmd, arg);
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct tsc2007_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       ierr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -1034,7 +1020,7 @@ static int tsc2007_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   switch (cmd)
     {
-      case TSIOC_SETCALIB:  /* arg: Pointer to int calibration value */
+      case TSIOC_SETXRCAL:  /* arg: Pointer to int calibration value */
         {
           FAR int *ptr = (FAR int *)((uintptr_t)arg);
           DEBUGASSERT(priv->config != NULL && ptr != NULL);
@@ -1042,7 +1028,7 @@ static int tsc2007_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         }
         break;
 
-      case TSIOC_GETCALIB:  /* arg: Pointer to int calibration value */
+      case TSIOC_GETXRCAL:  /* arg: Pointer to int calibration value */
         {
           FAR int *ptr = (FAR int *)((uintptr_t)arg);
           DEBUGASSERT(priv->config != NULL && ptr != NULL);
@@ -1071,7 +1057,7 @@ static int tsc2007_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         break;
     }
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return ret;
 }
 
@@ -1088,15 +1074,15 @@ static int tsc2007_poll(FAR struct file *filep, FAR struct pollfd *fds,
   int                       i;
 
   iinfo("setup: %d\n", (int)setup);
-  DEBUGASSERT(filep && fds);
+  DEBUGASSERT(fds);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct tsc2007_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Are we setting up the poll?  Or tearing it down? */
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       ierr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -1109,7 +1095,8 @@ static int tsc2007_poll(FAR struct file *filep, FAR struct pollfd *fds,
 
       if ((fds->events & POLLIN) == 0)
         {
-          ierr("ERROR: Missing POLLIN: revents: %08x\n", fds->revents);
+          ierr("ERROR: Missing POLLIN: revents: %08" PRIx32 "\n",
+               fds->revents);
           ret = -EDEADLK;
           goto errout;
         }
@@ -1135,8 +1122,8 @@ static int tsc2007_poll(FAR struct file *filep, FAR struct pollfd *fds,
       if (i >= CONFIG_TSC2007_NPOLLWAITERS)
         {
           ierr("ERROR: No available slot found: %d\n", i);
-          fds->priv    = NULL;
-          ret          = -EBUSY;
+          fds->priv = NULL;
+          ret       = -EBUSY;
           goto errout;
         }
 
@@ -1144,24 +1131,24 @@ static int tsc2007_poll(FAR struct file *filep, FAR struct pollfd *fds,
 
       if (priv->penchange)
         {
-          tsc2007_notify(priv);
+          poll_notify(&fds, 1, POLLIN);
         }
     }
   else if (fds->priv)
     {
       /* This is a request to tear down the poll. */
 
-      struct pollfd **slot = (struct pollfd **)fds->priv;
+      FAR struct pollfd **slot = (FAR struct pollfd **)fds->priv;
       DEBUGASSERT(slot != NULL);
 
       /* Remove all memory of the poll setup */
 
-      *slot                = NULL;
-      fds->priv            = NULL;
+      *slot     = NULL;
+      fds->priv = NULL;
     }
 
 errout:
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return ret;
 }
 
@@ -1212,7 +1199,8 @@ int tsc2007_register(FAR struct i2c_master_s *dev,
 #ifndef CONFIG_TSC2007_MULTIPLE
   priv = &g_tsc2007;
 #else
-  priv = (FAR struct tsc2007_dev_s *)kmm_malloc(sizeof(struct tsc2007_dev_s));
+  priv = (FAR struct tsc2007_dev_s *)
+    kmm_malloc(sizeof(struct tsc2007_dev_s));
   if (!priv)
     {
       ierr("ERROR: kmm_malloc(%d) failed\n", sizeof(struct tsc2007_dev_s));
@@ -1226,14 +1214,8 @@ int tsc2007_register(FAR struct i2c_master_s *dev,
   priv->i2c    = dev;               /* Save the I2C device handle */
   priv->config = config;            /* Save the board configuration */
 
-  nxsem_init(&priv->devsem,  0, 1); /* Initialize device structure semaphore */
+  nxmutex_init(&priv->devlock);     /* Initialize device structure mutex */
   nxsem_init(&priv->waitsem, 0, 0); /* Initialize pen event wait semaphore */
-
-  /* The event wait semaphore is used for signaling and, hence, should not
-   * have priority inheritance enabled.
-   */
-
-  nxsem_setprotocol(&priv->waitsem, SEM_PRIO_NONE);
 
   /* Make sure that interrupts are disabled */
 
@@ -1262,10 +1244,10 @@ int tsc2007_register(FAR struct i2c_master_s *dev,
 
   /* Register the device as an input device */
 
-  snprintf(devname, DEV_NAMELEN, DEV_FORMAT, minor);
+  snprintf(devname, sizeof(devname), DEV_FORMAT, minor);
   iinfo("Registering %s\n", devname);
 
-  ret = register_driver(devname, &tsc2007_fops, 0666, priv);
+  ret = register_driver(devname, &g_tsc2007_fops, 0666, priv);
   if (ret < 0)
     {
       ierr("ERROR: register_driver() failed: %d\n", ret);
@@ -1300,7 +1282,8 @@ int tsc2007_register(FAR struct i2c_master_s *dev,
   return OK;
 
 errout_with_priv:
-  nxsem_destroy(&priv->devsem);
+  nxmutex_destroy(&priv->devlock);
+  nxsem_destroy(&priv->waitsem);
 #ifdef CONFIG_TSC2007_MULTIPLE
   kmm_free(priv);
 #endif

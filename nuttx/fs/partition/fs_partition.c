@@ -1,35 +1,22 @@
 /****************************************************************************
  * fs/partition/fs_partition.c
  *
- *   Copyright (C) 2018 Pinecone Inc. All rights reserved.
- *   Author: Xiang Xiao <xiaoxiang@pinecone.net>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,11 +26,21 @@
 
 #include <sys/mount.h>
 
+#include <assert.h>
+#include <stdio.h>
+
+#include "driver/driver.h"
 #include "partition.h"
 
 /****************************************************************************
  * Private Types
  ****************************************************************************/
+
+struct partition_register_s
+{
+  FAR struct partition_state_s *state;
+  FAR const char *dir;
+};
 
 typedef CODE int
   (*partition_parser_t)(FAR struct partition_state_s *state,
@@ -54,19 +51,12 @@ typedef CODE int
  * Private Function Prototypes
  ****************************************************************************/
 
+static void register_partition(FAR struct partition_s *part,
+                               FAR void *arg);
+
 static int parse_partition(FAR struct partition_state_s *state,
                            partition_handler_t handler,
                            FAR void *arg);
-
-/****************************************************************************
- * Public Function Prototypes
- ****************************************************************************/
-
-#ifdef CONFIG_PTABLE_PARTITION
-int parse_ptable_partition(FAR struct partition_state_s *state,
-                           partition_handler_t handler,
-                           FAR void *arg);
-#endif
 
 /****************************************************************************
  * Private Data
@@ -77,12 +67,57 @@ static const partition_parser_t g_parser[] =
 #ifdef CONFIG_PTABLE_PARTITION
   parse_ptable_partition,
 #endif
+
+#ifdef CONFIG_GPT_PARTITION
+  parse_gpt_partition,
+#endif
+
+#ifdef CONFIG_MBR_PARTITION
+  parse_mbr_partition,
+#endif
+
+#ifdef CONFIG_TXTABLE_PARTITION
+  parse_txtable_partition,
+#endif
+
   NULL
 };
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+static void register_partition(FAR struct partition_s *part, FAR void *arg)
+{
+  if (part->name[0] != '\0')
+    {
+      FAR struct partition_register_s *reg = arg;
+      FAR struct partition_state_s *state = reg->state;
+      FAR char *path;
+
+      path = lib_get_pathbuffer();
+      if (path == NULL)
+        {
+          return;
+        }
+
+      snprintf(path, PATH_MAX, "%s/%s", reg->dir, part->name);
+      if (state->blk != NULL)
+        {
+          register_partition_with_inode(path, 0660, state->blk,
+                                        part->firstblock, part->nblocks);
+        }
+#ifdef CONFIG_MTD
+      else
+        {
+          register_partition_with_mtd(path, 0660, state->mtd,
+                                      part->firstblock, part->nblocks);
+        }
+#endif
+
+      lib_put_pathbuffer(path);
+    }
+}
 
 /****************************************************************************
  * Name: parse_partition
@@ -106,6 +141,16 @@ static int parse_partition(FAR struct partition_state_s *state,
 {
   int i;
   int ret = 0;
+  struct partition_register_s reg =
+  {
+    state, arg ? arg : "/dev"
+  };
+
+  if (handler == NULL)
+    {
+      handler = register_partition;
+      arg = &reg;
+    }
 
   for (i = 0; g_parser[i] != NULL; i++)
     {
@@ -122,6 +167,21 @@ static int parse_partition(FAR struct partition_state_s *state,
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+int read_partition_block(FAR struct partition_state_s *state,
+                         FAR void *buffer, size_t startblock,
+                         size_t nblocks)
+{
+  if (state->blk)
+    {
+      return state->blk->u.i_bops->read(state->blk,
+                                        buffer, startblock, nblocks);
+    }
+  else
+    {
+      return state->mtd->bread(state->mtd, startblock, nblocks, buffer);
+    }
+}
 
 /****************************************************************************
  * Name: parse_block_partition
@@ -156,9 +216,12 @@ int parse_block_partition(FAR const char *path,
 
   state.mtd = NULL;
 
-  ret = state.blk->u.i_bops->ioctl(state.blk, MTDIOC_GEOMETRY, (unsigned long)&mgeo);
-  if (ret >= 0)
+  if (state.blk->u.i_bops->ioctl != NULL &&
+      state.blk->u.i_bops->ioctl(state.blk, MTDIOC_GEOMETRY,
+                                 (unsigned long)(uintptr_t)&mgeo) >= 0)
     {
+      DEBUGASSERT(mgeo.blocksize);
+
       state.blocksize = mgeo.blocksize;
       state.erasesize = mgeo.erasesize;
       state.nblocks   = mgeo.neraseblocks;
@@ -171,6 +234,8 @@ int parse_block_partition(FAR const char *path,
       ret = state.blk->u.i_bops->geometry(state.blk, &geo);
       if (ret >= 0)
         {
+          DEBUGASSERT(geo.geo_sectorsize);
+
           state.blocksize = geo.geo_sectorsize;
           state.erasesize = geo.geo_sectorsize;
           state.nblocks   = geo.geo_nsectors;
@@ -207,11 +272,13 @@ int parse_mtd_partition(FAR struct mtd_dev_s *mtd,
   struct mtd_geometry_s mgeo;
   int ret;
 
-  ret = mtd->ioctl(mtd, MTDIOC_GEOMETRY, (unsigned long)&mgeo);
+  ret = mtd->ioctl(mtd, MTDIOC_GEOMETRY, (unsigned long)(uintptr_t)&mgeo);
   if (ret < 0)
     {
       return ret;
     }
+
+  DEBUGASSERT(mgeo.blocksize);
 
   state.blk       = NULL;
   state.mtd       = mtd;

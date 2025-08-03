@@ -1,35 +1,22 @@
 /****************************************************************************
  * fs/vfs/fs_poll.c
  *
- *   Copyright (C) 2008-2009, 2012-2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,73 +26,94 @@
 
 #include <nuttx/config.h>
 
-#include <stdbool.h>
 #include <poll.h>
 #include <time.h>
 #include <assert.h>
 #include <errno.h>
+#include <debug.h>
 
 #include <nuttx/clock.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/cancelpt.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/net/net.h>
+#include <nuttx/tls.h>
 
 #include <arch/irq.h>
 
 #include "inode/inode.h"
+#include "fs_heap.h"
 
 /****************************************************************************
- * Pre-processor Definitions
+ * Private Types
  ****************************************************************************/
 
-#define poll_semgive(sem) nxsem_post(sem)
+struct pollfd_s
+{
+  FAR struct pollfd *fds;
+  nfds_t nfds;
+};
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: poll_semtake
- ****************************************************************************/
-
-static int poll_semtake(FAR sem_t *sem)
-{
-  return nxsem_wait(sem);
-}
-
-/****************************************************************************
- * Name: poll_fdsetup
+ * Name: poll_teardown
  *
  * Description:
- *   Configure (or unconfigure) one file/socket descriptor for the poll
- *   operation.  If fds and sem are non-null, then the poll is being setup.
- *   if fds and sem are NULL, then the poll is being torn down.
+ *   Teardown the poll operation for each descriptor in the list and return
+ *   the count of non-zero poll events.
  *
  ****************************************************************************/
 
-static int poll_fdsetup(int fd, FAR struct pollfd *fds, bool setup)
+static inline void poll_teardown(FAR struct pollfd *fds, nfds_t nfds,
+                                 FAR int *count)
 {
-  /* Check for a valid file descriptor */
+  unsigned int i;
 
-  if ((unsigned int)fd >= CONFIG_NFILE_DESCRIPTORS)
+  /* Process each descriptor in the list */
+
+  *count = 0;
+  for (i = 0; i < nfds; i++)
     {
-      /* Perform the socket ioctl */
+      if (fds[i].fd >= 0)
+        {
+          FAR struct file *filep;
+          int ret;
 
-#ifdef CONFIG_NET
-      if ((unsigned int)fd < (CONFIG_NFILE_DESCRIPTORS +
-                              CONFIG_NSOCKET_DESCRIPTORS))
-        {
-          return net_poll(fd, fds, setup);
+          ret = file_get(fds[i].fd, &filep);
+          if (ret >= 0)
+            {
+              ret = file_poll(filep, &fds[i], false);
+
+              /* Calling putfilep twice to ensure reference counting
+               * for filep remains consistent with its state for
+               * before the poll.
+               */
+
+              file_put(filep);
+              file_put(filep);
+            }
+
+          if (ret < 0)
+            {
+              fds[i].revents |= POLLERR;
+            }
         }
-      else
-#endif
+
+      /* Check if any events were posted */
+
+      if (fds[i].revents != 0)
         {
-          return -EBADF;
+          (*count)++;
         }
+
+      /* Un-initialize the poll structure */
+
+      fds[i].arg = NULL;
+      fds[i].cb  = NULL;
     }
-
-  return fdesc_poll(fd, fds, setup);
 }
 
 /****************************************************************************
@@ -120,8 +128,8 @@ static inline int poll_setup(FAR struct pollfd *fds, nfds_t nfds,
                              FAR sem_t *sem)
 {
   unsigned int i;
-  unsigned int j;
   int ret = OK;
+  int count = 0;
 
   /* Process each descriptor in the list */
 
@@ -136,7 +144,8 @@ static inline int poll_setup(FAR struct pollfd *fds, nfds_t nfds,
        * on each thread.
        */
 
-      fds[i].sem     = sem;
+      fds[i].arg     = sem;
+      fds[i].cb      = poll_default_cb;
       fds[i].revents = 0;
       fds[i].priv    = NULL;
 
@@ -149,145 +158,66 @@ static inline int poll_setup(FAR struct pollfd *fds, nfds_t nfds,
        * spec, that appears to be the correct behavior.
        */
 
-      switch (fds[i].events & POLLMASK)
+      if (fds[i].fd >= 0)
         {
-        case POLLFD:
-          if (fds[i].fd >= 0)
+          FAR struct file *filep;
+          int num = i;
+
+          ret = file_get(fds[i].fd, &filep);
+          if (ret < 0)
             {
-              ret = poll_fdsetup(fds[i].fd, &fds[i], true);
+              num -= 1;
             }
-          break;
-
-        case POLLFILE:
-          if (fds[i].ptr != NULL)
+          else
             {
-              ret = file_poll(fds[i].ptr, &fds[i], true);
+              ret = file_poll(filep, &fds[i], true);
             }
-          break;
 
-#ifdef CONFIG_NET
-        case POLLSOCK:
-          if (fds[i].ptr != NULL)
+          if (ret < 0)
             {
-              ret = psock_poll(fds[i].ptr, &fds[i], true);
-            }
-          break;
-#endif
-
-        default:
-          ret = -EINVAL;
-          break;
-        }
-
-      if (ret < 0)
-        {
-          /* Setup failed for fds[i]. We now need to teardown previously
-           * setup fds[0 .. (i - 1)] to release allocated resources and
-           * to prevent memory corruption by access to freed/released 'fds'
-           * and 'sem'.
-           */
-
-          for (j = 0; j < i; j++)
-            {
-              switch (fds[j].events & POLLMASK)
+              if (num >= 0)
                 {
-                case POLLFD:
-                  poll_fdsetup(fds[j].fd, &fds[j], false);
-                  break;
-
-                case POLLFILE:
-                  file_poll(fds[j].ptr, &fds[j], false);
-                  break;
-
-#ifdef CONFIG_NET
-                case POLLSOCK:
-                  psock_poll(fds[j].ptr, &fds[j], false);
-                  break;
-#endif
-
-                default:
-                  break;
+                  poll_teardown(fds, num, &count);
                 }
+
+              fds[i].revents |= POLLERR;
+              fds[i].arg = NULL;
+              fds[i].cb = NULL;
+              return count + 1;
             }
-
-          /* Indicate an error on the file descriptor */
-
-          fds[i].revents |= POLLERR;
-          return ret;
+          else if (fds[i].revents != 0)
+            {
+              count++;
+            }
         }
     }
 
-  return OK;
+  if (count > 0)
+    {
+      /* If there are already events available in poll_setup,
+       * we execute teardown and return immediately.
+       */
+
+      poll_teardown(fds, i, &count);
+    }
+
+  return count;
 }
 
 /****************************************************************************
- * Name: poll_teardown
+ * Name: poll_cleanup
  *
  * Description:
- *   Teardown the poll operation for each descriptor in the list and return
- *   the count of non-zero poll events.
+ *   Cleanup the poll operation.
  *
  ****************************************************************************/
 
-static inline int poll_teardown(FAR struct pollfd *fds, nfds_t nfds,
-                                FAR int *count, int ret)
+static void poll_cleanup(FAR void *arg)
 {
-  unsigned int i;
-  int status = OK;
+  FAR struct pollfd_s *fdsinfo = (FAR struct pollfd_s *)arg;
+  int count;
 
-  /* Process each descriptor in the list */
-
-  *count = 0;
-  for (i = 0; i < nfds; i++)
-    {
-      switch (fds[i].events & POLLMASK)
-        {
-        case POLLFD:
-          if (fds[i].fd >= 0)
-            {
-              status = poll_fdsetup(fds[i].fd, &fds[i], false);
-            }
-          break;
-
-        case POLLFILE:
-          if (fds[i].ptr != NULL)
-            {
-              status = file_poll(fds[i].ptr, &fds[i], false);
-            }
-          break;
-
-#ifdef CONFIG_NET
-        case POLLSOCK:
-            if (fds[i].ptr != NULL)
-            {
-              status = psock_poll(fds[i].ptr, &fds[i], false);
-            }
-          break;
-#endif
-
-        default:
-          status = -EINVAL;
-          break;
-        }
-
-      if (status < 0)
-        {
-          ret = status;
-        }
-
-      /* Check if any events were posted */
-
-      if (fds[i].revents != 0)
-        {
-          (*count)++;
-        }
-
-      /* Un-initialize the poll structure */
-
-      fds[i].sem = NULL;
-    }
-
-  return ret;
+  poll_teardown(fdsinfo->fds, fdsinfo->nfds, &count);
 }
 
 /****************************************************************************
@@ -295,12 +225,92 @@ static inline int poll_teardown(FAR struct pollfd *fds, nfds_t nfds,
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: poll_default_cb
+ *
+ * Description:
+ *   The default poll callback function, this function do the final step of
+ *   poll notification.
+ *
+ * Input Parameters:
+ *   fds - The fds
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void poll_default_cb(FAR struct pollfd *fds)
+{
+  int semcount = 0;
+  FAR sem_t *pollsem;
+
+  if (fds->arg != NULL)
+    {
+      pollsem = (FAR sem_t *)fds->arg;
+      nxsem_get_value(pollsem, &semcount);
+      if (semcount < 1)
+        {
+          nxsem_post(pollsem);
+        }
+    }
+}
+
+/****************************************************************************
+ * Name: poll_notify
+ *
+ * Description:
+ *   Notify the poll, this function should be called by drivers to notify
+ *   the caller the poll is ready.
+ *
+ * Input Parameters:
+ *   afds     - The fds array
+ *   nfds     - Number of fds array
+ *   eventset - List of events to check for activity
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+noinstrument_function
+void poll_notify(FAR struct pollfd **afds, int nfds, pollevent_t eventset)
+{
+  int i;
+  FAR struct pollfd *fds;
+
+  DEBUGASSERT(afds != NULL && nfds >= 1);
+
+  for (i = 0; i < nfds && eventset; i++)
+    {
+      fds = afds[i];
+      if (fds != NULL)
+        {
+          /* The error event must be set in fds->revents */
+
+          fds->revents |= eventset & (fds->events | POLLERR | POLLHUP);
+          if ((fds->revents & (POLLERR | POLLHUP)) != 0)
+            {
+              /* Error or Hung up, clear POLLOUT event */
+
+              fds->revents &= ~POLLOUT;
+            }
+
+          if ((fds->revents != 0 || (fds->events & POLLALWAYS) != 0) &&
+              fds->cb != NULL)
+            {
+              finfo("Report events: %08" PRIx32 "\n", fds->revents);
+              fds->cb(fds);
+            }
+        }
+    }
+}
+
+/****************************************************************************
  * Name: file_poll
  *
  * Description:
- *   Low-level poll operation based on struct file.  This is used both to (1)
- *   support detached file, and also (2) by fdesc_poll() to perform all
- *   normal operations on file descriptors.
+ *   Low-level poll operation based on struct file.  This is used to
+ *   support detached file.
  *
  * Input Parameters:
  *   file     File structure instance
@@ -318,7 +328,7 @@ int file_poll(FAR struct file *filep, FAR struct pollfd *fds, bool setup)
   FAR struct inode *inode;
   int ret = -ENOSYS;
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep != NULL);
   inode = filep->f_inode;
 
   if (inode != NULL)
@@ -327,75 +337,55 @@ int file_poll(FAR struct file *filep, FAR struct pollfd *fds, bool setup)
        * If not, return -ENOSYS
        */
 
-      if (INODE_IS_DRIVER(inode) &&
+      if ((INODE_IS_DRIVER(inode) || INODE_IS_MQUEUE(inode) ||
+          INODE_IS_SOCKET(inode) || INODE_IS_PIPE(inode)) &&
           inode->u.i_ops != NULL && inode->u.i_ops->poll != NULL)
         {
           /* Yes, it does... Setup the poll */
 
-          ret = (int)inode->u.i_ops->poll(filep, fds, setup);
+          ret = inode->u.i_ops->poll(filep, fds, setup);
+          if (ret < 0)
+            {
+              ferr("poll failed:%p, setup:%d, ret:%d\n",
+                   inode->u.i_ops->poll, setup, ret);
+            }
         }
+#ifndef CONFIG_DISABLE_MOUNTPOINT
+      else if (INODE_IS_MOUNTPT(inode) && inode->u.i_mops != NULL &&
+               inode->u.i_mops->poll != NULL)
+        {
+          ret = inode->u.i_mops->poll(filep, fds, setup);
+          if (ret < 0)
+            {
+              ferr("poll failed:%p, setup:%d, ret:%d\n",
+                   inode->u.i_ops->poll, setup, ret);
+            }
+        }
+#endif
 
       /* Regular files (and block devices) are always readable and
        * writable. Open Group: "Regular files shall always poll TRUE for
        * reading and writing."
        */
 
-      if (INODE_IS_MOUNTPT(inode) || INODE_IS_BLOCK(inode) ||
-          INODE_IS_MTD(inode))
+      else if (INODE_IS_MOUNTPT(inode) || INODE_IS_BLOCK(inode) ||
+               INODE_IS_MTD(inode))
         {
           if (setup)
             {
-              fds->revents |= (fds->events & (POLLIN | POLLOUT));
-              if (fds->revents != 0)
-                {
-                  nxsem_post(fds->sem);
-                }
+              poll_notify(&fds, 1, POLLIN | POLLOUT);
             }
 
           ret = OK;
         }
     }
-
-  return ret;
-}
-
-/****************************************************************************
- * Name: fdesc_poll
- *
- * Description:
- *   The standard poll() operation redirects operations on file descriptors
- *   to this function.
- *
- * Input Parameters:
- *   fd    - The file descriptor of interest
- *   fds   - The structure describing the events to be monitored, OR NULL if
- *           this is a request to stop monitoring events.
- *   setup - true: Setup up the poll; false: Teardown the poll
- *
- * Returned Value:
- *  Zero (OK) is returned on success; a negated errno value is returned on
- *  any failure.
- *
- ****************************************************************************/
-
-int fdesc_poll(int fd, FAR struct pollfd *fds, bool setup)
-{
-  FAR struct file *filep;
-  int ret;
-
-  /* Get the file pointer corresponding to this file descriptor */
-
-  ret = fs_getfilep(fd, &filep);
-  if (ret < 0)
+  else
     {
-      return ret;
+      poll_notify(&fds, 1, POLLERR | POLLHUP);
+      ret = OK;
     }
 
-  DEBUGASSERT(filep != NULL);
-
-  /* Let file_poll() do the rest */
-
-  return file_poll(filep, fds, setup);
+  return ret;
 }
 
 /****************************************************************************
@@ -431,10 +421,10 @@ int fdesc_poll(int fd, FAR struct pollfd *fds, bool setup)
 
 int poll(FAR struct pollfd *fds, nfds_t nfds, int timeout)
 {
+  FAR struct pollfd *kfds;
   sem_t sem;
   int count = 0;
-  int errcode;
-  int ret;
+  int ret = OK;
 
   DEBUGASSERT(nfds == 0 || fds != NULL);
 
@@ -442,26 +432,50 @@ int poll(FAR struct pollfd *fds, nfds_t nfds, int timeout)
 
   enter_cancellation_point();
 
-  /* This semaphore is used for signaling and, hence, should not have
-   * priority inheritance enabled.
-   */
+#ifdef CONFIG_BUILD_KERNEL
+  /* Allocate kernel memory for the fds */
+
+  kfds = fs_heap_malloc(nfds * sizeof(struct pollfd));
+  if (!kfds)
+    {
+      /* Out of memory */
+
+      ret = -ENOMEM;
+      goto out_with_cancelpt;
+    }
+
+  /* Copy the user fds to neutral kernel memory */
+
+  memcpy(kfds, fds, nfds * sizeof(struct pollfd));
+#else
+  /* Can use the user fds directly */
+
+  kfds = fds;
+#endif
+
+  /* Set up the poll structure */
 
   nxsem_init(&sem, 0, 0);
-  nxsem_setprotocol(&sem, SEM_PRIO_NONE);
 
-  ret = poll_setup(fds, nfds, &sem);
-  if (ret >= 0)
+  /* If there are already events available in poll_setup,
+   * we return immediately
+   */
+
+  count = poll_setup(kfds, nfds, &sem);
+  if (count == 0)
     {
-      if (timeout == 0)
-        {
-          /* Poll returns immediately whether we have a poll event or not. */
+      struct pollfd_s fdsinfo;
 
-          ret = OK;
-        }
-      else if (timeout > 0)
-        {
-          clock_t ticks;
+      /* Push a cancellation point onto the stack.  This will be called if
+       * the thread is canceled.
+       */
 
+      fdsinfo.fds = kfds;
+      fdsinfo.nfds = nfds;
+      tls_cleanup_push(tls_get_info(), poll_cleanup, &fdsinfo);
+
+      if (timeout > 0)
+        {
           /* "Implementations may place limitations on the granularity of
            * timeout intervals. If the requested timeout interval requires
            * a finer granularity than the implementation supports, the
@@ -471,16 +485,6 @@ int poll(FAR struct pollfd *fds, nfds_t nfds, int timeout)
            * Round timeout up to next full tick.
            */
 
-#if (MSEC_PER_TICK * USEC_PER_MSEC) != USEC_PER_TICK && \
-    defined(CONFIG_HAVE_LONG_LONG)
-          ticks = (((unsigned long long)timeout * USEC_PER_MSEC) +
-                   (USEC_PER_TICK - 1)) /
-                  USEC_PER_TICK;
-#else
-          ticks = ((unsigned int)timeout + (MSEC_PER_TICK - 1)) /
-                  MSEC_PER_TICK;
-#endif
-
           /* Either wait for either a poll event(s), for a signal to occur,
            * or for the specified timeout to elapse with no event.
            *
@@ -489,7 +493,7 @@ int poll(FAR struct pollfd *fds, nfds_t nfds, int timeout)
            * will return immediately.
            */
 
-          ret = nxsem_tickwait(&sem, clock_systimer(), ticks);
+          ret = nxsem_tickwait(&sem, MSEC2TICK((clock_t)timeout));
           if (ret < 0)
             {
               if (ret == -ETIMEDOUT)
@@ -502,11 +506,11 @@ int poll(FAR struct pollfd *fds, nfds_t nfds, int timeout)
               /* EINTR is the only other error expected in normal operation */
             }
         }
-      else
+      else if (timeout < 0)
         {
           /* Wait for the poll event or signal with no timeout */
 
-          ret = poll_semtake(&sem);
+          ret = nxsem_wait(&sem);
         }
 
       /* Teardown the poll operation and get the count of events.  Zero will
@@ -515,23 +519,43 @@ int poll(FAR struct pollfd *fds, nfds_t nfds, int timeout)
        * Preserve ret, if negative, since it holds the result of the wait.
        */
 
-      errcode = poll_teardown(fds, nfds, &count, ret);
-      if (errcode < 0 && ret >= 0)
-        {
-          ret = errcode;
-        }
+      poll_teardown(kfds, nfds, &count);
+
+      /* Pop the cancellation point */
+
+      tls_cleanup_pop(tls_get_info(), 0);
     }
 
   nxsem_destroy(&sem);
-  leave_cancellation_point();
 
-  /* Check for errors */
+#ifdef CONFIG_BUILD_KERNEL
+  /* Copy the events back to user */
+
+  if (ret == OK)
+    {
+      int i;
+      for (i = 0; i < nfds; i++)
+        {
+          fds[i].revents = kfds[i].revents;
+        }
+    }
+
+  /* Free the temporary buffer */
+
+  fs_heap_free(kfds);
+
+out_with_cancelpt:
+#endif
+
+  leave_cancellation_point();
 
   if (ret < 0)
     {
       set_errno(-ret);
       return ERROR;
     }
-
-  return count;
+  else
+    {
+      return count;
+    }
 }

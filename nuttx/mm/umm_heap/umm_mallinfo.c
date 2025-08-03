@@ -1,6 +1,8 @@
 /****************************************************************************
  * mm/umm_heap/umm_mallinfo.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -24,7 +26,7 @@
 
 #include <nuttx/config.h>
 
-#include <stdlib.h>
+#include <malloc.h>
 
 #include <nuttx/mm/mm.h>
 
@@ -45,7 +47,19 @@
 
 struct mallinfo mallinfo(void)
 {
-  struct mallinfo info;
-  mm_mallinfo(USR_HEAP, &info);
-  return info;
+  return mm_mallinfo(USR_HEAP);
+}
+
+/****************************************************************************
+ * Name: mallinfo_task
+ *
+ * Description:
+ *   mallinfo_task returns a copy of updated current heap information of
+ *   task with specified pid for the user heap.
+ *
+ ****************************************************************************/
+
+struct mallinfo_task mallinfo_task(FAR const struct malltask *task)
+{
+  return mm_mallinfo_task(USR_HEAP, task);
 }

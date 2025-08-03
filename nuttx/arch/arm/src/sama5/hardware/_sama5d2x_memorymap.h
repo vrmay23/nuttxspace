@@ -1,54 +1,50 @@
-/************************************************************************************
+/****************************************************************************
  * arch/arm/src/sama5/hardware/_sama5d2x_memorymap.h
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_SAMA5_HARDWARE__SAMA5D2X_MEMORYMAP_H
 #define __ARCH_ARM_SRC_SAMA5_HARDWARE__SAMA5D2X_MEMORYMAP_H
 
-/************************************************************************************
+/****************************************************************************
  * Included Files
- ************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 #include <arch/sama5/chip.h>
 
-/************************************************************************************
- * Pre-processor Definitions
- ************************************************************************************/
+/* SAMA5 Virtual (mapped) Memory Map
+ *
+ * board_memorymap.h contains special mappings that are needed when a ROM
+ * memory map is used.  It is included in this odd location because it
+ * depends on some the virtual address definitions provided above.
+ */
 
-/* Decimal configuration values may exceed 2Gb and, hence, overflow to negative
- * values unless we force them to unsigned long:
+#include <arch/board/board_memorymap.h>
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+/* Decimal configuration values may exceed 2Gb and, hence, overflow to
+ * negative values unless we force them to unsigned long:
  */
 
 #define __CONCAT(a,b) a ## b
@@ -155,7 +151,7 @@
                                             /* 0x0004b000-0x0004bfff: Reserved */
 #  define SAM_SFC_OFFSET         0x0004c000 /* 0x0004c000-0x0004ffff: SFC */
 #  define SAM_I2SC0_OFFSET       0x00050000 /* 0x00050000-0x00053fff: I2SC0 */
-#  define SAM_CAN0_OFFSET        0x00054000 /* 0x00054000-0x00057fff: CAN0 */
+#  define SAM_MCAN0_OFFSET       0x00054000 /* 0x00054000-0x00057fff: MCAN0 */
 #  define SAM_SYSC_PSECTION      0xf8048000 /* 0xf8048000-0xf8048fff: System Controller */
 #  define SAM_SYSC_PADDR         0xf8048000 /* 0xf8048000-0xf8048fff: System Controller */
 
@@ -180,7 +176,7 @@
 #  define SAM_TDES_OFFSET        0x00044000 /* 0x00044000-0x00047fff: TDES */
 #  define SAM_CLASSD_OFFSET      0x00048000 /* 0x00048000-0x0004bfff: Class D */
 #  define SAM_I2SC1_OFFSET       0x0004c000 /* 0x0004c000-0x0004ffff: I2SC1 */
-#  define SAM_CAN1_OFFSET        0x00050000 /* 0x00050000-0x00053fff: CAN1 */
+#  define SAM_MCAN1_OFFSET       0x00050000 /* 0x00050000-0x00053fff: MCAN1 */
 #  define SAM_UTMI_OFFSET        0x00054000 /* 0x00054000-0x00057fff: UTMI */
                                             /* 0x00058000-0x0005bfff: Reserved */
 #  define SAM_SFRBU_OFFSET       0x0005c000 /* 0x0005c000-0x0005ffff: SFRBU */
@@ -195,7 +191,7 @@
  * are not known apriori and must be specified with configuration settings.
  */
 
-                                                 /* 0x00000000-0x0fffffff: Internal Memories */
+                             /* 0x00000000-0x0fffffff: Internal Memories */
 #define SAM_ROM_SIZE             (256*1024)      /* 0x00000000-0x0003ffff: ROM */
 #ifdef CONFIG_ARMV7A_L2CC_PL310
 #  define SAM_SRAMREMAP_SIZE     (128*1024)      /* 0x00000000-0x0001ffff: Remapped ISRAM0 */
@@ -317,6 +313,8 @@
 #define SAM_AXIMX_MMUFLAGS       MMU_IOFLAGS
 #define SAM_DAP_MMUFLAGS         MMU_IOFLAGS
 #define SAM_L2CC_MMUFLAGS        MMU_IOFLAGS
+#define SAM_SDMMC0_MMUFLAGS      MMU_IOFLAGS
+#define SAM_SDMMC1_MMUFLAGS      MMU_IOFLAGS
 
 /* If the NFC is not being used, the NFC SRAM can be used as general purpose
  * SRAM (cached).  If the NFC is used, then the NFC SRAM should be treated
@@ -374,31 +372,22 @@
 #  define SAM_EBICS3_MMUFLAGS    MMU_ROMFLAGS
 #endif
 
-#define SAM_QSPI0AES             MMU_IOFLAGS
-#define SAM_QSPI1AES             MMU_IOFLAGS
-#define SAM_SDMMC0               MMU_IOFLAGS
-#define SAM_SDMMC1               MMU_IOFLAGS
-#define SAM_QSPI0                MMU_IOFLAGS
-#define SAM_QSPI1                MMU_IOFLAGS
+#define SAM_QSPI0AES_MMUFLAGS    MMU_IOFLAGS
+#define SAM_QSPI1AES_MMUFLAGS    MMU_IOFLAGS
+#define SAM_SDMMC0_MMUFLAGS      MMU_IOFLAGS
+#define SAM_SDMMC1_MMUFLAGS      MMU_IOFLAGS
+#define SAM_QSPI0_MMUFLAGS       MMU_IOFLAGS
+#define SAM_QSPI1_MMUFLAGS       MMU_IOFLAGS
 #define SAM_NFCCR_MMUFLAGS       MMU_IOFLAGS
 
 #define SAM_PERIPHA_MMUFLAGS     MMU_IOFLAGS
 #define SAM_PERIPHB_MMUFLAGS     MMU_IOFLAGS
 #define SAM_PERIPHC_MMUFLAGS     MMU_IOFLAGS
 
-/* SAMA5 Virtual (mapped) Memory Map
- *
- * board_memorymap.h contains special mappings that are needed when a ROM
- * memory map is used.  It is included in this odd location because it depends
- * on some the virtual address definitions provided above.
- */
-
-#include <arch/board/board_memorymap.h>
-
 /* SAMA5 Virtual (mapped) Memory Map.  These are the mappings that will
  * be created if the page table lies in RAM.  If the platform has another,
- * read-only, pre-initialized page table (perhaps in ROM), then the board.h
- * file must provide these definitions.
+ * read-only, pre-initialized page table (perhaps in ROM), then the
+ * board.h file must provide these definitions.
  */
 
 #ifndef CONFIG_ARCH_ROMPGTABLE
@@ -429,8 +418,8 @@
 #define SAM_EBICS1_VSECTION      0x60000000 /* 0x60000000-0x6fffffff: EBI Chip Select 1 */
 #define SAM_EBICS2_VSECTION      0x70000000 /* 0x70000000-0x7fffffff: EBI Chip Select 2 */
 #define SAM_EBICS3_VSECTION      0x80000000 /* 0x80000000-0x8fffffff: EBI Chip Select 3 */
-#define SAM_QSPI0AES_VSECTION    0x90000000 /* 0x90000000-0x9fffffff: QSPI0 AES Memory */
-#define SAM_QSPI1AES_VSECTION    0xa0000000 /* 0xa0000000-0xafffffff: QSPI1 AES Memory */
+#define SAM_QSPI0AES_VSECTION    0x90000000 /* 0x90000000-0x97ffffff: QSPI0 AES Memory */
+#define SAM_QSPI1AES_VSECTION    0x98000000 /* 0x98000000-0x9fffffff: QSPI1 AES Memory */
 #define SAM_SDMMC0_VSECTION      0xa0000000 /* 0xa0000000-0xafffffff: SDMMC0 */
 #define SAM_SDMMC1_VSECTION      0xb0000000 /* 0xb0000000-0xbfffffff: SDMMC1 */
 #define SAM_NFCCR_VSECTION       0xc0000000 /* 0xc0000000-0xcfffffff: NFC Command Registers */
@@ -461,6 +450,8 @@
 
 /* Peripheral virtual base addresses */
 
+#define SAM_SDMMC0_VBASE         (SAM_SDMMC0_VSECTION)
+#define SAM_SDMMC1_VBASE         (SAM_SDMMC1_VSECTION)
 #define SAM_LCDC_VBASE           (SAM_PERIPHA_VSECTION+SAM_LCDC_OFFSET)
 #define SAM_XDMAC1_VBASE         (SAM_PERIPHA_VSECTION+SAM_XDMAC1_OFFSET)
 #define SAM_ISC_VBASE            (SAM_PERIPHA_VSECTION+SAM_ISC_OFFSET)
@@ -503,7 +494,7 @@
 #define SAM_ACC_VBASE            (SAM_PERIPHB_VSECTION+SAM_ACC_OFFSET)
 #define SAM_SFC_VBASE            (SAM_PERIPHB_VSECTION+SAM_SFC_OFFSET)
 #define SAM_I2SC0_VBASE          (SAM_PERIPHB_VSECTION+SAM_I2SC0_OFFSET)
-#define SAM_CAN0_VBASE           (SAM_PERIPHB_VSECTION+SAM_CAN0_OFFSET)
+#define SAM_MCAN0_VBASE          (SAM_PERIPHB_VSECTION+SAM_MCAN0_OFFSET)
 
 #define SAM_SPI1_VBASE           (SAM_PERIPHC_VSECTION+SAM_SPI1_OFFSET)
 #define SAM_SSC1_VBASE           (SAM_PERIPHC_VSECTION+SAM_SSC1_OFFSET)
@@ -516,21 +507,26 @@
 #define SAM_AIC_VBASE            (SAM_PERIPHC_VSECTION+SAM_AIC_OFFSET)
 #define SAM_TWI1_VBASE           (SAM_PERIPHC_VSECTION+SAM_TWI1_OFFSET)
 #define SAM_UDPHS_VBASE          (SAM_PERIPHC_VSECTION+SAM_UDPHS_OFFSET)
-#define SAM_ADC_VBASE            (SAM_PERIPHC_VSECTION+SAM_ADC_OFFSET)
+#define SAM_TSADC_VBASE          (SAM_PERIPHC_VSECTION+SAM_ADC_OFFSET)
 #define SAM_PIO_VBASE            (SAM_PERIPHC_VSECTION+SAM_PIO_OFFSET)
 #define SAM_MATRIX32_VBASE       (SAM_PERIPHC_VSECTION+SAM_MATRIX1_OFFSET)
 #define SAM_SECUMOD_VBASE        (SAM_PERIPHC_VSECTION+SAM_SECUMOD_OFFSET)
 #define SAM_TDES_VBASE           (SAM_PERIPHC_VSECTION+SAM_TDES_OFFSET)
 #define SAM_CLASSD_VBASE         (SAM_PERIPHC_VSECTION+SAM_CLASSD_OFFSET)
 #define SAM_I2SC1_VBASE          (SAM_PERIPHC_VSECTION+SAM_I2SC1_OFFSET)
-#define SAM_CAN1_VBASE           (SAM_PERIPHC_VSECTION+SAM_CAN1_OFFSET)
+#define SAM_MCAN1_VBASE          (SAM_PERIPHC_VSECTION+SAM_MCAN1_OFFSET)
 #define SAM_UTMI_VBASE           (SAM_PERIPHC_VSECTION+SAM_UTMI_OFFSET)
 #define SAM_SFRBU_VBASE          (SAM_PERIPHC_VSECTION+SAM_SFRBU_OFFSET)
 #define SAM_CHIPID_VBASE         (SAM_PERIPHC_VSECTION+SAM_CHIPID_OFFSET)
 
-#define SAM_PIOA_VBASE           (SAM_PERIPHA_VSECTION+SAM_PIO_OFFSET)
-#define SAM_PIOB_VBASE           (SAM_PERIPHB_VSECTION+SAM_PIO_OFFSET)
-#define SAM_PIOC_VBASE           (SAM_PERIPHC_VSECTION+SAM_PIO_OFFSET)
+#define SAM_PIOA_VBASE           SAM_PIO_IOGROUPA_VBASE
+#define SAM_PIOB_VBASE           SAM_PIO_IOGROUPB_VBASE
+#define SAM_PIOC_VBASE           SAM_PIO_IOGROUPC_VBASE
+#define SAM_PIOD_VBASE           SAM_PIO_IOGROUPD_VBASE
+
+#define SAM_FLEXCOM_USART_OFFSET (0x200)
+#define SAM_FLEXCOM_SPI_OFFSET   (0x400)
+#define SAM_FLEXCOM_TWI_OFFSET   (0x600)
 
 /* NuttX virtual base address
  *
@@ -640,11 +636,12 @@
  * 1) If CONFIG_ARCH_ROMPGTABLE, then the page table resides in ROM and we
  *    will not use any page table in RAM.
  * 2) We are executing out of SRAM.  In this case, vectors will reside at
- *    the bottom of SRAM, following by .text, .data, .bss, and heep.  The
+ *    the bottom of SRAM, following by .text, .data, .bss, and heap.  The
  *    page table will be squeezed into the end of internal SRAM in this
  *    case.
  *
- * Or... the user may specify the address of the page table explicitly be defining
+ * Or...
+ * the user may specify the address of the page table explicitly be defining
  * PGTABLE_BASE_VADDR and PGTABLE_BASE_PADDR in the board.h file.
  */
 
@@ -654,50 +651,50 @@
 
 #if !defined(PGTABLE_BASE_PADDR) || !defined(PGTABLE_BASE_VADDR)
 
-  /* Sanity check.. if one is undefined, both should be undefined */
+/* Sanity check.. if one is undefined, both should be undefined */
 
 #  if defined(PGTABLE_BASE_PADDR) || defined(PGTABLE_BASE_VADDR)
 #    error "Only one of PGTABLE_BASE_PADDR or PGTABLE_BASE_VADDR is defined"
 #  endif
 
-  /* A sanity check, if the configuration says that the page table is read-only
-   * and pre-initialized (maybe ROM), then it should have also defined both of
-   * the page table base addresses.
-   */
+/* A sanity check, if the configuration says that the page table is read-only
+ * and pre-initialized (maybe ROM), then it should have also defined both of
+ * the page table base addresses.
+ */
 
 #  ifdef CONFIG_ARCH_ROMPGTABLE
 #    error "CONFIG_ARCH_ROMPGTABLE defined; PGTABLE_BASE_P/VADDR not defined"
 #  endif
 
-  /* If CONFIG_PAGING is selected, then parts of the 1-to-1 virtual memory
-   * map probably do not apply because paging logic will probably partition
-   * the SRAM section differently.  In particular, if the page table is located
-   * at the end of SRAM, then the virtual page table address defined below
-   * will probably be in error.  In that case PGTABLE_BASE_VADDR is defined
-   * in the file mmu.h
-   *
-   * We must declare the page table at the bottom or at the top of internal
-   * SRAM.  We pick the bottom of internal SRAM *unless* there are vectors
-   * in the way at that position.
-   */
+/* If CONFIG_LEGACY_PAGING is selected, then parts of the 1-to-1 virtual
+ * memory map probably do not apply because paging logic will probably
+ * partition the SRAM section differently.  In particular, if the page
+ * table is located at the end of SRAM, then the virtual page table address
+ * defined below will probably be in error.  In that case PGTABLE_BASE_VADDR
+ * is defined in the file mmu.h
+ *
+ * We must declare the page table at the bottom or at the top of internal
+ * SRAM.  We pick the bottom of internal SRAM *unless* there are vectors
+ * in the way at that position.
+ */
 
 #  if defined(CONFIG_SAMA5_BOOT_ISRAM) && defined(CONFIG_ARCH_LOWVECTORS)
 
   /* In this case, page table must lie at the top 16Kb of ISRAM1 (or ISRAM0
    * if ISRAM1 is not available in this architecture)
    *
-   * If CONFIG_PAGING is defined, then mmu.h assign the virtual address
-   * of the page table.
+   * If CONFIG_LEGACY_PAGING is defined, then mmu.h assign the virtual
+   * address of the page table.
    */
 
 #    if SAM_ISRAM1_SIZE > 0
 #      define PGTABLE_BASE_PADDR (SAM_ISRAM1_PADDR+SAM_ISRAM1_SIZE-PGTABLE_SIZE)
-#      ifndef CONFIG_PAGING
+#      ifndef CONFIG_LEGACY_PAGING
 #        define PGTABLE_BASE_VADDR (SAM_ISRAM1_VADDR+SAM_ISRAM1_SIZE-PGTABLE_SIZE)
 #      endif
 #    else
 #      define PGTABLE_BASE_PADDR (SAM_ISRAM0_PADDR+SAM_ISRAM0_SIZE-PGTABLE_SIZE)
-#      ifndef CONFIG_PAGING
+#      ifndef CONFIG_LEGACY_PAGING
 #        define PGTABLE_BASE_VADDR (SAM_ISRAM0_VADDR+SAM_ISRAM0_SIZE-PGTABLE_SIZE)
 #      endif
 #    endif
@@ -720,13 +717,13 @@
 
 #  else /* CONFIG_SAMA5_BOOT_ISRAM && CONFIG_ARCH_LOWVECTORS */
 
-  /* Otherwise, the vectors lie at another location (perhaps in NOR FLASH, perhaps
-   * elsewhere in internal SRAM).  The page table will then be positioned at
-   * the first 16Kb of ISRAM0.
-   */
+/* Otherwise, the vectors lie at another location (perhaps in NOR FLASH,
+ * perhaps elsewhere in internal SRAM).  The page table will then be
+ * positioned at the first 16Kb of ISRAM0.
+ */
 
 #    define PGTABLE_BASE_PADDR    SAM_ISRAM0_PADDR
-#    ifndef CONFIG_PAGING
+#    ifndef CONFIG_LEGACY_PAGING
 #      define PGTABLE_BASE_VADDR  SAM_ISRAM0_VADDR
 #    endif
 #    define PGTABLE_IN_LOWSRAM    1
@@ -738,15 +735,15 @@
 
 #  endif /* CONFIG_SAMA5_BOOT_ISRAM && CONFIG_ARCH_LOWVECTORS */
 
-  /* In either case, the page table lies in ISRAM.  If ISRAM is not the
-   * primary RAM region, then we will need to set-up a special mapping for
-   * the page table at boot time.
-   */
+/* In either case, the page table lies in ISRAM.  If ISRAM is not the
+ * primary RAM region, then we will need to set-up a special mapping for
+ * the page table at boot time.
+ */
 
 #  if defined(CONFIG_BOOT_RUNFROMFLASH)
-  /* If we are running from FLASH, then the primary memory region is
-   * given by NUTTX_RAM_PADDR.
-   */
+/* If we are running from FLASH, then the primary memory region is
+ * given by NUTTX_RAM_PADDR.
+ */
 
 #    if NUTTX_RAM_PADDR != SAM_ISRAM_PSECTION
 #      define ARMV7A_PGTABLE_MAPPING 1
@@ -762,7 +759,7 @@
 
 #else /* !PGTABLE_BASE_PADDR || !PGTABLE_BASE_VADDR */
 
-  /* Sanity check.. if one is defined, both should be defined */
+/* Sanity check.. if one is defined, both should be defined */
 
 #  if !defined(PGTABLE_BASE_PADDR) || !defined(PGTABLE_BASE_VADDR)
 #    error "One of PGTABLE_BASE_PADDR or PGTABLE_BASE_VADDR is undefined"
@@ -785,10 +782,10 @@
 
 /* Level 2 Page table start addresses.
  *
- * 16Kb of memory is reserved hold the page table for the virtual mappings.  A
- * portion of this table is not accessible in the virtual address space (for
- * normal operation).   There is this large whole in the physcal address space
- * for which there will never be level 1 mappings:
+ * 16Kb of memory is reserved hold the page table for the virtual mappings.
+ *  A portion of this table is not accessible in the virtual address space
+ * (for normal operation).   There is this large whole in the physcal address
+ * space for which there will never be level 1 mappings:
  *
  *   0x80000000-0xefffffff: Undefined (1.75 GB)
  *
@@ -808,9 +805,9 @@
  *    memory to address 0x0000:0000 using both the MMU and the AXI matrix
  *    REMAP register.  So no L2 page table is required.
  *
- * 2) If on-demand paging is supported (CONFIG_PAGING=y), than an additional
- *    L2 page table is needed.  This page table will use the remainder of
- *    the address space.
+ * 2) If on-demand paging is supported (CONFIG_LEGACY_PAGING=y), than an
+ *    additional L2 page table is needed.  This page table will use the
+ *    remainder of the address space.
  */
 
 #ifndef CONFIG_ARCH_LOWVECTORS
@@ -843,7 +840,7 @@
 
 /* Paging L2 page table base addresses
  *
- * NOTE: If CONFIG_PAGING is defined, mmu.h will re-assign the virtual
+ * NOTE: If CONFIG_LEGACY_PAGING is defined, mmu.h will re-assign the virtual
  * address of the page table.
  */
 
@@ -859,7 +856,8 @@
  *
  *   SAM_VECTOR_PADDR - Unmapped, physical address of vector table in SRAM
  *   SAM_VECTOR_VSRAM - Virtual address of vector table in SRAM
- *   SAM_VECTOR_VADDR - Virtual address of vector table (0x00000000 or 0xffff0000)
+ *   SAM_VECTOR_VADDR - Virtual address of vector table
+ *                      (0x00000000 or 0xffff0000)
  */
 
 #define VECTOR_TABLE_SIZE         0x00010000
@@ -883,12 +881,13 @@
 
 #endif
 
-/************************************************************************************
+/****************************************************************************
  * Public Types
- ************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************
+/****************************************************************************
  * Public Data
- ************************************************************************************/
+ ****************************************************************************/
 
 #endif /* __ARCH_ARM_SRC_SAMA5_HARDWARE__SAMA5D2X_MEMORYMAP_H */
+

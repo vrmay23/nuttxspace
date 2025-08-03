@@ -1,41 +1,27 @@
 /****************************************************************************
- * apps/graphics/pdcurses/pdc_window.c
- * Public Domain Curses
- * RCSID("$Id: window.c,v 1.62 2008/07/13 16:08:18 wmcbrine Exp $")
+ * apps/graphics/pdcurs34/pdcurses/pdc_window.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Adapted by: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Adapted from the original public domain pdcurses by Gregory Nutt and
- * released as part of NuttX under the 3-clause BSD license:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Adapted from the original public domain pdcurses by Gregory Nutt
  ****************************************************************************/
 
 /* Name: window
@@ -170,7 +156,7 @@
 #include "curspriv.h"
 
 /****************************************************************************
- * Public functions
+ * Public Functions
  ****************************************************************************/
 
 WINDOW *PDC_makenew(int nlines, int ncols, int begy, int begx)
@@ -185,7 +171,7 @@ WINDOW *PDC_makenew(int nlines, int ncols, int begy, int begx)
 
   /* Allocate the window structure itself */
 
-  if ((win = calloc(1, sizeof(WINDOW))) == (WINDOW *) NULL)
+  if ((win = calloc(1, sizeof(WINDOW))) == NULL)
     {
       return win;
     }
@@ -195,7 +181,7 @@ WINDOW *PDC_makenew(int nlines, int ncols, int begy, int begx)
   if ((win->_y = malloc(nlines * sizeof(chtype *))) == NULL)
     {
       free(win);
-      return (WINDOW *)NULL;
+      return NULL;
     }
 
   /* allocate the minchng and maxchng arrays */
@@ -204,7 +190,7 @@ WINDOW *PDC_makenew(int nlines, int ncols, int begy, int begx)
     {
       free(win->_y);
       free(win);
-      return (WINDOW *)NULL;
+      return NULL;
     }
 
   if ((win->_lastch = malloc(nlines * sizeof(int))) == NULL)
@@ -212,7 +198,7 @@ WINDOW *PDC_makenew(int nlines, int ncols, int begy, int begx)
       free(win->_firstch);
       free(win->_y);
       free(win);
-      return (WINDOW *)NULL;
+      return NULL;
     }
 
   /* Initialize window variables */
@@ -244,7 +230,7 @@ WINDOW *PDC_makelines(WINDOW *win)
 
   if (!win)
     {
-      return (WINDOW *)NULL;
+      return NULL;
     }
 
   nlines = win->_maxy;
@@ -266,7 +252,7 @@ WINDOW *PDC_makelines(WINDOW *win)
           free(win->_y);
           free(win);
 
-          return (WINDOW *)NULL;
+          return NULL;
         }
     }
 
@@ -312,7 +298,7 @@ WINDOW *newwin(int nlines, int ncols, int begy, int begx)
       !(win = PDC_makenew(nlines, ncols, begy, begx)) ||
       !(win = PDC_makelines(win)))
     {
-      return (WINDOW *)NULL;
+      return NULL;
     }
 
   werase(win);
@@ -385,7 +371,7 @@ WINDOW *subwin(WINDOW *orig, int nlines, int ncols, int begy, int begx)
       (begy + nlines) > (orig->_begy + orig->_maxy) ||
       (begx + ncols) > (orig->_begx + orig->_maxx))
     {
-      return (WINDOW *)NULL;
+      return NULL;
     }
 
   if (!nlines)
@@ -400,7 +386,7 @@ WINDOW *subwin(WINDOW *orig, int nlines, int ncols, int begy, int begx)
 
   if (!(win = PDC_makenew(nlines, ncols, begy, begx)))
     {
-      return (WINDOW *)NULL;
+      return NULL;
     }
 
   /* Initialize window variables */
@@ -433,7 +419,8 @@ WINDOW *derwin(WINDOW *orig, int nlines, int ncols, int begy, int begx)
 
 int mvderwin(WINDOW *win, int pary, int parx)
 {
-  int i, j;
+  int i;
+  int j;
   WINDOW *mypar;
 
   if (!win || !(win->_parent))
@@ -474,7 +461,7 @@ WINDOW *dupwin(WINDOW *win)
 
   if (!win)
     {
-      return (WINDOW *) NULL;
+      return NULL;
     }
 
   nlines = win->_maxy;
@@ -485,7 +472,7 @@ WINDOW *dupwin(WINDOW *win)
   if (!(new = PDC_makenew(nlines, ncols, begy, begx)) ||
       !(new = PDC_makelines(new)))
     {
-      return (WINDOW *) NULL;
+      return NULL;
     }
 
   /* copy the contents of win into new */
@@ -542,21 +529,23 @@ WINDOW *resize_window(WINDOW *win, int nlines, int ncols)
 
   if (!win)
     {
-      return (WINDOW *)NULL;
+      return NULL;
     }
 
   if (win->_flags & _SUBPAD)
     {
-      if (!(new = subpad(win->_parent, nlines, ncols, win->_begy, win->_begx)))
+      if (!(new = subpad(win->_parent, nlines, ncols,
+                         win->_begy, win->_begx)))
         {
-          return (WINDOW *)NULL;
+          return NULL;
         }
     }
   else if (win->_flags & _SUBWIN)
     {
-      if (!(new = subwin(win->_parent, nlines, ncols, win->_begy, win->_begx)))
+      if (!(new = subwin(win->_parent, nlines, ncols,
+                         win->_begy, win->_begx)))
         {
-          return (WINDOW *)NULL;
+          return NULL;
         }
     }
   else
@@ -574,7 +563,7 @@ WINDOW *resize_window(WINDOW *win, int nlines, int ncols)
 
       if (!(new = PDC_makenew(nlines, ncols, new_begy, new_begx)))
         {
-          return (WINDOW *)NULL;
+          return NULL;
         }
     }
 
@@ -585,7 +574,7 @@ WINDOW *resize_window(WINDOW *win, int nlines, int ncols)
     {
       if (!(new = PDC_makelines(new)))
         {
-          return (WINDOW *) NULL;
+          return NULL;
         }
 
       werase(new);

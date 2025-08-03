@@ -1,6 +1,8 @@
 /****************************************************************************
  * libs/libc/machine/sim/arch_elf64.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -47,6 +49,7 @@
 #define R_X86_64_PLT32  4
 #define R_X86_64_32     10
 #define R_X86_64_32S    11
+#define R_X86_64_PC64   24
 
 /****************************************************************************
  * Private Data Types
@@ -80,7 +83,7 @@
  *
  ****************************************************************************/
 
-bool up_checkarch(FAR const Elf64_Ehdr *ehdr)
+bool up_checkarch(const Elf64_Ehdr *ehdr)
 {
   /* Make sure it's an x86_64 executable */
 
@@ -121,7 +124,7 @@ bool up_checkarch(FAR const Elf64_Ehdr *ehdr)
  * Name: up_relocate and up_relocateadd
  *
  * Description:
- *   Perform on architecture-specific ELF relocation.  Every architecture
+ *   Perform an architecture-specific ELF relocation.  Every architecture
  *   that uses the ELF loader must provide this function.
  *
  * Input Parameters:
@@ -139,15 +142,15 @@ bool up_checkarch(FAR const Elf64_Ehdr *ehdr)
  *
  ****************************************************************************/
 
-int up_relocate(FAR const Elf64_Rel *rel, FAR const Elf64_Sym *sym,
-                uintptr_t addr)
+int up_relocate(const Elf64_Rel *rel, const Elf64_Sym *sym, uintptr_t addr,
+                void *arch_data)
 {
   berr("Not implemented\n");
   return -ENOSYS;
 }
 
-int up_relocateadd(FAR const Elf64_Rela *rel, FAR const Elf64_Sym *sym,
-                   uintptr_t addr)
+int up_relocateadd(const Elf64_Rela *rel, const Elf64_Sym *sym,
+                   uintptr_t addr, void *arch_data)
 {
   unsigned int relotype;
   uint64_t value;
@@ -180,6 +183,10 @@ int up_relocateadd(FAR const Elf64_Rela *rel, FAR const Elf64_Sym *sym,
           }
 
         *(uint32_t *)addr = value;
+        break;
+      case R_X86_64_PC64:  /* S + A - P */
+        value = sym->st_value + rel->r_addend - addr;
+        *(uint64_t *)addr = value;
         break;
       case R_X86_64_32:  /* S + A */
       case R_X86_64_32S: /* S + A */

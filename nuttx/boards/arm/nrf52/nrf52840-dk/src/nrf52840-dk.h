@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/nrf52/nrf52840-dk/src/nrf52840-dk.h
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *   Author: Mateusz Szafoni <raiden00@railab.me>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -48,6 +35,18 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+/* Configuration ************************************************************/
+
+/* procfs File System */
+
+#ifdef CONFIG_FS_PROCFS
+#  ifdef CONFIG_NSH_PROC_MOUNTPOINT
+#    define NRF52_PROCFS_MOUNTPOINT CONFIG_NSH_PROC_MOUNTPOINT
+#  else
+#    define NRF52_PROCFS_MOUNTPOINT "/proc"
+#  endif
+#endif
 
 /* LED definitions **********************************************************/
 
@@ -82,13 +81,13 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Public data
+ * Public Data
  ****************************************************************************/
 
 #ifndef __ASSEMBLY__
 
 /****************************************************************************
- * Public Functions
+ * Public Functions Prototypes
  ****************************************************************************/
 
 /****************************************************************************
@@ -100,7 +99,7 @@
  *   CONFIG_BOARD_LATE_INITIALIZE=y :
  *     Called from board_late_initialize().
  *
- *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_LIB_BOARDCTL=y :
+ *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_BOARDCTL=y :
  *     Called from the NSH library
  *
  ****************************************************************************/
@@ -120,7 +119,7 @@ int nrf52_bringup(void);
 void nrf52_spidev_initialize(void);
 #endif
 
-/*****************************************************************************
+/****************************************************************************
  * Name: nrf52_lsm6dsl_initialize
  *
  * Description:
@@ -132,7 +131,7 @@ void nrf52_spidev_initialize(void);
 int nrf52_lsm6dsl_initialize(char *devpath);
 #endif
 
-/*****************************************************************************
+/****************************************************************************
  * Name: nrf52_lsm303agr_initialize
  *
  * Description:
@@ -144,7 +143,7 @@ int nrf52_lsm6dsl_initialize(char *devpath);
 int nrf52_lsm303agr_initialize(char *devpath);
 #endif
 
-/*****************************************************************************
+/****************************************************************************
  * Name: nrf52_hts221_initialize
  *
  * Description:
@@ -156,15 +155,64 @@ int nrf52_lsm303agr_initialize(char *devpath);
 int nrf52_hts221_initialize(char *devpath);
 #endif
 
-/*****************************************************************************
+/****************************************************************************
  * Name: nrf52_lpwaninitialize
  *
  * Description:
  *   Initialize SX127X LPWAN interaface.
+ *
  ****************************************************************************/
 
 #ifdef CONFIG_LPWAN_SX127X
 int nrf52_lpwaninitialize(void);
+#endif
+
+/****************************************************************************
+ * Name: nrf52_pwm_setup
+ *
+ * Description:
+ *   Initialize PWM driver.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_PWM
+int nrf52_pwm_setup(void);
+#endif
+
+/****************************************************************************
+ * Name: nrf52_adc_setup
+ *
+ * Description:
+ *   Initialize ADC driver.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_ADC
+int nrf52_adc_setup(void);
+#endif
+
+/****************************************************************************
+ * Name: nrf52_mx25_initialize
+ *
+ * Description:
+ *   Initialize the MX25RXX QSPI memory
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NRF52_QSPI
+int nrf52_mx25_initialize(void);
+#endif
+
+/****************************************************************************
+ * Name: nrf52_gpioleds_initialize
+ *
+ * Description:
+ *   Initialize GPIO devices with board LEDS and buttons.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NRF52840DK_BTNLEDS_GPIO
+int nrf52_gpioleds_initialize(void);
 #endif
 
 #endif /* __ASSEMBLY__ */

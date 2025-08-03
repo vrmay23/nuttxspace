@@ -1,34 +1,22 @@
 /****************************************************************************
  * drivers/sensors/hc_sr04.c
  *
- *   Copyright (C) 2017 Alan Carvalho de Assis <acassis@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -38,6 +26,7 @@
 
 #include <nuttx/config.h>
 #include <sys/types.h>
+#include <assert.h>
 #include <debug.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -47,6 +36,7 @@
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
+#include <nuttx/mutex.h>
 #include <nuttx/signal.h>
 #include <nuttx/random.h>
 #include <nuttx/sensors/hc_sr04.h>
@@ -82,12 +72,12 @@ static int hcsr04_poll(FAR struct file *filep, FAR struct pollfd *fds,
 struct hcsr04_dev_s
 {
   FAR struct hcsr04_config_s *config;
-  sem_t devsem;
+  mutex_t devlock;
   sem_t conv_donesem;
   int time_start_pulse;
   int time_finish_pulse;
   volatile bool rising;
-  struct pollfd *fds[CONFIG_HCSR04_NPOLLWAITERS];
+  FAR struct pollfd *fds[CONFIG_HCSR04_NPOLLWAITERS];
 };
 
 /****************************************************************************
@@ -102,10 +92,9 @@ static const struct file_operations g_hcsr04ops =
   hcsr04_write,  /* write */
   NULL,          /* seek */
   hcsr04_ioctl,  /* ioctl */
+  NULL,          /* mmap */
+  NULL,          /* truncate */
   hcsr04_poll    /* poll */
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL         /* unlink */
-#endif
 };
 
 /****************************************************************************
@@ -116,7 +105,7 @@ static int hcsr04_read_distance(FAR struct hcsr04_dev_s *priv)
 {
   int done;
 
-  nxsem_getvalue(&priv->conv_donesem, &done);
+  nxsem_get_value(&priv->conv_donesem, &done);
 
   if (done == 0)
     {
@@ -151,13 +140,13 @@ static int hcsr04_open(FAR struct file *filep)
   FAR struct hcsr04_dev_s *priv = inode->i_private;
   int ret;
 
-  ret = nxsem_wait_uninterruptible(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
     }
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   hcsr04_dbg("OPENED\n");
   return OK;
 }
@@ -168,13 +157,13 @@ static int hcsr04_close(FAR struct file *filep)
   FAR struct hcsr04_dev_s *priv = inode->i_private;
   int ret;
 
-  ret = nxsem_wait_uninterruptible(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
     }
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   hcsr04_dbg("CLOSED\n");
   return OK;
 }
@@ -190,7 +179,7 @@ static ssize_t hcsr04_read(FAR struct file *filep, FAR char *buffer,
 
   /* Get exclusive access */
 
-  ret = nxsem_wait_uninterruptible(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -226,7 +215,7 @@ static ssize_t hcsr04_read(FAR struct file *filep, FAR char *buffer,
         }
     }
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return length;
 }
 
@@ -245,7 +234,7 @@ static int hcsr04_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Get exclusive access */
 
-  ret = nxsem_wait_uninterruptible(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
@@ -271,7 +260,7 @@ static int hcsr04_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       break;
     }
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return ret;
 }
 
@@ -279,33 +268,9 @@ static bool hcsr04_sample(FAR struct hcsr04_dev_s *priv)
 {
   int done;
 
-  nxsem_getvalue(&priv->conv_donesem, &done);
+  nxsem_get_value(&priv->conv_donesem, &done);
 
   return (done == 0);
-}
-
-static void hcsr04_notify(FAR struct hcsr04_dev_s *priv)
-{
-  DEBUGASSERT(priv != NULL);
-
-  int i;
-
-  /* If there are threads waiting on poll() for data to become available,
-   * then wake them up now.  NOTE: we wake up all waiting threads because we
-   * do not know that they are going to do.  If they all try to read the
-   * data, then some make end up blocking after all.
-   */
-
-  for (i = 0; i < CONFIG_HCSR04_NPOLLWAITERS; i++)
-    {
-      FAR struct pollfd *fds = priv->fds[i];
-      if (fds)
-        {
-          fds->revents |= POLLIN;
-          hcsr04_dbg("Report events: %02x\n", fds->revents);
-          nxsem_post(fds->sem);
-        }
-    }
 }
 
 static int hcsr04_poll(FAR struct file *filep, FAR struct pollfd *fds,
@@ -317,15 +282,15 @@ static int hcsr04_poll(FAR struct file *filep, FAR struct pollfd *fds,
   int ret = OK;
   int i;
 
-  DEBUGASSERT(filep && fds);
+  DEBUGASSERT(fds);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv = (FAR struct hcsr04_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv = inode->i_private;
 
   /* Get exclusive access */
 
-  ret = nxsem_wait_uninterruptible(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
@@ -369,7 +334,7 @@ static int hcsr04_poll(FAR struct file *filep, FAR struct pollfd *fds,
       flags = enter_critical_section();
       if (hcsr04_sample(priv))
         {
-          hcsr04_notify(priv);
+          poll_notify(&fds, 1, POLLIN);
         }
 
       leave_critical_section(flags);
@@ -378,7 +343,7 @@ static int hcsr04_poll(FAR struct file *filep, FAR struct pollfd *fds,
     {
       /* This is a request to tear down the poll. */
 
-      struct pollfd **slot = (struct pollfd **)fds->priv;
+      FAR struct pollfd **slot = (FAR struct pollfd **)fds->priv;
       DEBUGASSERT(slot != NULL);
 
       /* Remove all memory of the poll setup */
@@ -388,7 +353,7 @@ static int hcsr04_poll(FAR struct file *filep, FAR struct pollfd *fds,
     }
 
 out:
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return ret;
 }
 
@@ -428,7 +393,7 @@ static int hcsr04_int_handler(int irq, FAR void *context, FAR void *arg)
     }
 
   hcsr04_dbg("HC-SR04 interrupt\n");
-  hcsr04_notify(priv);
+  poll_notify(priv->fds, CONFIG_HCSR04_NPOLLWAITERS, POLLIN);
 
   return OK;
 }
@@ -443,7 +408,7 @@ int hcsr04_register(FAR const char *devpath,
   int ret = 0;
   FAR struct hcsr04_dev_s *priv;
 
-  priv = (struct hcsr04_dev_s *)kmm_zalloc(sizeof(struct hcsr04_dev_s));
+  priv = kmm_zalloc(sizeof(struct hcsr04_dev_s));
 
   if (!priv)
     {
@@ -452,12 +417,14 @@ int hcsr04_register(FAR const char *devpath,
     }
 
   priv->config = config;
-  nxsem_init(&priv->devsem, 0, 1);
+  nxmutex_init(&priv->devlock);
   nxsem_init(&priv->conv_donesem, 0, 0);
 
   ret = register_driver(devpath, &g_hcsr04ops, 0666, priv);
   if (ret < 0)
     {
+      nxmutex_destroy(&priv->devlock);
+      nxsem_destroy(&priv->conv_donesem);
       kmm_free(priv);
       hcsr04_dbg("Error occurred during the driver registering = %d\n", ret);
       return ret;

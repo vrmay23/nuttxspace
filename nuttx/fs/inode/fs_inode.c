@@ -1,6 +1,8 @@
 /****************************************************************************
  * fs/inode/fs_inode.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -22,14 +24,8 @@
  * Included Files
  ****************************************************************************/
 
-#include <nuttx/config.h>
-
-#include <unistd.h>
-#include <assert.h>
-#include <errno.h>
-
 #include <nuttx/fs/fs.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/rwsem.h>
 
 #include "inode/inode.h"
 
@@ -37,32 +33,15 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define NO_HOLDER ((pid_t)-1)
-
 /****************************************************************************
  * Private Types
  ****************************************************************************/
-
-/* Implements a re-entrant mutex for inode access.  This must be re-entrant
- * because there can be cycles.  For example, it may be necessary to destroy
- * a block driver inode on umount() after a removable block device has been
- * removed.  In that case umount() holds the inode semaphore, but the block
- * driver may callback to unregister_blockdriver() after the un-mount,
- * requiring the semaphore again.
- */
-
-struct inode_sem_s
-{
-  sem_t   sem;     /* The semaphore */
-  pid_t   holder;  /* The current holder of the semaphore */
-  int16_t count;   /* Number of counts held */
-};
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static struct inode_sem_s g_inode_sem;
+static rw_semaphore_t g_inode_lock = RWSEM_INITIALIZER;
 
 /****************************************************************************
  * Public Functions
@@ -79,92 +58,59 @@ static struct inode_sem_s g_inode_sem;
 
 void inode_initialize(void)
 {
-  /* Initialize the semaphore to one (to support one-at-a-time access to the
-   * inode tree).
-   */
+  /* Reserve the root node */
 
-  nxsem_init(&g_inode_sem.sem, 0, 1);
-  g_inode_sem.holder = NO_HOLDER;
-  g_inode_sem.count  = 0;
-
-  /* Initialize files array (if it is used) */
-
-#ifdef CONFIG_HAVE_WEAKFUNCTIONS
-  if (files_initialize != NULL)
-#endif
-    {
-      files_initialize();
-    }
+  inode_root_reserve();
 }
 
 /****************************************************************************
- * Name: inode_semtake
+ * Name: inode_lock
  *
  * Description:
- *   Get exclusive access to the in-memory inode tree (g_inode_sem).
+ *   Get writeable exclusive access to the in-memory inode tree.
  *
  ****************************************************************************/
 
-int inode_semtake(void)
+void inode_lock(void)
 {
-  pid_t me;
-  int ret = OK;
-
-  /* Do we already hold the semaphore? */
-
-  me = getpid();
-  if (me == g_inode_sem.holder)
-    {
-      /* Yes... just increment the count */
-
-      g_inode_sem.count++;
-      DEBUGASSERT(g_inode_sem.count > 0);
-    }
-
-  /* Take the semaphore (perhaps waiting) */
-
-  else
-    {
-      ret = nxsem_wait_uninterruptible(&g_inode_sem.sem);
-      if (ret >= 0)
-        {
-          /* No we hold the semaphore */
-
-          g_inode_sem.holder = me;
-          g_inode_sem.count  = 1;
-        }
-    }
-
-  return ret;
+  down_write(&g_inode_lock);
 }
 
 /****************************************************************************
- * Name: inode_semgive
+ * Name: inode_rlock
  *
  * Description:
- *   Relinquish exclusive access to the in-memory inode tree (g_inode_sem).
+ *   Get readable exclusive access to the in-memory inode tree.
  *
  ****************************************************************************/
 
-void inode_semgive(void)
+void inode_rlock(void)
 {
-  DEBUGASSERT(g_inode_sem.holder == getpid());
+  down_read(&g_inode_lock);
+}
 
-  /* Is this our last count on the semaphore? */
+/****************************************************************************
+ * Name: inode_unlock
+ *
+ * Description:
+ *   Relinquish writeable exclusive access to the in-memory inode tree.
+ *
+ ****************************************************************************/
 
-  if (g_inode_sem.count > 1)
-    {
-      /* No.. just decrement the count */
+void inode_unlock(void)
+{
+  up_write(&g_inode_lock);
+}
 
-      g_inode_sem.count--;
-    }
+/****************************************************************************
+ * Name: inode_runlock
+ *
+ * Description:
+ *   Relinquish read exclusive access to the in-memory inode tree.
+ *
+ ****************************************************************************/
 
-  /* Yes.. then we can really release the semaphore */
-
-  else
-    {
-      g_inode_sem.holder = NO_HOLDER;
-      g_inode_sem.count  = 0;
-      nxsem_post(&g_inode_sem.sem);
-    }
+void inode_runlock(void)
+{
+  up_read(&g_inode_lock);
 }

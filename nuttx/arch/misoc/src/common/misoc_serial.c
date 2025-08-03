@@ -1,35 +1,22 @@
 /****************************************************************************
- * arch/misoc/src/lm32/lm32_blocktask.c
+ * arch/misoc/src/common/misoc_serial.c
  *
- *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
- *   Author: Ramtin Amin <keytwo@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,6 +31,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -118,8 +106,8 @@
 
 /* Common initialization logic will not not know that the all of the UARTs
  * have been disabled.  So, as a result, we may still have to provide
- * stub implementations of misoc_earlyserialinit(), misoc_serial_initialize(), and
- * misoc_putc().
+ * stub implementations of misoc_earlyserialinit(),
+ * misoc_serial_initialize(), and misoc_putc().
  */
 
 #ifdef HAVE_UART_DEVICE
@@ -155,7 +143,7 @@ static int  misoc_setup(struct uart_dev_s *dev);
 static void misoc_shutdown(struct uart_dev_s *dev);
 static int  misoc_attach(struct uart_dev_s *dev);
 static void misoc_detach(struct uart_dev_s *dev);
-static int  misoc_uart_interrupt(int irq, void *context, FAR void *arg);
+static int  misoc_uart_interrupt(int irq, void *context, void *arg);
 static int  misoc_ioctl(struct file *filep, int cmd, unsigned long arg);
 static int  misoc_receive(struct uart_dev_s *dev, uint32_t *status);
 static void misoc_rxint(struct uart_dev_s *dev, bool enable);
@@ -199,7 +187,7 @@ static char g_uart1txbuffer[CONFIG_UART1_TXBUFSIZE];
 
 #ifdef CONFIG_MISOC_UART1
 #ifndef CONFIG_MISOC_UART1PRIO
-# define CONFIG_MISOC_UART1PRIO 4
+#  define CONFIG_MISOC_UART1PRIO 4
 #endif
 
 static struct misoc_dev_s g_uart1priv =
@@ -228,7 +216,7 @@ static uart_dev_t g_uart1port =
   {
     .size    = CONFIG_UART1_TXBUFSIZE,
     .buffer  = g_uart1txbuffer,
-   },
+  },
   .ops       = &g_uart_ops,
   .priv      = &g_uart1priv,
 };
@@ -258,9 +246,9 @@ static void misoc_restoreuartint(struct uart_dev_s *dev, uint8_t im)
 static void misoc_disableuartint(struct uart_dev_s *dev, uint8_t *im)
 {
   if (im)
-   {
-     *im = uart_ev_enable_read();
-   }
+    {
+      *im = uart_ev_enable_read();
+    }
 
   misoc_restoreuartint(dev, 0);
 }
@@ -297,14 +285,15 @@ static void misoc_shutdown(struct uart_dev_s *dev)
  * Name: misoc_attach
  *
  * Description:
- *   Configure the UART to operation in interrupt driven mode.  This method is
- *   called when the serial port is opened.  Normally, this is just after the
+ *   Configure the UART to operation in interrupt driven mode.  This method
+ *   is called when the serial port is opened.  Normally, this is just after
  *   the setup() method is called, however, the serial console may operate in
  *   a non-interrupt driven mode during the boot phase.
  *
  *   RX and TX interrupts are not enabled by the attach method (unless the
  *   hardware supports multiple levels of interrupt enabling).  The RX and TX
- *   interrupts are not enabled until the txint() and rxint() methods are called.
+ *   interrupts are not enabled until the txint() and rxint() methods are
+ *   called.
  *
  ****************************************************************************/
 
@@ -323,8 +312,8 @@ static int misoc_attach(struct uart_dev_s *dev)
  *
  * Description:
  *   Detach UART interrupts.  This method is called when the serial port is
- *   closed normally just before the shutdown method is called.  The exception
- *   is the serial console which is never shutdown.
+ *   closed normally just before the shutdown method is called.
+ *   The exception is the serial console which is never shutdown.
  *
  ****************************************************************************/
 
@@ -341,14 +330,14 @@ static void misoc_detach(struct uart_dev_s *dev)
  *
  * Description:
  *   This is the UART interrupt handler.  It will be invoked when an
- *   interrupt received on the 'irq'  It should call uart_transmitchars or
- *   uart_receivechar to perform the appropriate data transfers.  The
- *   interrupt handling logic must be able to map the 'irq' number into the
+ *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
+ *   uart_recvchars to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'arg' to the
  *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
 
-static int misoc_uart_interrupt(int irq, void *context, FAR void *arg)
+static int misoc_uart_interrupt(int irq, void *context, void *arg)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
   uint32_t stat;
@@ -537,7 +526,7 @@ static bool misoc_txempty(struct uart_dev_s *dev)
  *
  * Description:
  *   Performs the low level UART initialization early in debug so that the
- *   serial console will be available during bootup.  This must be called
+ *   serial console will be available during boot up.  This must be called
  *   before misoc_serial_initialize.
  *
  ****************************************************************************/
@@ -554,27 +543,16 @@ void misoc_earlyserialinit(void)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
   struct uart_dev_s *dev = (struct uart_dev_s *)&CONSOLE_DEV;
   uint8_t imr;
 
-   misoc_disableuartint(dev, &imr);
-
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      misoc_lowputc('\r');
-    }
-
+  misoc_disableuartint(dev, &imr);
   misoc_lowputc(ch);
   misoc_restoreuartint(dev, imr);
 #endif
-  return ch;
 }
 
 /****************************************************************************
@@ -597,9 +575,8 @@ void misoc_serial_initialize(void)
 {
 }
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
-  return ch;
 }
 
 #endif /* HAVE_UART_DEVICE */
@@ -613,22 +590,11 @@ int up_putc(int ch)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      misoc_lowputc('\r');
-    }
-
   misoc_lowputc(ch);
 #endif
-
-  return ch;
 }
 
 #endif /* USE_SERIALDRIVER */
@@ -659,6 +625,7 @@ void misoc_serial_initialize(void)
 #endif
 
   /* Register all UARTs */
+
   uart_register("/dev/ttyS0", &TTYS0_DEV);
 #endif
 }

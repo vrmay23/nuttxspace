@@ -1,37 +1,22 @@
 /****************************************************************************
  * drivers/sensors/bmg160.c
- * Character driver for the BMG160 3-Axis gyroscope.
  *
- *   Copyright (C) 2016 DS-Automotion GmbH. All rights reserved.
- *   Author: Alexander Entinger <a.entinger@ds-automotion.com>
- *           Thomas Ilk
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,21 +26,23 @@
 
 #include <nuttx/config.h>
 
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <string.h>
 
+#include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/fs/fs.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 #include <nuttx/sensors/bmg160.h>
 #include <nuttx/random.h>
 
 #if defined(CONFIG_SPI) && defined(CONFIG_SENSORS_BMG160)
 
 /****************************************************************************
- * Private
+ * Private Types
  ****************************************************************************/
 
 struct bmg160_sensor_data_s
@@ -72,7 +59,7 @@ struct bmg160_dev_s
   FAR struct spi_dev_s *spi;          /* Pointer to the SPI instance */
   FAR struct bmg160_config_s *config; /* Pointer to the configuration of the
                                        * BMG160 sensor */
-  sem_t datasem;                      /* Manages exclusive access to this
+  mutex_t datalock;                   /* Manages exclusive access to this
                                        * structure */
   struct bmg160_sensor_data_s data;   /* The data as measured by the sensor */
   struct work_s work;                 /* The work queue is responsible for
@@ -103,7 +90,6 @@ static int bmg160_close(FAR struct file *filep);
 static ssize_t bmg160_read(FAR struct file *, FAR char *, size_t);
 static ssize_t bmg160_write(FAR struct file *filep, FAR const char *buffer,
                             size_t buflen);
-static int bmg160_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -111,16 +97,10 @@ static int bmg160_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
 
 static const struct file_operations g_bmg160_fops =
 {
-  bmg160_open,
-  bmg160_close,
-  bmg160_read,
-  bmg160_write,
-  NULL,
-  bmg160_ioctl,
-  NULL
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL
-#endif
+  bmg160_open,     /* open */
+  bmg160_close,    /* close */
+  bmg160_read,     /* read */
+  bmg160_write,    /* write */
 };
 
 /* Single linked list to store instances of drivers */
@@ -138,7 +118,9 @@ static struct bmg160_dev_s *g_bmg160_list = NULL;
 static void bmg160_read_register(FAR struct bmg160_dev_s *dev,
                                  uint8_t const reg_addr, uint8_t * reg_data)
 {
-  /* Lock the SPI bus so that only one device can access it at the same time */
+  /* Lock the SPI bus so that only one device can access it at the same
+   * time
+   */
 
   SPI_LOCK(dev->spi, true);
 
@@ -173,7 +155,9 @@ static void bmg160_write_register(FAR struct bmg160_dev_s *dev,
                                   uint8_t const reg_addr,
                                   uint8_t const reg_data)
 {
-  /* Lock the SPI bus so that only one device can access it at the same time */
+  /* Lock the SPI bus so that only one device can access it at the same
+   * time
+   */
 
   SPI_LOCK(dev->spi, true);
 
@@ -225,12 +209,12 @@ static void bmg160_read_measurement_data(FAR struct bmg160_dev_s *dev)
 
   bmg160_read_gyroscope_data(dev, &x_gyr, &y_gyr, &z_gyr);
 
-  /* Acquire the semaphore before the data is copied */
+  /* Acquire the mutex before the data is copied */
 
-  ret = nxsem_wait(&dev->datasem);
+  ret = nxmutex_lock(&dev->datalock);
   if (ret < 0)
     {
-      snerr("ERROR: Could not acquire dev->datasem: %d\n", ret);
+      snerr("ERROR: Could not acquire dev->datalock: %d\n", ret);
       return;
     }
 
@@ -240,9 +224,9 @@ static void bmg160_read_measurement_data(FAR struct bmg160_dev_s *dev)
   dev->data.y_gyr = (int16_t) (y_gyr);
   dev->data.z_gyr = (int16_t) (z_gyr);
 
-  /* Give back the semaphore */
+  /* Give back the mutex */
 
-  nxsem_post(&dev->datasem);
+  nxmutex_unlock(&dev->datalock);
 
   /* Feed sensor data to entropy pool */
 
@@ -257,7 +241,9 @@ static void bmg160_read_gyroscope_data(FAR struct bmg160_dev_s *dev,
                                        uint16_t * x_gyr, uint16_t * y_gyr,
                                        uint16_t * z_gyr)
 {
-  /* Lock the SPI bus so that only one device can access it at the same time */
+  /* Lock the SPI bus so that only one device can access it at the same
+   * time
+   */
 
   SPI_LOCK(dev->spi, true);
 
@@ -311,8 +297,8 @@ static int bmg160_interrupt_handler(int irq, FAR void *context)
   DEBUGASSERT(priv != NULL);
 
   /* Task the worker with retrieving the latest sensor data. We should not do
-   * this in a interrupt since it might take too long. Also we cannot lock the
-   * SPI bus from within an interrupt.
+   * this in a interrupt since it might take too long. Also we cannot lock
+   * the SPI bus from within an interrupt.
    */
 
   DEBUGASSERT(priv->work.worker == NULL);
@@ -364,28 +350,30 @@ static int bmg160_open(FAR struct file *filep)
 
   bmg160_write_register(priv,
                         BMG160_RANGE_REG,
-                        BMG160_RANGE_REG_FIX_VAL_bm | BMG160_RANGE_REG_FSR_1_bm |
-                        BMG160_RANGE_REG_FSR_0_bm);
+                        BMG160_RANGE_REG_FIX_VAL_BM |
+                        BMG160_RANGE_REG_FSR_1_BM |
+                        BMG160_RANGE_REG_FSR_0_BM);
 
   /* Enable - the fastest data output rate ODR = 2000 Hz -> BW = 230 Hz */
 
-  bmg160_write_register(priv, BMG160_BW_REG, BMG160_BW_REG_ODR_0_bm);
+  bmg160_write_register(priv, BMG160_BW_REG, BMG160_BW_REG_ODR_0_BM);
 
   /* Enable - new data interrupt 1 */
 
   bmg160_write_register(priv,
-                        BMG160_INT_EN_0_REG, BMG160_INT_EN_0_REG_DATA_EN_bm);
+                        BMG160_INT_EN_0_REG, BMG160_INT_EN_0_REG_DATA_EN_BM);
 
   /* Enable - active high level interrupt 1 - push-pull interrupt */
 
   bmg160_write_register(priv,
-                        BMG160_INT_EN_1_REG, BMG160_INT_EN_1_REG_INT1_LVL_bm);
+                        BMG160_INT_EN_1_REG,
+                        BMG160_INT_EN_1_REG_INT1_LVL_BM);
 
   /* Enable - map new data interrupt to INT1 */
 
   bmg160_write_register(priv,
                         BMG160_INT_MAP_1_REG,
-                        BMG160_INT_MAP_1_REG_INT1_DATA_bm);
+                        BMG160_INT_MAP_1_REG_INT1_DATA_BM);
 
   /* Read measurement data to ensure DRDY is low */
 
@@ -450,16 +438,17 @@ static ssize_t bmg160_read(FAR struct file *filep, FAR char *buffer,
 
   if (buflen < sizeof(FAR struct bmg160_sensor_data_s))
     {
-      snerr("ERROR: Not enough memory for reading out a sensor data sample\n");
+      snerr("ERROR: "
+            "Not enough memory for reading out a sensor data sample\n");
       return -ENOSYS;
     }
 
-  /* Acquire the semaphore before the data is copied */
+  /* Acquire the mutex before the data is copied */
 
-  ret = nxsem_wait(&priv->datasem);
+  ret = nxmutex_lock(&priv->datalock);
   if (ret < 0)
     {
-      snerr("ERROR: Could not acquire priv->datasem: %d\n", ret);
+      snerr("ERROR: Could not acquire priv->datalock: %d\n", ret);
       return ret;
     }
 
@@ -472,9 +461,9 @@ static ssize_t bmg160_read(FAR struct file *filep, FAR char *buffer,
   data->y_gyr = priv->data.y_gyr;
   data->z_gyr = priv->data.z_gyr;
 
-  /* Give back the semaphore */
+  /* Give back the mutex */
 
-  nxsem_post(&priv->datasem);
+  nxmutex_unlock(&priv->datalock);
 
   return sizeof(FAR struct bmg160_sensor_data_s);
 }
@@ -487,27 +476,6 @@ static ssize_t bmg160_write(FAR struct file *filep, FAR const char *buffer,
                             size_t buflen)
 {
   return -ENOSYS;
-}
-
-/****************************************************************************
- * Name: bmg160_ioctl
- ****************************************************************************/
-
-static int bmg160_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
-{
-  int ret = OK;
-
-  switch (cmd)
-    {
-      /* Command was not recognized */
-
-    default:
-      snerr("ERROR: Unrecognized cmd: %d\n", cmd);
-      ret = -ENOTTY;
-      break;
-    }
-
-  return ret;
 }
 
 /****************************************************************************
@@ -545,7 +513,7 @@ int bmg160_register(FAR const char *devpath, FAR struct spi_dev_s *spi,
 
   /* Initialize the BMG160 device structure */
 
-  priv = (FAR struct bmg160_dev_s *)kmm_malloc(sizeof(struct bmg160_dev_s));
+  priv = kmm_malloc(sizeof(struct bmg160_dev_s));
   if (priv == NULL)
     {
       snerr("ERROR: Failed to allocate instance\n");
@@ -556,9 +524,9 @@ int bmg160_register(FAR const char *devpath, FAR struct spi_dev_s *spi,
   priv->config      = config;
   priv->work.worker = NULL;
 
-  /* Initialize sensor data access semaphore */
+  /* Initialize sensor data access mutex */
 
-  nxsem_init(&priv->datasem, 0, 1);
+  nxmutex_init(&priv->datalock);
 
   /* Setup SPI frequency and mode */
 
@@ -571,6 +539,8 @@ int bmg160_register(FAR const char *devpath, FAR struct spi_dev_s *spi,
   if (ret < 0)
     {
       snerr("ERROR: Failed to attach interrupt\n");
+      nxmutex_destroy(&priv->datalock);
+      kmm_free(priv);
       return ret;
     }
 
@@ -580,8 +550,8 @@ int bmg160_register(FAR const char *devpath, FAR struct spi_dev_s *spi,
   if (ret < 0)
     {
       snerr("ERROR: Failed to register driver: %d\n", ret);
+      nxmutex_destroy(&priv->datalock);
       kmm_free(priv);
-      nxsem_destroy(&priv->datasem);
       return ret;
     }
 

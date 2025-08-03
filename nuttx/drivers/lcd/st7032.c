@@ -1,41 +1,26 @@
 /****************************************************************************
- * drivers/sensors/st7032.c
- * Alphanumeric LCD driver for ST7032i (tested on JLX1602G-390)
+ * drivers/lcd/st7032.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Copyright (C) 2018 Alan Carvalho de Assis
- *   Author: Alan Carvalho de Assis <acassis@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Basic initialization based on Olav Kallhovd driver.
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
+
+/* Alphanumeric LCD driver for ST7032i (tested on JLX1602G-390) */
 
 /****************************************************************************
  * Included Files
@@ -49,6 +34,7 @@
 #include <string.h>
 
 #include <nuttx/kmalloc.h>
+#include <nuttx/mutex.h>
 #include <nuttx/signal.h>
 #include <nuttx/ascii.h>
 #include <nuttx/fs/fs.h>
@@ -57,7 +43,7 @@
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/lcd/st7032.h>
 
-#ifndef CONFIG_LIB_SLCDCODEC
+#ifndef CONFIG_LIBC_SLCDCODEC
 # error please also select Library Routines, Segment LCD CODEC
 #endif
 
@@ -82,16 +68,9 @@ struct st7032_dev_s
   FAR struct i2c_master_s *i2c; /* I2C interface */
   uint8_t    row;               /* Current row position to write on display  */
   uint8_t    col;               /* Current col position to write on display  */
-  uint8_t    buffer[ST7032_MAX_ROW * ST7032_MAX_COL];  /* SLCD ASCII content */
+  uint8_t    buffer[ST7032_MAX_ROW * ST7032_MAX_COL];
   bool       pendscroll;
-  sem_t sem_excl;
-};
-
-struct lcd_instream_s
-{
-  struct lib_instream_s stream;
-  FAR const char *buffer;
-  ssize_t nbytes;
+  mutex_t    lock;
 };
 
 /****************************************************************************
@@ -111,8 +90,6 @@ static void lcd_scroll_up(FAR struct st7032_dev_s *priv);
 
 /* Character driver methods */
 
-static int     st7032_open(FAR struct file *filep);
-static int     st7032_close(FAR struct file *filep);
 static ssize_t st7032_read(FAR struct file *filep, FAR char *buffer,
                             size_t buflen);
 static ssize_t st7032_write(FAR struct file *filep, FAR const char *buffer,
@@ -127,16 +104,12 @@ static int     st7032_ioctl(FAR struct file *filep, int cmd,
 
 static const struct file_operations g_st7032fops =
 {
-  st7032_open,   /* open */
-  st7032_close,  /* close */
+  NULL,          /* open */
+  NULL,          /* close */
   st7032_read,   /* read */
   st7032_write,  /* write */
   st7032_seek,   /* seek */
   st7032_ioctl,  /* ioctl */
-  NULL,          /* poll */
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  NULL           /* unlink */
-#endif
 };
 
 /****************************************************************************
@@ -326,7 +299,7 @@ static inline void lcd_putdata(FAR struct st7032_dev_s *priv, uint8_t data)
 
   /* Update col/row positions */
 
- priv->col++;
+  priv->col++;
 
   if (priv->col >= ST7032_MAX_COL)
     {
@@ -355,11 +328,11 @@ static inline void lcd_putdata(FAR struct st7032_dev_s *priv, uint8_t data)
 
 static void lcd_scroll_up(FAR struct st7032_dev_s *priv)
 {
-  uint8_t *data;
+  FAR uint8_t *data;
   int currow;
   int curcol;
 
-  data = (uint8_t *)malloc(ST7032_MAX_COL);
+  data = kmm_malloc(ST7032_MAX_COL);
   if (NULL == data)
     {
       lcdinfo("Failed to allocate buffer in lcd_scroll_up()\n");
@@ -400,8 +373,7 @@ static void lcd_scroll_up(FAR struct st7032_dev_s *priv)
   priv->row = ST7032_MAX_ROW - 1;
   lcd_set_curpos(priv);
 
-  free(data);
-  return;
+  kmm_free(data);
 }
 
 /****************************************************************************
@@ -626,29 +598,6 @@ static void lcd_codec_action(FAR struct st7032_dev_s *priv,
 }
 
 /****************************************************************************
- * Name: lcd_getstream
- *
- * Description:
- *   Get one character from the LCD codec stream.
- *
- ****************************************************************************/
-
-static int lcd_getstream(FAR struct lib_instream_s *instream)
-{
-  FAR struct lcd_instream_s *lcdstream =
-    (FAR struct lcd_instream_s *)instream;
-
-  if (lcdstream->nbytes > 0)
-    {
-      lcdstream->nbytes--;
-      lcdstream->stream.nget++;
-      return (int)*lcdstream->buffer++;
-    }
-
-  return EOF;
-}
-
-/****************************************************************************
  * Name: lcd_init
  *
  * Description:
@@ -721,32 +670,6 @@ static void lcd_curpos_to_fpos(FAR struct st7032_dev_s *priv,
 }
 
 /****************************************************************************
- * Name: st7032_open
- *
- * Description:
- *   This function is called whenever the ST7032 device is opened.
- *
- ****************************************************************************/
-
-static int st7032_open(FAR struct file *filep)
-{
-  return OK;
-}
-
-/****************************************************************************
- * Name: st7032_close
- *
- * Description:
- *   This routine is called when the LM-75 device is closed.
- *
- ****************************************************************************/
-
-static int st7032_close(FAR struct file *filep)
-{
-  return OK;
-}
-
-/****************************************************************************
  * Name: st7032_read
  ****************************************************************************/
 
@@ -765,26 +688,23 @@ static ssize_t st7032_write(FAR struct file *filep, FAR const char *buffer,
 {
   FAR struct inode *inode = filep->f_inode;
   FAR struct st7032_dev_s *priv = inode->i_private;
-  struct lcd_instream_s instream;
+  struct lib_meminstream_s instream;
   struct slcdstate_s state;
   enum slcdret_e result;
   uint8_t ch;
   uint8_t count;
 
-  nxsem_wait(&priv->sem_excl);
+  nxmutex_lock(&priv->lock);
 
   /* Initialize the stream for use with the SLCD CODEC */
 
-  instream.stream.get  = lcd_getstream;
-  instream.stream.nget = 0;
-  instream.buffer      = buffer;
-  instream.nbytes      = buflen;
+  lib_meminstream(&instream, buffer, buflen);
 
   /* Now decode and process every byte in the input buffer */
 
   memset(&state, 0, sizeof(struct slcdstate_s));
-  while ((result = slcd_decode(&instream.stream, &state, &ch, &count)) !=
-         SLCDRET_EOF)
+  while ((result = slcd_decode(&instream.common,
+                               &state, &ch, &count)) != SLCDRET_EOF)
     {
       /* Is there some pending scroll? */
 
@@ -800,7 +720,9 @@ static ssize_t st7032_write(FAR struct file *filep, FAR const char *buffer,
 
           if (ch == ASCII_TAB)
             {
-              /* Blink Cursor? Shouldn't it be just 4 spaces to indicate TAB? */
+              /* Blink Cursor? Shouldn't it be just 4 spaces to indicate
+               * TAB?
+               */
 
               st7032_write_inst(priv, ST7032_DISPLAY_ON_OFF |
                                       DISPLAY_ON_OFF_D | DISPLAY_ON_OFF_C |
@@ -881,7 +803,7 @@ static ssize_t st7032_write(FAR struct file *filep, FAR const char *buffer,
 
   lcd_curpos_to_fpos(priv, priv->row, priv->col, &filep->f_pos);
 
-  nxsem_post(&priv->sem_excl);
+  nxmutex_unlock(&priv->lock);
   return buflen;
 }
 
@@ -900,11 +822,12 @@ static ssize_t st7032_write(FAR struct file *filep, FAR const char *buffer,
 static off_t st7032_seek(FAR struct file *filep, off_t offset, int whence)
 {
   FAR struct inode *inode = filep->f_inode;
-  FAR struct st7032_dev_s *priv = (FAR struct st7032_dev_s *)inode->i_private;
+  FAR struct st7032_dev_s *priv =
+    inode->i_private;
   off_t maxpos;
   off_t pos;
 
-  nxsem_wait(&priv->sem_excl);
+  nxmutex_lock(&priv->lock);
 
   maxpos = ST7032_MAX_ROW * ST7032_MAX_COL + (ST7032_MAX_ROW - 1);
   pos    = filep->f_pos;
@@ -954,13 +877,14 @@ static off_t st7032_seek(FAR struct file *filep, off_t offset, int whence)
         break;
 
       default:
+
         /* Return EINVAL if the whence argument is invalid */
 
         pos = (off_t)-EINVAL;
         break;
     }
 
-  nxsem_post(&priv->sem_excl);
+  nxmutex_unlock(&priv->lock);
   return pos;
 }
 
@@ -1002,7 +926,7 @@ static int st7032_ioctl(FAR struct file *filep, int cmd,
         {
           FAR struct inode *inode = filep->f_inode;
           FAR struct st7032_dev_s *priv =
-            (FAR struct st7032_dev_s *)inode->i_private;
+            inode->i_private;
           FAR struct slcd_curpos_s *attr =
             (FAR struct slcd_curpos_s *)((uintptr_t)arg);
 
@@ -1015,11 +939,11 @@ static int st7032_ioctl(FAR struct file *filep, int cmd,
         {
           FAR struct inode *inode = filep->f_inode;
           FAR struct st7032_dev_s *priv =
-            (FAR struct st7032_dev_s *)inode->i_private;
+            inode->i_private;
 
-          nxsem_wait(&priv->sem_excl);
+          nxmutex_lock(&priv->lock);
           *(FAR int *)((uintptr_t)arg) = 1; /* Hardcoded */
-          nxsem_post(&priv->sem_excl);
+          nxmutex_unlock(&priv->lock);
         }
         break;
 
@@ -1027,13 +951,13 @@ static int st7032_ioctl(FAR struct file *filep, int cmd,
         {
           FAR struct inode *inode = filep->f_inode;
           FAR struct st7032_dev_s *priv =
-            (FAR struct st7032_dev_s *)inode->i_private;
+            inode->i_private;
 
-          nxsem_wait(&priv->sem_excl);
+          nxmutex_lock(&priv->lock);
 
           /* TODO: set display contrast */
 
-          nxsem_post(&priv->sem_excl);
+          nxmutex_unlock(&priv->lock);
         }
         break;
 
@@ -1074,7 +998,7 @@ int st7032_register(FAR const char *devpath, FAR struct i2c_master_s *i2c)
 
   /* Initialize the ST7032 device structure */
 
-  priv = (FAR struct st7032_dev_s *)kmm_malloc(sizeof(struct st7032_dev_s));
+  priv = kmm_malloc(sizeof(struct st7032_dev_s));
   if (!priv)
     {
       snerr("ERROR: Failed to allocate instance\n");
@@ -1088,7 +1012,7 @@ int st7032_register(FAR const char *devpath, FAR struct i2c_master_s *i2c)
   priv->row        = 0;
   priv->pendscroll = false;
 
-  nxsem_init(&priv->sem_excl, 0, 1);
+  nxmutex_init(&priv->lock);
 
   /* Initialize the display */
 
@@ -1100,6 +1024,7 @@ int st7032_register(FAR const char *devpath, FAR struct i2c_master_s *i2c)
   if (ret < 0)
     {
       snerr("ERROR: Failed to register driver: %d\n", ret);
+      nxmutex_destroy(&priv->lock);
       kmm_free(priv);
     }
 

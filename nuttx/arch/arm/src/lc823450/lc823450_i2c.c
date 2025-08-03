@@ -1,37 +1,22 @@
 /****************************************************************************
  * arch/arm/src/lc823450/lc823450_i2c.c
  *
- *   Copyright 2014,2015,2016,2017 Sony Video & Sound Products Inc.
- *   Author: Nobutaka Toyoshima <Nobutaka.Toyoshima@jp.sony.com>
- *   Author: Masayuki Ishikawa <Masayuki.Ishikawa@jp.sony.com>
- *   Author: Masatoshi Tateishi <Masatoshi.Tateishi@jp.sony.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -56,13 +41,13 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/clock.h>
 #include <nuttx/signal.h>
+#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/i2c/i2c_master.h>
 
 #include <arch/board/board.h>
 
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "lc823450_syscontrol.h"
 #include "lc823450_clockconfig.h"
 #include "lc823450_i2c.h"
@@ -128,28 +113,27 @@ struct lc823450_i2c_priv_s
 {
   /* Standard I2C operations */
 
-  FAR const struct i2c_ops_s *ops;
+  const struct i2c_ops_s *ops;
 
   /* Port configuration */
 
-  FAR const struct lc823450_i2c_config_s *config;
+  const struct lc823450_i2c_config_s *config;
 
-  int   refs;                      /* Reference count */
-  sem_t sem_excl;                  /* Mutual exclusion semaphore */
+  int   refs;                /* Reference count */
+  mutex_t lock;              /* Mutual exclusion mutex */
 #ifndef CONFIG_I2C_POLLED
-  sem_t sem_isr;                   /* Interrupt wait semaphore */
+  sem_t sem_isr;             /* Interrupt wait semaphore */
 #endif
-  volatile uint8_t irqstate;       /* Interrupt handshake (see enum lc823450_irqstate_e) */
+  volatile uint8_t irqstate; /* Interrupt handshake (see enum lc823450_irqstate_e) */
 
-  uint32_t    frequency;           /* Current I2C bus furequency */
-  uint8_t     msgc;                /* Message count */
-  FAR struct i2c_msg_s *msgv;      /* Message list */
-  FAR uint8_t *ptr;                /* Current message buffer */
-  int         dcnt;                /* Current message length */
-  uint16_t    flags;               /* Current message flags */
-
-  uint32_t    timeoms;             /* I2C transfer timeout in msec */
-  bool        timedout;            /* If true, I2C transfer timed-out */
+  uint32_t    frequency;     /* Current I2C bus furequency */
+  uint8_t     msgc;          /* Message count */
+  struct i2c_msg_s *msgv;    /* Message list */
+  uint8_t     *ptr;          /* Current message buffer */
+  int         dcnt;          /* Current message length */
+  uint16_t    flags;         /* Current message flags */
+  uint32_t    timeoms;       /* I2C transfer timeout in msec */
+  bool        timedout;      /* If true, I2C transfer timed-out */
 };
 
 /****************************************************************************
@@ -157,46 +141,42 @@ struct lc823450_i2c_priv_s
  ****************************************************************************/
 
 static inline int
-  lc823450_i2c_sem_wait(FAR struct lc823450_i2c_priv_s *priv);
-static inline void
-  lc823450_i2c_sem_post(FAR struct lc823450_i2c_priv_s *priv);
-static inline int
-  lc823450_i2c_sem_waitdone(FAR struct lc823450_i2c_priv_s *priv);
+lc823450_i2c_sem_waitdone(struct lc823450_i2c_priv_s *priv);
 
 #ifndef CONFIG_I2C_POLLED
 static inline void
-  lc823450_i2c_enableirq(FAR struct lc823450_i2c_priv_s *priv);
+lc823450_i2c_enableirq(struct lc823450_i2c_priv_s *priv);
 static inline void
-  lc823450_i2c_disableirq(FAR struct lc823450_i2c_priv_s *priv);
+lc823450_i2c_disableirq(struct lc823450_i2c_priv_s *priv);
 #endif
 static inline bool
-  lc823450_i2c_checkirq(FAR struct lc823450_i2c_priv_s *priv);
+lc823450_i2c_checkirq(struct lc823450_i2c_priv_s *priv);
 static inline bool
-  lc823450_i2c_checkbusy(FAR struct lc823450_i2c_priv_s *priv);
+lc823450_i2c_checkbusy(struct lc823450_i2c_priv_s *priv);
 static inline void
-  lc823450_i2c_prepxfer(FAR struct lc823450_i2c_priv_s *priv);
+lc823450_i2c_prepxfer(struct lc823450_i2c_priv_s *priv);
 static inline void
-  lc823450_i2c_sendstart(FAR struct lc823450_i2c_priv_s *priv);
+lc823450_i2c_sendstart(struct lc823450_i2c_priv_s *priv);
 static inline void
-  lc823450_i2c_sendstop(FAR struct lc823450_i2c_priv_s *priv);
+lc823450_i2c_sendstop(struct lc823450_i2c_priv_s *priv);
 static inline uint32_t
-  lc823450_i2c_readdata(FAR struct lc823450_i2c_priv_s *priv);
-static void lc823450_i2c_starttransfer(FAR struct lc823450_i2c_priv_s *priv);
+lc823450_i2c_readdata(struct lc823450_i2c_priv_s *priv);
+static void lc823450_i2c_starttransfer(struct lc823450_i2c_priv_s *priv);
 
-static int lc823450_i2c_poll(FAR struct lc823450_i2c_priv_s *priv);
+static int lc823450_i2c_poll(struct lc823450_i2c_priv_s *priv);
 #ifndef CONFIG_I2C_POLLED
-static int lc823450_i2c_isr(int irq, FAR void *context, FAR void *arg);
+static int lc823450_i2c_isr(int irq, void *context, void *arg);
 #endif
 
-static int lc823450_i2c_init(FAR struct lc823450_i2c_priv_s *priv, int port);
+static int lc823450_i2c_init(struct lc823450_i2c_priv_s *priv, int port);
 static int
-  lc823450_i2c_deinit(FAR struct lc823450_i2c_priv_s *priv, int port);
+lc823450_i2c_deinit(struct lc823450_i2c_priv_s *priv, int port);
 
-static int lc823450_i2c_transfer(FAR struct i2c_master_s *dev,
-                                 FAR struct i2c_msg_s *msgs, int count);
+static int lc823450_i2c_transfer(struct i2c_master_s *dev,
+                                 struct i2c_msg_s *msgs, int count);
 
 #ifdef CONFIG_I2C_RESET
-static int lc823450_i2c_reset(FAR struct i2c_master_s *priv);
+static int lc823450_i2c_reset(struct i2c_master_s *priv);
 #endif
 
 /****************************************************************************
@@ -228,6 +208,10 @@ static struct lc823450_i2c_priv_s lc823450_i2c0_priv =
   .ops      = &lc823450_i2c_ops,
   .config   = &lc823450_i2c0_config,
   .refs     = 0,
+  .lock     = NXMUTEX_INITIALIZER,
+#ifndef CONFIG_I2C_POLLED
+  .sem_isr  = SEM_INITIALIZER(0),
+#endif
   .irqstate = IRQSTATE_IDLE,
   .msgc     = 0,
   .msgv     = NULL,
@@ -254,6 +238,10 @@ static struct lc823450_i2c_priv_s lc823450_i2c1_priv =
   .ops      = &lc823450_i2c_ops,
   .config   = &lc823450_i2c1_config,
   .refs     = 0,
+  .lock     = NXMUTEX_INITIALIZER,
+#ifndef CONFIG_I2C_POLLED
+  .sem_isr  = SEM_INITIALIZER(0),
+#endif
   .irqstate = IRQSTATE_IDLE,
   .msgc     = 0,
   .msgv     = NULL,
@@ -270,34 +258,6 @@ static struct lc823450_i2c_priv_s lc823450_i2c1_priv =
  ****************************************************************************/
 
 /****************************************************************************
- * Name: lc823450_i2c_sem_wait
- *
- * Description:
- *   Take the exclusive access, waiting as necessary.  May be interrupted by
- *   a signal.
- *
- ****************************************************************************/
-
-static inline int lc823450_i2c_sem_wait(FAR struct lc823450_i2c_priv_s *priv)
-{
-  return nxsem_wait(&priv->sem_excl);
-}
-
-/****************************************************************************
- * Name: lc823450_i2c_sem_post
- *
- * Description:
- *   Release the mutual exclusion semaphore
- *
- ****************************************************************************/
-
-static inline void
-  lc823450_i2c_sem_post(FAR struct lc823450_i2c_priv_s *priv)
-{
-  nxsem_post(&priv->sem_excl);
-}
-
-/****************************************************************************
  * Name: lc823450_i2c_sem_waitdone
  *
  * Description:
@@ -307,39 +267,22 @@ static inline void
 
 #ifndef CONFIG_I2C_POLLED
 static inline int
-  lc823450_i2c_sem_waitdone(FAR struct lc823450_i2c_priv_s *priv)
+lc823450_i2c_sem_waitdone(struct lc823450_i2c_priv_s *priv)
 {
-  struct timespec abstime;
   int ret;
 
   do
     {
-      /* Get the current time */
-
-      clock_gettime(CLOCK_REALTIME, &abstime);
-
-      /* Calculate a time in the future */
-
-#if CONFIG_LC823450_I2C_TIMEOSEC > 0
-      abstime.tv_sec += CONFIG_LC823450_I2C_TIMEOSEC;
-#endif
-
-      /* Add a value proportional to the number of bytes in the transfer */
-
-      abstime.tv_nsec += priv->timeoms * 1000 * 1000;
-      if (abstime.tv_nsec >= 1000 * 1000 * 1000)
-        {
-          abstime.tv_sec++;
-          abstime.tv_nsec -= 1000 * 1000 * 1000;
-        }
-
       /* Wait until either the transfer is complete or the timeout expires */
 
-      ret = nxsem_timedwait_uninterruptible(&priv->sem_isr, &abstime);
+      ret = nxsem_tickwait_uninterruptible(&priv->sem_isr,
+                                     SEC2TICK(CONFIG_LC823450_I2C_TIMEOSEC) +
+                                     MSEC2TICK(priv->timeoms));
       if (ret < 0)
         {
           /* Break out of the loop on irrecoverable errors.  This would
-           * include timeouts and mystery errors reported by nxsem_timedwait.
+           * include timeouts and mystery errors reported by
+           * nxsem_tickwait_uninterruptible.
            */
 
           break;
@@ -355,7 +298,7 @@ static inline int
 }
 #else
 static inline int
-  lc823450_i2c_sem_waitdone(FAR struct lc823450_i2c_priv_s *priv)
+lc823450_i2c_sem_waitdone(struct lc823450_i2c_priv_s *priv)
 {
   uint32_t timeout;
   clock_t start;
@@ -364,15 +307,15 @@ static inline int
 
   /* Get the timeout value */
 
-  timeout = MSEC2TICK(priv->timeoms + (MSEC_PER_TICK / 2));
+  timeout = MSEC2TICK(priv->timeoms);
   timeout += SEC2TICK(CONFIG_LC823450_I2C_TIMEOSEC);
 
   /* Signal the interrupt handler that we are waiting.  NOTE:  Interrupts
    * are currently disabled but will be temporarily re-enabled below when
-   * sem_timedwait() sleeps.
+   * nxsem_tickwait() sleeps.
    */
 
-  start = clock_systimer();
+  start = clock_systime_ticks();
 
   do
     {
@@ -384,7 +327,7 @@ static inline int
 
       /* Calculate the elapsed time */
 
-      elapsed = clock_systimer() - start;
+      elapsed = clock_systime_ticks() - start;
     }
   while (priv->irqstate != IRQSTATE_DONE && elapsed < timeout);
 
@@ -407,7 +350,7 @@ static inline int
  *
  ****************************************************************************/
 
-static void lc823450_i2c_prepxfer(FAR struct lc823450_i2c_priv_s *priv)
+static void lc823450_i2c_prepxfer(struct lc823450_i2c_priv_s *priv)
 {
   uint32_t base = priv->config->base;
   putreg32(((lc823450_get_systemfreq() / priv->msgv->frequency + 7) / 8) &
@@ -426,7 +369,7 @@ static void lc823450_i2c_prepxfer(FAR struct lc823450_i2c_priv_s *priv)
  ****************************************************************************/
 
 static inline bool
-  lc823450_i2c_checkbusy(FAR struct lc823450_i2c_priv_s *priv)
+lc823450_i2c_checkbusy(struct lc823450_i2c_priv_s *priv)
 {
   return (getreg32(priv->config->base + I2CSTR) & I2C_STR_BBSY) != 0;
 }
@@ -440,7 +383,7 @@ static inline bool
  ****************************************************************************/
 
 static inline bool
-  lc823450_i2c_checkirq(FAR struct lc823450_i2c_priv_s *priv)
+lc823450_i2c_checkirq(struct lc823450_i2c_priv_s *priv)
 {
   return (getreg32(priv->config->base + I2CSTR) & I2C_STR_IREQ) != 0;
 }
@@ -454,7 +397,7 @@ static inline bool
  ****************************************************************************/
 
 static inline bool
-  lc823450_i2c_checkack(FAR struct lc823450_i2c_priv_s *priv)
+lc823450_i2c_checkack(struct lc823450_i2c_priv_s *priv)
 {
   return (getreg32(priv->config->base + I2CSTR) & I2C_STR_ACKD) != 0;
 }
@@ -468,7 +411,7 @@ static inline bool
  ****************************************************************************/
 
 static inline void
-  lc823450_i2c_sendstart(FAR struct lc823450_i2c_priv_s *priv)
+lc823450_i2c_sendstart(struct lc823450_i2c_priv_s *priv)
 {
   modifyreg32(priv->config->base + I2CCTL, I2C_CTL_TRX, I2C_CTL_TRX);
   modifyreg32(priv->config->base + I2CCTL, I2C_CTL_ST, I2C_CTL_ST);
@@ -483,7 +426,7 @@ static inline void
  ****************************************************************************/
 
 static inline void
-  lc823450_i2c_sendstop(FAR struct lc823450_i2c_priv_s *priv)
+lc823450_i2c_sendstop(struct lc823450_i2c_priv_s *priv)
 {
   modifyreg32(priv->config->base + I2CSTR, I2C_STR_IREQ, 0);
   modifyreg32(priv->config->base + I2CCTL, I2C_CTL_TRX, I2C_CTL_TRX);
@@ -498,7 +441,7 @@ static inline void
  *
  ****************************************************************************/
 
-static inline void lc823450_i2c_clrstop(FAR struct lc823450_i2c_priv_s *priv)
+static inline void lc823450_i2c_clrstop(struct lc823450_i2c_priv_s *priv)
 {
   modifyreg32(priv->config->base + I2CSTR, I2C_STR_IREQ, 0);
 }
@@ -512,9 +455,9 @@ static inline void lc823450_i2c_clrstop(FAR struct lc823450_i2c_priv_s *priv)
  ****************************************************************************/
 
 #ifdef CONFIG_I2C_RESET
-static int lc823450_i2c_reset(FAR struct i2c_master_s *dev)
+static int lc823450_i2c_reset(struct i2c_master_s *dev)
 {
-  FAR struct lc823450_i2c_priv_s *priv = (struct lc823450_i2c_priv_s *)dev;
+  struct lc823450_i2c_priv_s *priv = (struct lc823450_i2c_priv_s *)dev;
 
   modifyreg32(priv->config->base + I2CCTL, I2C_CTL_SRST, I2C_CTL_SRST);
   modifyreg32(priv->config->base + I2CCTL, I2C_CTL_IREQEN, 0);
@@ -533,7 +476,7 @@ static int lc823450_i2c_reset(FAR struct i2c_master_s *dev)
 
 #ifndef CONFIG_I2C_POLLED
 static inline void
-  lc823450_i2c_enableirq(FAR struct lc823450_i2c_priv_s *priv)
+lc823450_i2c_enableirq(struct lc823450_i2c_priv_s *priv)
 {
   modifyreg32(priv->config->base + I2CCTL, I2C_CTL_IREQEN, I2C_CTL_IREQEN);
 }
@@ -549,7 +492,7 @@ static inline void
 
 #ifndef CONFIG_I2C_POLLED
 static inline void
-  lc823450_i2c_disableirq(FAR struct lc823450_i2c_priv_s *priv)
+lc823450_i2c_disableirq(struct lc823450_i2c_priv_s *priv)
 {
   modifyreg32(priv->config->base + I2CCTL, I2C_CTL_IREQEN, 0);
 }
@@ -564,7 +507,7 @@ static inline void
  ****************************************************************************/
 
 static inline uint32_t
-  lc823450_i2c_readdata(FAR struct lc823450_i2c_priv_s *priv)
+lc823450_i2c_readdata(struct lc823450_i2c_priv_s *priv)
 {
   return getreg32(priv->config->base + I2CRXD);
 }
@@ -577,13 +520,13 @@ static inline uint32_t
  *
  ****************************************************************************/
 
-static void lc823450_i2c_sendnack(FAR struct lc823450_i2c_priv_s *priv)
+static void lc823450_i2c_sendnack(struct lc823450_i2c_priv_s *priv)
 {
   modifyreg32(priv->config->base + I2CCTL, I2C_CTL_ACK, 0);
   modifyreg32(priv->config->base + I2CCTL, I2C_CTL_BTRIG, I2C_CTL_BTRIG);
 }
 
-static void lc823450_i2c_starttransfer(FAR struct lc823450_i2c_priv_s *priv)
+static void lc823450_i2c_starttransfer(struct lc823450_i2c_priv_s *priv)
 {
   if (priv->flags & I2C_M_READ)
     {
@@ -643,7 +586,7 @@ static void lc823450_i2c_starttransfer(FAR struct lc823450_i2c_priv_s *priv)
  *
  ****************************************************************************/
 
-static int lc823450_i2c_poll(FAR struct lc823450_i2c_priv_s *priv)
+static int lc823450_i2c_poll(struct lc823450_i2c_priv_s *priv)
 {
   bool ack;
 
@@ -802,7 +745,7 @@ static int lc823450_i2c_poll(FAR struct lc823450_i2c_priv_s *priv)
                * done.  Please refer to macaron's code.
                */
 
-              lc823450_i2c_reset((FAR struct i2c_master_s *)priv);
+              lc823450_i2c_reset((struct i2c_master_s *)priv);
 #endif
 
 #ifndef CONFIG_I2C_POLLED
@@ -846,10 +789,10 @@ static int lc823450_i2c_poll(FAR struct lc823450_i2c_priv_s *priv)
  ****************************************************************************/
 
 #ifndef CONFIG_I2C_POLLED
-static int lc823450_i2c_isr(int irq, FAR void *context, FAR void *arg)
+static int lc823450_i2c_isr(int irq, void *context, void *arg)
 {
-  FAR struct lc823450_i2c_priv_s *priv =
-    (FAR struct lc823450_i2c_priv_s *)arg;
+  struct lc823450_i2c_priv_s *priv =
+    (struct lc823450_i2c_priv_s *)arg;
 
   DEBUGASSERT(priv != NULL);
   return lc823450_i2c_poll(priv);
@@ -868,7 +811,7 @@ static int lc823450_i2c_isr(int irq, FAR void *context, FAR void *arg)
  *
  ****************************************************************************/
 
-static int lc823450_i2c_init(FAR struct lc823450_i2c_priv_s *priv, int port)
+static int lc823450_i2c_init(struct lc823450_i2c_priv_s *priv, int port)
 {
   /* Attach ISRs */
 
@@ -928,7 +871,7 @@ static int lc823450_i2c_init(FAR struct lc823450_i2c_priv_s *priv, int port)
  *
  ****************************************************************************/
 
-static int lc823450_i2c_deinit(FAR struct lc823450_i2c_priv_s *priv,
+static int lc823450_i2c_deinit(struct lc823450_i2c_priv_s *priv,
                                int port)
 {
   /* Disable I2C */
@@ -997,10 +940,10 @@ static int lc823450_i2c_deinit(FAR struct lc823450_i2c_priv_s *priv,
  *
  ****************************************************************************/
 
-static int lc823450_i2c_transfer(FAR struct i2c_master_s *dev,
-                                 FAR struct i2c_msg_s *msgs, int count)
+static int lc823450_i2c_transfer(struct i2c_master_s *dev,
+                                 struct i2c_msg_s *msgs, int count)
 {
-  FAR struct lc823450_i2c_priv_s *priv = (struct lc823450_i2c_priv_s *)dev;
+  struct lc823450_i2c_priv_s *priv = (struct lc823450_i2c_priv_s *)dev;
   irqstate_t irqs;
   int ret = 0;
 
@@ -1014,7 +957,7 @@ static int lc823450_i2c_transfer(FAR struct i2c_master_s *dev,
 
   /* Ensure that address or flags don't change meanwhile */
 
-  ret = lc823450_i2c_sem_wait(priv);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -1077,7 +1020,7 @@ static int lc823450_i2c_transfer(FAR struct i2c_master_s *dev,
           leave_critical_section(irqs);
 
           /* Wait for irq handler completion. 10msec wait is probably enough
-           * to terminate i2c transaction, NACK and STOP contition for read
+           * to terminate i2c transaction, NACK and STOP condition for read
            * transaction, STOP condition for write transaction
            */
 
@@ -1109,8 +1052,7 @@ static int lc823450_i2c_transfer(FAR struct i2c_master_s *dev,
 #endif
 
 exit:
-  lc823450_i2c_sem_post(priv);
-
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -1126,10 +1068,9 @@ exit:
  *
  ****************************************************************************/
 
-FAR struct i2c_master_s *lc823450_i2cbus_initialize(int port)
+struct i2c_master_s *lc823450_i2cbus_initialize(int port)
 {
-  FAR struct lc823450_i2c_priv_s *priv = NULL;
-  irqstate_t flags;
+  struct lc823450_i2c_priv_s *priv = NULL;
 
   switch (port)
     {
@@ -1144,7 +1085,7 @@ FAR struct i2c_master_s *lc823450_i2cbus_initialize(int port)
         break;
 #endif
     default:
-      DEBUGASSERT(false);
+      DEBUGPANIC();
       return NULL;
     }
 
@@ -1152,18 +1093,13 @@ FAR struct i2c_master_s *lc823450_i2cbus_initialize(int port)
    * power-up hardware and configure GPIOs.
    */
 
-  flags = enter_critical_section();
-
-  if ((volatile int)priv->refs++ == 0)
+  nxmutex_lock(&priv->lock);
+  if (priv->refs++ == 0)
     {
-      nxsem_init(&priv->sem_excl, 0, 1);
-#ifndef CONFIG_I2C_POLLED
-      nxsem_init(&priv->sem_isr, 0, 0);
-#endif
       lc823450_i2c_init(priv, port);
     }
 
-  leave_critical_section(flags);
+  nxmutex_unlock(&priv->lock);
   return (struct i2c_master_s *)priv;
 }
 
@@ -1175,10 +1111,9 @@ FAR struct i2c_master_s *lc823450_i2cbus_initialize(int port)
  *
  ****************************************************************************/
 
-int lc823450_i2cbus_uninitialize(FAR struct i2c_master_s *dev)
+int lc823450_i2cbus_uninitialize(struct i2c_master_s *dev)
 {
-  FAR struct lc823450_i2c_priv_s *priv = (struct lc823450_i2c_priv_s *)dev;
-  irqstate_t flags;
+  struct lc823450_i2c_priv_s *priv = (struct lc823450_i2c_priv_s *)dev;
   int port = -1;
 
   DEBUGASSERT(dev);
@@ -1190,15 +1125,12 @@ int lc823450_i2cbus_uninitialize(FAR struct i2c_master_s *dev)
       return OK;
     }
 
-  flags = enter_critical_section();
-
+  nxmutex_lock(&priv->lock);
   if (--priv->refs != 0)
     {
-      leave_critical_section(flags);
+      nxmutex_unlock(&priv->lock);
       return OK;
     }
-
-  leave_critical_section(flags);
 
 #ifdef CONFIG_LC823450_I2C0
   if (priv == &lc823450_i2c0_priv)
@@ -1216,20 +1148,15 @@ int lc823450_i2cbus_uninitialize(FAR struct i2c_master_s *dev)
 
   if (-1 == port)
     {
-      DEBUGASSERT(0);
+      DEBUGPANIC();
+      nxmutex_unlock(&priv->lock);
       return -EFAULT;
     }
 
   /* Disable power and other HW resource */
 
   lc823450_i2c_deinit(priv, port);
-
-  /* Release unused resources */
-
-  nxsem_destroy(&priv->sem_excl);
-#ifndef CONFIG_I2C_POLLED
-  nxsem_destroy(&priv->sem_isr);
-#endif
+  nxmutex_unlock(&priv->lock);
 
   return OK;
 }
@@ -1238,10 +1165,10 @@ int lc823450_i2cbus_uninitialize(FAR struct i2c_master_s *dev)
  * Name: lc823450_i2cbus_changetimeout
  ****************************************************************************/
 
-void lc823450_i2cbus_changetimeout(FAR struct i2c_master_s *dev,
+void lc823450_i2cbus_changetimeout(struct i2c_master_s *dev,
                                    uint32_t timeoms)
 {
-  FAR struct lc823450_i2c_priv_s *priv = (struct lc823450_i2c_priv_s *)dev;
+  struct lc823450_i2c_priv_s *priv = (struct lc823450_i2c_priv_s *)dev;
   priv->timeoms = timeoms;
 }
 

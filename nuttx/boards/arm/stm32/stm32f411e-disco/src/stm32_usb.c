@@ -1,11 +1,11 @@
 /****************************************************************************
  * boards/arm/stm32/stm32f411e-disco/src/stm32_usb.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- *   Copyright (C) 2017 Brian Webb. All rights reserved.
- *   Author: Brian Webb <webbbn@gmail.com>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2017 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2017 Brian Webb. All rights reserved.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-FileContributor: Brian Webb <webbbn@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -55,7 +55,7 @@
 #include <nuttx/usb/usbhost.h>
 #include <nuttx/usb/usbdev_trace.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "stm32.h"
 #include "stm32_otgfs.h"
 #include "stm32f411e-disco.h"
@@ -104,7 +104,7 @@ static int usbhost_waiter(int argc, char *argv[])
   struct usbhost_hubport_s *hport;
 
   uinfo("Running\n");
-  for (;;)
+  for (; ; )
     {
       /* Wait for the device to change state */
 
@@ -135,16 +135,20 @@ static int usbhost_waiter(int argc, char *argv[])
  * Name: stm32_usbinitialize
  *
  * Description:
- *   Called from stm32_usbinitialize very early in inialization to setup USB-related
- *   GPIO pins for the STM32F411 Discovery board.
+ *   Called from stm32_usbinitialize very early in initialization to setup
+ *   USB-related GPIO pins for the STM32F411 board.
  *
  ****************************************************************************/
 
 void stm32_usbinitialize(void)
 {
-  /* The OTG FS has an internal soft pull-up.  No GPIO configuration is required */
+  /* The OTG FS has an internal soft pull-up.
+   * No GPIO configuration is required
+   */
 
-  /* Configure the OTG FS VBUS sensing GPIO, Power On, and Overcurrent GPIOs */
+  /* Configure the OTG FS VBUS sensing GPIO,
+   * Power On, and Overcurrent GPIOs
+   */
 
 #ifdef CONFIG_STM32_OTGFS
   stm32_configgpio(GPIO_OTGFS_VBUS);
@@ -157,7 +161,8 @@ void stm32_usbinitialize(void)
  * Name: stm32_usbhost_initialize
  *
  * Description:
- *   Called at application startup time to initialize the USB host functionality.
+ *   Called at application startup time to initialize the USB host
+ *   functionality.
  *   This function will start a thread that will monitor for device
  *   connection/disconnection events.
  *
@@ -166,12 +171,7 @@ void stm32_usbinitialize(void)
 #ifdef CONFIG_USBHOST
 int stm32_usbhost_initialize(void)
 {
-  int pid;
-#if defined(CONFIG_USBHOST_HUB)    || defined(CONFIG_USBHOST_MSC) || \
-    defined(CONFIG_USBHOST_HIDKBD) || defined(CONFIG_USBHOST_HIDMOUSE) || \
-    defined(CONFIG_USBHOST_XBOXCONTROLLER)
   int ret;
-#endif
 
   /* First, register all of the class drivers needed to support the drivers
    * that we care about:
@@ -249,10 +249,10 @@ int stm32_usbhost_initialize(void)
 
       uinfo("Start usbhost_waiter\n");
 
-      pid = kthread_create("usbhost", CONFIG_STM32F411DISCO_USBHOST_PRIO,
+      ret = kthread_create("usbhost", CONFIG_STM32F411DISCO_USBHOST_PRIO,
                            CONFIG_STM32F411DISCO_USBHOST_STACKSIZE,
-                           (main_t)usbhost_waiter, (FAR char * const *)NULL);
-      return pid < 0 ? -ENOEXEC : OK;
+                           usbhost_waiter, NULL);
+      return ret < 0 ? -ENOEXEC : OK;
     }
 
   return -ENODEV;
@@ -263,21 +263,24 @@ int stm32_usbhost_initialize(void)
  * Name: stm32_usbhost_vbusdrive
  *
  * Description:
- *   Enable/disable driving of VBUS 5V output.  This function must be provided be
- *   each platform that implements the STM32 OTG FS host interface
+ *   Enable/disable driving of VBUS 5V output.  This function must be
+ *   provided be each platform that implements the STM32 OTG FS host
+ *   interface
  *
- *   "On-chip 5 V VBUS generation is not supported. For this reason, a charge pump
- *    or, if 5 V are available on the application board, a basic power switch, must
- *    be added externally to drive the 5 V VBUS line. The external charge pump can
- *    be driven by any GPIO output. When the application decides to power on VBUS
- *    using the chosen GPIO, it must also set the port power bit in the host port
- *    control and status register (PPWR bit in OTG_FS_HPRT).
+ *   "On-chip 5 V VBUS generation is not supported. For this reason, a
+ *    charge pump or, if 5 V are available on the application board, a
+ *    basic power switch, must be added externally to drive the 5 V VBUS
+ *    line. The external charge pump can be driven by any GPIO output.
+ *    When the application decides to power on VBUS using the chosen GPIO,
+ *    it must also set the port power bit in the host port control and
+ *    status register (PPWR bit in OTG_FS_HPRT).
  *
- *   "The application uses this field to control power to this port, and the core
- *    clears this bit on an overcurrent condition."
+ *   "The application uses this field to control power to this port,
+ *    and the core clears this bit on an overcurrent condition."
  *
  * Input Parameters:
- *   iface - For future growth to handle multiple USB host interface.  Should be zero.
+ *   iface - For future growth to handle multiple USB host interface.
+ *           Should be zero.
  *   enable - true: enable VBUS power; false: disable VBUS power
  *
  * Returned Value:
@@ -309,16 +312,16 @@ void stm32_usbhost_vbusdrive(int iface, bool enable)
  * Name: stm32_setup_overcurrent
  *
  * Description:
- *   Setup to receive an interrupt-level callback if an overcurrent condition is
- *   detected.
+ *   Setup to receive an interrupt-level callback if an overcurrent
+ *   condition is detected.
  *
  * Input Parameters:
  *   handler - New overcurrent interrupt handler
  *   arg     - The argument provided for the interrupt handler
  *
  * Returned Value:
- *   Zero (OK) is returned on success.  Otherwise, a negated errno value is returned
- *   to indicate the nature of the failure.
+ *   Zero (OK) is returned on success.  Otherwise, a negated errno value
+ *   is returned to indicate the nature of the failure.
  *
  ****************************************************************************/
 
@@ -333,15 +336,15 @@ int stm32_setup_overcurrent(xcpt_t handler, void *arg)
  * Name:  stm32_usbsuspend
  *
  * Description:
- *   Board logic must provide the stm32_usbsuspend logic if the USBDEV driver is
- *   used.  This function is called whenever the USB enters or leaves suspend mode.
- *   This is an opportunity for the board logic to shutdown clocks, power, etc.
- *   while the USB is suspended.
+ *   Board logic must provide the stm32_usbsuspend logic if the USBDEV
+ *   driver is used.  This function is called whenever the USB enters or
+ *   leaves suspend mode. This is an opportunity for the board logic to
+ *   shutdown clocks, power, etc. while the USB is suspended.
  *
  ****************************************************************************/
 
 #ifdef CONFIG_USBDEV
-void stm32_usbsuspend(FAR struct usbdev_s *dev, bool resume)
+void stm32_usbsuspend(struct usbdev_s *dev, bool resume)
 {
   uinfo("resume: %d\n", resume);
 }

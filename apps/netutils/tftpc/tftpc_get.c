@@ -1,37 +1,22 @@
 /****************************************************************************
- * netutils/tftp/tftpc_get.c
+ * apps/netutils/tftpc/tftpc_get.c
  *
- *   Copyright (C) 2008-2009, 2011, 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *   Copyright (C) 2018 Sebastien Lorquet. All rights reserved.
- *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, TFTP_DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -81,8 +66,8 @@ static inline int tftp_parsedatapacket(FAR const uint8_t *packet,
   *opcode = (uint16_t)packet[0] << 8 | (uint16_t)packet[1];
   if (*opcode == TFTP_DATA)
     {
-       *blockno = (uint16_t)packet[2] << 8 | (uint16_t)packet[3];
-       return OK;
+      *blockno = (uint16_t)packet[2] << 8 | (uint16_t)packet[3];
+      return OK;
     }
 #ifdef CONFIG_DEBUG_NET_WARN
   else if (*opcode == TFTP_ERR)
@@ -104,7 +89,7 @@ static inline int tftp_parsedatapacket(FAR const uint8_t *packet,
  * Input Parameters:
  *   remote - The name of the file on the TFTP server.
  *   addr   - The IP address of the server in network order
- *   binary - TRUE:  Perform binary ('octect') transfer
+ *   binary - TRUE:  Perform binary ('octet') transfer
  *            FALSE: Perform text ('netascii') transfer
  *   cb     - callback that will be called with data packets
  *   ctx    - pointer passed to the previous callback
@@ -130,11 +115,11 @@ int tftpget_cb(FAR const char *remote, in_addr_t addr, bool binary,
 
   /* Allocate the buffer to used for socket/disk I/O */
 
-  packet = (FAR uint8_t*)zalloc(TFTP_IOBUFSIZE);
+  packet = (FAR uint8_t *)zalloc(TFTP_IOBUFSIZE);
   if (!packet)
     {
       nerr("ERROR: packet memory allocation failure\n");
-      set_errno(ENOMEM);
+      errno = ENOMEM;
       return result;
     }
 
@@ -170,8 +155,8 @@ int tftpget_cb(FAR const char *remote, in_addr_t addr, bool binary,
 
           if (blockno == 1)
             {
-              len             = tftp_mkreqpacket(packet, TFTP_RRQ, remote,
-                                                 binary);
+              len             = tftp_mkreqpacket(packet, TFTP_IOBUFSIZE,
+                                                 TFTP_RRQ, remote, binary);
               server.sin_port = HTONS(CONFIG_NETUTILS_TFTP_PORT);
               ret             = tftp_sendto(sd, packet, len, &server);
               if (ret != len)
@@ -179,10 +164,10 @@ int tftpget_cb(FAR const char *remote, in_addr_t addr, bool binary,
                   goto errout_with_sd;
                 }
 
-              /* Subsequent sendto will use the port number selected by the TFTP
-               * server in the DATA packet.  Setting the server port to zero
-               * here indicates that we have not yet received the server port
-               * number.
+              /* Subsequent sendto will use the port number selected by the
+               * TFTP server in the DATA packet.  Setting the server port to
+               * zero here indicates that we have not yet received the server
+               * port number.
                */
 
               server.sin_port = 0;
@@ -239,10 +224,11 @@ int tftpget_cb(FAR const char *remote, in_addr_t addr, bool binary,
                                              TFTP_ERRST_ILLEGALOP);
                       ret = tftp_sendto(sd, packet, len, &from);
                     }
+
                   continue;
                 }
 
-              /* Replace the server port to the one in the good data response */
+              /* Replace the server port to the one in the good response */
 
               if (!server.sin_port)
                 {
@@ -266,7 +252,8 @@ int tftpget_cb(FAR const char *remote, in_addr_t addr, bool binary,
       /* Write the received data chunk to the file */
 
       ndatabytes = nbytesrecvd - TFTP_DATAHEADERSIZE;
-      tftp_dumpbuffer("Recvd DATA", packet + TFTP_DATAHEADERSIZE, ndatabytes);
+      tftp_dumpbuffer("Recvd DATA",
+                      packet + TFTP_DATAHEADERSIZE, ndatabytes);
       if (tftp_cb(ctx, 0, packet + TFTP_DATAHEADERSIZE, ndatabytes) < 0)
         {
           goto errout_with_sd;
@@ -280,6 +267,7 @@ int tftpget_cb(FAR const char *remote, in_addr_t addr, bool binary,
         {
           goto errout_with_sd;
         }
+
       ninfo("ACK blockno %d\n", blockno);
     }
   while (ndatabytes >= TFTP_DATASIZE);
@@ -330,10 +318,11 @@ static ssize_t tftp_write(FAR void *ctx, uint32_t offset, FAR uint8_t *buf,
 
       /* Handle partial writes */
 
-      ninfo("Wrote %d bytes to file\n", nbyteswritten);
+      ninfo("Wrote %zd bytes to file\n", nbyteswritten);
       left -= nbyteswritten;
       buf  += nbyteswritten;
     }
+
   return len;
 }
 
@@ -358,7 +347,7 @@ int tftpget(FAR const char *remote, FAR const char *local, in_addr_t addr,
 
   /* Open the file for writing */
 
-  fd = open(local, O_WRONLY|O_CREAT|O_TRUNC, 0666);
+  fd = open(local, O_WRONLY | O_CREAT | O_TRUNC, 0666);
   if (fd < 0)
     {
       nerr("ERROR: open failed: %d\n", errno);

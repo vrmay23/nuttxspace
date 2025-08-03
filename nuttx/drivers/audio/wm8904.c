@@ -1,45 +1,29 @@
 /****************************************************************************
  * drivers/audio/wm8904.c
  *
- * Audio device driver for Wolfson Microelectronics WM8904 Audio codec.
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Copyright (C) 2014, 2016-2018 Gregory Nutt. All rights reserved.
- *   Author:  Gregory Nutt <gnutt@nuttx.org>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * References:
- * - "WM8904 Ultra Low Power CODEC for Portable Audio Applications, Pre-
- *    Production", September 2012, Rev 3.3, Wolfson Microelectronics
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * -  The framework for this driver is based on Ken Pettit's VS1053 driver.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
+
+/* References:
+ * - "WM8904 Ultra Low Power CODEC for Portable Audio Applications, Pre-
+ *    Production", September 2012, Rev 3.3, Wolfson Microelectronics
+ */
 
 /****************************************************************************
  * Included Files
@@ -52,15 +36,17 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include <fcntl.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <fixedmath.h>
-#include <queue.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
+#include <nuttx/queue.h>
 #include <nuttx/clock.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/signal.h>
@@ -71,7 +57,6 @@
 #include <nuttx/audio/i2s.h>
 #include <nuttx/audio/audio.h>
 #include <nuttx/audio/wm8904.h>
-#include <nuttx/lib/math.h>
 
 #include "wm8904.h"
 
@@ -94,9 +79,6 @@ static
                   uint8_t regaddr);
 static void     wm8904_writereg(FAR struct wm8904_dev_s *priv,
                   uint8_t regaddr, uint16_t regval);
-static int      wm8904_takesem(FAR sem_t *sem);
-static int      wm8904_forcetake(FAR sem_t *sem);
-#define         wm8904_givesem(s) nxsem_post(s)
 
 #ifndef CONFIG_AUDIO_EXCLUDE_VOLUME
 static inline uint16_t wm8904_scalevolume(uint16_t volume, b16_t scale);
@@ -409,57 +391,6 @@ static void wm8904_writereg(FAR struct wm8904_dev_s *priv, uint8_t regaddr,
 }
 
 /****************************************************************************
- * Name: wm8904_takesem
- *
- * Description:
- *  Take a semaphore count, handling the nasty EINTR return if we are
- *  interrupted by a signal.
- *
- ****************************************************************************/
-
-static int wm8904_takesem(sem_t *sem)
-{
-  return nxsem_wait_uninterruptible(sem);
-}
-
-/****************************************************************************
- * Name: wm8904_forcetake
- *
- * Description:
- *   This is just another wrapper but this one continues even if the thread
- *   is canceled.  This must be done in certain conditions where were must
- *   continue in order to clean-up resources.
- *
- ****************************************************************************/
-
-static int wm8904_forcetake(FAR sem_t *sem)
-{
-  int result;
-  int ret = OK;
-
-  do
-    {
-      result = nxsem_wait_uninterruptible(sem);
-
-      /* The only expected error would -ECANCELED meaning that the
-       * parent thread has been canceled.  We have to continue and
-       * terminate the poll in this case.
-       */
-
-      DEBUGASSERT(result == OK || result == -ECANCELED);
-      if (ret == OK && result < 0)
-        {
-          /* Remember the first failure */
-
-          ret = result;
-        }
-    }
-  while (result < 0);
-
-  return ret;
-}
-
-/****************************************************************************
  * Name: wm8904_scalevolume
  *
  * Description:
@@ -497,22 +428,27 @@ static void wm8904_setvolume(FAR struct wm8904_dev_s *priv, uint16_t volume,
 #ifndef CONFIG_AUDIO_EXCLUDE_BALANCE
   /* Calculate the left channel volume level {0..1000} */
 
-  if (priv->balance <= 500)
+  if (priv->balance <= (b16HALF - 1))
     {
       leftlevel = volume;
     }
-  else if (priv->balance == 1000)
+  else if (priv->balance == (b16ONE - 1))
     {
       leftlevel = 0;
     }
   else
     {
-      leftlevel = wm8904_scalevolume(volume, b16ONE - (b16_t)priv->balance);
+      /* Note: b16ONE - balance goes from 0 to 0.5.
+       * Hence need to multiply volume by 2!
+       */
+
+      leftlevel = wm8904_scalevolume(2 * volume,
+                                     b16ONE - (b16_t)priv->balance);
     }
 
   /* Calculate the right channel volume level {0..1000} */
 
-  if (priv->balance >= 500)
+  if (priv->balance >= (b16HALF - 1))
     {
       rightlevel = volume;
     }
@@ -522,7 +458,12 @@ static void wm8904_setvolume(FAR struct wm8904_dev_s *priv, uint16_t volume,
     }
   else
     {
-      rightlevel = wm8904_scalevolume(volume, (b16_t)priv->balance);
+      /* Note: b16ONE - balance goes from 0 to 0.5.
+       * Hence need to multiply volume by 2!
+       */
+
+      rightlevel = wm8904_scalevolume(2 * volume,
+                                      (b16_t)priv->balance);
     }
 #else
   leftlevel  = priv->volume;
@@ -1077,7 +1018,7 @@ static int wm8904_getcaps(FAR struct audio_lowerhalf_s *dev, int type,
 
               /* Report the Sample rates we support */
 
-              caps->ac_controls.b[0] =
+              caps->ac_controls.hw[0] =
                 AUDIO_SAMP_RATE_8K | AUDIO_SAMP_RATE_11K |
                 AUDIO_SAMP_RATE_16K | AUDIO_SAMP_RATE_22K |
                 AUDIO_SAMP_RATE_32K | AUDIO_SAMP_RATE_44K |
@@ -1099,11 +1040,15 @@ static int wm8904_getcaps(FAR struct audio_lowerhalf_s *dev, int type,
 
       case AUDIO_TYPE_FEATURE:
 
-        /* If the sub-type is UNDEF, then report the Feature Units we support */
+        /* If the sub-type is UNDEF,
+         * then report the Feature Units we support
+         */
 
         if (caps->ac_subtype == AUDIO_FU_UNDEF)
           {
-            /* Fill in the ac_controls section with the Feature Units we have */
+            /* Fill in the ac_controls section with
+             * the Feature Units we have
+             */
 
             caps->ac_controls.b[0] = AUDIO_FU_VOLUME | AUDIO_FU_BASS |
                                      AUDIO_FU_TREBLE;
@@ -1222,6 +1167,31 @@ static int wm8904_configure(FAR struct audio_lowerhalf_s *dev,
            }
           break;
 #endif /* CONFIG_AUDIO_EXCLUDE_VOLUME */
+
+#ifndef CONFIG_AUDIO_EXCLUDE_BALANCE
+        case AUDIO_FU_BALANCE:
+          {
+            /* Set the balance.  The percentage level * 10 (0-1000) is in the
+             * ac_controls.b[0] parameter.
+             */
+
+            uint16_t balance = caps->ac_controls.hw[0];
+            audinfo("    Balance: %d\n", balance);
+
+            if (balance >= 0 && balance <= 1000)
+              {
+                /* Scale the balance setting to the range {0..(b16ONE - 1)} */
+
+                priv->balance = (balance * (b16ONE - 1)) / 1000;
+                wm8904_setvolume(priv, priv->volume, priv->mute);
+              }
+            else
+              {
+                ret = -EDOM;
+              }
+           }
+          break;
+#endif /* CONFIG_AUDIO_EXCLUDE_BALANCE */
 
 #ifndef CONFIG_AUDIO_EXCLUDE_TONE
         case AUDIO_FU_BASS:
@@ -1400,12 +1370,12 @@ static void  wm8904_senddone(FAR struct i2s_dev_s *i2s,
    * buffers in the done queue that need to be cleaned up.
    */
 
-  msg.msgId = AUDIO_MSG_COMPLETE;
-  ret = nxmq_send(priv->mq, (FAR const char *)&msg, sizeof(msg),
-                  CONFIG_WM8904_MSG_PRIO);
+  msg.msg_id = AUDIO_MSG_COMPLETE;
+  ret = file_mq_send(&priv->mq, (FAR const char *)&msg, sizeof(msg),
+                     CONFIG_WM8904_MSG_PRIO);
   if (ret < 0)
     {
-      auderr("ERROR: nxmq_send failed: %d\n", ret);
+      auderr("ERROR: file_mq_send failed: %d\n", ret);
     }
 }
 
@@ -1507,7 +1477,7 @@ static int wm8904_sendbuffer(FAR struct wm8904_dev_s *priv)
    * only while accessing 'inflight'.
    */
 
-  ret = wm8904_takesem(&priv->pendsem);
+  ret = nxmutex_lock(&priv->pendlock);
   if (ret < 0)
     {
       return ret;
@@ -1566,7 +1536,7 @@ static int wm8904_sendbuffer(FAR struct wm8904_dev_s *priv)
         }
     }
 
-  wm8904_givesem(&priv->pendsem);
+  nxmutex_unlock(&priv->pendlock);
   return ret;
 }
 
@@ -1599,20 +1569,22 @@ static int wm8904_start(FAR struct audio_lowerhalf_s *dev)
 
   /* Create a message queue for the worker thread */
 
-  snprintf(priv->mqname, sizeof(priv->mqname), "/tmp/%X", priv);
+  snprintf(priv->mqname, sizeof(priv->mqname), "/tmp/%" PRIXPTR,
+           (uintptr_t)priv);
 
   attr.mq_maxmsg  = 16;
   attr.mq_msgsize = sizeof(struct audio_msg_s);
   attr.mq_curmsgs = 0;
   attr.mq_flags   = 0;
 
-  priv->mq = mq_open(priv->mqname, O_RDWR | O_CREAT, 0644, &attr);
-  if (priv->mq == NULL)
+  ret = file_mq_open(&priv->mq, priv->mqname,
+                     O_RDWR | O_CREAT, 0644, &attr);
+  if (ret < 0)
     {
       /* Error creating message queue! */
 
       auderr("ERROR: Couldn't allocate message queue\n");
-      return -ENOMEM;
+      return ret;
     }
 
   /* Join any old worker thread we had created to prevent a memory leak */
@@ -1667,10 +1639,10 @@ static int wm8904_stop(FAR struct audio_lowerhalf_s *dev)
 
   /* Send a message to stop all audio streaming */
 
-  term_msg.msgId = AUDIO_MSG_STOP;
+  term_msg.msg_id = AUDIO_MSG_STOP;
   term_msg.u.data = 0;
-  nxmq_send(priv->mq, (FAR const char *)&term_msg, sizeof(term_msg),
-            CONFIG_WM8904_MSG_PRIO);
+  file_mq_send(&priv->mq, (FAR const char *)&term_msg, sizeof(term_msg),
+               CONFIG_WM8904_MSG_PRIO);
 
   /* Join the worker thread */
 
@@ -1703,7 +1675,7 @@ static int wm8904_pause(FAR struct audio_lowerhalf_s *dev)
 
   if (priv->running && !priv->paused)
     {
-      /* Disable interrupts to prevent us from suppling any more data */
+      /* Disable interrupts to prevent us from supplying any more data */
 
       priv->paused = true;
       wm8904_setvolume(priv, priv->volume, true);
@@ -1771,7 +1743,7 @@ static int wm8904_enqueuebuffer(FAR struct audio_lowerhalf_s *dev,
 
   /* Add the new buffer to the tail of pending audio buffers */
 
-  ret = wm8904_takesem(&priv->pendsem);
+  ret = nxmutex_lock(&priv->pendlock);
   if (ret < 0)
     {
       return ret;
@@ -1779,7 +1751,7 @@ static int wm8904_enqueuebuffer(FAR struct audio_lowerhalf_s *dev,
 
   apb->flags |= AUDIO_APB_OUTPUT_ENQUEUED;
   dq_addlast(&apb->dq_entry, &priv->pendq);
-  wm8904_givesem(&priv->pendsem);
+  nxmutex_unlock(&priv->pendlock);
 
   /* Send a message to the worker thread indicating that a new buffer has
    * been enqueued.  If mq is NULL, then the playing has not yet started.
@@ -1788,16 +1760,16 @@ static int wm8904_enqueuebuffer(FAR struct audio_lowerhalf_s *dev,
    */
 
   ret = OK;
-  if (priv->mq != NULL)
+  if (priv->mq.f_inode != NULL)
     {
-      term_msg.msgId  = AUDIO_MSG_ENQUEUE;
+      term_msg.msg_id  = AUDIO_MSG_ENQUEUE;
       term_msg.u.data = 0;
 
-      ret = nxmq_send(priv->mq, (FAR const char *)&term_msg,
-                      sizeof(term_msg), CONFIG_WM8904_MSG_PRIO);
+      ret = file_mq_send(&priv->mq, (FAR const char *)&term_msg,
+                         sizeof(term_msg), CONFIG_WM8904_MSG_PRIO);
       if (ret < 0)
         {
-          auderr("ERROR: nxmq_send failed: %d\n", ret);
+          auderr("ERROR: file_mq_send failed: %d\n", ret);
         }
     }
 
@@ -1828,6 +1800,7 @@ static int wm8904_cancelbuffer(FAR struct audio_lowerhalf_s *dev,
 static int wm8904_ioctl(FAR struct audio_lowerhalf_s *dev, int cmd,
                         unsigned long arg)
 {
+  int ret = OK;
 #ifdef CONFIG_AUDIO_DRIVER_SPECIFIC_BUFFERS
   FAR struct ap_buffer_info_s *bufinfo;
 #endif
@@ -1865,11 +1838,12 @@ static int wm8904_ioctl(FAR struct audio_lowerhalf_s *dev, int cmd,
 #endif
 
       default:
+        ret = -ENOTTY;
         audinfo("Ignored\n");
         break;
     }
 
-  return OK;
+  return ret;
 }
 
 /****************************************************************************
@@ -1889,9 +1863,9 @@ static int wm8904_reserve(FAR struct audio_lowerhalf_s *dev)
   FAR struct wm8904_dev_s *priv = (FAR struct wm8904_dev_s *) dev;
   int ret;
 
-  /* Borrow the APBQ semaphore for thread sync */
+  /* Borrow the APBQ mutex for thread sync */
 
-  ret = wm8904_takesem(&priv->pendsem);
+  ret = nxmutex_lock(&priv->pendlock);
   if (ret < 0)
     {
       return ret;
@@ -1917,8 +1891,7 @@ static int wm8904_reserve(FAR struct audio_lowerhalf_s *dev)
       priv->reserved    = true;
     }
 
-  wm8904_givesem(&priv->pendsem);
-
+  nxmutex_unlock(&priv->pendlock);
   return ret;
 }
 
@@ -1948,14 +1921,14 @@ static int wm8904_release(FAR struct audio_lowerhalf_s *dev)
       priv->threadid = 0;
     }
 
-  /* Borrow the APBQ semaphore for thread sync */
+  /* Borrow the APBQ mutex for thread sync */
 
-  ret = wm8904_forcetake(&priv->pendsem);
+  ret = nxmutex_lock(&priv->pendlock);
 
   /* Really we should free any queued buffers here */
 
   priv->reserved = false;
-  wm8904_givesem(&priv->pendsem);
+  nxmutex_unlock(&priv->pendlock);
 
   return ret;
 }
@@ -2112,7 +2085,8 @@ static void *wm8904_workerthread(pthread_addr_t pvarg)
 
       /* Wait for messages from our message queue */
 
-      msglen = nxmq_receive(priv->mq, (FAR char *)&msg, sizeof(msg), &prio);
+      msglen = file_mq_receive(&priv->mq, (FAR char *)&msg,
+                               sizeof(msg), &prio);
 
       /* Handle the case when we return with no message */
 
@@ -2124,7 +2098,7 @@ static void *wm8904_workerthread(pthread_addr_t pvarg)
 
       /* Process the message */
 
-      switch (msg.msgId)
+      switch (msg.msg_id)
         {
           /* The ISR has requested more data.  We will catch this case at
            * the top of the loop.
@@ -2162,7 +2136,7 @@ static void *wm8904_workerthread(pthread_addr_t pvarg)
             break;
 
           default:
-            auderr("ERROR: Ignoring message ID %d\n", msg.msgId);
+            auderr("ERROR: Ignoring message ID %d\n", msg.msg_id);
             break;
         }
     }
@@ -2173,7 +2147,7 @@ static void *wm8904_workerthread(pthread_addr_t pvarg)
 
   /* Return any pending buffers in our pending queue */
 
-  wm8904_forcetake(&priv->pendsem);
+  nxmutex_lock(&priv->pendlock);
   while ((apb = (FAR struct ap_buffer_s *)dq_remfirst(&priv->pendq)) != NULL)
     {
       /* Release our reference to the buffer */
@@ -2189,7 +2163,7 @@ static void *wm8904_workerthread(pthread_addr_t pvarg)
 #endif
     }
 
-  wm8904_givesem(&priv->pendsem);
+  nxmutex_unlock(&priv->pendlock);
 
   /* Return any pending buffers in our done queue */
 
@@ -2197,9 +2171,8 @@ static void *wm8904_workerthread(pthread_addr_t pvarg)
 
   /* Close the message queue */
 
-  mq_close(priv->mq);
-  mq_unlink(priv->mqname);
-  priv->mq = NULL;
+  file_mq_close(&priv->mq);
+  file_mq_unlink(priv->mqname);
 
   /* Send an AUDIO_MSG_COMPLETE message to the client */
 
@@ -2501,7 +2474,7 @@ static void wm8904_hw_reset(FAR struct wm8904_dev_s *priv)
   priv->nchannels  = WM8904_DEFAULT_NCHANNELS;
   priv->bpsamp     = WM8904_DEFAULT_BPSAMP;
 #if !defined(CONFIG_AUDIO_EXCLUDE_VOLUME) && !defined(CONFIG_AUDIO_EXCLUDE_BALANCE)
-  priv->balance    = b16HALF;            /* Center balance */
+  priv->balance    = b16HALF - 1;            /* Center balance */
 #endif
 
   /* Software reset.  This puts all WM8904 registers back in their
@@ -2563,7 +2536,7 @@ FAR struct audio_lowerhalf_s *
 
   /* Allocate a WM8904 device structure */
 
-  priv = (FAR struct wm8904_dev_s *)kmm_zalloc(sizeof(struct wm8904_dev_s));
+  priv = kmm_zalloc(sizeof(struct wm8904_dev_s));
   if (priv)
     {
       /* Initialize the WM8904 device structure.  Since we used kmm_zalloc,
@@ -2575,7 +2548,7 @@ FAR struct audio_lowerhalf_s *
       priv->i2c        = i2c;
       priv->i2s        = i2s;
 
-      nxsem_init(&priv->pendsem, 0, 1);
+      nxmutex_init(&priv->pendlock);
       dq_init(&priv->pendq);
       dq_init(&priv->doneq);
 
@@ -2604,7 +2577,7 @@ FAR struct audio_lowerhalf_s *
   return NULL;
 
 errout_with_dev:
-  nxsem_destroy(&priv->pendsem);
+  nxmutex_destroy(&priv->pendlock);
   kmm_free(priv);
   return NULL;
 }

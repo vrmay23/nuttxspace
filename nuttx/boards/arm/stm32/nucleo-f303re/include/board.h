@@ -1,43 +1,27 @@
 /****************************************************************************
  * boards/arm/stm32/nucleo-f303re/include/board.h
- * include/arch/board/board.h
  *
- *   Copyright (C) 2013, 2016 Gregory Nutt. All rights reserved.
- *   Copyright (C) 2015 Omni Hoverboards Inc. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *            Paul Alexander Patience <paul-a.patience@polymtl.ca>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
-#ifndef __BOARDS_ARM_STM32_STM32F3DISCOVERY_INCLUDE_BOARD_H
-#define __BOARDS_ARM_STM32_STM32F3DISCOVERY_INCLUDE_BOARD_H
+#ifndef __BOARDS_ARM_STM32_NUCLEO_F303RE_INCLUDE_BOARD_H
+#define __BOARDS_ARM_STM32_NUCLEO_F303RE_INCLUDE_BOARD_H
 
 /****************************************************************************
  * Included Files
@@ -48,10 +32,6 @@
 #ifndef __ASSEMBLY__
 #  include <stdint.h>
 #  include <stdbool.h>
-#endif
-
-#ifdef __KERNEL__
-#  include "stm32.h"
 #endif
 
 /****************************************************************************
@@ -74,7 +54,10 @@
 #define STM32_HSE_FREQUENCY     STM32_BOARD_XTAL
 #define STM32_LSE_FREQUENCY     32768            /* X2 on board */
 
-/* PLL source is HSE/1, PLL multipler is 9: PLL frequency is 8MHz (XTAL) x 9 = 72MHz */
+/* PLL source is HSE/1,
+ * PLL multiplier is 9:
+ * PLL frequency is 8MHz (XTAL) x 9 = 72MHz
+ */
 
 #define STM32_CFGR_PLLSRC       RCC_CFGR_PLLSRC
 #define STM32_CFGR_PLLXTPRE     0
@@ -91,7 +74,6 @@
 
 #define STM32_RCC_CFGR_HPRE     RCC_CFGR_HPRE_SYSCLK
 #define STM32_HCLK_FREQUENCY    STM32_SYSCLK_FREQUENCY
-#define STM32_BOARD_HCLK        STM32_HCLK_FREQUENCY      /* same as above, to satisfy compiler */
 
 /* APB2 clock (PCLK2) is HCLK (72MHz) */
 
@@ -141,6 +123,7 @@
 #define BOARD_TIM8_FREQUENCY   STM32_HCLK_FREQUENCY
 
 /* LED definitions **********************************************************/
+
 /* The Nucleo F303RE board has three LEDs.  Two of these are controlled by
  * logic on the board and are not available for software control:
  *
@@ -194,6 +177,7 @@
 #define LED_PANIC        1
 
 /* Button definitions *******************************************************/
+
 /* The Nucleo F303RE supports two buttons; only one button is controllable
  * by software:
  *
@@ -208,6 +192,7 @@
 #define BUTTON_USER_BIT  (1 << BUTTON_USER)
 
 /* Alternate function pin selections ****************************************/
+
 /* CAN */
 
 #define GPIO_CAN1_RX GPIO_CAN_RX_2
@@ -240,6 +225,7 @@
 #define GPIO_USART2_TX GPIO_USART2_TX_2
 
 /* DMA channels *************************************************************/
+
 /* ADC */
 
 #define ADC1_DMA_CHAN DMACHAN_ADC1

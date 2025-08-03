@@ -1,11 +1,29 @@
 /****************************************************************************
  * apps/netutils/telnetc/telnetc.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/****************************************************************************
+ *
  * Leveraged from libtelnet, https://github.com/seanmiddleditch/libtelnet.
  * Modified and re-released under the BSD license:
- *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
  * The original authors of libtelnet are listed below.  Per their licesne,
  * "The author or authors of this code dedicate any and all copyright
@@ -19,33 +37,6 @@
  *   (Also listed in the AUTHORS file are Jack Kelly <endgame.dos@gmail.com>
  *   and Katherine Flavel <kate@elide.org>)
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
  ****************************************************************************/
 
 /****************************************************************************
@@ -56,7 +47,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
-#include <string.h>
 #include <stdarg.h>
 
 #if defined(HAVE_ZLIB)
@@ -247,7 +237,7 @@ enum telnet_error_e _init_zlib(FAR struct telnet_s *telnet, int deflate,
 
   /* Allocate zstream box */
 
-  if ((z = (z_stream *) calloc(1, sizeof(z_stream))) == 0)
+  if ((z = (z_stream *)calloc(1, sizeof(z_stream))) == 0)
     {
       return _error(telnet, __LINE__, __func__, TELNET_ENOMEM, err_fatal,
                     "malloc() failed: %d", errno);
@@ -392,8 +382,8 @@ static inline int _check_telopt(FAR struct telnet_s *telnet,
 
 /* Retrieve RFC1143 option state */
 
-static inline struct telnet_rfc1143_s _get_rfc1143(FAR struct telnet_s *telnet,
-                                                   unsigned char telopt)
+static inline struct telnet_rfc1143_s
+_get_rfc1143(FAR struct telnet_s *telnet, unsigned char telopt)
 {
   struct telnet_rfc1143_s empty;
   int i;
@@ -436,9 +426,9 @@ static inline void _set_rfc1143(FAR struct telnet_s *telnet,
 
   /* we're going to need to track state for it, so grow the queue by 4 (four)
    * elements and put the telopt into it; bail on allocation error.  we go by
-   * four because it seems like a reasonable guess as to the number of enabled
-   * options for most simple code, and it allows for an acceptable number of
-   * reallocations for complex code.
+   * four because it seems like a reasonable guess as to the number of
+   * enabled options for most simple code, and it allows for an acceptable
+   * number of reallocations for complex code.
    */
 
   qtmp = (struct telnet_rfc1143_s *)
@@ -973,7 +963,7 @@ static int _zmp_telnet(FAR struct telnet_s *telnet, FAR const char *buffer,
                        size_t size)
 {
   union telnet_event_u ev;
-  FAR char **argv;
+  FAR const char **argv;
   FAR const char *c;
   size_t i;
   size_t argc;
@@ -996,7 +986,7 @@ static int _zmp_telnet(FAR struct telnet_s *telnet, FAR const char *buffer,
 
   /* Allocate argument array, bail on error */
 
-  if ((argv = (char **)calloc(argc, sizeof(char *))) == 0)
+  if ((argv = (const char **)calloc(argc, sizeof(char *))) == 0)
     {
       _error(telnet, __LINE__, __func__, TELNET_ENOMEM, 0,
              "calloc() failed: %d", errno);
@@ -1007,14 +997,14 @@ static int _zmp_telnet(FAR struct telnet_s *telnet, FAR const char *buffer,
 
   for (i = 0, c = buffer; i != argc; ++i)
     {
-      argv[i] = (char *)c;
+      argv[i] = c;
       c      += strlen(c) + 1;
     }
 
   /* Invoke event with our arguments */
 
   ev.type     = TELNET_EV_ZMP;
-  ev.zmp.argv = (const char **)argv;
+  ev.zmp.argv = argv;
   ev.zmp.argc = argc;
   telnet->eh(telnet, &ev, telnet->ud);
 
@@ -1318,7 +1308,9 @@ static void _process(FAR struct telnet_s *telnet, FAR const char *buffer,
 
         case TELNET_STATE_DATA:
 
-          /* On an IAC byte, pass through all pending bytes and switch states */
+          /* On an IAC byte, pass through all pending bytes and switch
+           * states
+           */
 
           if (byte == TELNET_IAC)
             {
@@ -1432,8 +1424,9 @@ static void _process(FAR struct telnet_s *telnet, FAR const char *buffer,
               /* In 1998 MCCP used TELOPT 85 and the protocol defined an
                * invalid subnegotiation sequence (IAC SB 85 WILL SE) to start
                * compression. Subsequently MCCP version 2 was created in 2000
-               * using TELOPT 86 and a valid subnegotiation (IAC SB 86 IAC SE).
-               * libtelnet for now just captures and discards MCCPv1 sequences.
+               * using TELOPT 86 and a valid subnegotiation (IAC SB 86 IAC
+               * SE). libtelnet for now just captures and discards MCCPv1
+               * sequences.
                */
 
               start = i + 2;
@@ -1466,10 +1459,11 @@ static void _process(FAR struct telnet_s *telnet, FAR const char *buffer,
 
               if (_subnegotiate(telnet) != 0)
                 {
-                  /* Any remaining bytes in the buffer are compressed. we have
-                   * to re-invoke telnet_recv to get those bytes inflated and
-                   * abort trying to process the remaining compressed bytes in
-                   * the current _process buffer argument.
+                  /* Any remaining bytes in the buffer are compressed. we
+                   * have to re-invoke telnet_recv to get those bytes
+                   * inflated and abort trying to process the remaining
+                   * compressed bytes in the current _process buffer
+                   * argument.
                    */
 
                   telnet_recv(telnet, &buffer[start], size - start);
@@ -1494,9 +1488,9 @@ static void _process(FAR struct telnet_s *telnet, FAR const char *buffer,
                 }
               break;
 
-              /* Something else -- protocol error.  attempt to process content
-               * in subnegotiation buffer, then evaluate the given command as
-               * an IAC code.
+              /* Something else -- protocol error.  attempt to process
+               * content in subnegotiation buffer, then evaluate the given
+               * command as an IAC code.
                */
 
             default:
@@ -1519,9 +1513,9 @@ static void _process(FAR struct telnet_s *telnet, FAR const char *buffer,
                 }
               else
                 {
-                  /* Recursive call to get the current input byte processed as
-                   * a regular IAC command.  we could use a goto, but that
-                   * would be gross.
+                  /* Recursive call to get the current input byte
+                   * processed as a regular IAC command.  we could use a
+                   * goto, but that would be gross.
                    */
 
                   _process(telnet, (char *)&byte, 1);
@@ -1888,8 +1882,8 @@ void telnet_subnegotiation(FAR struct telnet_s *telnet, unsigned char telopt,
   _sendu(telnet, bytes + 3, 2);
 
 #if defined(HAVE_ZLIB)
-  /* If we're a proxy and we just sent the COMPRESS2 marker, we must make sure
-   * all further data is compressed if not already.
+  /* If we're a proxy and we just sent the COMPRESS2 marker, we must make
+   * sure all further data is compressed if not already.
    */
 
   if (telnet->flags & TELNET_FLAG_PROXY && telopt == TELNET_TELOPT_COMPRESS2)
@@ -1945,9 +1939,9 @@ void telnet_begin_compress2(FAR struct telnet_s *telnet)
       return;
     }
 
-  /* Send compression marker.  we send directly to the event handler instead of
-   * passing through _send because _send would result in the compress marker
-   * itself being compressed.
+  /* Send compression marker.  we send directly to the event handler instead
+   * of passing through _send because _send would result in the compress
+   * marker itself being compressed.
    */
 
   ev.type        = TELNET_EV_SEND;

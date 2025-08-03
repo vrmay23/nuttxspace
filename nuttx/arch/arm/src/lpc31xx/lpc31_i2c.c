@@ -1,37 +1,22 @@
 /****************************************************************************
  * arch/arm/src/lpc31xx/lpc31_i2c.c
  *
- *   Author: David Hewson
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Copyright (C) 2010-2011, 2014, 2016-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,11 +31,13 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/wdog.h>
+#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/i2c/i2c_master.h>
 
@@ -58,12 +45,11 @@
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "up_arch.h"
-#include "up_internal.h"
-
+#include "arm_internal.h"
 #include "lpc31_i2c.h"
 #include "lpc31_evntrtr.h"
 #include "lpc31_syscreg.h"
+#include "lpc31_cgudrvr.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -78,6 +64,7 @@
 /****************************************************************************
  * Private Data
  ****************************************************************************/
+
 struct lpc31_i2cdev_s
 {
     struct i2c_master_s dev;      /* Generic I2C device */
@@ -86,10 +73,10 @@ struct lpc31_i2cdev_s
     uint16_t          rstid;      /* Reset for this device */
     uint16_t          irqid;      /* IRQ for this device */
 
-    sem_t             mutex;      /* Only one thread can access at a time */
+    mutex_t           lock;       /* Only one thread can access at a time */
     sem_t             wait;       /* Place to wait for state machine completion */
     volatile uint8_t  state;      /* State of state machine */
-    WDOG_ID           timeout;    /* Watchdog to timeout when bus hung */
+    struct wdog_s     timeout;    /* Watchdog to timeout when bus hung */
     uint32_t          frequency;  /* Current I2C frequency */
 
     struct i2c_msg_s *msgs;       /* remaining transfers - first one is in progress */
@@ -106,21 +93,32 @@ struct lpc31_i2cdev_s
 #define I2C_STATE_HEADER    2
 #define I2C_STATE_TRANSFER  3
 
-static struct lpc31_i2cdev_s i2cdevices[2];
+static struct lpc31_i2cdev_s i2cdevices[2] =
+{
+  {
+    .lock = NXMUTEX_INITIALIZER,
+    .wait = SEM_INITIALIZER(0),
+  },
+  {
+    .lock = NXMUTEX_INITIALIZER,
+    .wait = SEM_INITIALIZER(0),
+  },
+};
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static int  i2c_interrupt(int irq, FAR void *context, FAR void *arg);
+static int  i2c_interrupt(int irq, void *context, void *arg);
 static void i2c_progress(struct lpc31_i2cdev_s *priv);
-static void i2c_timeout(int argc, uint32_t arg, ...);
+static void i2c_timeout(wdparm_t arg);
 static void i2c_hwreset(struct lpc31_i2cdev_s *priv);
-static void i2c_setfrequency(struct lpc31_i2cdev_s *priv, uint32_t frequency);
-static int  i2c_transfer(FAR struct i2c_master_s *dev,
-                         FAR struct i2c_msg_s *msgs, int count);
+static void i2c_setfrequency(struct lpc31_i2cdev_s *priv,
+                             uint32_t frequency);
+static int  i2c_transfer(struct i2c_master_s *dev,
+                         struct i2c_msg_s *msgs, int count);
 #ifdef CONFIG_I2C_RESET
-static int  i2c_reset(FAR struct i2c_master_s * dev);
+static int  i2c_reset(struct i2c_master_s *dev);
 #endif
 
 /****************************************************************************
@@ -184,7 +182,7 @@ static void i2c_setfrequency(struct lpc31_i2cdev_s *priv, uint32_t frequency)
  *
  ****************************************************************************/
 
-static int i2c_interrupt(int irq, FAR void *context, FAR void *arg)
+static int i2c_interrupt(int irq, void *context, void *arg)
 {
   struct lpc31_i2cdev_s *priv = (struct lpc31_i2cdev_s *)arg;
 
@@ -204,7 +202,8 @@ static int i2c_interrupt(int irq, FAR void *context, FAR void *arg)
 static void i2c_progress(struct lpc31_i2cdev_s *priv)
 {
   struct i2c_msg_s *msg;
-  uint32_t stat, ctrl;
+  uint32_t stat;
+  uint32_t ctrl;
 
   stat = getreg32(priv->base + LPC31_I2C_STAT_OFFSET);
 
@@ -233,8 +232,9 @@ static void i2c_progress(struct lpc31_i2cdev_s *priv)
         case I2C_STATE_START:
           if ((msg->flags & I2C_M_TEN) != 0)
             {
-              priv->header[0] = I2C_TX_START | 0xF0 | ((msg->addr & 0x300) >> 7);
-              priv->header[1] = msg->addr & 0xFF;
+              priv->header[0] = I2C_TX_START | 0xf0 |
+                                ((msg->addr & 0x300) >> 7);
+              priv->header[1] = msg->addr & 0xff;
               priv->hdrcnt = 2;
               if (msg->flags & I2C_M_READ)
                 {
@@ -244,7 +244,8 @@ static void i2c_progress(struct lpc31_i2cdev_s *priv)
             }
           else
             {
-              priv->header[0] = I2C_TX_START | (msg->addr << 1) | (msg->flags & I2C_M_READ);
+              priv->header[0] = I2C_TX_START | (msg->addr << 1) |
+                                (msg->flags & I2C_M_READ);
               priv->hdrcnt = 1;
             }
 
@@ -252,12 +253,14 @@ static void i2c_progress(struct lpc31_i2cdev_s *priv)
 
           priv->state = I2C_STATE_HEADER;
           priv->wrcnt = 0;
+
           /* DROP THROUGH */
 
         case I2C_STATE_HEADER:
           while ((priv->wrcnt != priv->hdrcnt) && (stat & I2C_STAT_TFF) == 0)
             {
-              putreg32(priv->header[priv->wrcnt], priv->base + LPC31_I2C_TX_OFFSET);
+              putreg32(priv->header[priv->wrcnt],
+                       priv->base + LPC31_I2C_TX_OFFSET);
               priv->wrcnt++;
 
               stat = getreg32(priv->base + LPC31_I2C_STAT_OFFSET);
@@ -267,21 +270,25 @@ static void i2c_progress(struct lpc31_i2cdev_s *priv)
             {
               /* Enable Tx FIFO Not Full Interrupt */
 
-              putreg32(ctrl | I2C_CTRL_TFFIE, priv->base + LPC31_I2C_CTRL_OFFSET);
+              putreg32(ctrl | I2C_CTRL_TFFIE,
+                       priv->base + LPC31_I2C_CTRL_OFFSET);
               goto out;
             }
 
           priv->state = I2C_STATE_TRANSFER;
           priv->wrcnt = 0;
           priv->rdcnt = 0;
+
           /* DROP THROUGH */
 
         case I2C_STATE_TRANSFER:
           if (msg->flags & I2C_M_READ)
             {
-              while ((priv->rdcnt != msg->length) && (stat & I2C_STAT_RFE) == 0)
+              while ((priv->rdcnt != msg->length) &&
+                     (stat & I2C_STAT_RFE) == 0)
                 {
-                  msg->buffer[priv->rdcnt] = getreg32 (priv->base + LPC31_I2C_RX_OFFSET);
+                  msg->buffer[priv->rdcnt] =
+                    getreg32(priv->base + LPC31_I2C_RX_OFFSET);
                   priv->rdcnt++;
 
                   stat = getreg32(priv->base + LPC31_I2C_STAT_OFFSET);
@@ -289,13 +296,17 @@ static void i2c_progress(struct lpc31_i2cdev_s *priv)
 
               if (priv->rdcnt < msg->length)
                 {
-                  /* Not all data received, fill the Tx FIFO with more dummies */
+                  /* Not all data received,
+                   * fill the Tx FIFO with more dummies
+                   */
 
-                  while ((priv->wrcnt != msg->length) && (stat & I2C_STAT_TFF) == 0)
+                  while ((priv->wrcnt != msg->length) &&
+                         (stat & I2C_STAT_TFF) == 0)
                     {
-                      if ((priv->wrcnt + 1) == msg->length && priv->nmsg == 1)
+                      if (priv->wrcnt + 1 == msg->length && priv->nmsg == 1)
                         {
-                          putreg32(I2C_TX_STOP, priv->base + LPC31_I2C_TX_OFFSET);
+                          putreg32(I2C_TX_STOP,
+                                   priv->base + LPC31_I2C_TX_OFFSET);
                         }
                       else
                         {
@@ -309,30 +320,37 @@ static void i2c_progress(struct lpc31_i2cdev_s *priv)
 
                   if (priv->wrcnt < msg->length)
                     {
-                      /* Enable Tx FIFO not full and Rx Fifo Avail Interrupts */
+                      /* Enable Tx FIFO not full and
+                       * Rx Fifo Avail Interrupts
+                       */
 
-                      putreg32(ctrl | I2C_CTRL_TFFIE | I2C_CTRL_RFDAIE, priv->base + LPC31_I2C_CTRL_OFFSET);
+                      putreg32(ctrl | I2C_CTRL_TFFIE | I2C_CTRL_RFDAIE,
+                               priv->base + LPC31_I2C_CTRL_OFFSET);
                     }
                   else
                     {
                       /* Enable Rx Fifo Avail Interrupts */
 
-                      putreg32(ctrl | I2C_CTRL_RFDAIE, priv->base + LPC31_I2C_CTRL_OFFSET);
+                      putreg32(ctrl | I2C_CTRL_RFDAIE,
+                               priv->base + LPC31_I2C_CTRL_OFFSET);
                     }
+
                   goto out;
                 }
             }
           else    /* WRITE */
             {
-              while ((priv->wrcnt != msg->length) && (stat & I2C_STAT_TFF) == 0)
+              while (!!(priv->wrcnt != msg->length) && (stat & I2C_STAT_TFF))
                 {
                   if ((priv->wrcnt + 1) == msg->length && priv->nmsg == 1)
                     {
-                      putreg32(I2C_TX_STOP | msg->buffer[priv->wrcnt], priv->base + LPC31_I2C_TX_OFFSET);
+                      putreg32(I2C_TX_STOP | msg->buffer[priv->wrcnt],
+                               priv->base + LPC31_I2C_TX_OFFSET);
                     }
                   else
                     {
-                      putreg32(msg->buffer[priv->wrcnt], priv->base + LPC31_I2C_TX_OFFSET);
+                      putreg32(msg->buffer[priv->wrcnt],
+                               priv->base + LPC31_I2C_TX_OFFSET);
                     }
 
                   priv->wrcnt++;
@@ -344,7 +362,8 @@ static void i2c_progress(struct lpc31_i2cdev_s *priv)
                 {
                   /* Enable Tx Fifo not full Interrupt */
 
-                  putreg32(ctrl | I2C_CTRL_TFFIE, priv->base + LPC31_I2C_CTRL_OFFSET);
+                  putreg32(ctrl | I2C_CTRL_TFFIE,
+                           priv->base + LPC31_I2C_CTRL_OFFSET);
                   goto out;
                 }
             }
@@ -400,9 +419,9 @@ out:
  *
  ****************************************************************************/
 
-static void i2c_timeout(int argc, uint32_t arg, ...)
+static void i2c_timeout(wdparm_t arg)
 {
-  struct lpc31_i2cdev_s *priv = (struct lpc31_i2cdev_s *) arg;
+  struct lpc31_i2cdev_s *priv = (struct lpc31_i2cdev_s *)arg;
 
   irqstate_t flags = enter_critical_section();
 
@@ -447,7 +466,7 @@ static void i2c_hwreset(struct lpc31_i2cdev_s *priv)
 
   /* Wait for Reset to complete */
 
-  while ((getreg32(priv->base + LPC31_I2C_CTRL_OFFSET) & I2C_CTRL_RESET) != 0)
+  while (!!(getreg32(priv->base + LPC31_I2C_CTRL_OFFSET) & I2C_CTRL_RESET))
       ;
 }
 
@@ -459,15 +478,16 @@ static void i2c_hwreset(struct lpc31_i2cdev_s *priv)
  *
  ****************************************************************************/
 
-static int i2c_transfer(FAR struct i2c_master_s *dev, FAR struct i2c_msg_s *msgs, int count)
+static int i2c_transfer(struct i2c_master_s *dev,
+                        struct i2c_msg_s *msgs, int count)
 {
-  struct lpc31_i2cdev_s *priv = (struct lpc31_i2cdev_s *) dev;
+  struct lpc31_i2cdev_s *priv = (struct lpc31_i2cdev_s *)dev;
   irqstate_t flags;
   int ret;
 
   /* Get exclusive access to the I2C bus */
 
-  nxsem_wait(&priv->mutex);
+  nxmutex_lock(&priv->lock);
   flags = enter_critical_section();
 
   /* Set up for the transfer */
@@ -490,7 +510,7 @@ static int i2c_transfer(FAR struct i2c_master_s *dev, FAR struct i2c_msg_s *msgs
 
   /* Start a watchdog to timeout the transfer if the bus is locked up... */
 
-  wd_start(priv->timeout, I2C_TIMEOUT, i2c_timeout, 1, (uint32_t)priv);
+  wd_start(&priv->timeout, I2C_TIMEOUT, i2c_timeout, (wdparm_t)priv);
 
   /* Wait for the transfer to complete */
 
@@ -499,15 +519,15 @@ static int i2c_transfer(FAR struct i2c_master_s *dev, FAR struct i2c_msg_s *msgs
       nxsem_wait(&priv->wait);
     }
 
-  wd_cancel(priv->timeout);
+  wd_cancel(&priv->timeout);
   ret = count - priv->nmsg;
 
   leave_critical_section(flags);
-  nxsem_post(&priv->mutex);
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
-/************************************************************************************
+/****************************************************************************
  * Name: i2c_reset
  *
  * Description:
@@ -519,10 +539,10 @@ static int i2c_transfer(FAR struct i2c_master_s *dev, FAR struct i2c_msg_s *msgs
  * Returned Value:
  *   Zero (OK) on success; a negated errno value on failure.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifdef CONFIG_I2C_RESET
-static int i2c_reset(FAR struct i2c_master_s * dev)
+static int i2c_reset(struct i2c_master_s *dev)
 {
   return OK;
 }
@@ -549,17 +569,6 @@ struct i2c_master_s *lpc31_i2cbus_initialize(int port)
   priv->rstid = (port == 0) ? RESETID_I2C0RST  : RESETID_I2C1RST;
   priv->irqid = (port == 0) ? LPC31_IRQ_I2C0   : LPC31_IRQ_I2C1;
 
-  /* Initialize semaphores */
-
-  nxsem_init(&priv->mutex, 0, 1);
-  nxsem_init(&priv->wait, 0, 0);
-
-  /* The wait semaphore is used for signaling and, hence, should not have
-   * priority inheritance enabled.
-   */
-
-  nxsem_setprotocol(&priv->wait, SEM_PRIO_NONE);
-
   /* Enable I2C system clocks */
 
   lpc31_enableclock(priv->clkid);
@@ -571,11 +580,6 @@ struct i2c_master_s *lpc31_i2cbus_initialize(int port)
   /* Soft reset the device */
 
   i2c_hwreset(priv);
-
-  /* Allocate a watchdog timer */
-
-  priv->timeout = wd_create();
-  DEBUGASSERT(priv->timeout != 0);
 
   /* Attach Interrupt Handler */
 
@@ -599,7 +603,7 @@ struct i2c_master_s *lpc31_i2cbus_initialize(int port)
  *
  ****************************************************************************/
 
-int lpc31_i2cbus_uninitialize(FAR struct i2c_master_s *dev)
+int lpc31_i2cbus_uninitialize(struct i2c_master_s *dev)
 {
   struct lpc31_i2cdev_s *priv = (struct lpc31_i2cdev_s *)dev;
 

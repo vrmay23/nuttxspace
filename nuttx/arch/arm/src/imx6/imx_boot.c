@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/imx6/imx_boot.c
  *
- *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,7 +31,7 @@
 #include <debug.h>
 
 #include <nuttx/cache.h>
-#ifdef CONFIG_PAGING
+#ifdef CONFIG_LEGACY_PAGING
 #  include <nuttx/page.h>
 #endif
 
@@ -54,10 +41,7 @@
 #include "arm.h"
 #include "mmu.h"
 #include "scu.h"
-#include "fpu.h"
-#include "up_internal.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "imx_config.h"
 #include "imx_clockconfig.h"
 #include "imx_memorymap.h"
@@ -81,8 +65,8 @@
 
 /* Symbols defined via the linker script */
 
-extern uint32_t _vector_start; /* Beginning of vector block */
-extern uint32_t _vector_end;   /* End+1 of vector block */
+extern uint8_t _vector_start[]; /* Beginning of vector block */
+extern uint8_t _vector_end[];   /* End+1 of vector block */
 
 /****************************************************************************
  * Private Functions
@@ -129,12 +113,12 @@ static inline void imx_remap(void)
  ****************************************************************************/
 
 #if !defined(CONFIG_ARCH_ROMPGTABLE) && defined(CONFIG_ARCH_LOWVECTORS) && \
-     defined(CONFIG_PAGING)
+     defined(CONFIG_LEGACY_PAGING)
 static void imx_vectorpermissions(uint32_t mmuflags)
 {
   /* The PTE for the beginning of OCRAM is at the base of the L2 page table */
 
-  uint32_t pte = mmu_l2_getentry(PG_L2_VECT_VADDR, 0);
+  uintptr_t pte = mmu_l2_getentry(PG_L2_VECT_VADDR, 0);
 
   /* Mask out the old MMU flags from the page table entry.
    *
@@ -166,13 +150,7 @@ static void imx_vectorpermissions(uint32_t mmuflags)
 
 static inline size_t imx_vectorsize(void)
 {
-  uintptr_t src;
-  uintptr_t end;
-
-  src  = (uintptr_t)&_vector_start;
-  end  = (uintptr_t)&_vector_end;
-
-  return (size_t)(end - src);
+  return _vector_end - _vector_start;
 }
 
 /****************************************************************************
@@ -189,7 +167,7 @@ static void imx_vectormapping(void)
 {
   uint32_t vector_paddr = IMX_VECTOR_PADDR & PTE_SMALL_PADDR_MASK;
   uint32_t vector_vaddr = IMX_VECTOR_VADDR & PTE_SMALL_PADDR_MASK;
-  uint32_t vector_size  = (uint32_t)&_vector_end - (uint32_t)&_vector_start;
+  uint32_t vector_size  = _vector_end - _vector_start;
   uint32_t end_paddr    = IMX_VECTOR_PADDR + vector_size;
 
   /* REVISIT:  Cannot really assert in this context */
@@ -203,7 +181,7 @@ static void imx_vectormapping(void)
 
   while (vector_paddr < end_paddr)
     {
-      mmu_l2_setentry(VECTOR_L2_VBASE,  vector_paddr, vector_vaddr,
+      mmu_l2_setentry(VECTOR_L2_VBASE, vector_paddr, vector_vaddr,
                       MMU_L2_VECTORFLAGS);
       vector_paddr += 4096;
       vector_vaddr += 4096;
@@ -227,8 +205,8 @@ static void imx_vectormapping(void)
  * Description:
  *   Copy the interrupt block to its final destination.  Vectors are already
  *   positioned at the beginning of the text region and only need to be
- *   copied in the case where we are using high vectors or where the beginning
- *   of the text region cannot be remapped to address zero.
+ *   copied in the case where we are using high vectors or where the
+ *   beginning of the text region cannot be remapped to address zero.
  *
  ****************************************************************************/
 
@@ -239,7 +217,7 @@ static void imx_copyvectorblock(void)
   uint32_t *end;
   uint32_t *dest;
 
-#ifdef CONFIG_PAGING
+#ifdef CONFIG_LEGACY_PAGING
   /* If we are using re-mapped vectors in an area that has been marked
    * read only, then temporarily mark the mapping write-able (non-buffered).
    */
@@ -247,8 +225,8 @@ static void imx_copyvectorblock(void)
   imx_vectorpermissions(MMU_L2_VECTRWFLAGS);
 #endif
 
-  /* Copy the vectors into OCRAM at the address that will be mapped to the vector
-   * address:
+  /* Copy the vectors into OCRAM at the address that will be mapped to the
+   * vector address:
    *
    *   IMX_VECTOR_PADDR - Unmapped, physical address of vector table in OCRAM
    *   IMX_VECTOR_VSRAM - Virtual address of vector table in OCRAM
@@ -256,8 +234,8 @@ static void imx_copyvectorblock(void)
    *                      0xffff0000)
    */
 
-  src  = (uint32_t *)&_vector_start;
-  end  = (uint32_t *)&_vector_end;
+  src  = (uint32_t *)_vector_start;
+  end  = (uint32_t *)_vector_end;
   dest = (uint32_t *)IMX_VECTOR_VSRAM;
 
   while (src < end)
@@ -265,7 +243,7 @@ static void imx_copyvectorblock(void)
       *dest++ = *src++;
     }
 
-#if !defined(CONFIG_ARCH_LOWVECTORS) && defined(CONFIG_PAGING)
+#if !defined(CONFIG_ARCH_LOWVECTORS) && defined(CONFIG_LEGACY_PAGING)
   /* Make the vectors read-only, cacheable again */
 
   imx_vectorpermissions(MMU_L2_VECTORFLAGS);
@@ -383,6 +361,7 @@ static inline void imx_wdtdisable(void)
  *
  ****************************************************************************/
 
+osentry_function
 void arm_boot(void)
 {
 #if defined(CONFIG_ARCH_RAMFUNCS)
@@ -428,7 +407,9 @@ void arm_boot(void)
    * at _framfuncs
    */
 
-  for (src = &_framfuncs, dest = &_sramfuncs; dest < &_eramfuncs; )
+  for (src = (const uint32_t *)_framfuncs,
+       dest = (uint32_t *)_sramfuncs; dest < (uint32_t *)_eramfuncs;
+      )
     {
       *dest++ = *src++;
     }
@@ -439,7 +420,7 @@ void arm_boot(void)
    * be available when fetched into the I-Cache.
    */
 
-  up_clean_dcache((uintptr_t)&_sramfuncs, (uintptr_t)&_eramfuncs)
+  up_clean_dcache((uintptr_t)_sramfuncs, (uintptr_t)_eramfuncs)
   PROGRESS('F');
 #endif
 
@@ -460,12 +441,10 @@ void arm_boot(void)
   imx_clockconfig();
   PROGRESS('I');
 
-#ifdef CONFIG_ARCH_FPU
   /* Initialize the FPU */
 
   arm_fpuconfig();
   PROGRESS('J');
-#endif
 
   /* Perform board-specific memory initialization,  This must include
    * initialization of board-specific memory resources (e.g., SDRAM)
@@ -520,7 +499,8 @@ void arm_boot(void)
 
   /* Now we can enable all other CPUs.  The enabled CPUs will start execution
    * at __cpuN_start and, after very low-level CPU initialization has been
-   * performed, will branch to arm_cpu_boot() (see arch/arm/src/armv7-a/smp.h)
+   * performed, will branch to arm_cpu_boot()
+   * (see arch/arm/src/armv7-a/smp.h)
    */
 
   imx_cpu_enable();

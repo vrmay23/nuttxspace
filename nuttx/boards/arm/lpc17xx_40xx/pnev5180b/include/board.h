@@ -1,47 +1,29 @@
 /****************************************************************************
  * boards/arm/lpc17xx_40xx/pnev5180b/include/board.h
- * include/arch/board/board.h
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *   Author: Michael Jung <mijung@gmx.net>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Based on boards/zkit-arm-1769/include/board.h
- *   Copyright (C) 2013 Zilogic Systems. All rights reserved.
- *   Author: BabuSubashChandar <code@zilogic.com>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+ ****************************************************************************/
 
 #ifndef __BOARDS_ARM_LPC17XX_40XX_PNEV5180B_INCLUDE_BOARD_H
 #define __BOARDS_ARM_LPC17XX_40XX_PNEV5180B_INCLUDE_BOARD_H
 
-/*****************************************************************************
+/****************************************************************************
  * Included Files
  ****************************************************************************/
 
@@ -53,11 +35,11 @@
 #  include <nuttx/irq.h>
 #endif
 
-/*****************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- *****************************************************************************/
+ ****************************************************************************/
 
-/* Clocking ******************************************************************/
+/* Clocking *****************************************************************/
 
 /* NOTE:  The following definitions require lpc17_40_syscon.h.  It is not
  * included here because the including C file may not have that file in its
@@ -73,7 +55,7 @@
  *
  *   SYSCLK = BOARD_OSCCLK_FREQUENCY = 12MHz  -> Select Main oscillator for
  *                                               source
- *   PLL0CLK = (2 * 20 * SYSCLK) / 1 = 480MHz -> PLL0 multipler=20,
+ *   PLL0CLK = (2 * 20 * SYSCLK) / 1 = 480MHz -> PLL0 multiplier=20,
  *                                               pre-divider=1
  *   CCLCK = 480MHz / 4 = 120MHz              -> CCLK divider = 4
  */
@@ -138,13 +120,15 @@
 #define CONFIG_LP17_FLASH          1
 #define BOARD_FLASHCFG_VALUE       0x0000403a
 
-/* LED definitions ***********************************************************/
+/* LED definitions **********************************************************/
 
 /* If CONFIG_ARCH_LEDs is defined, then NuttX will control the LEDs on the
- * PNEV5180B board.  The following definitions describe how NuttX controls the
- * LEDs:
+ * PNEV5180B board.  The following definitions describe how NuttX controls
+ * the LEDs:
  */
+
                              /* LD201  LD200  LD202  LD203                 */
+
                              /* RED    ORANGE BLUE   GREEN                 */
 #define LED_STARTED       0  /* ON     ON     ON     ON                    */
 #define LED_HEAPALLOCATE  1  /* OFF    OFF    OFF    ON                    */
@@ -155,7 +139,7 @@
 #define LED_ASSERTION     6  /* OFF    ON     OFF    OFF    (momentary)    */
 #define LED_PANIC         7  /* ON     OFF    OFF    OFF    (1Hz flashing) */
 
-/* Alternate pin selections **************************************************/
+/* Alternate pin selections *************************************************/
 
 /* Pin Description                      On Board       Connector
  *  -------------------------------- ---------------- -------------
@@ -180,15 +164,15 @@
  * P3.26/STCLK/MAT0.1/PWM1.3          LD202            BLUE LED
  */
 
-/*****************************************************************************
+/****************************************************************************
  * Public Types
- *****************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ASSEMBLY__
 
-/*****************************************************************************
+/****************************************************************************
  * Public Data
- *****************************************************************************/
+ ****************************************************************************/
 
 #undef EXTERN
 #if defined(__cplusplus)
@@ -199,30 +183,30 @@ extern "C"
 #define EXTERN extern
 #endif
 
-/*****************************************************************************
+/****************************************************************************
  * Public Function Prototypes
- *****************************************************************************/
+ ****************************************************************************/
 
-/*****************************************************************************
+/****************************************************************************
  * Name: lpc17_40_boardinitialize
  *
  * Description:
- *   All LPC17xx/LPC40xx architectures must provide the following entry point.
- *   This entry point is called early in the initialization -- after all
- *   memory has been configured and mapped but before any devices have
+ *   All LPC17xx/LPC40xx architectures must provide the following entry
+ *   point. This entry point is called early in the initialization -- after
+ *   all memory has been configured and mapped but before any devices have
  *   been initialized.
  *
- *****************************************************************************/
+ ****************************************************************************/
 
 void lpc17_40_boardinitialize(void);
 
-/*****************************************************************************
+/****************************************************************************
  * Name: lpc17_40_led
  *
  * Description:
  *   Once the system has booted, these functions can be used to control LED 1
  *
- *****************************************************************************/
+ ****************************************************************************/
 
 #ifdef CONFIG_ARCH_LEDS
 void lpc17_40_led(int lednum, int state);

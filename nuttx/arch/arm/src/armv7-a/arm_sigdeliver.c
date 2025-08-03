@@ -1,36 +1,22 @@
 /****************************************************************************
  * arch/arm/src/armv7-a/arm_sigdeliver.c
  *
- *   Copyright (C) 2013, 2015-2016, 2018-2019 Gregory Nutt. All rights
- *     reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,6 +28,7 @@
 
 #include <stdint.h>
 #include <sched.h>
+#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
@@ -50,15 +37,14 @@
 #include <arch/board/board.h>
 
 #include "sched/sched.h"
-#include "up_internal.h"
-#include "up_arch.h"
+#include "arm_internal.h"
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: up_sigdeliver
+ * Name: arm_sigdeliver
  *
  * Description:
  *   This is the a signal handling trampoline.  When a signal action was
@@ -67,17 +53,10 @@
  *
  ****************************************************************************/
 
-void up_sigdeliver(void)
+void arm_sigdeliver(void)
 {
-  struct tcb_s  *rtcb = this_task();
-  uint32_t regs[XCPTCONTEXT_REGS];
-
-  /* Save the errno.  This must be preserved throughout the signal handling
-   * so that the user code final gets the correct errno value (probably
-   * EINTR).
-   */
-
-  int saved_errno = rtcb->pterrno;
+  struct tcb_s *rtcb = this_task();
+  uint32_t *regs = rtcb->xcp.saved_regs;
 
 #ifdef CONFIG_SMP
   /* In the SMP case, we must terminate the critical section while the signal
@@ -91,31 +70,27 @@ void up_sigdeliver(void)
   board_autoled_on(LED_SIGNAL);
 
   sinfo("rtcb=%p sigdeliver=%p sigpendactionq.head=%p\n",
-        rtcb, rtcb->xcp.sigdeliver, rtcb->sigpendactionq.head);
-  DEBUGASSERT(rtcb->xcp.sigdeliver != NULL);
+        rtcb, rtcb->sigdeliver, rtcb->sigpendactionq.head);
+  DEBUGASSERT(rtcb->sigdeliver != NULL);
 
-  /* Save the return state on the stack. */
-
-  up_copyfullstate(regs, rtcb->xcp.regs);
-
+retry:
 #ifdef CONFIG_SMP
   /* In the SMP case, up_schedule_sigaction(0) will have incremented
    * 'irqcount' in order to force us into a critical section.  Save the
    * pre-incremented irqcount.
    */
 
-  saved_irqcount = rtcb->irqcount - 1;
+  saved_irqcount = rtcb->irqcount;
   DEBUGASSERT(saved_irqcount >= 0);
 
   /* Now we need call leave_critical_section() repeatedly to get the irqcount
    * to zero, freeing all global spinlocks that enforce the critical section.
    */
 
-  do
+  while (rtcb->irqcount > 0)
     {
       leave_critical_section(regs[REG_CPSR]);
     }
-  while (rtcb->irqcount > 0);
 #endif /* CONFIG_SMP */
 
 #ifndef CONFIG_SUPPRESS_INTERRUPTS
@@ -128,38 +103,42 @@ void up_sigdeliver(void)
 
   /* Deliver the signal */
 
-  ((sig_deliver_t)rtcb->xcp.sigdeliver)(rtcb);
+  (rtcb->sigdeliver)(rtcb);
 
   /* Output any debug messages BEFORE restoring errno (because they may
    * alter errno), then disable interrupts again and restore the original
    * errno that is needed by the user logic (it is probably EINTR).
    *
    * I would prefer that all interrupts are disabled when
-   * up_fullcontextrestore() is called, but that may not be necessary.
+   * arm_fullcontextrestore() is called, but that may not be necessary.
    */
 
   sinfo("Resuming\n");
 
-  /* Call enter_critical_section() to disable local interrupts before
-   * restoring local context.
-   *
-   * Here, we should not use up_irq_save() in SMP mode.
-   * For example, if we call up_irq_save() here and another CPU might
-   * have called up_cpu_pause() to this cpu, hence g_cpu_irqlock has
-   * been locked by the cpu, in this case, we would see a deadlock in
-   * later call of enter_critical_section() to restore irqcount.
-   * To avoid this situation, we need to call enter_critical_section().
+#ifdef CONFIG_SMP
+  /* Restore the saved 'irqcount' and recover the critical section
+   * spinlocks.
    */
 
-#ifdef CONFIG_SMP
-  enter_critical_section();
-#else
+  DEBUGASSERT(rtcb->irqcount == 0);
+  while (rtcb->irqcount < saved_irqcount + 1)
+    {
+      enter_critical_section();
+    }
+#endif
+
+#ifndef CONFIG_SUPPRESS_INTERRUPTS
   up_irq_save();
 #endif
 
-  /* Restore the saved errno value */
-
-  rtcb->pterrno        = saved_errno;
+  if (!sq_empty(&rtcb->sigpendactionq) &&
+      (rtcb->flags & TCB_FLAG_SIGNAL_ACTION) == 0)
+    {
+#ifdef CONFIG_SMP
+      leave_critical_section(regs[REG_CPSR]);
+#endif
+      goto retry;
+    }
 
   /* Modify the saved return state with the actual saved values in the
    * TCB.  This depends on the fact that nested signal handling is
@@ -171,28 +150,20 @@ void up_sigdeliver(void)
    * could be modified by a hostile program.
    */
 
-  regs[REG_PC]         = rtcb->xcp.saved_pc;
-  regs[REG_CPSR]       = rtcb->xcp.saved_cpsr;
-  rtcb->xcp.sigdeliver = NULL;  /* Allows next handler to be scheduled */
-
-#ifdef CONFIG_SMP
-  /* Restore the saved 'irqcount' and recover the critical section
-   * spinlocks.
-   *
-   * REVISIT:  irqcount should be one from the above call to
-   * enter_critical_section().  Could the saved_irqcount be zero?  That
-   * would be a problem.
-   */
-
-  DEBUGASSERT(rtcb->irqcount == 1);
-  while (rtcb->irqcount < saved_irqcount)
-    {
-      enter_critical_section();
-    }
-#endif
+  rtcb->sigdeliver = NULL;  /* Allows next handler to be scheduled */
 
   /* Then restore the correct state for this thread of execution. */
 
   board_autoled_off(LED_SIGNAL);
-  up_fullcontextrestore(regs);
+#ifdef CONFIG_SMP
+  /* We need to keep the IRQ lock until task switching */
+
+  rtcb->irqcount++;
+  leave_critical_section(regs[REG_CPSR]);
+  rtcb->irqcount--;
+#endif
+
+  rtcb->xcp.regs = rtcb->xcp.saved_regs;
+  arm_fullcontextrestore();
+  UNUSED(regs);
 }

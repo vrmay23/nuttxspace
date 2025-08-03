@@ -1,40 +1,44 @@
 #!/usr/bin/env bash
+############################################################################
 # apps/tools/mkimport.sh
 #
-#   Copyright (C) 2014 Gregory Nutt. All rights reserved.
-#   Author: Gregory Nutt <gnutt@nuttx.org>
+# SPDX-License-Identifier: Apache-2.0
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
 #
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in
-#    the documentation and/or other materials provided with the
-#    distribution.
-# 3. Neither the name NuttX nor the names of its contributors may be
-#    used to endorse or promote products derived from this software
-#    without specific prior written permission.
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
-# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
-# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
 #
-
+############################################################################
 # Get the input parameter list
 
-USAGE="USAGE: $0 [-d] [-z] [-l <ext>] -x <export-path>"
+USAGE="
+
+DESCRIPTION:
+
+  Preparing folder 'import/' using the export package from NuttX kernel
+  build.
+
+USAGE: $0 [-d] [-z] [-l <ext>] -x <export-package>
+
+Where:
+
+  -d enable debugging output
+  -h show this help message
+  -l <ext> extension of library file (default is .a)
+  -x <export-package> export package file name
+  -z expect gzip compressed tar ball
+"
 unset EXPORT
 unset TGZ
 LIBEXT=.a
@@ -50,13 +54,13 @@ while [ ! -z "$1" ]; do
 			;;
 		-x )
 			shift
-			EXPORT=$1
+			EXPORT=$(realpath $1)
 			;;
 		-z )
 			TGZ=y
 			;;
 		-h )
-			echo $USAGE
+			echo "$USAGE"
 			exit 0
 			;;
 		* )
@@ -95,6 +99,7 @@ fi
 
 WD=${PWD}
 IMPORTDIR=${WD}/import
+BUILTINDIR=${WD}/builtin
 DARCHDIR=${IMPORTDIR}/arch
 DINCDIR=${IMPORTDIR}/include
 DLIBDIR=${IMPORTDIR}/libs
@@ -113,18 +118,18 @@ rm -rf ${DALLDIRS}
 mkdir ${TMPDIR} || \
 	{ echo "ERROR: Failed to create ${TMPDIR}"; exit 1; }
 
+if [ "X${TGZ}" == "Xy" ]; then
+	tar zxf ${EXPORT} -C ${TMPDIR} || \
+		{ echo "ERROR: tar zxf ${EXPORT} failed"; exit 1; }
+else
+	unzip ${EXPORT} -d ${TMPDIR} || \
+		{ echo "ERROR: unzip ${EXPORT} failed"; exit 1; }
+fi
+
 # Unpack the export package into the temporary directory
 
 cd ${TMPDIR} || \
 	{ echo "ERROR: Failed to cd to ${TMPDIR}"; exit 1; }
-
-if [ "X${TGZ}" == "Xy" ]; then
-	tar zxf ${EXPORT} || \
-		{ echo "ERROR: tar zxf ${EXPORT} failed"; exit 1; }
-else
-	unzip ${EXPORT} || \
-		{ echo "ERROR: unzip ${EXPORT} failed"; exit 1; }
-fi
 
 EXPORTDIR=`ls`
 
@@ -144,6 +149,7 @@ SLIBDIR=${EXPORTDIR}/libs
 SSCRIPTSDIR=${EXPORTDIR}/scripts
 SSTARTDIR=${EXPORTDIR}/startup
 STOOLSDIR=${EXPORTDIR}/tools
+REGISTERSDIR=${EXPORTDIR}/registry
 
 unset SALLDIRS
 if [ -d ${SARCHDIR} ]; then
@@ -170,9 +176,12 @@ fi
 mv ${SALLDIRS} ${IMPORTDIR}/. || \
 	{ echo "ERROR: Failed to move ${SALLDIRS} to ${IMPORTDIR}"; exit 1; }
 
+cp -rf ${REGISTERSDIR} ${BUILTINDIR}/. || \
+	{ echo "ERROR: Failed to move ${REGISTERSDIR} to ${BUILTINDIR}"; exit 1; }
+
 # Move the .config file in place in the import directory
 
-SFILES=".config"
+SFILES=".config System.map"
 for file in ${SFILES}; do
 	if [ -f "${EXPORTDIR}/${file}" ]; then
 		cp -a ${EXPORTDIR}/${file} ${IMPORTDIR}/${file} || \

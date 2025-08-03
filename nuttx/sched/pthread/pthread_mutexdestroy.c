@@ -1,35 +1,22 @@
 /****************************************************************************
  * sched/pthread/pthread_mutexdestroy.c
  *
- *   Copyright (C) 2007-2009, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,6 +29,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sched.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -74,21 +62,22 @@ int pthread_mutex_destroy(FAR pthread_mutex_t *mutex)
   int ret = EINVAL;
   int status;
 
-  sinfo("mutex=0x%p\n", mutex);
+  sinfo("mutex=%p\n", mutex);
   DEBUGASSERT(mutex != NULL);
 
   if (mutex != NULL)
     {
-      /* Make sure the semaphore is stable while we make the following checks */
+      pid_t pid;
 
-      sched_lock();
+      pid = mutex_get_holder(&mutex->mutex);
 
       /* Is the mutex available? */
 
-      if (mutex->pid >= 0)
+      if (pid >= 0)
         {
-          DEBUGASSERT(mutex->pid != 0); /* < 0: available, >0 owned, ==0 error */
+          /* < 0: available, >0 owned, ==0 error */
 
+          DEBUGASSERT(pid != 0);
           /* No.. Verify that the PID still exists.  We may be destroying
            * the mutex after cancelling a pthread and the mutex may have
            * been in a bad state owned by the dead pthread.  NOTE: The
@@ -96,32 +85,26 @@ int pthread_mutex_destroy(FAR pthread_mutex_t *mutex)
            * (see pthread_mutex_consistent()).
            *
            * If the holding thread is still valid, then we should be able to
-           * map its PID to the underlying TCB. That is what sched_gettcb()
-           * does.
+           * map its PID to the underlying TCB. That is what
+           * nxsched_get_tcb() does.
            */
 
-          if (sched_gettcb(mutex->pid) == NULL)
+          if (nxsched_get_tcb(pid) == NULL)
             {
               /* The thread associated with the PID no longer exists */
-
-              mutex->pid = -1;
 
               /* Reset the semaphore.  If threads are were on this
                * semaphore, then this will awakened them and make
                * destruction of the semaphore impossible here.
                */
 
-              status = nxsem_reset((FAR sem_t *)&mutex->sem, 1);
-              if (status < 0)
-                {
-                  ret = -status;
-                }
+              mutex_reset(&mutex->mutex);
 
               /* Check if the reset caused some other thread to lock the
                * mutex.
                */
 
-              else if (mutex->pid != -1)
+              if (mutex_is_locked(&mutex->mutex))
                 {
                   /* Yes.. then we cannot destroy the mutex now. */
 
@@ -132,7 +115,7 @@ int pthread_mutex_destroy(FAR pthread_mutex_t *mutex)
 
               else
                 {
-                  status = nxsem_destroy((FAR sem_t *)&mutex->sem);
+                  status = mutex_destroy(&mutex->mutex);
                   ret = (status < 0) ? -status : OK;
                 }
             }
@@ -149,11 +132,9 @@ int pthread_mutex_destroy(FAR pthread_mutex_t *mutex)
            * Perhaps this logic should all nxsem_reset() first?
            */
 
-          status = nxsem_destroy((FAR sem_t *)&mutex->sem);
+          status = mutex_destroy(&mutex->mutex);
           ret = ((status < 0) ? -status : OK);
         }
-
-      sched_unlock();
     }
 
   sinfo("Returning %d\n", ret);

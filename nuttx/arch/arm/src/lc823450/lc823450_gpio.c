@@ -1,37 +1,22 @@
 /****************************************************************************
  * arch/arm/src/lc823450/lc823450_gpio.c
  *
- *   Copyright 2014,2015,2016,2017 Sony Video & Sound Products Inc.
- *   Author: Masayuki Ishikawa <Masayuki.Ishikawa@jp.sony.com>
- *   Author: Nobutaka Toyoshima <Nobutaka.Toyoshima@jp.sony.com>
- *   Author: Masatoshi Tateishi <Masatoshi.Tateishi@jp.sony.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,10 +28,13 @@
 #include <nuttx/config.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/spinlock.h>
+
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "lc823450_gpio.h"
 #include "lc823450_syscontrol.h"
 
@@ -66,13 +54,15 @@
  * Private Data
  ****************************************************************************/
 
+static spinlock_t g_gpio_lock = SP_UNLOCKED;
+
 #ifdef CONFIG_IOEX
-static FAR struct ioex_dev_s *g_ioex_dev;
+static struct ioex_dev_s *g_ioex_dev;
 #endif
 
 #ifdef CONFIG_LC823450_VGPIO
 #define GPIO_VIRTUAL_NUM 32
-static FAR struct vgpio_ops_s *vgpio_ops[GPIO_VIRTUAL_NUM];
+static struct vgpio_ops_s *vgpio_ops[GPIO_VIRTUAL_NUM];
 #endif /* CONFIG_LC823450_VGPIO */
 
 /****************************************************************************
@@ -145,7 +135,9 @@ static inline void lc823450_configpull(uint16_t gpiocfg,
   switch (pull)
     {
       case GPIO_FLOAT:
+
         /* do nothing */
+
         break;
       case GPIO_PULLUP:
         regval |=  (1 << (2 * pin));
@@ -239,12 +231,12 @@ int lc823450_gpio_mux(uint16_t gpiocfg)
 
   if (port <= (GPIO_PORT5 >> GPIO_PORT_SHIFT))
     {
-      irqstate_t flags = spin_lock_irqsave();
+      irqstate_t flags = spin_lock_irqsave(&g_gpio_lock);
       val = getreg32(PMDCNT0 + (port * 4));
       val &= ~(3 << (2 * pin));
       val |= (mux << (2 *pin));
       putreg32(val, PMDCNT0 + (port * 4));
-      spin_unlock_irqrestore(flags);
+      spin_unlock_irqrestore(&g_gpio_lock, flags);
     }
   else
     {
@@ -287,7 +279,7 @@ int lc823450_gpio_config(uint16_t gpiocfg)
 
       /* Handle the GPIO configuration by the basic mode of the pin */
 
-      flags = spin_lock_irqsave();
+      flags = spin_lock_irqsave(&g_gpio_lock);
 
       /* pull up/down specified */
 
@@ -306,13 +298,13 @@ int lc823450_gpio_config(uint16_t gpiocfg)
             lc823450_configoutput(gpiocfg, port, pin);
             break;
 
-          default :
+          default:
             gpioerr("ERROR: Unrecognized pin mode: %04x\n", gpiocfg);
             ret = -EINVAL;
             break;
         }
 
-      spin_unlock_irqrestore(flags);
+      spin_unlock_irqrestore(&g_gpio_lock, flags);
     }
 #ifdef CONFIG_IOEX
   else if (port <= (GPIO_PORTEX >> GPIO_PORT_SHIFT))
@@ -337,7 +329,7 @@ int lc823450_gpio_config(uint16_t gpiocfg)
                 pupd = IOEX_PUPD_PULLDOWN;
                 break;
               default:
-                DEBUGASSERT(0);
+                DEBUGPANIC();
                 return -EINVAL;
             }
         }
@@ -384,7 +376,7 @@ void lc823450_gpio_write(uint16_t gpiocfg, bool value)
 #ifdef CONFIG_LC823450_VGPIO
   if (port == (GPIO_PORTV >> GPIO_PORT_SHIFT))
     {
-      assert(pin < GPIO_VIRTUAL_NUM);
+      ASSERT(pin < GPIO_VIRTUAL_NUM);
       if (vgpio_ops[pin] && vgpio_ops[pin]->write)
         {
           vgpio_ops[pin]->write(pin, value);
@@ -400,7 +392,7 @@ void lc823450_gpio_write(uint16_t gpiocfg, bool value)
 
       regaddr = lc823450_get_gpio_data(port);
 
-      flags = spin_lock_irqsave();
+      flags = spin_lock_irqsave(&g_gpio_lock);
 
       /* Write the value (0 or 1).  To the data register */
 
@@ -417,8 +409,8 @@ void lc823450_gpio_write(uint16_t gpiocfg, bool value)
 
       putreg32(regval, regaddr);
 
-      spin_unlock_irqrestore(flags);
-  }
+      spin_unlock_irqrestore(&g_gpio_lock, flags);
+    }
 #ifdef CONFIG_IOEX
   else if (port <= (GPIO_PORTEX >> GPIO_PORT_SHIFT))
     {
@@ -449,7 +441,7 @@ bool lc823450_gpio_read(uint16_t gpiocfg)
 #ifdef CONFIG_LC823450_VGPIO
   if (port == (GPIO_PORTV >> GPIO_PORT_SHIFT))
     {
-      assert(pin < GPIO_VIRTUAL_NUM);
+      ASSERT(pin < GPIO_VIRTUAL_NUM);
       if (vgpio_ops[pin] && vgpio_ops[pin]->read)
         {
           return vgpio_ops[pin]->read(pin);
@@ -464,6 +456,7 @@ bool lc823450_gpio_read(uint16_t gpiocfg)
       DEBUGASSERT(pin < NUM_GPIO_PINS);
 
       /* Get the value of the pin from the pin data register */
+
       regaddr = lc823450_get_gpio_data(port);
       regval  = getreg32(regaddr);
       value = ((regval >> pin) & 0x01);
@@ -478,7 +471,7 @@ bool lc823450_gpio_read(uint16_t gpiocfg)
 #endif /* CONFIG_IOEX */
   else
     {
-      DEBUGASSERT(0);
+      DEBUGPANIC();
     }
 
   return value;
@@ -515,9 +508,9 @@ int lc823450_gpio_initialize(void)
  ****************************************************************************/
 
 #ifdef CONFIG_LC823450_VGPIO
-int lc823450_vgpio_register(unsigned int pin, FAR struct vgpio_ops_s *ops)
+int lc823450_vgpio_register(unsigned int pin, struct vgpio_ops_s *ops)
 {
-  assert(pin < GPIO_VIRTUAL_NUM);
+  ASSERT(pin < GPIO_VIRTUAL_NUM);
   vgpio_ops[pin] = ops;
   return OK;
 }

@@ -1,5 +1,7 @@
 /****************************************************************************
- * examples/posix_spawn/spawn_main.c
+ * apps/examples/posix_spawn/spawn_main.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -30,6 +32,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <malloc.h>
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
@@ -40,43 +43,9 @@
 #include <nuttx/drivers/ramdisk.h>
 #include <nuttx/symtab.h>
 
-#include "filesystem/romfs.h"
-
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-/* Check configuration.  This is not all of the configuration settings that
- * are required -- only the more obvious.
- */
-
-#ifdef CONFIG_BINFMT_DISABLE
-#  error "The binary loader is disabled (CONFIG_BINFMT_DISABLE)!"
-#endif
-
-#ifndef CONFIG_ELF
-#  error "You must select CONFIG_ELF in your configuration file"
-#endif
-
-#ifndef CONFIG_FS_ROMFS
-#  error "You must select CONFIG_FS_ROMFS in your configuration file"
-#endif
-
-#ifdef CONFIG_DISABLE_MOUNTPOINT
-#  error "You must not disable mountpoints via CONFIG_DISABLE_MOUNTPOINT in your configuration file"
-#endif
-
-#ifdef CONFIG_BINFMT_DISABLE
-#  error "You must not disable loadable modules via CONFIG_BINFMT_DISABLE in your configuration file"
-#endif
-
-#ifndef CONFIG_LIB_BOARDCTL
-#  error "This configuration requires CONFIG_LIB_BOARDCTL"
-#endif
-
-#ifndef CONFIG_BOARDCTL_APP_SYMTAB
-#  error "You must enable the symobol table interface with CONFIG_BOARDCTL_APP_SYMTAB"
-#endif
 
 /* Describe the ROMFS file system */
 
@@ -84,34 +53,24 @@
 #define NSECTORS(b)  (((b)+SECTORSIZE-1)/SECTORSIZE)
 #define MOUNTPT      "/mnt/romfs"
 
-#ifndef CONFIG_EXAMPLES_ELF_DEVMINOR
-#  define CONFIG_EXAMPLES_ELF_DEVMINOR 0
+#ifndef CONFIG_EXAMPLES_POSIXSPAWN_DEVMINOR
+#  define CONFIG_EXAMPLES_POSIXSPAWN_DEVMINOR 0
 #endif
 
-#ifndef CONFIG_EXAMPLES_ELF_DEVPATH
-#  define CONFIG_EXAMPLES_ELF_DEVPATH "/dev/ram0"
+#ifndef CONFIG_EXAMPLES_POSIXSPAWN_DEVPATH
+#  define CONFIG_EXAMPLES_POSIXSPAWN_DEVPATH "/dev/ram0"
 #endif
 
 /* If CONFIG_DEBUG_FEATURES is enabled, use info/err instead of printf so
  * that the output will be synchronous with the debug output.
  */
 
-#ifdef CONFIG_CPP_HAVE_VARARGS
-#  ifdef CONFIG_DEBUG_FEATURES
-#    define message(format, ...)    _info(format, ##__VA_ARGS__)
-#    define errmsg(format, ...)     _err(format, ##__VA_ARGS__)
-#  else
-#    define message(format, ...)    printf(format, ##__VA_ARGS__)
-#    define errmsg(format, ...)     fprintf(stderr, format, ##__VA_ARGS__)
-#  endif
+#ifdef CONFIG_DEBUG_FEATURES
+#  define message                 _info
+#  define errmsg                  _err
 #else
-#  ifdef CONFIG_DEBUG_FEATURES
-#    define message                 _info
-#    define errmsg                  _err
-#  else
-#    define message                 printf
-#    define errmsg                  printf
-#  endif
+#  define message                 printf
+#  define errmsg                  printf
 #endif
 
 /****************************************************************************
@@ -128,20 +87,26 @@ static unsigned int g_mmstep;     /* Memory Usage at beginning of test step */
 static const char delimiter[] =
   "**************************************"
   "**************************************";
-static const char g_redirect[] = "redirect";
-static const char g_hello[]    = "hello";
 static const char g_data[]     = "testdata.txt";
 
 static char fullpath[128];
 
-static char * const g_argv[4] =
+static char * const g_hello_argv[5] =
 {
-  "Argument 1", "Argument 2", "Argument 3", NULL
+  "hello", "Argument 1", "Argument 2", "Argument 3", NULL
+};
+
+static char * const g_redirect_argv[2] =
+{
+  "redirect", NULL
 };
 
 /****************************************************************************
  * Symbols from Auto-Generated Code
  ****************************************************************************/
+
+extern const unsigned char romfs_img[];
+extern const unsigned int romfs_img_len;
 
 extern const struct symtab_s g_spawn_exports[];
 extern const int g_spawn_nexports;
@@ -215,6 +180,7 @@ int main(int argc, FAR char *argv[])
   FAR const char *filepath;
   pid_t pid;
   int ret;
+  struct boardioc_romdisk_s desc;
 
   /* Initialize the memory monitor */
 
@@ -222,15 +188,19 @@ int main(int argc, FAR char *argv[])
 
   /* Create a ROM disk for the ROMFS filesystem */
 
-  message("Registering romdisk at /dev/ram%d\n",
-          CONFIG_EXAMPLES_ELF_DEVMINOR);
+  desc.minor    = CONFIG_EXAMPLES_POSIXSPAWN_DEVMINOR;  /* Minor device number of the ROM disk. */
+  desc.nsectors = NSECTORS(romfs_img_len);              /* The number of sectors in the ROM disk */
+  desc.sectsize = SECTORSIZE;                           /* The size of one sector in bytes */
+  desc.image    = (FAR uint8_t *)romfs_img;             /* File system image */
 
-  ret = romdisk_register(CONFIG_EXAMPLES_ELF_DEVMINOR,
-                         (FAR uint8_t *)romfs_img, NSECTORS(romfs_img_len),
-                         SECTORSIZE);
+  message("Registering romdisk at /dev/ram%d\n",
+          CONFIG_EXAMPLES_POSIXSPAWN_DEVMINOR);
+
+  ret = boardctl(BOARDIOC_ROMDISK, (uintptr_t)&desc);
+
   if (ret < 0)
     {
-      errmsg("ERROR: romdisk_register failed: %d\n", ret);
+      errmsg("ERROR: romdisk_register failed: %s\n", strerror(errno));
       exit(1);
     }
 
@@ -239,14 +209,14 @@ int main(int argc, FAR char *argv[])
   /* Mount the file system */
 
   message("Mounting ROMFS filesystem at target=%s with source=%s\n",
-         MOUNTPT, CONFIG_EXAMPLES_ELF_DEVPATH);
+          MOUNTPT, CONFIG_EXAMPLES_POSIXSPAWN_DEVPATH);
 
-  ret = mount(CONFIG_EXAMPLES_ELF_DEVPATH, MOUNTPT, "romfs",
+  ret = mount(CONFIG_EXAMPLES_POSIXSPAWN_DEVPATH, MOUNTPT, "romfs",
               MS_RDONLY, NULL);
   if (ret < 0)
     {
       errmsg("ERROR: mount(%s,%s,romfs) failed: %s\n",
-             CONFIG_EXAMPLES_ELF_DEVPATH, MOUNTPT, errno);
+             CONFIG_EXAMPLES_POSIXSPAWN_DEVPATH, MOUNTPT, strerror(errno));
     }
 
   mm_update(&g_mmstep, "after mount");
@@ -256,13 +226,13 @@ int main(int argc, FAR char *argv[])
    * the ROMFS mountpoint.
    */
 
-#if defined(CONFIG_LIB_ENVPATH) && !defined(CONFIG_PATH_INITIAL)
+#if defined(CONFIG_LIBC_ENVPATH) && !defined(CONFIG_PATH_INITIAL)
   setenv("PATH", MOUNTPT, 1);
 #endif
 
   /* Make sure that we are using our symbol tablee */
 
-  symdesc.symtab   = (FAR struct symtab_s *)g_spawn_exports; /* Discard 'const' */
+  symdesc.symtab   = g_spawn_exports;
   symdesc.nsymbols = g_spawn_nexports;
   boardctl(BOARDIOC_APP_SYMTAB, (uintptr_t)&symdesc);
 
@@ -274,7 +244,7 @@ int main(int argc, FAR char *argv[])
    * this program from the others.
    */
 
-  testheader(g_hello);
+  testheader(g_hello_argv[0]);
 
   /* Initialize the attributes file actions structure */
 
@@ -302,10 +272,10 @@ int main(int argc, FAR char *argv[])
    * search the PATH variable to find the executable.
    */
 
-#ifdef CONFIG_LIB_ENVPATH
-  filepath = g_hello;
+#ifdef CONFIG_LIBC_ENVPATH
+  filepath = g_hello_argv[0];
 #else
-  snprintf(fullpath, 128, "%s/%s", MOUNTPT, g_hello);
+  snprintf(fullpath, sizeof(fullpath), "%s/%s", MOUNTPT, g_hello_argv[0]);
   filepath = fullpath;
 #endif
 
@@ -313,8 +283,8 @@ int main(int argc, FAR char *argv[])
 
   mm_update(&g_mmstep, "before posix_spawn");
 
-  ret = posix_spawn(&pid, filepath, &file_actions, &attr, NULL,
-                    (FAR char * const *)&g_argv);
+  ret = posix_spawn(&pid, filepath, &file_actions,
+                    &attr, g_hello_argv, NULL);
   if (ret != 0)
     {
       errmsg("ERROR: posix_spawn failed: %d\n", ret);
@@ -351,7 +321,7 @@ int main(int argc, FAR char *argv[])
    * this program from the others.
    */
 
-  testheader(g_redirect);
+  testheader(g_redirect_argv[0]);
 
   /* Initialize the attributes file actions structure */
 
@@ -383,7 +353,7 @@ int main(int argc, FAR char *argv[])
 
   posix_spawn_file_actions_dump(&file_actions);
 
-  snprintf(fullpath, 128, "%s/%s", MOUNTPT, g_data);
+  snprintf(fullpath, sizeof(fullpath), "%s/%s", MOUNTPT, g_data);
   ret = posix_spawn_file_actions_addopen(&file_actions, 0, fullpath,
                                          O_RDONLY, 0644);
   if (ret != 0)
@@ -401,10 +371,10 @@ int main(int argc, FAR char *argv[])
    * search the PATH variable to find the executable.
    */
 
-#ifdef CONFIG_LIB_ENVPATH
-  filepath = g_redirect;
+#ifdef CONFIG_LIBC_ENVPATH
+  filepath = g_redirect_argv[0];
 #else
-  snprintf(fullpath, 128, "%s/%s", MOUNTPT, g_redirect);
+  snprintf(fullpath, sizeof(fullpath), "%s/%s", MOUNTPT, g_redirect_argv[0]);
   filepath = fullpath;
 #endif
 
@@ -412,7 +382,8 @@ int main(int argc, FAR char *argv[])
 
   mm_update(&g_mmstep, "before posix_spawn");
 
-  ret = posix_spawn(&pid, filepath, &file_actions, &attr, NULL, NULL);
+  ret = posix_spawn(&pid, filepath, &file_actions,
+                    &attr, g_redirect_argv, NULL);
   if (ret != 0)
     {
       errmsg("ERROR: posix_spawn failed: %d\n", ret);

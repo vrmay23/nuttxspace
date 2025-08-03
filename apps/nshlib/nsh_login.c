@@ -1,35 +1,22 @@
 /****************************************************************************
  * apps/nshlib/nsh_login.c
  *
- *   Copyright (C) 2016, 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name Gregory Nutt nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,9 +26,10 @@
 
 #include <nuttx/config.h>
 
-#include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>
+#include <termios.h>
 
 #include "fsutils/passwd.h"
 #ifdef CONFIG_NSH_CLE
@@ -52,6 +40,7 @@
 
 #include "nsh.h"
 #include "nsh_console.h"
+#include "nshlib/nshlib.h"
 
 #ifdef CONFIG_NSH_CONSOLE_LOGIN
 
@@ -139,7 +128,7 @@ static void nsh_token(FAR struct console_stdio_s *pstate,
 
   /* Copied the token into the buffer */
 
-  strncpy(buffer, start, buflen);
+  strlcpy(buffer, start, buflen);
 }
 
 /****************************************************************************
@@ -158,9 +147,20 @@ static void nsh_token(FAR struct console_stdio_s *pstate,
 int nsh_login(FAR struct console_stdio_s *pstate)
 {
   char username[16];
-  char password[16];
+  char password[128];
+#ifdef CONFIG_NSH_PLATFORM_CHALLENGE
+  char challenge[128];
+#endif
+  struct termios cfg;
   int ret;
   int i;
+
+#ifdef CONFIG_NSH_PLATFORM_SKIP_LOGIN
+  if (platform_skip_login() == OK)
+    {
+      return OK;
+    }
+#endif
 
   /* Loop for the configured number of retries */
 
@@ -169,13 +169,12 @@ int nsh_login(FAR struct console_stdio_s *pstate)
       /* Ask for the login username */
 
       username[0] = '\0';
-      fputs(g_userprompt, pstate->cn_outstream);
-      fflush(pstate->cn_outstream);
+      write(OUTFD(pstate), g_userprompt, strlen(g_userprompt));
 
       /* readline() returns EOF on failure */
 
-      ret = readline(pstate->cn_line, CONFIG_NSH_LINELEN,
-                     INSTREAM(pstate), OUTSTREAM(pstate));
+      ret = readline_fd(pstate->cn_line, LINE_MAX,
+                        INFD(pstate), OUTFD(pstate));
       if (ret != EOF)
         {
           /* Parse out the username */
@@ -183,14 +182,47 @@ int nsh_login(FAR struct console_stdio_s *pstate)
           nsh_token(pstate, username, sizeof(username));
         }
 
+      if (username[0] == '\0')
+        {
+          i--;
+          continue;
+        }
+
+#ifdef CONFIG_NSH_PLATFORM_CHALLENGE
+      platform_challenge(challenge, sizeof(challenge));
+      write(OUTFD(pstate), challenge, strlen(challenge));
+#endif
+
       /* Ask for the login password */
 
-      fputs(g_passwordprompt, pstate->cn_outstream);
-      fflush(pstate->cn_outstream);
+      write(OUTFD(pstate), g_passwordprompt, strlen(g_passwordprompt));
+
+      /* Disable ECHO if its a tty device */
+
+      if (isatty(INFD(pstate)))
+        {
+          if (tcgetattr(INFD(pstate), &cfg) == 0)
+            {
+              cfg.c_lflag &= ~ECHO;
+              tcsetattr(INFD(pstate), TCSANOW, &cfg);
+            }
+        }
 
       password[0] = '\0';
-      if (fgets(pstate->cn_line, CONFIG_NSH_LINELEN,
-                INSTREAM(pstate)) != NULL)
+      ret = readline_fd(pstate->cn_line, LINE_MAX, INFD(pstate), -1);
+
+      /* Enable echo again after password */
+
+      if (isatty(INFD(pstate)))
+        {
+          if (tcgetattr(INFD(pstate), &cfg) == 0)
+            {
+              cfg.c_lflag |= ECHO;
+              tcsetattr(INFD(pstate), TCSANOW, &cfg);
+            }
+        }
+
+      if (ret > 0)
         {
           /* Parse out the password */
 
@@ -203,7 +235,11 @@ int nsh_login(FAR struct console_stdio_s *pstate)
           if (PASSWORD_VERIFY_MATCH(ret))
 
 #elif defined(CONFIG_NSH_LOGIN_PLATFORM)
+#ifdef CONFIG_NSH_PLATFORM_CHALLENGE
+          ret = platform_user_verify(username, challenge, password);
+#else
           ret = platform_user_verify(username, password);
+#endif
           if (PASSWORD_VERIFY_MATCH(ret))
 
 #elif defined(CONFIG_NSH_LOGIN_FIXED)
@@ -213,14 +249,13 @@ int nsh_login(FAR struct console_stdio_s *pstate)
 #  error No user verification method selected
 #endif
             {
-              fputs(g_loginsuccess, pstate->cn_outstream);
-              fflush(pstate->cn_outstream);
+              write(OUTFD(pstate), g_loginsuccess, strlen(g_loginsuccess));
               return OK;
             }
           else
             {
-              fputs(g_badcredentials, pstate->cn_outstream);
-              fflush(pstate->cn_outstream);
+              write(OUTFD(pstate), g_badcredentials,
+                    strlen(g_badcredentials));
 #if CONFIG_NSH_LOGIN_FAILDELAY > 0
               usleep(CONFIG_NSH_LOGIN_FAILDELAY * 1000L);
 #endif
@@ -230,8 +265,7 @@ int nsh_login(FAR struct console_stdio_s *pstate)
 
   /* Too many failed login attempts */
 
-  fputs(g_loginfailure, pstate->cn_outstream);
-  fflush(pstate->cn_outstream);
+  write(OUTFD(pstate), g_loginfailure, strlen(g_loginfailure));
   return -1;
 }
 

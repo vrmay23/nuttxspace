@@ -1,36 +1,22 @@
 /****************************************************************************
  * arch/arm/src/tiva/common/tiva_serial.c
  *
- *   Copyright (C) 2009-2010, 2012-2014, 2017-2018 Gregory Nutt. All rights
- *     reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -45,6 +31,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -56,9 +43,7 @@
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "up_arch.h"
-#include "up_internal.h"
-
+#include "arm_internal.h"
 #include "tiva_lowputc.h"
 
 /****************************************************************************
@@ -81,8 +66,8 @@
 #  error "No UARTs enabled"
 #endif
 
-/* Which UART with be tty0/console and which tty1-7?  The console will always
- * be ttyS0.  If there is no console then will use the lowest numbered UART.
+/* Which UART will be tty0/console and which tty1-7?  The console will always
+ * be ttyS0.  If there is no console then we'll use the lowest numbered UART.
  */
 
 /* First pick the console and ttys0.  This could be any of UART0-5 */
@@ -140,10 +125,10 @@
 #    define TTYS0_DEV           g_uart5port /* UART5 is ttyS0 */
 #    define UART5_ASSIGNED      1
 #  elif defined(CONFIG_TIVA_UART6)
-#    define TTYS0_DEV           g_uart6port /* UART5 is ttyS0 */
+#    define TTYS0_DEV           g_uart6port /* UART6 is ttyS0 */
 #    define UART6_ASSIGNED      1
 #  elif defined(CONFIG_TIVA_UART7)
-#    define TTYS0_DEV           g_uart7port /* UART5 is ttyS0 */
+#    define TTYS0_DEV           g_uart7port /* UART7 is ttyS0 */
 #    define UART7_ASSIGNED      1
 #  endif
 #endif
@@ -287,8 +272,8 @@
 #endif
 
 /* Pick ttys7. This could be one of UART6-7. It can't be UART0-5 because
- * those have already been assigned to ttsyS0, 1, 2, 3, 4, or 6.  One of
- * UART 6-7 could also be the console.
+ * those have already been assigned to ttsyS0, 1, 2, 3, 4, 5, or 6.  One
+ * of UART 6-7 could also be the console.
  */
 
 #if defined(CONFIG_TIVA_UART6) && !defined(UART6_ASSIGNED)
@@ -312,6 +297,15 @@ struct up_dev_s
   uint8_t  parity;    /* 0=none, 1=odd, 2=even */
   uint8_t  bits;      /* Number of bits (7 or 8) */
   bool     stopbits2; /* true: Configure with 2 stop bits instead of 1 */
+#ifdef CONFIG_SERIAL_IFLOWCONTROL
+  bool     iflow;     /* input flow control (RTS) enabled */
+#endif
+#ifdef CONFIG_SERIAL_OFLOWCONTROL
+  bool     oflow;     /* output flow control (CTS) enabled */
+#endif
+#ifdef CONFIG_TIVA_UART_BREAKS
+  bool     brk;       /* true: Line break in progress */
+#endif
 };
 
 /****************************************************************************
@@ -324,7 +318,7 @@ static int  up_attach(struct uart_dev_s *dev);
 static void up_detach(struct uart_dev_s *dev);
 static int  up_interrupt(int irq, void *context, void *arg);
 static int  up_ioctl(struct file *filep, int cmd, unsigned long arg);
-static int  up_receive(struct uart_dev_s *dev, uint32_t *status);
+static int  up_receive(struct uart_dev_s *dev, unsigned int *status);
 static void up_rxint(struct uart_dev_s *dev, bool enable);
 static bool up_rxavailable(struct uart_dev_s *dev);
 static void up_send(struct uart_dev_s *dev, int ch);
@@ -401,6 +395,12 @@ static struct up_dev_s g_uart0priv =
   .parity         = CONFIG_UART0_PARITY,
   .bits           = CONFIG_UART0_BITS,
   .stopbits2      = CONFIG_UART0_2STOP,
+#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART0_IFLOWCONTROL)
+  .iflow          = true,
+#endif
+#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART0_OFLOWCONTROL)
+  .oflow          = true,
+#endif
 };
 
 static uart_dev_t g_uart0port =
@@ -431,22 +431,28 @@ static struct up_dev_s g_uart1priv =
   .parity         = CONFIG_UART1_PARITY,
   .bits           = CONFIG_UART1_BITS,
   .stopbits2      = CONFIG_UART1_2STOP,
+#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART1_IFLOWCONTROL)
+  .iflow          = true,
+#endif
+#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART1_OFLOWCONTROL)
+  .oflow          = true,
+#endif
 };
 
 static uart_dev_t g_uart1port =
 {
-  .recv     =
-  {
-    .size   = CONFIG_UART1_RXBUFSIZE,
-    .buffer = g_uart1rxbuffer,
-  },
-  .xmit     =
-  {
-    .size   = CONFIG_UART1_TXBUFSIZE,
-    .buffer = g_uart1txbuffer,
-   },
-  .ops      = &g_uart_ops,
-  .priv     = &g_uart1priv,
+  .recv       =
+    {
+      .size   = CONFIG_UART1_RXBUFSIZE,
+      .buffer = g_uart1rxbuffer,
+    },
+  .xmit       =
+    {
+      .size   = CONFIG_UART1_TXBUFSIZE,
+      .buffer = g_uart1txbuffer,
+    },
+  .ops        = &g_uart_ops,
+  .priv       = &g_uart1priv,
 };
 #endif
 
@@ -461,22 +467,28 @@ static struct up_dev_s g_uart2priv =
   .parity         = CONFIG_UART2_PARITY,
   .bits           = CONFIG_UART2_BITS,
   .stopbits2      = CONFIG_UART2_2STOP,
+#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART2_IFLOWCONTROL)
+  .iflow          = true,
+#endif
+#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART2_OFLOWCONTROL)
+  .oflow          = true,
+#endif
 };
 
 static uart_dev_t g_uart2port =
 {
-  .recv     =
-  {
-    .size   = CONFIG_UART2_RXBUFSIZE,
-    .buffer = g_uart2rxbuffer,
-  },
-  .xmit     =
-  {
-    .size   = CONFIG_UART2_TXBUFSIZE,
-    .buffer = g_uart2txbuffer,
-   },
-  .ops      = &g_uart_ops,
-  .priv     = &g_uart2priv,
+  .recv       =
+    {
+      .size   = CONFIG_UART2_RXBUFSIZE,
+      .buffer = g_uart2rxbuffer,
+    },
+  .xmit       =
+    {
+      .size   = CONFIG_UART2_TXBUFSIZE,
+      .buffer = g_uart2txbuffer,
+    },
+  .ops        = &g_uart_ops,
+  .priv       = &g_uart2priv,
 };
 #endif
 
@@ -491,22 +503,28 @@ static struct up_dev_s g_uart3priv =
   .parity         = CONFIG_UART3_PARITY,
   .bits           = CONFIG_UART3_BITS,
   .stopbits2      = CONFIG_UART3_2STOP,
+#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART3_IFLOWCONTROL)
+  .iflow          = true,
+#endif
+#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART3_OFLOWCONTROL)
+  .oflow          = true,
+#endif
 };
 
 static uart_dev_t g_uart3port =
 {
-  .recv     =
-  {
-    .size   = CONFIG_UART3_RXBUFSIZE,
-    .buffer = g_uart3rxbuffer,
-  },
-  .xmit     =
-  {
-    .size   = CONFIG_UART3_TXBUFSIZE,
-    .buffer = g_uart3txbuffer,
-  },
-  .ops      = &g_uart_ops,
-  .priv     = &g_uart3priv,
+  .recv       =
+    {
+      .size   = CONFIG_UART3_RXBUFSIZE,
+      .buffer = g_uart3rxbuffer,
+    },
+  .xmit       =
+    {
+      .size   = CONFIG_UART3_TXBUFSIZE,
+      .buffer = g_uart3txbuffer,
+    },
+  .ops        = &g_uart_ops,
+  .priv       = &g_uart3priv,
 };
 #endif
 
@@ -521,6 +539,12 @@ static struct up_dev_s g_uart4priv =
   .parity         = CONFIG_UART4_PARITY,
   .bits           = CONFIG_UART4_BITS,
   .stopbits2      = CONFIG_UART4_2STOP,
+#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART4_IFLOWCONTROL)
+  .iflow          = true,
+#endif
+#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART4_OFLOWCONTROL)
+  .oflow          = true,
+#endif
 };
 
 static uart_dev_t g_uart4port =
@@ -551,22 +575,28 @@ static struct up_dev_s g_uart5priv =
   .parity         = CONFIG_UART5_PARITY,
   .bits           = CONFIG_UART5_BITS,
   .stopbits2      = CONFIG_UART5_2STOP,
+#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART5_IFLOWCONTROL)
+  .iflow          = true,
+#endif
+#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART5_OFLOWCONTROL)
+  .oflow          = true,
+#endif
 };
 
 static uart_dev_t g_uart5port =
 {
-  .recv     =
-  {
-    .size   = CONFIG_UART5_RXBUFSIZE,
-    .buffer = g_uart5rxbuffer,
-  },
-  .xmit     =
-  {
-    .size   = CONFIG_UART5_TXBUFSIZE,
-    .buffer = g_uart5txbuffer,
-  },
-  .ops      = &g_uart_ops,
-  .priv     = &g_uart5priv,
+  .recv       =
+    {
+      .size   = CONFIG_UART5_RXBUFSIZE,
+      .buffer = g_uart5rxbuffer,
+    },
+  .xmit       =
+    {
+      .size   = CONFIG_UART5_TXBUFSIZE,
+      .buffer = g_uart5txbuffer,
+    },
+  .ops        = &g_uart_ops,
+  .priv       = &g_uart5priv,
 };
 #endif
 
@@ -581,22 +611,28 @@ static struct up_dev_s g_uart6priv =
   .parity         = CONFIG_UART6_PARITY,
   .bits           = CONFIG_UART6_BITS,
   .stopbits2      = CONFIG_UART6_2STOP,
+#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART6_IFLOWCONTROL)
+  .iflow          = true,
+#endif
+#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART6_OFLOWCONTROL)
+  .oflow          = true,
+#endif
 };
 
 static uart_dev_t g_uart6port =
 {
-  .recv     =
-  {
-    .size   = CONFIG_UART6_RXBUFSIZE,
-    .buffer = g_uart6rxbuffer,
-  },
-  .xmit     =
-  {
-    .size   = CONFIG_UART6_TXBUFSIZE,
-    .buffer = g_uart6txbuffer,
-  },
-  .ops      = &g_uart_ops,
-  .priv     = &g_uart6priv,
+  .recv       =
+    {
+      .size   = CONFIG_UART6_RXBUFSIZE,
+      .buffer = g_uart6rxbuffer,
+    },
+  .xmit       =
+    {
+      .size   = CONFIG_UART6_TXBUFSIZE,
+      .buffer = g_uart6txbuffer,
+    },
+  .ops        = &g_uart_ops,
+  .priv       = &g_uart6priv,
 };
 #endif
 
@@ -611,22 +647,28 @@ static struct up_dev_s g_uart7priv =
   .parity         = CONFIG_UART7_PARITY,
   .bits           = CONFIG_UART7_BITS,
   .stopbits2      = CONFIG_UART7_2STOP,
+#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART7_IFLOWCONTROL)
+  .iflow          = true,
+#endif
+#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART7_OFLOWCONTROL)
+  .oflow          = true,
+#endif
 };
 
 static uart_dev_t g_uart7port =
 {
-  .recv     =
-  {
-    .size   = CONFIG_UART7_RXBUFSIZE,
-    .buffer = g_uart7rxbuffer,
-  },
-  .xmit     =
-  {
-    .size   = CONFIG_UART7_TXBUFSIZE,
-    .buffer = g_uart7txbuffer,
-  },
-  .ops      = &g_uart_ops,
-  .priv     = &g_uart7priv,
+  .recv       =
+    {
+      .size   = CONFIG_UART7_RXBUFSIZE,
+      .buffer = g_uart7rxbuffer,
+    },
+  .xmit       =
+    {
+      .size   = CONFIG_UART7_TXBUFSIZE,
+      .buffer = g_uart7txbuffer,
+    },
+  .ops        = &g_uart_ops,
+  .priv       = &g_uart7priv,
 };
 #endif
 
@@ -647,7 +689,8 @@ static inline uint32_t up_serialin(struct up_dev_s *priv, int offset)
  * Name: up_serialout
  ****************************************************************************/
 
-static inline void up_serialout(struct up_dev_s *priv, int offset, uint32_t value)
+static inline void up_serialout(struct up_dev_s *priv, int offset,
+                                uint32_t value)
 {
   putreg32(value, priv->uartbase + offset);
 }
@@ -749,36 +792,37 @@ static void up_set_format(struct uart_dev_s *dev)
    * "The baud-rate divisor is a 22-bit number consisting of a 16-bit integer
    *  and a 6-bit fractional part. The number formed by these two values is
    *  used by the baud-rate generator to determine the bit period. Having a
-   *  fractional baud-rate divider allows the UART to generate all the standard
-   *  baud rates.
+   *  fractional baud-rate divider allows the UART to generate all the
+   *  standard baud rates.
    *
    * "The 16-bit integer is loaded through the UART Integer Baud-Rate Divisor
-   *  (UARTIBRD) register ... and the 6-bit fractional part is loaded with the
-   *  UART Fractional Baud-Rate Divisor (UARTFBRD) register... The baud-rate
-   *  divisor (BRD) has the following relationship to the system clock (where
-   *  BRDI is the integer part of the BRD and BRDF is the fractional part,
-   *  separated by a decimal place.):
+   *  (UARTIBRD) register ... and the 6-bit fractional part is loaded with
+   *  the UART Fractional Baud-Rate Divisor (UARTFBRD) register... The
+   *  baud-rate divisor (BRD) has the following relationship to the system
+   *  clock (where BRDI is the integer part of the BRD and BRDF is the
+   *  fractional part, separated by a decimal place.):
    *
    *    "BRD = BRDI + BRDF = UARTSysClk / (16 * Baud Rate)
    *
    * "where UARTSysClk is the system clock connected to the UART. The 6-bit
-   *  fractional number (that is to be loaded into the DIVFRAC bit field in the
-   *  UARTFBRD register) can be calculated by taking the fractional part of the
-   *  baud-rate divisor, multiplying it by 64, and adding 0.5 to account for
-   *  rounding errors:
+   *  fractional number (that is to be loaded into the DIVFRAC bit field in
+   *  the UARTFBRD register) can be calculated by taking the fractional part
+   *  of the baud-rate divisor, multiplying it by 64, and adding 0.5 to
+   *  account for rounding errors:
    *
    *    "UARTFBRD[DIVFRAC] = integer(BRDF * 64 + 0.5)
    *
-   * "The UART generates an internal baud-rate reference clock at 16x the baud-
-   *  rate (referred to as Baud16). This reference clock is divided by 16 to
-   *  generate the transmit clock, and is used for error detection during receive
-   *  operations.
+   * "The UART generates an internal baud-rate reference clock at 16x the
+   *  baud-rate (referred to as Baud16). This reference clock is divided by
+   *  16 to generate the transmit clock, and is used for error detection
+   *  during receive operations.
    *
-   * "Along with the UART Line Control, High Byte (UARTLCRH) register ..., the
-   *  UARTIBRD and UARTFBRD registers form an internal 30-bit register. This
-   *  internal register is only updated when a write operation to UARTLCRH is
-   *  performed, so any changes to the baud-rate divisor must be followed by a
-   *  write to the UARTLCRH register for the changes to take effect. ..."
+   * "Along with the UART Line Control, High Byte (UARTLCRH) register ...,
+   *  the UARTIBRD and UARTFBRD registers form an internal 30-bit register.
+   *  This internal register is only updated when a write operation to
+   *  UARTLCRH is performed, so any changes to the baud-rate divisor must be
+   *  followed by a write to the UARTLCRH register for the changes to take
+   *  effect. ..."
    */
 
   den       = priv->baud << 4;
@@ -805,8 +849,8 @@ static void up_set_format(struct uart_dev_s *dev)
       case 7:
           lcrh |= UART_LCRH_WLEN_7BITS;
           break;
-      case 8:
 
+      case 8:
       default:
           lcrh |= UART_LCRH_WLEN_8BITS;
           break;
@@ -832,12 +876,36 @@ static void up_set_format(struct uart_dev_s *dev)
 
   up_serialout(priv, TIVA_UART_LCRH_OFFSET, lcrh);
 
+  /* Enable or disable CTS/RTS, if applicable */
+
+#if defined(CONFIG_SERIAL_IFLOWCONTROL)
+  if (priv->iflow)
+    {
+      ctl |= UART_CTL_RTSEN;
+    }
+  else
+    {
+      ctl &= ~UART_CTL_RTSEN;
+    }
+#endif
+
+#if defined(CONFIG_SERIAL_OFLOWCONTROL)
+  if (priv->oflow)
+    {
+      ctl |= UART_CTL_CTSEN;
+    }
+  else
+    {
+      ctl &= ~UART_CTL_CTSEN;
+    }
+#endif
+
   if (was_active)
     {
-      ctl  = up_serialin(priv, TIVA_UART_CTL_OFFSET);
       ctl |= UART_CTL_UARTEN;
-      up_serialout(priv, TIVA_UART_CTL_OFFSET, ctl);
     }
+
+  up_serialout(priv, TIVA_UART_CTL_OFFSET, ctl);
 }
 
 /****************************************************************************
@@ -865,14 +933,15 @@ static int up_setup(struct uart_dev_s *dev)
    */
 
   up_serialout(priv, TIVA_UART_IFLS_OFFSET,
-               UART_IFLS_TXIFLSEL_18th | UART_IFLS_RXIFLSEL_18th);
+               UART_IFLS_TXIFLSEL_18TH | UART_IFLS_RXIFLSEL_18TH);
 
   /* Flush the Rx and Tx FIFOs -- How do you do that? */
 
-  /* Enable Rx interrupts from the UART except for Tx interrupts.  We don't want
-   * Tx interrupts until we have something to send.  We will check for serial
-   * errors as part of Rx interrupt processing (no interrupts will be received
-   * yet because the interrupt is still disabled at the interrupt controller.
+  /* Enable Rx interrupts from the UART except for Tx interrupts.  We don't
+   * want TX interrupts until we have something to send.  We will check for
+   * serial errors as part of Rx interrupt processing (no interrupts will be
+   * received yet because the interrupt is still disabled at the interrupt
+   * controller.
    */
 
   up_serialout(priv, TIVA_UART_IM_OFFSET, UART_IM_RXIM | UART_IM_RTIM);
@@ -887,6 +956,7 @@ static int up_setup(struct uart_dev_s *dev)
 
   ctl = up_serialin(priv, TIVA_UART_CTL_OFFSET);
   ctl |= (UART_CTL_UARTEN | UART_CTL_TXE | UART_CTL_RXE);
+
   up_serialout(priv, TIVA_UART_CTL_OFFSET, ctl);
 
   /* Set up the cache IM value */
@@ -919,9 +989,10 @@ static void up_shutdown(struct uart_dev_s *dev)
  *   the setup() method is called, however, the serial console may operate in
  *   a non-interrupt driven mode during the boot phase.
  *
- *   RX and TX interrupts are not enabled when by the attach method (unless the
- *   hardware supports multiple levels of interrupt enabling).  The RX and TX
- *   interrupts are not enabled until the txint() and rxint() methods are called.
+ *   RX and TX interrupts are not enabled when by the attach method (unless
+ *   the hardware supports multiple levels of interrupt enabling).  The RX
+ *   and TX interrupts are not enabled until the txint() and rxint() methods
+ *   are called.
  *
  ****************************************************************************/
 
@@ -950,8 +1021,8 @@ static int up_attach(struct uart_dev_s *dev)
  *
  * Description:
  *   Detach UART interrupts.  This method is called when the serial port is
- *   closed normally just before the shutdown method is called.  The exception is
- *   the serial console which is never shutdown.
+ *   closed normally just before the shutdown method is called.  The
+ *   exception is the serial console which is never shutdown.
  *
  ****************************************************************************/
 
@@ -966,12 +1037,11 @@ static void up_detach(struct uart_dev_s *dev)
  * Name: up_interrupt
  *
  * Description:
- *   This is the UART interrupt handler.  It will be invoked
- *   when an interrupt received on the 'irq'  It should call
- *   uart_transmitchars or uart_receivechar to perform the
- *   appropriate data transfers.  The interrupt handling logic
- *   must be able to map the 'irq' number into the appropriate
- *   uart_dev_s structure in order to call these functions.
+ *   This is the UART interrupt handler.  It will be invoked when an
+ *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
+ *   uart_recvchars to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'arg' to the
+ *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
 
@@ -1034,14 +1104,15 @@ static int up_interrupt(int irq, void *context, void *arg)
 
 static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
 {
-#if defined(CONFIG_SERIAL_TIOCSERGSTRUCT) || defined(CONFIG_SERIAL_TERMIOS)
+#if defined(CONFIG_SERIAL_TIOCSERGSTRUCT) || defined(CONFIG_SERIAL_TERMIOS) \
+    || defined(CONFIG_TIVA_UART_BREAKS)
   struct inode      *inode = filep->f_inode;
   struct uart_dev_s *dev   = inode->i_private;
 #endif
-#if defined(CONFIG_SERIAL_TERMIOS)
+#if defined(CONFIG_SERIAL_TERMIOS) || defined(CONFIG_TIVA_UART_BREAKS)
   struct up_dev_s   *priv  = (struct up_dev_s *)dev->priv;
 #endif
-  int                ret    = OK;
+  int                ret   = OK;
 
   switch (cmd)
     {
@@ -1073,8 +1144,6 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
             break;
           }
 
-        cfsetispeed(termiosp, priv->baud);
-
         if (priv->bits >= 5 && priv->bits <= 8)
           {
             ccflag |= (CS5 + (priv->bits - 5));
@@ -1094,11 +1163,27 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
             ccflag |= PARENB | PARODD;
           }
 
-        /* TODO append support for HUPCL, CLOCAL and flow control bits
-         * as well as os-compliant break sequence
+#ifdef CONFIG_SERIAL_OFLOWCONTROL
+        if (priv->oflow)
+          {
+            ccflag |= CCTS_OFLOW;
+          }
+#endif
+
+#ifdef CONFIG_SERIAL_IFLOWCONTROL
+        if (priv->iflow)
+          {
+            ccflag |= CRTS_IFLOW;
+          }
+#endif
+
+        /* TODO append support for HUPCL and CLOCAL as well as os-compliant
+         * break sequence
          */
 
         termiosp->c_cflag = ccflag;
+
+        cfsetispeed(termiosp, priv->baud);
       }
       break;
 
@@ -1114,15 +1199,25 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
 
         /* Perform some sanity checks before accepting any changes */
 
-        if (termiosp->c_cflag & CRTSCTS)
+#ifndef CONFIG_SERIAL_OFLOWCONTROL
+        if (termiosp->c_cflag & CCTS_OFLOW)
           {
-            /* We don't support for flow control right now, so we report an
-             * error
-             */
+            /* CTS not supported in this build, so report error */
 
             ret = -EINVAL;
             break;
           }
+#endif /* !CONFIG_SERIAL_OFLOWCONTROL */
+
+#ifndef CONFIG_SERIAL_IFLOWCONTROL
+        if (termiosp->c_cflag & CRTS_IFLOW)
+          {
+            /* RTS not supported in this build, so report error */
+
+            ret = -EINVAL;
+            break;
+          }
+#endif /* !CONFIG_SERIAL_IFLOWCONTROL */
 
         if (termiosp->c_cflag & PARENB)
           {
@@ -1137,6 +1232,13 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
         priv->bits      = (termiosp->c_cflag & CSIZE) + 5;
         priv->baud      = cfgetispeed(termiosp);
 
+#ifdef CONFIG_SERIAL_OFLOWCONTROL
+        priv->oflow = (termiosp->c_cflag & CCTS_OFLOW) != 0;
+#endif
+#ifdef CONFIG_SERIAL_IFLOWCONTROL
+        priv->iflow = (termiosp->c_cflag & CRTS_IFLOW) != 0;
+#endif
+
         /* Effect the changes immediately - note that we do not implement
          * TCSADRAIN / TCSAFLUSH
          */
@@ -1145,6 +1247,52 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
       }
       break;
 #endif /* CONFIG_SERIAL_TERMIOS */
+
+#ifdef CONFIG_TIVA_UART_BREAKS
+    case TIOCSBRK:  /* BSD compatibility: Turn break on, unconditionally */
+      {
+        irqstate_t flags;
+        uint32_t tx_break;
+
+        flags = enter_critical_section();
+
+        /* Disable any further tx activity */
+
+        priv->brk = true;
+        up_txint(dev, false);
+
+        /* Send a break signal */
+
+        tx_break = up_serialin(priv, TIVA_UART_LCRH_OFFSET);
+        tx_break |= UART_LCRH_BRK;
+        up_serialout(priv, TIVA_UART_LCRH_OFFSET, tx_break);
+
+        leave_critical_section(flags);
+      }
+      break;
+
+    case TIOCCBRK:  /* BSD compatibility: Turn break off, unconditionally */
+      {
+        irqstate_t flags;
+        uint32_t tx_break;
+
+        flags = enter_critical_section();
+
+        /* Stop sending the break signal */
+
+        tx_break = up_serialin(priv, TIVA_UART_LCRH_OFFSET);
+        tx_break &= ~UART_LCRH_BRK;
+        up_serialout(priv, TIVA_UART_LCRH_OFFSET, tx_break);
+
+        /* Enable further tx activity */
+
+        priv->brk = false;
+        up_txint(dev, true);
+
+        leave_critical_section(flags);
+      }
+      break;
+#endif /* CONFIG_TIVA_UART_BREAKS */
 
     default:
       ret = -ENOTTY;
@@ -1164,7 +1312,7 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int up_receive(struct uart_dev_s *dev, uint32_t *status)
+static int up_receive(struct uart_dev_s *dev, unsigned int *status)
 {
   struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
   uint32_t rxd;
@@ -1204,6 +1352,7 @@ static void up_rxint(struct uart_dev_s *dev, bool enable)
     {
       priv->im &= ~(UART_IM_RXIM | UART_IM_RTIM);
     }
+
   up_serialout(priv, TIVA_UART_IM_OFFSET, priv->im);
 }
 
@@ -1254,6 +1403,16 @@ static void up_txint(struct uart_dev_s *dev, bool enable)
       /* Set to receive an interrupt when the TX fifo is half emptied */
 
 #ifndef CONFIG_SUPPRESS_SERIAL_INTS
+#  ifdef CONFIG_TIVA_UART_BREAKS
+      /* Do not enable TX interrupt if line break in progress */
+
+      if (priv->brk)
+        {
+          leave_critical_section(flags);
+          return;
+        }
+#  endif
+
       priv->im |= UART_IM_TXIM;
       up_serialout(priv, TIVA_UART_IM_OFFSET, priv->im);
 
@@ -1277,6 +1436,7 @@ static void up_txint(struct uart_dev_s *dev, bool enable)
       priv->im &= ~UART_IM_TXIM;
       up_serialout(priv, TIVA_UART_IM_OFFSET, priv->im);
     }
+
   leave_critical_section(flags);
 }
 
@@ -1313,17 +1473,17 @@ static bool up_txempty(struct uart_dev_s *dev)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: up_earlyserialinit
+ * Name: arm_earlyserialinit
  *
  * Description:
  *   Performs the low level UART initialization early in
  *   debug so that the serial console will be available
- *   during bootup.  This must be called before up_serialinit.
+ *   during boot up.  This must be called before arm_serialinit.
  *
  ****************************************************************************/
 
 #ifdef USE_EARLYSERIALINIT
-void up_earlyserialinit(void)
+void arm_earlyserialinit(void)
 {
   /* NOTE:  All GPIO configuration for the UARTs was performed in
    * tiva_lowsetup
@@ -1364,15 +1524,15 @@ void up_earlyserialinit(void)
 #endif /* !USE_EARLYSERIALINIT */
 
 /****************************************************************************
- * Name: up_serialinit
+ * Name: arm_serialinit
  *
  * Description:
  *   Register serial console and serial ports.  This assumes
- *   that up_earlyserialinit was called previously.
+ *   that arm_earlyserialinit was called previously.
  *
  ****************************************************************************/
 
-void up_serialinit(void)
+void arm_serialinit(void)
 {
   /* Register the console */
 
@@ -1414,7 +1574,7 @@ void up_serialinit(void)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
   struct up_dev_s *priv = (struct up_dev_s *)CONSOLE_DEV.priv;
@@ -1422,23 +1582,12 @@ int up_putc(int ch)
 
   up_disableuartint(priv, &im);
 
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      up_waittxnotfull(priv);
-      up_serialout(priv, TIVA_UART_DR_OFFSET, (uint32_t)'\r');
-    }
-
   up_waittxnotfull(priv);
   up_serialout(priv, TIVA_UART_DR_OFFSET, (uint32_t)ch);
 
   up_waittxnotfull(priv);
   up_restoreuartint(priv, im);
 #endif
-  return ch;
 }
 
 #else /* USE_SERIALDRIVER */
@@ -1451,21 +1600,11 @@ int up_putc(int ch)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      up_lowputc('\r');
-    }
-
-  up_lowputc(ch);
+  arm_lowputc(ch);
 #endif
-  return ch;
 }
 
 #endif /* USE_SERIALDRIVER */

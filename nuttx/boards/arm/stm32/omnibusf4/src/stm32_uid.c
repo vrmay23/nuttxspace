@@ -1,8 +1,9 @@
 /****************************************************************************
  * boards/arm/stm32/omnibusf4/src/stm32_uid.c
  *
- *   Copyright (C) 2015 Marawan Ragab. All rights reserved.
- *   Author: Marawan Ragab <marawan31@gmail.com>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2015 Marawan Ragab. All rights reserved.
+ * SPDX-FileContributor: Marawan Ragab <marawan31@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,6 +40,7 @@
 
 #include <nuttx/config.h>
 
+#include <sys/types.h>
 #include <errno.h>
 #include "stm32_uid.h"
 
@@ -48,10 +50,6 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifndef OK
-#  define OK 0
-#endif
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -59,7 +57,7 @@
 #if defined(CONFIG_BOARDCTL_UNIQUEID)
 int board_uniqueid(uint8_t *uniqueid)
 {
-  if (uniqueid == 0)
+  if (uniqueid == NULL)
     {
       return -EINVAL;
     }

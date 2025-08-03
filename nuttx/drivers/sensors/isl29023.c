@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/sensors/isl29023.c
  *
- *   Copyright (C) 2019 DataVision s.r.o. All rights reserved.
- *   Authors: Matous Pokorny <matous.pokorny@datavision.cz>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,6 +30,7 @@
 #include <debug.h>
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include <nuttx/fs/fs.h>
 #include <nuttx/i2c/i2c_master.h>
@@ -56,10 +44,6 @@
 /****************************************************************************
  * Pre-Processor Definitions
  ****************************************************************************/
-
-#ifndef CONFIG_ISL29023_I2C_FREQUENCY
-#  define CONFIG_ISL29023_I2C_FREQUENCY 400000
-#endif
 
 /* Registers definitions */
 
@@ -93,8 +77,8 @@ struct isl29023_dev_s
   FAR struct i2c_master_s *i2c;
   uint8_t addr;                   /* Address on the I2C bus */
   uint8_t op_mode;                /* Defined by isl29023_operational_mode_e */
-  uint32_t resolution;            /* Sensor ADC res. 16..65536 */
-  uint32_t range;                 /* Sensor range 1000..64000 */
+  uint32_t resolution;            /* Sensor ADC res in counts (16..65536) */
+  uint32_t range;                 /* Sensor range (1000..64000) */
 };
 
 /****************************************************************************
@@ -111,7 +95,8 @@ static int isl29023_read_reg(FAR struct isl29023_dev_s *dev,
                       const uint8_t regaddr, uint8_t *buffer, size_t buflen);
 static int isl29023_read_lux(FAR struct isl29023_dev_s *dev,
                               FAR struct isl29023_data_s *data);
-static int isl29023_set_op_mode(FAR struct isl29023_dev_s *dev, uint8_t mode);
+static int isl29023_set_op_mode(FAR struct isl29023_dev_s *dev,
+                                uint8_t mode);
 static int isl29023_set_resolution(FAR struct isl29023_dev_s *dev,
                                     uint8_t res_mode);
 static int isl29023_set_range(FAR struct isl29023_dev_s *dev,
@@ -119,13 +104,13 @@ static int isl29023_set_range(FAR struct isl29023_dev_s *dev,
 
 /* Driver methods */
 
-static int isl29023_open(FAR struct file *filep);
-static int isl29023_close(FAR struct file *filep);
 static ssize_t isl29023_read(FAR struct file *filep, FAR char *buffer,
                              size_t buflen);
-static ssize_t isl29023_write(FAR struct file *filep, FAR const char *buffer,
+static ssize_t isl29023_write(FAR struct file *filep,
+                              FAR const char *buffer,
                               size_t buflen);
-static int isl29023_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
+static int isl29023_ioctl(FAR struct file *filep, int cmd,
+                          unsigned long arg);
 
 /****************************************************************************
  * Private Data
@@ -133,13 +118,12 @@ static int isl29023_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
 
 static const struct file_operations g_isl29023fops =
 {
-  isl29023_open,   /* open */
-  isl29023_close,  /* close */
+  NULL,            /* open */
+  NULL,            /* close */
   isl29023_read,   /* read */
   isl29023_write,  /* write */
   NULL,            /* seek */
   isl29023_ioctl,  /* ioctl */
-  NULL             /* poll */
 };
 
 /****************************************************************************
@@ -190,7 +174,7 @@ static int isl29023_i2c_read(FAR struct isl29023_dev_s *dev,
 
   /* Setup for the transfer */
 
-  msg.frequency = CONFIG_LM75_I2C_FREQUENCY,
+  msg.frequency = CONFIG_ISL29023_I2C_FREQUENCY,
   msg.addr      = dev->addr,
   msg.flags     = I2C_M_READ;
   msg.buffer    = buffer;
@@ -211,7 +195,8 @@ static int isl29023_i2c_read(FAR struct isl29023_dev_s *dev,
  ****************************************************************************/
 
 static int isl29023_read_reg(FAR struct isl29023_dev_s *dev,
-                        const uint8_t regaddr, uint8_t *buffer, size_t buflen)
+                             const uint8_t regaddr, uint8_t *buffer,
+                             size_t buflen)
 {
   int ret;
 
@@ -230,32 +215,6 @@ static int isl29023_read_reg(FAR struct isl29023_dev_s *dev,
     }
 
   return ret;
-}
-
-/****************************************************************************
- * Name: isl29023_open
- *
- * Description:
- *   This function is called whenever the ISL29023 device is opened.
- *
- ****************************************************************************/
-
-static int isl29023_open(FAR struct file *filep)
-{
-  return OK;
-}
-
-/****************************************************************************
- * Name: isl29023_close
- *
- * Description:
- *   This routine is called when the ISL29023 device is closed.
- *
- ****************************************************************************/
-
-static int isl29023_close(FAR struct file *filep)
-{
-  return OK;
 }
 
 /****************************************************************************
@@ -354,7 +313,7 @@ static int isl29023_set_op_mode(FAR struct isl29023_dev_s *dev, uint8_t mode)
   buffer[0] = ISL29023_COMMAND_1;
 
   dev->op_mode = mode;
-  sninfo("mode: %x\n", dev->mode);
+  sninfo("mode: %x\n", dev->op_mode);
 
   return isl29023_i2c_write(dev, buffer, 2);
 }
@@ -387,7 +346,7 @@ static int isl29023_set_resolution(FAR struct isl29023_dev_s *dev,
   buffer[0] = ISL29023_COMMAND_2;
 
   dev->resolution = 1u << (16u - res_mode * 4u);
-  sninfo("resolution: %d\n", dev->resolution);
+  sninfo("resolution: %" PRIu32 "\n", dev->resolution);
 
   return isl29023_i2c_write(dev, buffer, 2);
 }
@@ -420,7 +379,7 @@ static int isl29023_set_range(FAR struct isl29023_dev_s *dev,
   buffer[0] = ISL29023_COMMAND_2;
 
   dev->range = 1000u * (1u << range_mode) * (1u << range_mode);
-  sninfo("range: %u\n", dev->range);
+  sninfo("range: %" PRIu32 "\n", dev->range);
 
   return isl29023_i2c_write(dev, buffer, 2);
 }
@@ -477,7 +436,8 @@ int isl29023_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   FAR struct isl29023_dev_s *priv;
   int ret;
 
-  priv = (FAR struct isl29023_dev_s *)kmm_malloc(sizeof(struct isl29023_dev_s));
+  priv = (FAR struct isl29023_dev_s *)
+              kmm_malloc(sizeof(struct isl29023_dev_s));
   if (priv == NULL)
     {
       snerr("ERROR: Failed to allocate instance\n");

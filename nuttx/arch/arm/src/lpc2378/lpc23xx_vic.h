@@ -1,13 +1,11 @@
-/************************************************************************************
+/****************************************************************************
  * arch/arm/src/lpc2378/lpc23xx_vic.h
  *
- *   Copyright (C) 2010 Rommel Marcelo. All rights reserved.
- *   Author: Rommel Marcelo
- *
- * This file is part of the NuttX RTOS and based on the lpc2148 port:
- *
- *   Copyright (C) 2010 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2010 Rommel Marcelo. All rights reserved.
+ * SPDX-FileCopyrightText: 2010 Gregory Nutt. All rights reserved.
+ * SPDX-FileContributor: Rommel Marcelo
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,18 +34,18 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_LPC2378_LPC23XX_VIC_H
 #define __ARCH_ARM_SRC_LPC2378_LPC23XX_VIC_H
 
-/************************************************************************************
+/****************************************************************************
  * Included Files
- ************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- ************************************************************************************/
+ ****************************************************************************/
 
 /* All VIC registers are 32-bits wide */
 
@@ -56,21 +54,24 @@
 
 /* Vector Control Register bit definitions */
 
-//~ #define LPC23XX_VECTPRIORITY_IRQMASK  (0x0000001f)
-//~ #define VECTPRIORITY_IRQMASK  (0x0000FFFF)
-//~ #define LPC23XX_VECTPRIORITY_IRQSHIFT (0)
-//~ #define LPC23XX_VECTPRIORITY_ENABLE   (1 << 5)
+/* #define LPC23XX_VECTPRIORITY_IRQMASK  (0x0000001f) */
 
-/************************************************************************************
+/* #define VECTPRIORITY_IRQMASK  (0x0000FFFF) */
+
+/* #define LPC23XX_VECTPRIORITY_IRQSHIFT (0) */
+
+/* #define LPC23XX_VECTPRIORITY_ENABLE   (1 << 5) */
+
+/****************************************************************************
  * Public Types
- ************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************
+/****************************************************************************
  * Inline Functions
- ************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************
+/****************************************************************************
  * Public Function Prototypes
- ************************************************************************************/
+ ****************************************************************************/
 
 #endif /* __ARCH_ARM_SRC_LPC2378_LPC23XX_VIC_H */

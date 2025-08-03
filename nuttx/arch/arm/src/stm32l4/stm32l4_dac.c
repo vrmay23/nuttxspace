@@ -1,38 +1,24 @@
-/************************************************************************************
+/****************************************************************************
  * arch/arm/src/stm32l4/stm32l4_dac.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *           Juha Niskanen <juha.niskanen@haltian.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 /****************************************************************************
  * Included Files
@@ -44,6 +30,7 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -51,9 +38,7 @@
 #include <nuttx/irq.h>
 #include <nuttx/analog/dac.h>
 
-#include "up_internal.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "chip.h"
 #include "stm32l4.h"
 #include "stm32l4_dac.h"
@@ -65,7 +50,9 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
 /* Configuration ************************************************************/
+
 /* Up to 1 DAC interface for up to 2 channels are supported */
 
 #if STM32L4_NDAC > 2
@@ -307,7 +294,9 @@
  * Private Types
  ****************************************************************************/
 
-/* This structure represents the internal state of the single STM32 DAC block */
+/* This structure represents the internal state of the single STM32 DAC
+ * block
+ */
 
 struct stm32_dac_s
 {
@@ -318,6 +307,9 @@ struct stm32_dac_s
 
 struct stm32_chan_s
 {
+#ifdef CONFIG_STM32L4_DAC_LL_OPS
+  const struct stm32_dac_ops_s *llops; /* Low-level DAC ops */
+#endif
   uint8_t    inuse  : 1; /* True, the driver is in use and not available */
 #ifdef HAVE_DMA
   uint8_t    hasdma : 1; /* True, this channel supports DMA */
@@ -346,29 +338,42 @@ struct stm32_chan_s
 
 /* DAC Register access */
 
+static uint32_t dac_getreg(struct stm32_chan_s *priv, int offset);
+static void     dac_dumpregs(struct stm32_chan_s *priv);
+
 #ifdef HAVE_DMA
-static inline void tim_putreg(FAR struct stm32_chan_s *chan, int offset,
+static inline void tim_putreg(struct stm32_chan_s *chan, int offset,
                               uint32_t value);
-static inline void tim_modifyreg(FAR struct stm32_chan_s *chan, int offset,
+static inline void tim_modifyreg(struct stm32_chan_s *chan, int offset,
                                  uint32_t clearbits, uint32_t setbits);
 #endif
 
 /* DAC methods */
 
-static void dac_reset(FAR struct dac_dev_s *dev);
-static int  dac_setup(FAR struct dac_dev_s *dev);
-static void dac_shutdown(FAR struct dac_dev_s *dev);
-static void dac_txint(FAR struct dac_dev_s *dev, bool enable);
-static int  dac_send(FAR struct dac_dev_s *dev, FAR struct dac_msg_s *msg);
-static int  dac_ioctl(FAR struct dac_dev_s *dev, int cmd, unsigned long arg);
+static void dac_reset(struct dac_dev_s *dev);
+static int  dac_setup(struct dac_dev_s *dev);
+static void dac_shutdown(struct dac_dev_s *dev);
+static void dac_txint(struct dac_dev_s *dev, bool enable);
+static int  dac_send(struct dac_dev_s *dev, struct dac_msg_s *msg);
+static int  dac_ioctl(struct dac_dev_s *dev, int cmd, unsigned long arg);
 
 /* Initialization */
 
 #ifdef HAVE_DMA
-static int  dac_timinit(FAR struct stm32_chan_s *chan);
+static int  dac_timinit(struct stm32_chan_s *chan);
 #endif
-static int  dac_chaninit(FAR struct stm32_chan_s *chan);
+static int  dac_chaninit(struct stm32_chan_s *chan);
 static void dac_blockinit(void);
+
+#ifdef CONFIG_STM32L4_DAC_LL_OPS
+static void dac_llops_enable(struct stm32_dac_dev_s *dev, bool enabled);
+static void dac_llops_writedro(struct stm32_dac_dev_s *dev, uint16_t data);
+#ifdef HAVE_DMA
+static void dac_llops_startdma(struct stm32_dac_dev_s *dev);
+static void dac_llops_stopdma(struct stm32_dac_dev_s *dev);
+#endif
+static void dac_llops_dumpregs(struct stm32_dac_dev_s *dev);
+#endif /* CONFIG_STM32L4_DAC_LL_OPS */
 
 /****************************************************************************
  * Private Data
@@ -384,6 +389,21 @@ static const struct dac_ops_s g_dacops =
   .ao_ioctl    = dac_ioctl,
 };
 
+/* Publicly visible DAC lower-half operations */
+
+#ifdef CONFIG_STM32L4_DAC_LL_OPS
+static const struct stm32_dac_ops_s g_dac_llops =
+{
+  .enable        = dac_llops_enable,
+  .write_dro     = dac_llops_writedro,
+#ifdef HAVE_DMA
+  .start_dma     = dac_llops_startdma,
+  .stop_dma      = dac_llops_stopdma,
+#endif
+  .dump_regs     = dac_llops_dumpregs
+};
+#endif /* CONFIG_STM32L4_DAC_LL_OPS */
+
 #ifdef CONFIG_STM32L4_DAC1
 /* Channel 1 */
 
@@ -393,9 +413,12 @@ uint16_t stm32l4_dac1_dmabuffer[CONFIG_STM32L4_DAC1_DMA_BUFFER_SIZE];
 
 static struct stm32_chan_s g_dac1priv =
 {
+#ifdef CONFIG_STM32L4_DAC_LL_OPS
+  .llops      = &g_dac_llops,
+#endif
   .intf       = 0,
 #ifdef CONFIG_STM32L4_DAC1_OUTPUT_ADC
-  .pin        = 0xffffffffU,
+  .pin        = 0xffffffffu,
 #else
   .pin        = GPIO_DAC1_OUT,
 #endif
@@ -430,9 +453,12 @@ uint16_t stm32l4_dac2_dmabuffer[CONFIG_STM32L4_DAC2_DMA_BUFFER_SIZE];
 
 static struct stm32_chan_s g_dac2priv =
 {
+#ifdef CONFIG_STM32L4_DAC_LL_OPS
+  .llops      = &g_dac_llops,
+#endif
   .intf       = 1,
 #ifdef CONFIG_STM32L4_DAC2_OUTPUT_ADC
-  .pin        = 0xffffffffU,
+  .pin        = 0xffffffffu,
 #else
   .pin        = GPIO_DAC2_OUT,
 #endif
@@ -465,6 +491,26 @@ static struct stm32_dac_s g_dacblock;
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: dac_getreg
+ *
+ * Description:
+ *   Read the value of an DAC register.
+ *
+ * Input Parameters:
+ *   priv   - A reference to the DAC block status
+ *   offset - The offset to the register to read
+ *
+ * Returned Value:
+ *   The current contents of the specified register
+ *
+ ****************************************************************************/
+
+static uint32_t dac_getreg(struct stm32_chan_s *priv, int offset)
+{
+  return getreg32(STM32L4_DAC_BASE + offset);
+}
+
+/****************************************************************************
  * Name: stm32l4_dac_modify_cr
  *
  * Description:
@@ -480,8 +526,9 @@ static struct stm32_dac_s g_dacblock;
  *
  ****************************************************************************/
 
-static inline void stm32l4_dac_modify_cr(FAR struct stm32_chan_s *chan,
-                                         uint32_t clearbits, uint32_t setbits)
+static inline void stm32l4_dac_modify_cr(struct stm32_chan_s *chan,
+                                         uint32_t clearbits,
+                                         uint32_t setbits)
 {
   unsigned int shift;
 
@@ -514,8 +561,9 @@ static inline void stm32l4_dac_modify_cr(FAR struct stm32_chan_s *chan,
  *
  ****************************************************************************/
 
-static inline void stm32l4_dac_modify_mcr(FAR struct stm32_chan_s *chan,
-                                          uint32_t clearbits, uint32_t setbits)
+static inline void stm32l4_dac_modify_mcr(struct stm32_chan_s *chan,
+                                          uint32_t clearbits,
+                                          uint32_t setbits)
 {
   unsigned int shift;
 
@@ -528,6 +576,22 @@ static inline void stm32l4_dac_modify_mcr(FAR struct stm32_chan_s *chan,
 
   shift = (chan->intf & 1) << 4;
   modifyreg32(STM32L4_DAC_MCR, clearbits << shift, setbits << shift);
+}
+
+/****************************************************************************
+ * Name: dac_dumpregs
+ ****************************************************************************/
+
+static void dac_dumpregs(struct stm32_chan_s *priv)
+{
+  UNUSED(priv);
+
+  ainfo("CR:  0x%08" PRIx32 " SWTRGR: 0x%08" PRIx32
+        "SR:  0x%08" PRIx32 "    MCR: 0x%08" PRIx32 "\n",
+        dac_getreg(priv, STM32L4_DAC_CR_OFFSET),
+        dac_getreg(priv, STM32L4_DAC_SWTRIGR_OFFSET),
+        dac_getreg(priv, STM32L4_DAC_SR_OFFSET),
+        dac_getreg(priv, STM32L4_DAC_MCR_OFFSET));
 }
 
 /****************************************************************************
@@ -546,7 +610,7 @@ static inline void stm32l4_dac_modify_mcr(FAR struct stm32_chan_s *chan,
  ****************************************************************************/
 
 #ifdef HAVE_DMA
-static inline void tim_putreg(FAR struct stm32_chan_s *chan, int offset,
+static inline void tim_putreg(struct stm32_chan_s *chan, int offset,
                               uint32_t value)
 {
   putreg32(value, chan->tbase + offset);
@@ -571,7 +635,7 @@ static inline void tim_putreg(FAR struct stm32_chan_s *chan, int offset,
  ****************************************************************************/
 
 #ifdef HAVE_DMA
-static inline void tim_modifyreg(FAR struct stm32_chan_s *chan, int offset,
+static inline void tim_modifyreg(struct stm32_chan_s *chan, int offset,
                                  uint32_t clearbits, uint32_t setbits)
 {
   modifyreg32(chan->tbase + offset, clearbits, setbits);
@@ -594,7 +658,7 @@ static inline void tim_modifyreg(FAR struct stm32_chan_s *chan, int offset,
  *
  ****************************************************************************/
 
-static void dac_reset(FAR struct dac_dev_s *dev)
+static void dac_reset(struct dac_dev_s *dev)
 {
   irqstate_t flags;
 
@@ -615,8 +679,8 @@ static void dac_reset(FAR struct dac_dev_s *dev)
  * Description:
  *   Configure the DAC. This method is called the first time that the DAC
  *   device is opened.  This will occur when the port is first opened.
- *   This setup includes configuring and attaching DAC interrupts.  Interrupts
- *   are all disabled upon return.
+ *   This setup includes configuring and attaching DAC interrupts.
+ *   Interrupts are all disabled upon return.
  *
  * Input Parameters:
  *
@@ -625,7 +689,7 @@ static void dac_reset(FAR struct dac_dev_s *dev)
  *
  ****************************************************************************/
 
-static int dac_setup(FAR struct dac_dev_s *dev)
+static int dac_setup(struct dac_dev_s *dev)
 {
   return OK;
 }
@@ -644,7 +708,7 @@ static int dac_setup(FAR struct dac_dev_s *dev)
  *
  ****************************************************************************/
 
-static void dac_shutdown(FAR struct dac_dev_s *dev)
+static void dac_shutdown(struct dac_dev_s *dev)
 {
 #warning "Missing logic"
 }
@@ -662,7 +726,7 @@ static void dac_shutdown(FAR struct dac_dev_s *dev)
  *
  ****************************************************************************/
 
-static void dac_txint(FAR struct dac_dev_s *dev, bool enable)
+static void dac_txint(struct dac_dev_s *dev, bool enable)
 {
 #warning "Missing logic"
 }
@@ -681,7 +745,8 @@ static void dac_txint(FAR struct dac_dev_s *dev, bool enable)
  ****************************************************************************/
 
 #ifdef HAVE_DMA
-static void dac_dmatxcallback(DMA_HANDLE handle, uint8_t isr, FAR void *arg)
+static void dac_dmatxcallback(DMA_HANDLE handle, uint8_t isr,
+                              void *arg)
 {
   struct stm32_chan_s *chan = (struct stm32_chan_s *)arg;
   struct dac_dev_s    *dev;
@@ -707,13 +772,15 @@ static void dac_dmatxcallback(DMA_HANDLE handle, uint8_t isr, FAR void *arg)
 
   DEBUGASSERT(dev->ad_priv == chan);
 
-  /* Report the result of the transfer only if the TX callback has not already
-   * reported an error.
+  /* Report the result of the transfer only if the TX callback has not
+   * already reported an error.
    */
 
   if (chan->result == -EBUSY)
     {
-      /* Save the result of the transfer if no error was previously reported. */
+      /* Save the result of the transfer if no error was previously
+       * reported.
+       */
 
       chan->result = (isr & DMA_CHAN_TEIF_BIT) ? -EIO : OK;
       dac_txdone(dev);
@@ -734,9 +801,9 @@ static void dac_dmatxcallback(DMA_HANDLE handle, uint8_t isr, FAR void *arg)
  *
  ****************************************************************************/
 
-static int dac_send(FAR struct dac_dev_s *dev, FAR struct dac_msg_s *msg)
+static int dac_send(struct dac_dev_s *dev, struct dac_msg_s *msg)
 {
-  FAR struct stm32_chan_s *chan = dev->ad_priv;
+  struct stm32_chan_s *chan = dev->ad_priv;
 
   /* Enable DAC Channel */
 
@@ -745,14 +812,16 @@ static int dac_send(FAR struct dac_dev_s *dev, FAR struct dac_msg_s *msg)
 #ifdef HAVE_DMA
   if (chan->hasdma)
     {
-      /* Copy the value to circular buffer. Since dmabuffer is initialized to zero,
-       * writing e.g. monotonously increasing values creates a continuously repeating
-       * ramp-effect, alternating with periods of zero output.
+      /* Copy the value to circular buffer. Since dmabuffer is initialized to
+       * zero, writing e.g. monotonously increasing values creates a
+       * continuously repeating ramp-effect, alternating with periods of zero
+       * output.
        *
-       * In real use it the dmabuffer should be initialized with a desired pattern
-       * beforehand, followed by a single dummy write to initiate circular DMA. If want
-       * to write just one value at a time with DMA, set the buffer size to 1 (mostly
-       * useful for just testing the functionality).
+       * In real use it the dmabuffer should be initialized with a desired
+       * pattern beforehand, followed by a single dummy write to initiate
+       * circular DMA. If want to write just one value at a time with DMA,
+       * set the buffer size to 1 (mostly useful for just testing the
+       * functionality).
        */
 
       chan->dmabuffer[chan->buffer_pos] = (uint16_t)msg->am_data;
@@ -798,7 +867,7 @@ static int dac_send(FAR struct dac_dev_s *dev, FAR struct dac_msg_s *msg)
   /* Reset counters (generate an update) */
 
 #ifdef HAVE_DMA
-  tim_modifyreg(chan, STM32L4_BTIM_EGR_OFFSET, 0, ATIM_EGR_UG);
+  tim_modifyreg(chan, STM32L4_GTIM_EGR_OFFSET, 0, GTIM_EGR_UG);
 #endif
   return OK;
 }
@@ -816,7 +885,7 @@ static int dac_send(FAR struct dac_dev_s *dev, FAR struct dac_msg_s *msg)
  *
  ****************************************************************************/
 
-static int dac_ioctl(FAR struct dac_dev_s *dev, int cmd, unsigned long arg)
+static int dac_ioctl(struct dac_dev_s *dev, int cmd, unsigned long arg)
 {
   return -ENOTTY;
 }
@@ -837,7 +906,7 @@ static int dac_ioctl(FAR struct dac_dev_s *dev, int cmd, unsigned long arg)
  ****************************************************************************/
 
 #ifdef HAVE_DMA
-static int dac_timinit(FAR struct stm32_chan_s *chan)
+static int dac_timinit(struct stm32_chan_s *chan)
 {
   uint32_t pclk;
   uint32_t prescaler;
@@ -910,8 +979,8 @@ static int dac_timinit(FAR struct stm32_chan_s *chan)
 
   modifyreg32(regaddr, 0, setbits);
 
-  /* Calculate optimal values for the timer prescaler and for the timer reload
-   * register.  If 'frequency' is the desired frequency, then
+  /* Calculate optimal values for the timer prescaler and for the timer
+   * reload register.  If 'frequency' is the desired frequency, then
    *
    *   reload = timclk / frequency
    *   timclk = pclk / presc
@@ -967,26 +1036,26 @@ static int dac_timinit(FAR struct stm32_chan_s *chan)
 
   /* Set the reload and prescaler values */
 
-  tim_putreg(chan, STM32L4_BTIM_ARR_OFFSET, (uint16_t)reload);
-  tim_putreg(chan, STM32L4_BTIM_PSC_OFFSET, (uint16_t)(prescaler - 1));
+  tim_putreg(chan, STM32L4_GTIM_ARR_OFFSET, (uint16_t)reload);
+  tim_putreg(chan, STM32L4_GTIM_PSC_OFFSET, (uint16_t)(prescaler - 1));
 
   /* Count mode up, auto reload */
 
-  tim_modifyreg(chan, STM32L4_BTIM_CR1_OFFSET, 0, ATIM_CR1_ARPE);
+  tim_modifyreg(chan, STM32L4_GTIM_CR1_OFFSET, 0, GTIM_CR1_ARPE);
 
   /* Selection TRGO selection: update */
 
-  tim_modifyreg(chan, STM32L4_BTIM_CR2_OFFSET, ATIM_CR2_MMS_MASK,
-                ATIM_CR2_MMS_UPDATE);
+  tim_modifyreg(chan, STM32L4_GTIM_CR2_OFFSET, GTIM_CR2_MMS_MASK,
+                GTIM_CR2_MMS_UPDATE);
 
   /* Update DMA request enable ???? */
 #if 0
-  tim_modifyreg(chan, STM32L4_BTIM_DIER_OFFSET, 0, ATIM_DIER_UDE);
+  tim_modifyreg(chan, STM32L4_GTIM_DIER_OFFSET, 0, GTIM_DIER_UDE);
 #endif
 
   /* Enable the counter */
 
-  tim_modifyreg(chan, STM32L4_BTIM_CR1_OFFSET, 0, ATIM_CR1_CEN);
+  tim_modifyreg(chan, STM32L4_GTIM_CR1_OFFSET, 0, GTIM_CR1_CEN);
   return OK;
 }
 #endif
@@ -1005,7 +1074,7 @@ static int dac_timinit(FAR struct stm32_chan_s *chan)
  *
  ****************************************************************************/
 
-static int dac_chaninit(FAR struct stm32_chan_s *chan)
+static int dac_chaninit(struct stm32_chan_s *chan)
 {
   uint16_t clearbits;
   uint16_t setbits;
@@ -1027,7 +1096,7 @@ static int dac_chaninit(FAR struct stm32_chan_s *chan)
    * should first be configured to analog (AIN)".
    */
 
-  if (chan->pin != 0xffffffffU)
+  if (chan->pin != 0xffffffffu)
     {
       stm32l4_configgpio(chan->pin);
     }
@@ -1055,7 +1124,7 @@ static int dac_chaninit(FAR struct stm32_chan_s *chan)
   /* Enable output buffer or route DAC output to on-chip peripherals (ADC) */
 
   clearbits = DAC_MCR_MODE1_MASK;
-  if (chan->pin != 0xffffffffU)
+  if (chan->pin != 0xffffffffu)
     {
       setbits = DAC_MCR_MODE_EXTBUF;
     }
@@ -1063,6 +1132,7 @@ static int dac_chaninit(FAR struct stm32_chan_s *chan)
     {
       setbits = DAC_MCR_MODE_IN;
     }
+
   stm32l4_dac_modify_mcr(chan, clearbits, setbits);
 
 #ifdef HAVE_DMA
@@ -1145,6 +1215,112 @@ static void dac_blockinit(void)
   g_dacblock.init = 1;
 }
 
+#ifdef CONFIG_STM32L4_DAC_LL_OPS
+
+/****************************************************************************
+ * Name: dac_llops_enable
+ ****************************************************************************/
+
+static void dac_llops_enable(struct stm32_dac_dev_s *dev, bool enabled)
+{
+  struct stm32_chan_s *priv = (struct stm32_chan_s *)dev;
+
+  /* Enable/disable DAC Channel */
+
+  if (enabled)
+    {
+      stm32l4_dac_modify_cr(priv, 0, DAC_CR_EN);
+    }
+  else
+    {
+      stm32l4_dac_modify_cr(priv, DAC_CR_EN, 0);
+    }
+}
+
+/****************************************************************************
+ * Name: dac_llops_writedro
+ ****************************************************************************/
+
+static void dac_llops_writedro(struct stm32_dac_dev_s *dev, uint16_t data)
+{
+  struct stm32_chan_s *priv = (struct stm32_chan_s *)dev;
+
+  putreg16(data, priv->dro);
+}
+
+/****************************************************************************
+ * Name: dac_llops_startdma
+ ****************************************************************************/
+#ifdef HAVE_DMA
+static void dac_llops_startdma(struct stm32_dac_dev_s *dev)
+{
+  struct stm32_chan_s *priv = (struct stm32_chan_s *)dev;
+
+  /* Configure the DMA stream/channel.
+   *
+   * - Channel number
+   * - Peripheral address
+   * - Direction: Memory to peripheral
+   * - Disable peripheral address increment
+   * - Enable memory address increment
+   * - Peripheral data size: half word
+   * - Mode: circular???
+   * - Priority: ?
+   * - FIFO mode: disable
+   * - FIFO threshold: half full
+   * - Memory Burst: single
+   * - Peripheral Burst: single
+   */
+
+  stm32l4_dmasetup(priv->dma, priv->dro, (uint32_t)priv->dmabuffer,
+                    priv->buffer_len, DAC_DMA_CONTROL_WORD);
+
+  /* Start the DMA */
+
+  priv->result = -EBUSY;
+  stm32l4_dmastart(priv->dma, dac_dmatxcallback, priv, false);
+
+  /* Enable DMA for DAC Channel */
+
+  stm32l4_dac_modify_cr(priv, 0, DAC_CR_DMAEN);
+
+  /* Reset counters (generate an update) */
+
+  tim_modifyreg(priv, STM32L4_GTIM_EGR_OFFSET, 0, GTIM_EGR_UG);
+}
+
+/****************************************************************************
+ * Name: dac_llops_stopdma
+ ****************************************************************************/
+
+static void dac_llops_stopdma(struct stm32_dac_dev_s *dev)
+{
+  struct stm32_chan_s *priv = (struct stm32_chan_s *)dev;
+
+  /* Stop the DMA */
+
+  priv->result = -EBUSY;
+  stm32l4_dmastop(priv->dma);
+
+  /* Enable DMA for DAC Channel */
+
+  stm32l4_dac_modify_cr(priv, 0, DAC_CR_DMAEN);
+}
+#endif
+
+/****************************************************************************
+ * Name: adc_llops_dumpregs
+ ****************************************************************************/
+
+static void dac_llops_dumpregs(struct stm32_dac_dev_s *dev)
+{
+  struct stm32_chan_s *priv = (struct stm32_chan_s *)dev;
+
+  dac_dumpregs(priv);
+}
+
+#endif  /* CONFIG_STM32L4_DAC_LL_OPS */
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -1167,10 +1343,10 @@ static void dac_blockinit(void)
  *
  ****************************************************************************/
 
-FAR struct dac_dev_s *stm32l4_dacinitialize(int intf)
+struct dac_dev_s *stm32l4_dacinitialize(int intf)
 {
-  FAR struct dac_dev_s    *dev;
-  FAR struct stm32_chan_s *chan;
+  struct dac_dev_s    *dev;
+  struct stm32_chan_s *chan;
   int ret;
 
   switch (intf)

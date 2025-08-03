@@ -1,35 +1,22 @@
 /****************************************************************************
- *  arch/arm/src/armv7-a/arm_initialstate.c
+ * arch/arm/src/armv7-a/arm_initialstate.c
  *
- *   Copyright (C) 2013-2014 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -45,8 +32,7 @@
 #include <nuttx/arch.h>
 
 #include "arm.h"
-#include "up_internal.h"
-#include "up_arch.h"
+#include "arm_internal.h"
 
 /****************************************************************************
  * Public Functions
@@ -70,14 +56,53 @@ void up_initial_state(struct tcb_s *tcb)
 {
   struct xcptcontext *xcp = &tcb->xcp;
   uint32_t cpsr;
+#ifdef CONFIG_ARCH_KERNEL_STACK
+  uint32_t *kstack = xcp->kstack;
+#endif
 
   /* Initialize the initial exception register context structure */
 
   memset(xcp, 0, sizeof(struct xcptcontext));
 
+  /* Initialize the idle thread stack */
+
+  if (tcb->pid == IDLE_PROCESS_ID)
+    {
+      tcb->stack_alloc_ptr = (void *)(g_idle_topstack -
+                                      CONFIG_IDLETHREAD_STACKSIZE);
+      tcb->stack_base_ptr  = tcb->stack_alloc_ptr;
+      tcb->adj_stack_size  = CONFIG_IDLETHREAD_STACKSIZE;
+
+#ifdef CONFIG_STACK_COLORATION
+      /* If stack debug is enabled, then fill the stack with a
+       * recognizable value that we can use later to test for high
+       * water marks.
+       */
+
+      arm_stack_color(tcb->stack_alloc_ptr, 0);
+#endif /* CONFIG_STACK_COLORATION */
+
+      return;
+    }
+
+#ifdef CONFIG_ARCH_KERNEL_STACK
+  xcp->kstack = kstack;
+#endif
+
+  /* Initialize the context registers to stack top */
+
+  xcp->regs = (void *)((uint32_t)tcb->stack_base_ptr +
+                                 tcb->adj_stack_size -
+                                 XCPTCONTEXT_SIZE);
+
+  /* Initialize the xcp registers */
+
+  memset(xcp->regs, 0, XCPTCONTEXT_SIZE);
+
   /* Save the initial stack pointer */
 
-  xcp->regs[REG_SP] = (uint32_t)tcb->adj_stack_ptr;
+  xcp->regs[REG_SP] = (uint32_t)tcb->stack_base_ptr +
+                                tcb->adj_stack_size;
 
   /* Save the task entry point */
 
@@ -105,7 +130,7 @@ void up_initial_state(struct tcb_s *tcb)
    * privileges will be dropped before transitioning to user code.
    */
 
-  cpsr = PSR_MODE_SVC;
+  cpsr = PSR_MODE_SYS;
 
   /* Enable or disable interrupts, based on user configuration */
 
@@ -114,15 +139,19 @@ void up_initial_state(struct tcb_s *tcb)
 
   cpsr |= (PSR_I_BIT | PSR_F_BIT);
 
-#else /* CONFIG_SUPPRESS_INTERRUPTS */
-  /* Leave IRQs enabled (Also FIQs if CONFIG_ARMV7A_DECODEFIQ is selected) */
+#elif defined(CONFIG_ARCH_TRUSTZONE_SECURE)
+  /* In tee, we need to disable the IRQ interrupt to make the A core
+   * policy consistent with the M core.
+   */
 
-#ifndef CONFIG_ARMV7A_DECODEFIQ
+  cpsr |= PSR_I_BIT;
+#elif !defined(CONFIG_ARCH_HIPRI_INTERRUPT)
+  /* Leave IRQs enabled (Also FIQs if CONFIG_ARCH_TRUSTZONE_SECURE or
+   * CONFIG_ARCH_HIPRI_INTERRUPT is selected)
+   */
 
   cpsr |= PSR_F_BIT;
-
-#endif /* !CONFIG_ARMV7A_DECODEFIQ */
-#endif /* CONFIG_SUPPRESS_INTERRUPTS */
+#endif
 
 #ifdef CONFIG_ARM_THUMB
   cpsr |= PSR_T_BIT;

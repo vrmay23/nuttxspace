@@ -1,35 +1,22 @@
 /****************************************************************************
  * fs/procfs/fs_procfsuptime.c
  *
- *   Copyright (C) 2013, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,7 +27,6 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <sys/statfs.h>
 #include <sys/stat.h>
 
 #include <stdint.h>
@@ -58,6 +44,8 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/fs/procfs.h>
+
+#include "fs_heap.h"
 
 #if !defined(CONFIG_DISABLE_MOUNTPOINT) && defined(CONFIG_FS_PROCFS)
 #ifndef CONFIG_FS_PROCFS_EXCLUDE_UPTIME
@@ -111,12 +99,13 @@ static int     uptime_stat(FAR const char *relpath, FAR struct stat *buf);
  * with any compiler.
  */
 
-const struct procfs_operations uptime_operations =
+const struct procfs_operations g_uptime_operations =
 {
   uptime_open,       /* open */
   uptime_close,      /* close */
   uptime_read,       /* read */
-  NULL,               /* write */
+  NULL,              /* write */
+  NULL,              /* poll */
 
   uptime_dup,        /* dup */
 
@@ -155,17 +144,9 @@ static int uptime_open(FAR struct file *filep, FAR const char *relpath,
       return -EACCES;
     }
 
-  /* "uptime" is the only acceptable value for the relpath */
-
-  if (strcmp(relpath, "uptime") != 0)
-    {
-      ferr("ERROR: relpath is '%s'\n", relpath);
-      return -ENOENT;
-    }
-
   /* Allocate a container to hold the file attributes */
 
-  attr = (FAR struct uptime_file_s *)kmm_zalloc(sizeof(struct uptime_file_s));
+  attr = fs_heap_zalloc(sizeof(struct uptime_file_s));
   if (!attr)
     {
       ferr("ERROR: Failed to allocate file attributes\n");
@@ -193,7 +174,7 @@ static int uptime_close(FAR struct file *filep)
 
   /* Release the file attributes structure */
 
-  kmm_free(attr);
+  fs_heap_free(attr);
   filep->f_priv = NULL;
   return OK;
 }
@@ -214,11 +195,11 @@ static ssize_t uptime_read(FAR struct file *filep, FAR char *buffer,
 #if defined(CONFIG_HAVE_DOUBLE) && defined(CONFIG_LIBC_FLOATINGPOINT)
   double now;
 #else
-# if defined(CONFIG_SYSTEM_TIME64)
+#  if defined(CONFIG_SYSTEM_TIME64)
   uint64_t sec;
-# else
+#  else
   uint32_t sec;
-# endif
+#  endif
   unsigned int remainder;
   unsigned int csec;
 #endif
@@ -241,13 +222,14 @@ static ssize_t uptime_read(FAR struct file *filep, FAR char *buffer,
     {
       /* System time */
 
-      ticktime = clock_systimer() - INITIAL_SYSTEM_TIMER_TICKS;
+      ticktime = clock_systime_ticks() - INITIAL_SYSTEM_TIMER_TICKS;
 
 #if defined(CONFIG_HAVE_DOUBLE) && defined(CONFIG_LIBC_FLOATINGPOINT)
-      /* Convert the system up time to a seconds + hundredths of seconds string */
+      /* Convert the up time to a seconds + hundredths of seconds string */
 
       now       = (double)ticktime / (double)CLOCKS_PER_SEC;
-      linesize  = snprintf(attr->line, UPTIME_LINELEN, "%10.2f\n", now);
+      linesize  = procfs_snprintf(attr->line, UPTIME_LINELEN,
+                                  "%10.2f\n", now);
 
 #else
       /* Convert the system up time to seconds + hundredths of seconds */
@@ -256,7 +238,9 @@ static ssize_t uptime_read(FAR struct file *filep, FAR char *buffer,
       remainder = (unsigned int)(ticktime % CLOCKS_PER_SEC);
       csec      = (100 * remainder + (CLOCKS_PER_SEC / 2)) / CLOCKS_PER_SEC;
 
-      /* Make sure that rounding did not force the hundredths of a second above 99 */
+      /* Make sure that rounding did not force the hundredths of
+       * a second above 99
+       */
 
       if (csec > 99)
         {
@@ -267,11 +251,11 @@ static ssize_t uptime_read(FAR struct file *filep, FAR char *buffer,
       /* Convert the seconds + hundredths of seconds to a string */
 
 #ifdef CONFIG_SYSTEM_TIME64
-      linesize = snprintf(attr->line, UPTIME_LINELEN, "%7llu.%02u\n",
-                          sec, csec);
+      linesize = procfs_snprintf(attr->line, UPTIME_LINELEN,
+                                 "%7" PRIu64 ".%02u\n", sec, csec);
 #else
-      linesize = snprintf(attr->line, UPTIME_LINELEN, "%7lu.%02u\n",
-                         (unsigned long)sec, csec);
+      linesize = procfs_snprintf(attr->line, UPTIME_LINELEN,
+                                 "%7" PRIu32 ".%02u\n", sec, csec);
 #endif
 
 #endif
@@ -283,7 +267,7 @@ static ssize_t uptime_read(FAR struct file *filep, FAR char *buffer,
   /* Transfer the system up time to user receive buffer */
 
   offset = filep->f_pos;
-  ret    = procfs_memcpy(attr->line, attr->linesize, buffer, buflen, &offset);
+  ret = procfs_memcpy(attr->line, attr->linesize, buffer, buflen, &offset);
 
   /* Update the file offset */
 
@@ -317,7 +301,7 @@ static int uptime_dup(FAR const struct file *oldp, FAR struct file *newp)
 
   /* Allocate a new container to hold the task and attribute selection */
 
-  newattr = (FAR struct uptime_file_s *)kmm_malloc(sizeof(struct uptime_file_s));
+  newattr = fs_heap_malloc(sizeof(struct uptime_file_s));
   if (!newattr)
     {
       ferr("ERROR: Failed to allocate file attributes\n");
@@ -343,14 +327,6 @@ static int uptime_dup(FAR const struct file *oldp, FAR struct file *newp)
 
 static int uptime_stat(FAR const char *relpath, FAR struct stat *buf)
 {
-  /* "uptime" is the only acceptable value for the relpath */
-
-  if (strcmp(relpath, "uptime") != 0)
-    {
-      ferr("ERROR: relpath is '%s'\n", relpath);
-      return -ENOENT;
-    }
-
   /* "uptime" is the name for a read-only file */
 
   memset(buf, 0, sizeof(struct stat));

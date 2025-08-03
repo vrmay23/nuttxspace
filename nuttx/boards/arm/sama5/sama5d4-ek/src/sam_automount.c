@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/sama5/sama5d4-ek/src/sam_automount.c
  *
- *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,6 +30,7 @@
 #  define CONFIG_DEBUG_FS 1
 #endif
 
+#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
@@ -54,18 +42,6 @@
 #ifdef HAVE_AUTOMOUNTER
 
 /****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#ifndef NULL
-#  define NULL (FAR void *)0
-#endif
-
-#ifndef OK
-#  define OK 0
-#endif
-
-/****************************************************************************
  * Private Types
  ****************************************************************************/
 
@@ -73,10 +49,10 @@
 
 struct sam_automount_state_s
 {
-  volatile automount_handler_t handler;    /* Upper half handler */
-  FAR void *arg;                           /* Handler argument */
-  bool enable;                             /* Fake interrupt enable */
-  bool pending;                            /* Set if there an event while disabled */
+  volatile automount_handler_t handler; /* Upper half handler */
+  void *arg;                            /* Handler argument */
+  bool enable;                          /* Fake interrupt enable */
+  bool pending;                         /* Set if there an event while disabled */
 };
 
 /* This structure represents the static configuration of an automounter */
@@ -87,20 +63,20 @@ struct sam_automount_config_s
    * struct automount_lower_s to struct sam_automount_config_s
    */
 
-  struct automount_lower_s lower;          /* Publicly visible part */
-  uint8_t hsmci;                           /* HSMCI0_SLOTNO or HSMCI1_SLOTNO */
-  FAR struct sam_automount_state_s *state; /* Changeable state */
+  struct automount_lower_s lower;      /* Publicly visible part */
+  uint8_t hsmci;                       /* HSMCI0_SLOTNO or HSMCI1_SLOTNO */
+  struct sam_automount_state_s *state; /* Changeable state */
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static int  sam_attach(FAR const struct automount_lower_s *lower,
-                       automount_handler_t isr, FAR void *arg);
-static void sam_enable(FAR const struct automount_lower_s *lower,
+static int  sam_attach(const struct automount_lower_s *lower,
+                       automount_handler_t isr, void *arg);
+static void sam_enable(const struct automount_lower_s *lower,
                        bool enable);
-static bool sam_inserted(FAR const struct automount_lower_s *lower);
+static bool sam_inserted(const struct automount_lower_s *lower);
 
 /****************************************************************************
  * Private Data
@@ -166,15 +142,15 @@ static const struct sam_automount_config_s g_hsmci1config =
  *
  ****************************************************************************/
 
-static int sam_attach(FAR const struct automount_lower_s *lower,
-                      automount_handler_t isr, FAR void *arg)
+static int sam_attach(const struct automount_lower_s *lower,
+                      automount_handler_t isr, void *arg)
 {
-  FAR const struct sam_automount_config_s *config;
-  FAR struct sam_automount_state_s *state;
+  const struct sam_automount_config_s *config;
+  struct sam_automount_state_s *state;
 
   /* Recover references to our structure */
 
-  config = (FAR struct sam_automount_config_s *)lower;
+  config = (struct sam_automount_config_s *)lower;
   DEBUGASSERT(config && config->state);
 
   state = config->state;
@@ -205,15 +181,16 @@ static int sam_attach(FAR const struct automount_lower_s *lower,
  *
  ****************************************************************************/
 
-static void sam_enable(FAR const struct automount_lower_s *lower, bool enable)
+static void sam_enable(const struct automount_lower_s *lower,
+                       bool enable)
 {
-  FAR const struct sam_automount_config_s *config;
-  FAR struct sam_automount_state_s *state;
+  const struct sam_automount_config_s *config;
+  struct sam_automount_state_s *state;
   irqstate_t flags;
 
   /* Recover references to our structure */
 
-  config = (FAR struct sam_automount_config_s *)lower;
+  config = (struct sam_automount_config_s *)lower;
   DEBUGASSERT(config && config->state);
 
   state = config->state;
@@ -227,7 +204,7 @@ static void sam_enable(FAR const struct automount_lower_s *lower, bool enable)
 
   if (enable && state->pending)
     {
-      /* Yes.. perform the fake interrupt if the interrutp is attached */
+      /* Yes.. perform the fake interrupt if the interrupt is attached */
 
       if (state->handler)
         {
@@ -255,11 +232,11 @@ static void sam_enable(FAR const struct automount_lower_s *lower, bool enable)
  *
  ****************************************************************************/
 
-static bool sam_inserted(FAR const struct automount_lower_s *lower)
+static bool sam_inserted(const struct automount_lower_s *lower)
 {
-  FAR const struct sam_automount_config_s *config;
+  const struct sam_automount_config_s *config;
 
-  config = (FAR struct sam_automount_config_s *)lower;
+  config = (struct sam_automount_config_s *)lower;
   DEBUGASSERT(config && config->state);
 
   return sam_cardinserted(config->hsmci);
@@ -285,7 +262,7 @@ static bool sam_inserted(FAR const struct automount_lower_s *lower)
 
 void sam_automount_initialize(void)
 {
-  FAR void *handle;
+  void *handle;
 
   finfo("Initializing automounter(s)\n");
 
@@ -338,8 +315,8 @@ void sam_automount_initialize(void)
 
 void sam_automount_event(int slotno, bool inserted)
 {
-  FAR const struct sam_automount_config_s *config;
-  FAR struct sam_automount_state_s *state;
+  const struct sam_automount_config_s *config;
+  struct sam_automount_state_s *state;
 
 #ifdef CONFIG_SAMA5D4EK_HSMCI0_AUTOMOUNT
   /* Is this a change in the HSMCI0 insertion state? */

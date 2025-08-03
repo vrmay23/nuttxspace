@@ -1,37 +1,22 @@
 /****************************************************************************
  * drivers/wireless/ieee802154/mrf24j40/mrf24j40_radif.c
  *
- *   Copyright (C) 2015-2016 Sebastien Lorquet. All rights reserved.
- *   Copyright (C) 2017 Verge Inc. All rights reserved.
- *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
- *   Author: Anthony Merlino <anthony@vergeaero.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -152,11 +137,11 @@ static void mrf24j40_setorder(FAR struct mrf24j40_radio_s *dev, uint8_t bo,
           remcnt  = (bi - (maincnt * dev->slpclkper)) / 50;
         }
 
-      wlinfo("MAINCNT: %lu, REMCNT: %lu\n", maincnt, remcnt);
+      wlinfo("MAINCNT: %" PRIu32 ", REMCNT: %" PRIu32 "\n", maincnt, remcnt);
 
       /* Program the Main Counter, MAINCNT (0x229<1:0>, 0x228, 0x227,
        * 0x226), and Remain Counter, REMCNT (0x225, 0x224), according to BO
-       * and SO values.  Refer to Section 3.15.1.3 “Sleep Mode * Counters”
+       * and SO values.  Refer to Section 3.15.1.3 "Sleep Mode * Counters"
        */
 
       mrf24j40_setreg(dev->spi, MRF24J40_REMCNTL, (remcnt & 0xff));
@@ -172,7 +157,8 @@ static void mrf24j40_setorder(FAR struct mrf24j40_radio_s *dev, uint8_t bo,
    * After configuring BO and SO, the beacon frame will be sent immediately.
    */
 
-  mrf24j40_setreg(dev->spi, MRF24J40_ORDER, ((bo << 4) & 0xf0) | (so & 0x0f));
+  mrf24j40_setreg(dev->spi, MRF24J40_ORDER,
+                 ((bo << 4) & 0xf0) | (so & 0x0f));
 }
 
 static void mrf24j40_slpclkcal(FAR struct mrf24j40_radio_s *dev)
@@ -191,14 +177,14 @@ static void mrf24j40_slpclkcal(FAR struct mrf24j40_radio_s *dev)
                   0x01 | MRF24J40_SLPCON1_CLKOUT_DISABLED);
 
   /* Begin calibration by setting the SLPCALEN bit (SLPCAL2 0x20b<4>) to
-   * ‘1’. Sixteen samples of the SLPCLK are counted and stored in the
+   * '1'. Sixteen samples of the SLPCLK are counted and stored in the
    * SLPCAL register. No need to mask, this is the only writable bit
    */
 
   mrf24j40_setreg(dev->spi, MRF24J40_SLPCAL2, MRF24J40_SLPCAL2_SLPCALEN);
 
   /* Calibration is complete when the SLPCALRDY bit (SLPCAL2 0x20b<7>) is
-   * set to ‘1’.
+   * set to '1'.
    */
 
   while (!(mrf24j40_getreg(dev->spi, MRF24J40_SLPCAL2) &
@@ -264,7 +250,8 @@ int mrf24j40_txnotify(FAR struct ieee802154_radio_s *radio, bool gts)
         {
           /* Schedule to serialize the poll on the worker thread. */
 
-          work_queue(HPWORK, &dev->gts_pollwork, mrf24j40_dopoll_gts, dev, 0);
+          work_queue(HPWORK, &dev->gts_pollwork,
+                     mrf24j40_dopoll_gts, dev, 0);
         }
     }
   else
@@ -315,7 +302,7 @@ int mrf24j40_txdelayed(FAR struct ieee802154_radio_s *radio,
 
   /* Get exclusive access to the radio device */
 
-  ret = nxsem_wait(&dev->exclsem);
+  ret = nxmutex_lock(&dev->lock);
   if (ret < 0)
     {
       return ret;
@@ -342,12 +329,12 @@ int mrf24j40_txdelayed(FAR struct ieee802154_radio_s *radio,
 
   if (!work_available(&dev->irqwork))
     {
-      nxsem_post(&dev->exclsem);
+      nxmutex_unlock(&dev->lock);
       mrf24j40_irqworker((FAR void *)dev);
 
       /* Get exclusive access to the radio device */
 
-      ret = nxsem_wait(&dev->exclsem);
+      ret = nxmutex_lock(&dev->lock);
       if (ret < 0)
         {
           return ret;
@@ -370,8 +357,7 @@ int mrf24j40_txdelayed(FAR struct ieee802154_radio_s *radio,
       mrf24j40_mactimer(dev, symboldelay);
     }
 
-  nxsem_post(&dev->exclsem);
-
+  nxmutex_unlock(&dev->lock);
   return OK;
 }
 
@@ -424,7 +410,8 @@ int mrf24j40_rxenable(FAR struct ieee802154_radio_s *radio, bool enable)
   return OK;
 }
 
-int mrf24j40_energydetect(FAR struct ieee802154_radio_s *radio, uint32_t nsymbols)
+int mrf24j40_energydetect(FAR struct ieee802154_radio_s *radio,
+                          uint32_t nsymbols)
 {
   return -ENOTTY;
 }
@@ -454,7 +441,7 @@ int mrf24j40_reset(FAR struct ieee802154_radio_s *radio)
   mrf24j40_setreg(dev->spi, MRF24J40_BBREG6 , 0x40); /* 01000000 Append RSSI to rx packets */
 
   /* Calibrate the Sleep Clock (SLPCLK) frequency. Refer to Section 3.15.1.2
-   * “Sleep Clock Calibration”.
+   * "Sleep Clock Calibration".
    */
 
   mrf24j40_slpclkcal(dev);
@@ -569,6 +556,12 @@ int mrf24j40_getattr(FAR struct ieee802154_radio_s *radio,
         }
         break;
 
+      case IEEE802154_ATTR_PHY_REGDUMP:
+        {
+          ret = mrf24j40_regdump(dev);
+        }
+        break;
+
       default:
         ret = IEEE802154_STATUS_UNSUPPORTED_ATTRIBUTE;
     }
@@ -657,13 +650,17 @@ int mrf24j40_beaconstart(FAR struct ieee802154_radio_s *radio,
 
   if (sfspec->pancoord)
     {
-      /* Set the PANCOORD (RXMCR 0x00<3>) bit = 1to configure as PAN coordinator */
+      /* Set the PANCOORD (RXMCR 0x00<3>) bit = 1to configure as
+       * PAN coordinator
+       */
 
       reg = mrf24j40_getreg(dev->spi, MRF24J40_RXMCR);
       reg |= MRF24J40_RXMCR_PANCOORD;
       mrf24j40_setreg(dev->spi, MRF24J40_RXMCR, reg);
 
-      /* Set the SLOTTED (TXMCR 0x11<5>) bit = 1 to use Slotted CSMA-CA mode */
+      /* Set the SLOTTED (TXMCR 0x11<5>) bit = 1 to use
+       * Slotted CSMA-CA mode
+       */
 
       reg = mrf24j40_getreg(dev->spi, MRF24J40_TXMCR);
       reg |= MRF24J40_TXMCR_SLOTTED;
@@ -679,8 +676,8 @@ int mrf24j40_beaconstart(FAR struct ieee802154_radio_s *radio,
       dev->bsn = 0;
       mrf24j40_setreg(dev->spi, MRF24J40_BEACON_FIFO + 4, dev->bsn++);
 
-      /* Set the TXBMSK (TXBCON1 0x25<7>) bit = 1 to mask the beacon interrupt
-       * mask
+      /* Set the TXBMSK (TXBCON1 0x25<7>) bit = 1 to mask the beacon
+       * interrupt mask
        */
 
       reg = mrf24j40_getreg(dev->spi, MRF24J40_TXBCON1);

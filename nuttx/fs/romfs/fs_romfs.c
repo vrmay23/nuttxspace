@@ -1,38 +1,22 @@
 /****************************************************************************
- * rm/romfs/fs_romfs.h
+ * fs/romfs/fs_romfs.c
  *
- *   Copyright (C) 2008-2009, 2011, 2017-2018 Gregory Nutt. All rights
- *     reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * References: Linux/Documentation/filesystems/romfs.txt
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,8 +30,6 @@
 #include <sys/statfs.h>
 #include <sys/stat.h>
 
-#include <stdint.h>
-#include <stdbool.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
@@ -60,10 +42,27 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/fs/ioctl.h>
-#include <nuttx/fs/dirent.h>
-#include <nuttx/mtd/mtd.h>
 
 #include "fs_romfs.h"
+#include "fs_heap.h"
+
+/****************************************************************************
+ * Private Types
+ ****************************************************************************/
+
+/* This structure represents one entry node in the romfs file system */
+
+struct romfs_dir_s
+{
+  struct fs_dirent_s base;                 /* Vfs directory structure */
+#ifdef CONFIG_FS_ROMFS_CACHE_NODE
+  FAR struct romfs_nodeinfo_s **firstnode; /* The address of first node in the directory */
+  FAR struct romfs_nodeinfo_s **currnode;  /* The address of current node into the directory */
+#else
+  off_t firstoffset;                       /* Offset to the first entry in the directory */
+  off_t curroffset;                        /* Current offset into the directory contents */
+#endif
+};
 
 /****************************************************************************
  * Private Function Prototypes
@@ -77,6 +76,8 @@ static ssize_t romfs_read(FAR struct file *filep, FAR char *buffer,
 static off_t   romfs_seek(FAR struct file *filep, off_t offset, int whence);
 static int     romfs_ioctl(FAR struct file *filep, int cmd,
                            unsigned long arg);
+static int     romfs_mmap(FAR struct file *filep,
+                          FAR struct mm_map_entry_s *map);
 
 static int     romfs_dup(FAR const struct file *oldp,
                          FAR struct file *newp);
@@ -85,9 +86,12 @@ static int     romfs_fstat(FAR const struct file *filep,
 
 static int     romfs_opendir(FAR struct inode *mountpt,
                              FAR const char *relpath,
-                             FAR struct fs_dirent_s *dir);
+                             FAR struct fs_dirent_s **dir);
+static int     romfs_closedir(FAR struct inode *mountpt,
+                              FAR struct fs_dirent_s *dir);
 static int     romfs_readdir(FAR struct inode *mountpt,
-                             FAR struct fs_dirent_s *dir);
+                             FAR struct fs_dirent_s *dir,
+                             FAR struct dirent *entry);
 static int     romfs_rewinddir(FAR struct inode *mountpt,
                                FAR struct fs_dirent_s *dir);
 
@@ -112,7 +116,7 @@ static int     romfs_stat(FAR struct inode *mountpt, FAR const char *relpath,
  * with any compiler.
  */
 
-const struct mountpt_operations romfs_operations =
+const struct mountpt_operations g_romfs_operations =
 {
   romfs_open,      /* open */
   romfs_close,     /* close */
@@ -120,14 +124,19 @@ const struct mountpt_operations romfs_operations =
   NULL,            /* write */
   romfs_seek,      /* seek */
   romfs_ioctl,     /* ioctl */
+  romfs_mmap,      /* mmap */
+  NULL,            /* truncate */
+  NULL,            /* poll */
+  NULL,            /* readv */
+  NULL,            /* writev */
 
   NULL,            /* sync */
   romfs_dup,       /* dup */
   romfs_fstat,     /* fstat */
-  NULL,            /* truncate */
+  NULL,            /* fchstat */
 
   romfs_opendir,   /* opendir */
-  NULL,            /* closedir */
+  romfs_closedir,  /* closedir */
   romfs_readdir,   /* readdir */
   romfs_rewinddir, /* rewinddir */
 
@@ -139,7 +148,8 @@ const struct mountpt_operations romfs_operations =
   NULL,            /* mkdir */
   NULL,            /* rmdir */
   NULL,            /* rename */
-  romfs_stat       /* stat */
+  romfs_stat,      /* stat */
+  NULL             /* chstat */
 };
 
 /****************************************************************************
@@ -153,39 +163,50 @@ const struct mountpt_operations romfs_operations =
 static int romfs_open(FAR struct file *filep, FAR const char *relpath,
                       int oflags, mode_t mode)
 {
-  struct romfs_dirinfo_s      dirinfo;
+  struct romfs_nodeinfo_s     nodeinfo;
   FAR struct romfs_mountpt_s *rm;
   FAR struct romfs_file_s    *rf;
+  size_t                      len;
   int                         ret;
 
   finfo("Open '%s'\n", relpath);
 
   /* Sanity checks */
 
-  DEBUGASSERT(filep->f_priv == NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv == NULL);
 
   /* Get mountpoint private data from the inode reference from the file
    * structure
    */
 
-  rm = (FAR struct romfs_mountpt_s *)filep->f_inode->i_private;
+  rm = filep->f_inode->i_private;
 
   DEBUGASSERT(rm != NULL);
 
   /* Check if the mount is still healthy */
 
-  ret = romfs_semtake(rm);
+  ret = nxrmutex_lock(&rm->rm_lock);
   if (ret < 0)
     {
       return ret;
     }
 
-  ret = romfs_checkmount(rm);
-  if (ret != OK)
+#ifdef CONFIG_FS_ROMFS_WRITEABLE
+  if (oflags & (O_WRONLY | O_APPEND | O_TRUNC | O_CREAT))
     {
-      ferr("ERROR: romfs_checkmount failed: %d\n", ret);
-      goto errout_with_semaphore;
+      if (list_is_empty(&rm->rm_sparelist))
+        {
+          ferr("ERROR: RW not enabled, only O_RDONLY supported\n");
+          ret = -EACCES;
+          goto errout_with_lock;
+        }
+
+      nxrmutex_unlock(&rm->rm_lock);
+      nxsem_wait_uninterruptible(&rm->rm_sem);
+      nxrmutex_lock(&rm->rm_lock);
     }
+  else
+#endif
 
   /* ROMFS is read-only.  Any attempt to open with any kind of write
    * access is not permitted.
@@ -195,40 +216,43 @@ static int romfs_open(FAR struct file *filep, FAR const char *relpath,
     {
       ferr("ERROR: Only O_RDONLY supported\n");
       ret = -EACCES;
-      goto errout_with_semaphore;
+      goto errout_with_lock;
     }
 
-  /* Initialize the directory info structure */
-
-  memset(&dirinfo, 0, sizeof(struct romfs_dirinfo_s));
+  ret = romfs_checkmount(rm);
+  if (ret < 0)
+    {
+      ferr("ERROR: romfs_checkmount failed: %d\n", ret);
+      goto errout_with_sem;
+    }
 
   /* Locate the directory entry for this path */
 
-  ret = romfs_finddirentry(rm, &dirinfo, relpath);
+  ret = romfs_finddirentry(rm, &nodeinfo, relpath);
   if (ret < 0)
     {
       ferr("ERROR: Failed to find directory directory entry for '%s': %d\n",
            relpath, ret);
-      goto errout_with_semaphore;
+      goto errout_with_sem;
     }
 
   /* The full path exists -- but is the final component a file
    * or a directory?  Or some other Unix file type that is not
-   * appropriate in this contex.
+   * appropriate in this context.
    *
    * REVISIT: This logic should follow hard/soft link file
    * types.  At present, it returns the ENXIO.
    */
 
-  if (IS_DIRECTORY(dirinfo.rd_next))
+  if (IS_DIRECTORY(nodeinfo.rn_next))
     {
       /* It is a directory */
 
       ret = -EISDIR;
       ferr("ERROR: '%s' is a directory\n", relpath);
-      goto errout_with_semaphore;
+      goto errout_with_sem;
     }
-  else if (!IS_FILE(dirinfo.rd_next))
+  else if (!IS_FILE(nodeinfo.rn_next))
     {
       /* ENXIO indicates "The named file is a character special or
        * block special file, and the device associated with this
@@ -240,41 +264,38 @@ static int romfs_open(FAR struct file *filep, FAR const char *relpath,
 
       ret = -ENXIO;
       ferr("ERROR: '%s' is a special file\n", relpath);
-      goto errout_with_semaphore;
+      goto errout_with_sem;
     }
-
-#ifdef CONFIG_FILE_MODE
-# warning "Missing check for privileges based on inode->i_mode"
-#endif
 
   /* Create an instance of the file private data to describe the opened
    * file.
    */
 
-  rf = (FAR struct romfs_file_s *)kmm_zalloc(sizeof(struct romfs_file_s));
+  len = strlen(relpath);
+  rf = fs_heap_zalloc(sizeof(struct romfs_file_s) + len);
   if (!rf)
     {
-      ferr("ERROR: Failed to allocate private data\n", ret);
+      ferr("ERROR: Failed to allocate private data\n");
       ret = -ENOMEM;
-      goto errout_with_semaphore;
+      goto errout_with_sem;
     }
 
   /* Initialize the file private data (only need to initialize
    * non-zero elements)
    */
 
-  rf->rf_size = dirinfo.rd_size;
-  rf->rf_type = (uint8_t)(dirinfo.rd_next & RFNEXT_ALLMODEMASK);
+  rf->rf_size = nodeinfo.rn_size;
+  rf->rf_type = (uint8_t)(nodeinfo.rn_next & RFNEXT_ALLMODEMASK);
+  memcpy(rf->rf_path, relpath, len + 1);
 
   /* Get the start of the file data */
 
-  ret = romfs_datastart(rm, dirinfo.rd_dir.fr_curroffset,
-                        &rf->rf_startoffset);
+  ret = romfs_datastart(rm, &nodeinfo, &rf->rf_startoffset);
   if (ret < 0)
     {
       ferr("ERROR: Failed to locate start of file data: %d\n", ret);
-      kmm_free(rf);
-      goto errout_with_semaphore;
+      fs_heap_free(rf);
+      goto errout_with_sem;
     }
 
   /* Configure buffering to support access to this file */
@@ -283,30 +304,38 @@ static int romfs_open(FAR struct file *filep, FAR const char *relpath,
   if (ret < 0)
     {
       ferr("ERROR: Failed configure buffering: %d\n", ret);
-      kmm_free(rf);
-      goto errout_with_semaphore;
+      fs_heap_free(rf);
+      goto errout_with_sem;
     }
 
   /* Attach the private date to the struct file instance */
 
   filep->f_priv = rf;
+  rm->rm_refs++;
 
-  /* Then insert the new instance into the mountpoint structure.
-   * It needs to be there (1) to handle error conditions that effect
-   * all files, and (2) to inform the umount logic that we are busy
-   * (but a simple reference count could have done that).
-   */
+#ifdef CONFIG_FS_ROMFS_WRITEABLE
 
-  rf->rf_next = rm->rm_head;
-  rm->rm_head = rf->rf_next;
+  /* If the file is only created for read */
 
-  romfs_semgive(rm);
-  return OK;
+  if ((oflags & (O_WRONLY | O_APPEND | O_TRUNC | O_CREAT)) == O_CREAT)
+    {
+      nxsem_post(&rm->rm_sem);
+    }
+#endif
 
-  /* Error exits */
+  nxrmutex_unlock(&rm->rm_lock);
+  return ret;
 
-errout_with_semaphore:
-  romfs_semgive(rm);
+errout_with_sem:
+#ifdef CONFIG_FS_ROMFS_WRITEABLE
+  if (oflags & (O_WRONLY | O_APPEND | O_TRUNC | O_CREAT))
+    {
+      nxsem_post(&rm->rm_sem);
+    }
+#endif
+
+errout_with_lock:
+  nxrmutex_unlock(&rm->rm_lock);
   return ret;
 }
 
@@ -318,13 +347,13 @@ static int romfs_close(FAR struct file *filep)
 {
   FAR struct romfs_mountpt_s *rm;
   FAR struct romfs_file_s    *rf;
-  int                         ret = OK;
+  int                         ret;
 
   finfo("Closing\n");
 
   /* Sanity checks */
 
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv != NULL);
 
   /* Recover our private data from the struct file instance */
 
@@ -332,6 +361,22 @@ static int romfs_close(FAR struct file *filep)
   rm = filep->f_inode->i_private;
 
   DEBUGASSERT(rm != NULL);
+
+  ret = nxrmutex_lock(&rm->rm_lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  rm->rm_refs--;
+#ifdef CONFIG_FS_ROMFS_WRITEABLE
+  if (filep->f_oflags & (O_WRONLY | O_APPEND | O_TRUNC))
+    {
+      nxsem_post(&rm->rm_sem);
+    }
+#endif
+
+  nxrmutex_unlock(&rm->rm_lock);
 
   /* Do not check if the mount is healthy.  We must support closing of
    * the file even when there is healthy mount.
@@ -346,12 +391,12 @@ static int romfs_close(FAR struct file *filep)
 
   if (!rm->rm_xipbase && rf->rf_buffer)
     {
-      kmm_free(rf->rf_buffer);
+      fs_heap_free(rf->rf_buffer);
     }
 
   /* Then free the file structure itself. */
 
-  kmm_free(rf);
+  fs_heap_free(rf);
   filep->f_priv = NULL;
   return ret;
 }
@@ -366,7 +411,7 @@ static ssize_t romfs_read(FAR struct file *filep, FAR char *buffer,
   FAR struct romfs_mountpt_s *rm;
   FAR struct romfs_file_s    *rf;
   unsigned int                bytesread;
-  unsigned int                readsize;
+  unsigned int                readsize = 0;
   unsigned int                nsectors;
   uint32_t                    offset;
   size_t                      bytesleft;
@@ -375,11 +420,11 @@ static ssize_t romfs_read(FAR struct file *filep, FAR char *buffer,
   int                         sectorndx;
   int                         ret;
 
-  finfo("Read %d bytes from offset %d\n", buflen, filep->f_pos);
+  finfo("Read %zu bytes from offset %jd\n", buflen, (intmax_t)filep->f_pos);
 
   /* Sanity checks */
 
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv != NULL);
 
   /* Recover our private data from the struct file instance */
 
@@ -390,17 +435,17 @@ static ssize_t romfs_read(FAR struct file *filep, FAR char *buffer,
 
   /* Make sure that the mount is still healthy */
 
-  ret = romfs_semtake(rm);
+  ret = nxrmutex_lock(&rm->rm_lock);
   if (ret < 0)
     {
       return (ssize_t)ret;
     }
 
   ret = romfs_checkmount(rm);
-  if (ret != OK)
+  if (ret < 0)
     {
       ferr("ERROR: romfs_checkmount failed: %d\n", ret);
-      goto errout_with_semaphore;
+      goto errout_with_lock;
     }
 
   /* Get the number of bytes left in the file */
@@ -420,15 +465,13 @@ static ssize_t romfs_read(FAR struct file *filep, FAR char *buffer,
    * error occurs.
    */
 
-  readsize = 0;
   while (buflen > 0)
     {
       /* Get the first sector and index to read from. */
 
-      offset     = rf->rf_startoffset + filep->f_pos;
-      sector     = SEC_NSECTORS(rm, offset);
-      sectorndx  = offset & SEC_NDXMASK(rm);
-      bytesread  = 0;
+      offset    = rf->rf_startoffset + filep->f_pos;
+      sector    = SEC_NSECTORS(rm, offset);
+      sectorndx = offset & SEC_NDXMASK(rm);
 
       /* Check if the user has provided a buffer large enough to
        * hold one or more complete sectors -AND- the read is
@@ -436,7 +479,7 @@ static ssize_t romfs_read(FAR struct file *filep, FAR char *buffer,
        */
 
       nsectors = SEC_NSECTORS(rm, buflen);
-      if (nsectors > 0 && sectorndx == 0)
+      if (nsectors >= rf->rf_ncachesector && sectorndx == 0)
         {
           /* Read maximum contiguous sectors directly to the user's
            * buffer without using our tiny read buffer.
@@ -444,16 +487,16 @@ static ssize_t romfs_read(FAR struct file *filep, FAR char *buffer,
 
           /* Read all of the sectors directly into user memory */
 
-          finfo("Read %d sectors starting with %d\n", nsectors, sector);
+          finfo("Read %d sectors starting with %jd\n", nsectors,
+                (intmax_t)sector);
           ret = romfs_hwread(rm, userbuffer, sector, nsectors);
           if (ret < 0)
             {
               ferr("ERROR: romfs_hwread failed: %d\n", ret);
-              goto errout_with_semaphore;
+              goto errout_with_lock;
             }
 
-          sector    += nsectors;
-          bytesread  = nsectors * rm->rm_hwsectorsize;
+          bytesread = nsectors * rm->rm_hwsectorsize;
         }
       else
         {
@@ -462,28 +505,24 @@ static ssize_t romfs_read(FAR struct file *filep, FAR char *buffer,
            * it is already there then all is well.
            */
 
-          finfo("Read sector %d\n", sector);
+          finfo("Read sector %jd\n", (intmax_t)sector);
           ret = romfs_filecacheread(rm, rf, sector);
           if (ret < 0)
             {
               ferr("ERROR: romfs_filecacheread failed: %d\n", ret);
-              goto errout_with_semaphore;
+              goto errout_with_lock;
             }
 
           /* Copy the partial sector into the user buffer */
 
-          bytesread = rm->rm_hwsectorsize - sectorndx;
+          bytesread = (rf->rf_cachesector + rf->rf_ncachesector - sector) *
+                      rm->rm_hwsectorsize - sectorndx;
+          sectorndx = rf->rf_ncachesector * rm->rm_hwsectorsize - bytesread;
           if (bytesread > buflen)
             {
               /* We will not read to the end of the buffer */
 
               bytesread = buflen;
-            }
-          else
-            {
-              /* We will read to the end of the buffer (or beyond) */
-
-             sector++;
             }
 
           finfo("Return %d bytes from sector offset %d\n",
@@ -499,12 +538,9 @@ static ssize_t romfs_read(FAR struct file *filep, FAR char *buffer,
       buflen       -= bytesread;
     }
 
-  romfs_semgive(rm);
-  return readsize;
-
-errout_with_semaphore:
-  romfs_semgive(rm);
-  return ret;
+errout_with_lock:
+  nxrmutex_unlock(&rm->rm_lock);
+  return readsize ? readsize : ret;
 }
 
 /****************************************************************************
@@ -518,16 +554,16 @@ static off_t romfs_seek(FAR struct file *filep, off_t offset, int whence)
   off_t                       position;
   int                         ret;
 
-  finfo("Seek to offset: %d whence: %d\n", offset, whence);
+  finfo("Seek to offset: %jd whence: %d\n", (intmax_t)offset, whence);
 
   /* Sanity checks */
 
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv != NULL);
 
   /* Recover our private data from the struct file instance */
 
-  rf    = filep->f_priv;
-  rm    = filep->f_inode->i_private;
+  rf = filep->f_priv;
+  rm = filep->f_inode->i_private;
 
   DEBUGASSERT(rm != NULL);
 
@@ -558,17 +594,17 @@ static off_t romfs_seek(FAR struct file *filep, off_t offset, int whence)
 
   /* Make sure that the mount is still healthy */
 
-  ret = romfs_semtake(rm);
+  ret = nxrmutex_lock(&rm->rm_lock);
   if (ret < 0)
     {
       return (off_t)ret;
     }
 
   ret = romfs_checkmount(rm);
-  if (ret != OK)
+  if (ret < 0)
     {
        ferr("ERROR: romfs_checkmount failed: %d\n", ret);
-       goto errout_with_semaphore;
+       goto errout_with_lock;
     }
 
   /* Limit positions to the end of the file. */
@@ -583,13 +619,10 @@ static off_t romfs_seek(FAR struct file *filep, off_t offset, int whence)
   /* Set file position and return success */
 
   filep->f_pos = position;
-  finfo("New file position: %d\n", filep->f_pos);
+  finfo("New file position: %jd\n", (intmax_t)filep->f_pos);
 
-  romfs_semgive(rm);
-  return OK;
-
-errout_with_semaphore:
-  romfs_semgive(rm);
+errout_with_lock:
+  nxrmutex_unlock(&rm->rm_lock);
   return ret;
 }
 
@@ -599,36 +632,69 @@ errout_with_semaphore:
 
 static int romfs_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
-  FAR struct romfs_mountpt_s *rm;
-  FAR struct romfs_file_s    *rf;
-  FAR void                  **ppv = (FAR void**)arg;
+  FAR struct romfs_file_s *rf;
 
   finfo("cmd: %d arg: %08lx\n", cmd, arg);
 
   /* Sanity checks */
 
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv != NULL);
+
+  /* Recover our private data from the struct file instance */
+
+  rf = filep->f_priv;
+
+  if (cmd == FIOC_FILEPATH)
+    {
+      FAR char *ptr = (FAR char *)((uintptr_t)arg);
+      inode_getpath(filep->f_inode, ptr, PATH_MAX);
+      strlcat(ptr, rf->rf_path, PATH_MAX);
+      return 0;
+    }
+  else if (cmd == FIOC_XIPBASE)
+    {
+      FAR struct romfs_mountpt_s *rm = filep->f_inode->i_private;
+      FAR uintptr_t *ptr = (FAR uintptr_t *)arg;
+
+      if (rm->rm_xipbase != 0)
+        {
+          *ptr = (uintptr_t)rm->rm_xipbase + rf->rf_startoffset;
+          return 0;
+        }
+      else
+        {
+          return -ENXIO;
+        }
+    }
+
+  return -ENOTTY;
+}
+
+static int romfs_mmap(FAR struct file *filep, FAR struct mm_map_entry_s *map)
+{
+  FAR struct romfs_mountpt_s *rm;
+  FAR struct romfs_file_s *rf;
+
+  /* Sanity checks */
+
+  DEBUGASSERT(filep->f_priv != NULL);
 
   /* Recover our private data from the struct file instance */
 
   rf = filep->f_priv;
   rm = filep->f_inode->i_private;
 
-  DEBUGASSERT(rm != NULL);
+  /* Return the address on the media corresponding to the start of
+   * the file.
+   */
 
-  /* Only one ioctl command is supported */
-
-  if (cmd == FIOC_MMAP && rm->rm_xipbase && ppv)
+  if (rm->rm_xipbase && map->offset >= 0 && map->offset < rf->rf_size &&
+      map->length != 0 && map->offset + map->length <= rf->rf_size)
     {
-      /* Return the address on the media corresponding to the start of
-       * the file.
-       */
-
-      *ppv = (FAR void *)(rm->rm_xipbase + rf->rf_startoffset);
-      return OK;
+      map->vaddr = rm->rm_xipbase + rf->rf_startoffset + map->offset;
+      return 0;
     }
 
-  ferr("ERROR: Invalid cmd: %d \n", cmd);
   return -ENOTTY;
 }
 
@@ -641,6 +707,7 @@ static int romfs_dup(FAR const struct file *oldp, FAR struct file *newp)
   FAR struct romfs_mountpt_s *rm;
   FAR struct romfs_file_s *oldrf;
   FAR struct romfs_file_s *newrf;
+  size_t len;
   int ret;
 
   finfo("Dup %p->%p\n", oldp, newp);
@@ -655,22 +722,22 @@ static int romfs_dup(FAR const struct file *oldp, FAR struct file *newp)
    * structure
    */
 
-  rm = (FAR struct romfs_mountpt_s *)newp->f_inode->i_private;
+  rm = newp->f_inode->i_private;
   DEBUGASSERT(rm != NULL);
 
   /* Check if the mount is still healthy */
 
-  ret = romfs_semtake(rm);
+  ret = nxrmutex_lock(&rm->rm_lock);
   if (ret < 0)
     {
       return ret;
     }
 
   ret = romfs_checkmount(rm);
-  if (ret != OK)
+  if (ret < 0)
     {
       ferr("ERROR: romfs_checkmount failed: %d\n", ret);
-      goto errout_with_semaphore;
+      goto errout_with_lock;
     }
 
   /* Recover the old private data from the old struct file instance */
@@ -681,56 +748,46 @@ static int romfs_dup(FAR const struct file *oldp, FAR struct file *newp)
    * dup'ed file.
    */
 
-  newrf = (FAR struct romfs_file_s *)kmm_malloc(sizeof(struct romfs_file_s));
+  len   = strlen(oldrf->rf_path);
+  newrf = fs_heap_malloc(sizeof(struct romfs_file_s) + len);
   if (!newrf)
     {
-      ferr("ERROR: Failed to allocate private data\n", ret);
+      ferr("ERROR: Failed to allocate private data\n");
       ret = -ENOMEM;
-      goto errout_with_semaphore;
+      goto errout_with_lock;
     }
 
   /* Copy all file private data (except for the buffer) */
 
   newrf->rf_startoffset = oldrf->rf_startoffset;
   newrf->rf_size        = oldrf->rf_size;
+  newrf->rf_type        = oldrf->rf_type;
+  memcpy(newrf->rf_path, oldrf->rf_path, len + 1);
 
   /* Configure buffering to support access to this file */
 
   ret = romfs_fileconfigure(rm, newrf);
   if (ret < 0)
     {
-      kmm_free(newrf);
+      fs_heap_free(newrf);
       ferr("ERROR: Failed configure buffering: %d\n", ret);
-      goto errout_with_semaphore;
+      goto errout_with_lock;
     }
 
   /* Attach the new private date to the new struct file instance */
 
   newp->f_priv = newrf;
+  rm->rm_refs++;
 
-  /* Then insert the new instance into the mountpoint structure.
-   * It needs to be there (1) to handle error conditions that effect
-   * all files, and (2) to inform the umount logic that we are busy
-   * (but a simple reference count could have done that).
-   */
-
-  newrf->rf_next = rm->rm_head;
-  rm->rm_head = newrf->rf_next;
-
-  romfs_semgive(rm);
-  return OK;
-
-  /* Error exits */
-
-errout_with_semaphore:
-  romfs_semgive(rm);
+errout_with_lock:
+  nxrmutex_unlock(&rm->rm_lock);
   return ret;
 }
 
 /****************************************************************************
  * Name: romfs_fstat
  *
- * Description:
+ * Description
  *   Obtain information about an open file associated with the file
  *   descriptor 'fd', and will write it to the area pointed to by 'buf'.
  *
@@ -746,19 +803,19 @@ static int romfs_fstat(FAR const struct file *filep, FAR struct stat *buf)
 
   /* Sanity checks */
 
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv != NULL);
 
   /* Get mountpoint private data from the inode reference from the file
    * structure
    */
 
   rf = filep->f_priv;
-  rm = (FAR struct romfs_mountpt_s *)filep->f_inode->i_private;
+  rm = filep->f_inode->i_private;
   DEBUGASSERT(rm != NULL);
 
   /* Check if the mount is still healthy */
 
-  ret = romfs_semtake(rm);
+  ret = nxrmutex_lock(&rm->rm_lock);
   if (ret < 0)
     {
       return ret;
@@ -773,23 +830,24 @@ static int romfs_fstat(FAR const struct file *filep, FAR struct stat *buf)
                               rm->rm_hwsectorsize, buf);
     }
 
-  romfs_semgive(rm);
+  nxrmutex_unlock(&rm->rm_lock);
   return ret;
 }
 
 /****************************************************************************
  * Name: romfs_opendir
  *
- * Description:
+ * Description
  *   Open a directory for read access
  *
  ****************************************************************************/
 
 static int romfs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
-                         FAR struct fs_dirent_s *dir)
+                         FAR struct fs_dirent_s **dir)
 {
   FAR struct romfs_mountpt_s *rm;
-  FAR struct romfs_dirinfo_s  dirinfo;
+  FAR struct romfs_dir_s     *rdir;
+  struct romfs_nodeinfo_s     nodeinfo;
   int                         ret;
 
   finfo("relpath: '%s'\n", relpath);
@@ -802,67 +860,105 @@ static int romfs_opendir(FAR struct inode *mountpt, FAR const char *relpath,
 
   rm = mountpt->i_private;
 
+  rdir = fs_heap_zalloc(sizeof(*rdir));
+  if (rdir == NULL)
+    {
+      return -ENOMEM;
+    }
+
   /* Make sure that the mount is still healthy */
 
-  ret = romfs_semtake(rm);
+  ret = nxrmutex_lock(&rm->rm_lock);
   if (ret < 0)
     {
-      return ret;
+      goto errout_with_rdir;
     }
 
   ret = romfs_checkmount(rm);
-  if (ret != OK)
+  if (ret < 0)
     {
       ferr("ERROR: romfs_checkmount failed: %d\n", ret);
-      goto errout_with_semaphore;
+      goto errout_with_lock;
     }
 
   /* Find the requested directory */
 
-  ret = romfs_finddirentry(rm, &dirinfo, relpath);
+  ret = romfs_finddirentry(rm, &nodeinfo, relpath);
   if (ret < 0)
     {
       ferr("ERROR: Failed to find directory '%s': %d\n", relpath, ret);
-      goto errout_with_semaphore;
+      goto errout_with_lock;
     }
 
   /* Verify that it is some kind of directory */
 
-  if (!IS_DIRECTORY(dirinfo.rd_next))
+  if (!IS_DIRECTORY(nodeinfo.rn_next))
     {
       /* The entry is not a directory */
 
-      ferr("ERROR: '%s' is not a directory: %d\n", relpath);
+      ferr("ERROR: '%s' is not a directory\n", relpath);
       ret = -ENOTDIR;
-      goto errout_with_semaphore;
+      goto errout_with_lock;
     }
 
   /* The entry is a directory */
 
-  memcpy(&dir->u.romfs, &dirinfo.rd_dir, sizeof(struct fs_romfsdir_s));
-  romfs_semgive(rm);
-  return OK;
+#ifdef CONFIG_FS_ROMFS_CACHE_NODE
+  rdir->firstnode   = nodeinfo.rn_child;
+  rdir->currnode    = nodeinfo.rn_child;
+#else
+  rdir->firstoffset = nodeinfo.rn_offset;
+  rdir->curroffset  = nodeinfo.rn_offset;
+#endif
 
-errout_with_semaphore:
-  romfs_semgive(rm);
+  *dir = &rdir->base;
+  nxrmutex_unlock(&rm->rm_lock);
+  return 0;
+
+errout_with_lock:
+  nxrmutex_unlock(&rm->rm_lock);
+
+errout_with_rdir:
+  fs_heap_free(rdir);
   return ret;
+}
+
+/****************************************************************************
+ * Name: romfs_closedir
+ *
+ * Description
+ *   Close the directory
+ *
+ ****************************************************************************/
+
+static int romfs_closedir(FAR struct inode *mountpt,
+                          FAR struct fs_dirent_s *dir)
+{
+  DEBUGASSERT(dir);
+  fs_heap_free(dir);
+  return 0;
 }
 
 /****************************************************************************
  * Name: romfs_readdir
  *
- * Description: Read the next directory entry
+ * Description
+ *   Read the next directory entry
  *
  ****************************************************************************/
 
 static int romfs_readdir(FAR struct inode *mountpt,
-                         FAR struct fs_dirent_s *dir)
+                         FAR struct fs_dirent_s *dir,
+                         FAR struct dirent *entry)
 {
   FAR struct romfs_mountpt_s *rm;
+  FAR struct romfs_dir_s     *rdir;
+#ifndef CONFIG_FS_ROMFS_CACHE_NODE
   uint32_t                    linkoffset;
-  uint32_t                    next;
   uint32_t                    info;
   uint32_t                    size;
+#endif
+  uint32_t                    next;
   int                         ret;
 
   finfo("Entry\n");
@@ -874,20 +970,21 @@ static int romfs_readdir(FAR struct inode *mountpt,
   /* Recover our private data from the inode instance */
 
   rm = mountpt->i_private;
+  rdir = (FAR struct romfs_dir_s *)dir;
 
   /* Make sure that the mount is still healthy */
 
-  ret = romfs_semtake(rm);
+  ret = nxrmutex_lock(&rm->rm_lock);
   if (ret < 0)
     {
       return ret;
     }
 
   ret = romfs_checkmount(rm);
-  if (ret != OK)
+  if (ret < 0)
     {
       ferr("ERROR: omfs_checkmount failed: %d\n", ret);
-      goto errout_with_semaphore;
+      goto errout_with_lock;
     }
 
   /* Loop, skipping over unsupported items in the file system */
@@ -896,7 +993,11 @@ static int romfs_readdir(FAR struct inode *mountpt,
     {
       /* Have we reached the end of the directory */
 
-      if (!dir->u.romfs.fr_curroffset)
+#ifdef CONFIG_FS_ROMFS_CACHE_NODE
+      if (!rdir->currnode || !(*rdir->currnode))
+#else
+      if (!rdir->curroffset)
+#endif
         {
           /* We signal the end of the directory by returning the
            * special error -ENOENT
@@ -904,56 +1005,69 @@ static int romfs_readdir(FAR struct inode *mountpt,
 
           finfo("End of directory\n");
           ret = -ENOENT;
-          goto errout_with_semaphore;
+          goto errout_with_lock;
         }
 
+#ifdef CONFIG_FS_ROMFS_CACHE_NODE
+      next = (*rdir->currnode)->rn_next;
+      strlcpy(entry->d_name, (*rdir->currnode)->rn_name,
+              sizeof(entry->d_name));
+      rdir->currnode++;
+#else
       /* Parse the directory entry */
 
-      ret = romfs_parsedirentry(rm, dir->u.romfs.fr_curroffset, &linkoffset,
+      ret = romfs_parsedirentry(rm, rdir->curroffset, &linkoffset,
                                 &next, &info, &size);
       if (ret < 0)
         {
           ferr("ERROR: romfs_parsedirentry failed: %d\n", ret);
-          goto errout_with_semaphore;
+          goto errout_with_lock;
         }
 
       /* Save the filename */
 
-      ret = romfs_parsefilename(rm, dir->u.romfs.fr_curroffset,
-                                dir->fd_dir.d_name);
+      ret = romfs_parsefilename(rm, rdir->curroffset,
+                                entry->d_name);
       if (ret < 0)
         {
           ferr("ERROR: romfs_parsefilename failed: %d\n", ret);
-          goto errout_with_semaphore;
+          goto errout_with_lock;
         }
 
       /* Set up the next directory entry offset */
 
-      dir->u.romfs.fr_curroffset = next & RFNEXT_OFFSETMASK;
+      rdir->curroffset = next & RFNEXT_OFFSETMASK;
+#endif
 
       /* Check the file type */
 
       if (IS_DIRECTORY(next))
         {
-          dir->fd_dir.d_type = DTYPE_DIRECTORY;
+          entry->d_type = DTYPE_DIRECTORY;
           break;
         }
       else if (IS_FILE(next))
         {
-          dir->fd_dir.d_type = DTYPE_FILE;
+          entry->d_type = DTYPE_FILE;
+          break;
+        }
+      else if (IS_SOFTLINK(next))
+        {
+          entry->d_type = DTYPE_LINK;
           break;
         }
     }
 
-errout_with_semaphore:
-  romfs_semgive(rm);
+errout_with_lock:
+  nxrmutex_unlock(&rm->rm_lock);
   return ret;
 }
 
 /****************************************************************************
  * Name: romfs_rewindir
  *
- * Description: Reset directory read to the first entry
+ * Description
+ *   Reset directory read to the first entry
  *
  ****************************************************************************/
 
@@ -961,6 +1075,7 @@ static int romfs_rewinddir(FAR struct inode *mountpt,
                            FAR struct fs_dirent_s *dir)
 {
   FAR struct romfs_mountpt_s *rm;
+  FAR struct romfs_dir_s *rdir;
   int ret;
 
   finfo("Entry\n");
@@ -972,33 +1087,39 @@ static int romfs_rewinddir(FAR struct inode *mountpt,
   /* Recover our private data from the inode instance */
 
   rm = mountpt->i_private;
+  rdir = (FAR struct romfs_dir_s *)dir;
 
   /* Make sure that the mount is still healthy */
 
-  ret = romfs_semtake(rm);
+  ret = nxrmutex_lock(&rm->rm_lock);
   if (ret < 0)
     {
       return ret;
     }
 
   ret = romfs_checkmount(rm);
-  if (ret == OK)
+  if (ret >= 0)
     {
-      dir->u.romfs.fr_curroffset = dir->u.romfs.fr_firstoffset;
+#ifdef CONFIG_FS_ROMFS_CACHE_NODE
+      rdir->currnode = rdir->firstnode;
+#else
+      rdir->curroffset = rdir->firstoffset;
+#endif
     }
 
-  romfs_semgive(rm);
+  nxrmutex_unlock(&rm->rm_lock);
   return ret;
 }
 
 /****************************************************************************
  * Name: romfs_bind
  *
- * Description: This implements a portion of the mount operation. This
- *  function allocates and initializes the mountpoint private data and
- *  binds the blockdriver inode to the filesystem private data.  The final
- *  binding of the private data (containing the blockdriver) to the
- *  mountpoint is performed by mount().
+ * Description
+ *   This implements a portion of the mount operation. This
+ *   function allocates and initializes the mountpoint private data and
+ *   binds the blockdriver inode to the filesystem private data.  The final
+ *   binding of the private data (containing the blockdriver) to the
+ *   mountpoint is performed by mount().
  *
  ****************************************************************************/
 
@@ -1018,31 +1139,30 @@ static int romfs_bind(FAR struct inode *blkdriver, FAR const void *data,
       return -ENODEV;
     }
 
-  if (INODE_IS_BLOCK(blkdriver) &&
-      blkdriver->u.i_bops->open != NULL &&
-      blkdriver->u.i_bops->open(blkdriver) != OK)
+  if (blkdriver->u.i_bops->open != NULL &&
+      (ret = blkdriver->u.i_bops->open(blkdriver)) < 0)
     {
       ferr("ERROR: No open method\n");
-      return -ENODEV;
+      return ret;
     }
 
   /* Create an instance of the mountpt state structure */
 
-  rm = (FAR struct romfs_mountpt_s *)
-    kmm_zalloc(sizeof(struct romfs_mountpt_s));
+  rm = fs_heap_zalloc(sizeof(struct romfs_mountpt_s));
   if (!rm)
     {
       ferr("ERROR: Failed to allocate mountpoint structure\n");
-      return -ENOMEM;
+      ret = -ENOMEM;
+      goto errout;
     }
 
   /* Initialize the allocated mountpt state structure.  The filesystem is
-   * responsible for one reference ont the blkdriver inode and does not
+   * responsible for one reference on the blkdriver inode and does not
    * have to addref() here (but does have to release in ubind().
    */
 
-  nxsem_init(&rm->rm_sem, 0, 0);   /* Initialize the semaphore that controls access */
-  rm->rm_blkdriver   = blkdriver;  /* Save the block driver reference */
+  nxrmutex_init(&rm->rm_lock);  /* Initialize the mutex that controls access */
+  rm->rm_blkdriver = blkdriver; /* Save the block driver reference */
 
   /* Get the hardware configuration and setup buffering appropriately */
 
@@ -1050,42 +1170,83 @@ static int romfs_bind(FAR struct inode *blkdriver, FAR const void *data,
   if (ret < 0)
     {
       ferr("ERROR: romfs_hwconfigure failed: %d\n", ret);
-      goto errout_with_sem;
+      goto errout_with_mount;
     }
 
-  /* Then complete the mount by getting the ROMFS configuratrion from
+#ifdef CONFIG_FS_ROMFS_WRITEABLE
+  if (data && strstr(data, "rw") && strstr(data, "forceformat"))
+    {
+      ret = romfs_mkfs(rm);
+      if (ret < 0)
+        {
+          ferr("ERROR: romfs_mkfs failed: %d\n", ret);
+          goto errout_with_buffer;
+        }
+    }
+#endif
+
+  /* Then complete the mount by getting the ROMFS configuration from
    * the ROMF header
    */
 
-  ret = romfs_fsconfigure(rm);
+  ret = romfs_fsconfigure(rm, data);
   if (ret < 0)
     {
-      ferr("ERROR: romfs_fsconfigure failed: %d\n", ret);
-      goto errout_with_buffer;
+#ifdef CONFIG_FS_ROMFS_WRITEABLE
+      if (data && strstr(data, "rw") && strstr(data, "autoformat"))
+        {
+          ret = romfs_mkfs(rm);
+          if (ret < 0)
+            {
+              ferr("ERROR: romfs_format failed: %d\n", ret);
+              goto errout_with_buffer;
+            }
+
+          ret = romfs_fsconfigure(rm, data);
+          if (ret < 0)
+            {
+              ferr("ERROR: romfs_fsconfigure failed: %d\n", ret);
+              goto errout_with_buffer;
+            }
+        }
+      else
+#endif
+        {
+          ferr("ERROR: romfs_fsconfigure failed: %d\n", ret);
+          goto errout_with_buffer;
+        }
     }
+
+#ifdef CONFIG_FS_ROMFS_WRITEABLE
+  nxsem_init(&rm->rm_sem, 0, 1);
+#endif
 
   /* Mounted! */
 
-  *handle = (FAR void *)rm;
-  romfs_semgive(rm);
-  return OK;
+  *handle = rm;
+  return 0;
 
 errout_with_buffer:
-  if (!rm->rm_xipbase)
+  fs_heap_free(rm->rm_devbuffer);
+
+errout_with_mount:
+  nxrmutex_destroy(&rm->rm_lock);
+  fs_heap_free(rm);
+
+errout:
+  if (blkdriver->u.i_bops->close != NULL)
     {
-      kmm_free(rm->rm_buffer);
+      blkdriver->u.i_bops->close(blkdriver);
     }
 
-errout_with_sem:
-  nxsem_destroy(&rm->rm_sem);
-  kmm_free(rm);
   return ret;
 }
 
 /****************************************************************************
  * Name: romfs_unbind
  *
- * Description: This implements the filesystem portion of the umount
+ * Description
+ *   This implements the filesystem portion of the umount
  *   operation.
  *
  ****************************************************************************/
@@ -1093,7 +1254,7 @@ errout_with_sem:
 static int romfs_unbind(FAR void *handle, FAR struct inode **blkdriver,
                         unsigned int flags)
 {
-  FAR struct romfs_mountpt_s *rm = (FAR struct romfs_mountpt_s *)handle;
+  FAR struct romfs_mountpt_s *rm = handle;
   int ret;
 
   finfo("Entry\n");
@@ -1107,13 +1268,13 @@ static int romfs_unbind(FAR void *handle, FAR struct inode **blkdriver,
 
   /* Check if there are sill any files opened on the filesystem. */
 
-  ret = romfs_semtake(rm);
+  ret = nxrmutex_lock(&rm->rm_lock);
   if (ret < 0)
     {
       return ret;
     }
 
-  if (rm->rm_head)
+  if (rm->rm_refs)
     {
       /* We cannot unmount now.. there are open files */
 
@@ -1123,7 +1284,7 @@ static int romfs_unbind(FAR void *handle, FAR struct inode **blkdriver,
        * no open file references.
        */
 
-      ret = (flags != 0) ? -ENOSYS : -EBUSY;
+      ret = flags ? -ENOSYS : -EBUSY;
     }
   else
     {
@@ -1131,7 +1292,7 @@ static int romfs_unbind(FAR void *handle, FAR struct inode **blkdriver,
 
       if (rm->rm_blkdriver)
         {
-          struct inode *inode = rm->rm_blkdriver;
+          FAR struct inode *inode = rm->rm_blkdriver;
           if (inode)
             {
               if (INODE_IS_BLOCK(inode) && inode->u.i_bops->close != NULL)
@@ -1154,24 +1315,29 @@ static int romfs_unbind(FAR void *handle, FAR struct inode **blkdriver,
 
       /* Release the mountpoint private data */
 
-      if (!rm->rm_xipbase && rm->rm_buffer)
-        {
-          kmm_free(rm->rm_buffer);
-        }
+      fs_heap_free(rm->rm_devbuffer);
 
+#ifdef CONFIG_FS_ROMFS_CACHE_NODE
+      romfs_freenode(rm->rm_root);
+#endif
+#ifdef CONFIG_FS_ROMFS_WRITEABLE
       nxsem_destroy(&rm->rm_sem);
-      kmm_free(rm);
-      return OK;
+      romfs_free_sparelist(&rm->rm_sparelist);
+#endif
+      nxrmutex_destroy(&rm->rm_lock);
+      fs_heap_free(rm);
+      return 0;
     }
 
-  romfs_semgive(rm);
+  nxrmutex_unlock(&rm->rm_lock);
   return ret;
 }
 
 /****************************************************************************
  * Name: romfs_statfs
  *
- * Description: Return filesystem statistics
+ * Description
+ *   Return filesystem statistics
  *
  ****************************************************************************/
 
@@ -1192,7 +1358,7 @@ static int romfs_statfs(FAR struct inode *mountpt, FAR struct statfs *buf)
 
   /* Check if the mount is still healthy */
 
-  ret = romfs_semtake(rm);
+  ret = nxrmutex_lock(&rm->rm_lock);
   if (ret < 0)
     {
       return ret;
@@ -1202,12 +1368,11 @@ static int romfs_statfs(FAR struct inode *mountpt, FAR struct statfs *buf)
   if (ret < 0)
     {
       ferr("ERROR: romfs_checkmount failed: %d\n", ret);
-      goto errout_with_semaphore;
+      goto errout_with_lock;
     }
 
   /* Fill in the statfs info */
 
-  memset(buf, 0, sizeof(struct statfs));
   buf->f_type    = ROMFS_MAGIC;
 
   /* We will claim that the optimal transfer size is the size of one sector */
@@ -1216,23 +1381,21 @@ static int romfs_statfs(FAR struct inode *mountpt, FAR struct statfs *buf)
 
   /* Everything else follows in units of sectors */
 
-  buf->f_blocks  = SEC_NSECTORS(rm, rm->rm_volsize + SEC_NDXMASK(rm));
-  buf->f_bfree   = 0;
-  buf->f_bavail  = 0;
+  buf->f_blocks  = rm->rm_hwnsectors;
+  buf->f_bfree   = buf->f_blocks -
+                   SEC_NSECTORS(rm, rm->rm_volsize + SEC_NDXMASK(rm));
+  buf->f_bavail  = buf->f_bfree;
   buf->f_namelen = NAME_MAX;
 
-  romfs_semgive(rm);
-  return OK;
-
-errout_with_semaphore:
-  romfs_semgive(rm);
+errout_with_lock:
+  nxrmutex_unlock(&rm->rm_lock);
   return ret;
 }
 
 /****************************************************************************
  * Name: romfs_stat_common
  *
- * Description:
+ * Description
  *   Return information about a file or directory
  *
  ****************************************************************************/
@@ -1248,11 +1411,20 @@ static int romfs_stat_common(uint8_t type, uint32_t size,
       buf->st_mode = S_IFDIR | S_IROTH | S_IXOTH | S_IRGRP | S_IXGRP |
                      S_IRUSR | S_IXUSR;
     }
-  else if (IS_FILE(type))
+  else if (IS_FILE(type) || IS_SOFTLINK(type))
     {
+      if (IS_FILE(type))
+        {
+          buf->st_mode = S_IFREG;
+        }
+      else
+        {
+          buf->st_mode = S_IFLNK;
+        }
+
       /* It's a read-only file name */
 
-      buf->st_mode = S_IFREG | S_IROTH | S_IRGRP | S_IRUSR;
+      buf->st_mode |= S_IROTH | S_IRGRP | S_IRUSR;
       if (IS_EXECUTABLE(type))
         {
           /* It's a read-execute file name */
@@ -1273,13 +1445,14 @@ static int romfs_stat_common(uint8_t type, uint32_t size,
   buf->st_size    = size;
   buf->st_blksize = sectorsize;
   buf->st_blocks  = (buf->st_size + sectorsize - 1) / sectorsize;
-  return OK;
+  return 0;
 }
 
 /****************************************************************************
  * Name: romfs_stat
  *
- * Description: Return information about a file or directory
+ * Description
+ *   Return information about a file or directory
  *
  ****************************************************************************/
 
@@ -1287,7 +1460,7 @@ static int romfs_stat(FAR struct inode *mountpt, FAR const char *relpath,
                       FAR struct stat *buf)
 {
   FAR struct romfs_mountpt_s *rm;
-  FAR struct romfs_dirinfo_s dirinfo;
+  struct romfs_nodeinfo_s nodeinfo;
   uint8_t type;
   int ret;
 
@@ -1303,38 +1476,38 @@ static int romfs_stat(FAR struct inode *mountpt, FAR const char *relpath,
 
   /* Check if the mount is still healthy */
 
-  ret = romfs_semtake(rm);
+  ret = nxrmutex_lock(&rm->rm_lock);
   if (ret < 0)
     {
       return ret;
     }
 
   ret = romfs_checkmount(rm);
-  if (ret != OK)
+  if (ret < 0)
     {
       ferr("ERROR: romfs_checkmount failed: %d\n", ret);
-      goto errout_with_semaphore;
+      goto errout_with_lock;
     }
 
   /* Find the directory entry corresponding to relpath. */
 
-  ret = romfs_finddirentry(rm, &dirinfo, relpath);
+  ret = romfs_finddirentry(rm, &nodeinfo, relpath);
 
   /* If nothing was found, then we fail with EEXIST */
 
   if (ret < 0)
     {
       finfo("Failed to find directory: %d\n", ret);
-      goto errout_with_semaphore;
+      goto errout_with_lock;
     }
 
   /* Return information about the directory entry */
 
-  type = (uint8_t)(dirinfo.rd_next & RFNEXT_ALLMODEMASK);
-  ret  = romfs_stat_common(type, dirinfo.rd_size, rm->rm_hwsectorsize, buf);
+  type = (uint8_t)(nodeinfo.rn_next & RFNEXT_ALLMODEMASK);
+  ret  = romfs_stat_common(type, nodeinfo.rn_size, rm->rm_hwsectorsize, buf);
 
-errout_with_semaphore:
-  romfs_semgive(rm);
+errout_with_lock:
+  nxrmutex_unlock(&rm->rm_lock);
   return ret;
 }
 

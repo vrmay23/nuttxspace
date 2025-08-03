@@ -1,45 +1,26 @@
 /****************************************************************************
  * apps/wireless/ieee802154/i8sak/i8sak_poll.c
- * IEEE 802.15.4 Swiss Army Knife
  *
- *   Copyright (C) 2014-2015, 2017 Gregory Nutt. All rights reserved.
- *   Copyright (C) 2014-2015 Sebastien Lorquet. All rights reserved.
- *   Copyright (C) 2017 Verge Inc. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
- *   Author: Anthony Merlino <anthony@vergeaero.com>
- *   Author: Gregory Nuttx <gnutt@nuttx.org>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
- /****************************************************************************
+/****************************************************************************
  * Included Files
  ****************************************************************************/
 
@@ -49,6 +30,7 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <sys/ioctl.h>
 #include <nuttx/fs/ioctl.h>
 
@@ -61,7 +43,8 @@
  * Private Function Prototypes
  ****************************************************************************/
 
-static void poll_eventcb(FAR struct ieee802154_primitive_s *primitive, FAR void *arg);
+static void poll_eventcb(FAR struct ieee802154_primitive_s *primitive,
+                         FAR void *arg);
 
 /****************************************************************************
  * Public Functions
@@ -91,18 +74,22 @@ void i8sak_poll_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
                     "Usage: %s [-h]\n"
                     "    -h = this help menu\n"
                     , argv[0]);
+
             /* Must manually reset optind if we are going to exit early */
 
             optind = -1;
             return;
           case ':':
             fprintf(stderr, "ERROR: missing argument\n");
+
             /* Must manually reset optind if we are going to exit early */
 
             optind = -1;
             i8sak_cmd_error(i8sak); /* This exits for us */
+
           case '?':
             fprintf(stderr, "ERROR: unknown argument\n");
+
             /* Must manually reset optind if we are going to exit early */
 
             optind = -1;
@@ -112,14 +99,15 @@ void i8sak_poll_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
 
   i8sak_requestdaemon(i8sak);
 
-  /* Register new oneshot callback for receiving the association notifications */
+  /* Register new callback for receiving the association notifications */
 
   memset(&eventfilter, 0, sizeof(struct i8sak_eventfilter_s));
   eventfilter.confevents.poll = true;
 
   i8sak_eventlistener_addreceiver(i8sak, poll_eventcb, &eventfilter, true);
 
-  memcpy(&pollreq.coordaddr, &i8sak->ep_addr, sizeof(struct ieee802154_addr_s));
+  memcpy(&pollreq.coordaddr, &i8sak->ep_addr,
+         sizeof(struct ieee802154_addr_s));
 
   if (pollreq.coordaddr.mode == IEEE802154_ADDRMODE_SHORT)
     {
@@ -135,7 +123,8 @@ void i8sak_poll_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
       fd = open(i8sak->ifname, O_RDWR);
       if (fd < 0)
         {
-          fprintf(stderr, "ERROR: cannot open %s, errno=%d\n", i8sak->ifname, errno);
+          fprintf(stderr, "ERROR: cannot open %s, errno=%d\n",
+                  i8sak->ifname, errno);
           i8sak_cmd_error(i8sak);
         }
 
@@ -157,7 +146,9 @@ void i8sak_poll_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
 
   close(fd);
 
-  /* Wait here, the event listener will notify us if the correct event occurs */
+  /* Wait here, the event listener will notify us if the correct event
+   * occurs
+   */
 
   ret = sem_wait(&i8sak->sigsem);
   if (ret != OK)
@@ -173,7 +164,8 @@ void i8sak_poll_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
  * Private Function
  ****************************************************************************/
 
-static void poll_eventcb(FAR struct ieee802154_primitive_s *primitive, FAR void *arg)
+static void poll_eventcb(FAR struct ieee802154_primitive_s *primitive,
+                         FAR void *arg)
 {
   FAR struct i8sak_s *i8sak = (FAR struct i8sak_s *)arg;
 

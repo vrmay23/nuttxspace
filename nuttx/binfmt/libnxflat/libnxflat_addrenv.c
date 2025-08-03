@@ -1,35 +1,22 @@
 /****************************************************************************
  * binfmt/libnxflat/libnxflat_addrenv.c
  *
- *   Copyright (C) 2012 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,21 +27,16 @@
 #include <nuttx/config.h>
 
 #include <string.h>
+#include <sys/param.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
+#include <nuttx/addrenv.h>
 #include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
 
 #include "libnxflat.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#ifndef MIN
-#  define MIN(x,y) ((x) < (y) ? (x) : (y))
-#endif
 
 /****************************************************************************
  * Private Constant Data
@@ -86,12 +68,13 @@
  *
  ****************************************************************************/
 
-int nxflat_addrenv_alloc(FAR struct nxflat_loadinfo_s *loadinfo, size_t envsize)
+int nxflat_addrenv_alloc(FAR struct nxflat_loadinfo_s *loadinfo,
+                         size_t envsize)
 {
   FAR struct dspace_s *dspace;
 #ifdef CONFIG_ARCH_ADDRENV
+  FAR struct arch_addrenv_s *addrenv = &loadinfo->addrenv.addrenv;
   FAR void *vdata;
-  save_addrenv_t oldenv;
   size_t heapsize;
   int ret;
 #endif
@@ -100,7 +83,7 @@ int nxflat_addrenv_alloc(FAR struct nxflat_loadinfo_s *loadinfo, size_t envsize)
 
   /* Allocate the struct dspace_s container for the D-Space allocation */
 
-  dspace = (FAR struct dspace_s *)kmm_malloc(sizeof(struct dspace_s));
+  dspace = kmm_malloc(sizeof(struct dspace_s));
   if (dspace == 0)
     {
       berr("ERROR: Failed to allocate DSpace\n");
@@ -121,12 +104,16 @@ int nxflat_addrenv_alloc(FAR struct nxflat_loadinfo_s *loadinfo, size_t envsize)
 
   /* Create a D-Space address environment for the new NXFLAT task */
 
-  ret = up_addrenv_create(0, envsize, heapsize, &loadinfo->addrenv);
+  ret = up_addrenv_create(0, envsize, heapsize, addrenv);
   if (ret < 0)
     {
       berr("ERROR: up_addrenv_create failed: %d\n", ret);
       goto errout_with_dspace;
     }
+
+  /* Take a reference to the address environment, so it won't get freed */
+
+  addrenv_take(&loadinfo->addrenv);
 
   /* Get the virtual address associated with the start of the address
    * environment.  This is the base address that we will need to use to
@@ -134,7 +121,7 @@ int nxflat_addrenv_alloc(FAR struct nxflat_loadinfo_s *loadinfo, size_t envsize)
    * selected.
    */
 
-  ret = up_addrenv_vdata(&loadinfo->addrenv, 0, &vdata);
+  ret = up_addrenv_vdata(addrenv, 0, &vdata);
   if (ret < 0)
     {
       berr("ERROR: up_addrenv_vdata failed: %d\n", ret);
@@ -145,19 +132,19 @@ int nxflat_addrenv_alloc(FAR struct nxflat_loadinfo_s *loadinfo, size_t envsize)
    * selected the D-Space address environment to do this.
    */
 
-  ret = up_addrenv_select(loadinfo->addrenv, &oldenv);
+  ret = addrenv_select(&loadinfo->addrenv);
   if (ret < 0)
     {
-      berr("ERROR: up_addrenv_select failed: %d\n", ret);
+      berr("ERROR: addrenv_select failed: %d\n", ret);
       goto errout_with_addrenv;
     }
 
   memset(vdata, 0, envsize);
 
-  ret = up_addrenv_restore(oldenv);
+  ret = addrenv_restore();
   if (ret < 0)
     {
-      berr("ERROR: up_addrenv_restore failed: %d\n", ret);
+      berr("ERROR: addrenv_restore failed: %d\n", ret);
       goto errout_with_addrenv;
     }
 
@@ -178,7 +165,7 @@ errout_with_dspace:
 #else
   /* Allocate (and zero) memory to hold the ELF image */
 
-  dspace->region = (FAR uint8_t *)kumm_zalloc(envsize);
+  dspace->region = kumm_zalloc(envsize);
   if (!dspace->region)
     {
       kmm_free(dspace);

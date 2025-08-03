@@ -1,18 +1,10 @@
 /****************************************************************************
- * arch/arm/src/sam34/sam_tc.c
+ * arch/arm/src/sam34/sam4cm_tc.c
  *
- *   Copyright (C) 2013-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * References:
- *
- *   SAMA5D3 Series Data Sheet
- *   Atmel NoOS sample code.
- *
- * The Atmel sample code has a BSD compatible license that requires this
- * copyright notice:
- *
- *   Copyright (c) 2011, Atmel Corporation
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2013-2017 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2011 Atmel Corporation
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,6 +35,12 @@
  *
  ****************************************************************************/
 
+/* References:
+ *
+ *   SAMA5D3 Series Data Sheet
+ *   Atmel NoOS sample code.
+ */
+
 /****************************************************************************
  * Included Files
  ****************************************************************************/
@@ -58,10 +56,10 @@
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 #include <arch/board/board.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "sam_periphclks.h"
 #include "hardware/sam_pinmap.h"
 #include "hardware/sam_pmc.h"
@@ -109,7 +107,7 @@ struct sam_chan_s
   tc_handler_t handler;    /* Attached interrupt handler */
   void *arg;               /* Interrupt handler argument */
   uint8_t chan;            /* Channel number (0, 1, or 2 OR 3, 4, or 5) */
-  sem_t exclsem;           /* Assures mutually exclusive access to TC */
+  mutex_t lock;            /* Assures mutually exclusive access to TC */
   bool initialized;        /* True: channel data has been initialized */
   bool inuse;              /* True: channel is in use */
 
@@ -127,11 +125,6 @@ struct sam_chan_s
  * Private Function Prototypes
  ****************************************************************************/
 
-/* Low-level helpers ********************************************************/
-
-static int  sam_takesem(struct sam_chan_s *chan);
-#define     sam_givesem(chan) (nxsem_post(&chan->exclsem))
-
 #ifdef CONFIG_SAM34_TC_REGDEBUG
 static void sam_regdump(struct sam_chan_s *chan, const char *msg);
 static bool sam_checkreg(struct sam_chan_s *chan, bool wr, uint32_t regaddr,
@@ -148,7 +141,7 @@ static inline void sam_chan_putreg(struct sam_chan_s *chan,
 
 /* Interrupt Handling *******************************************************/
 
-static int sam_tc_interrupt(int irq, void *context, FAR void *arg);
+static int sam_tc_interrupt(int irq, void *context, void *arg);
 
 /* Initialization ***********************************************************/
 
@@ -313,7 +306,9 @@ static const struct sam_chconfig_s g_configs[] =
 
 static struct sam_chan_s g_channels[ENABLED_CHANNELS];
 
-/* TC frequency data.  This table provides the frequency for each selection of TCCLK */
+/* TC frequency data.
+ * This table provides the frequency for each selection of TCCLK
+ */
 
 #define TC_NDIVIDERS   4
 #define TC_NDIVOPTIONS 5
@@ -346,26 +341,6 @@ static const uint8_t g_regoffset[TC_NREGISTERS] =
 /****************************************************************************
  * Low-level Helpers
  ****************************************************************************/
-
-/****************************************************************************
- * Name: sam_takesem
- *
- * Description:
- *   Take the wait semaphore (handling false alarm wakeups due to the receipt
- *   of signals).
- *
- * Input Parameters:
- *   dev - Instance of the SDIO device driver state structure.
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-static int sam_takesem(struct sam_chan_s *chan)
-{
-  return nxsem_wait_uninterruptible(&chan->exclsem);
-}
 
 /****************************************************************************
  * Name: sam_regdump
@@ -427,7 +402,7 @@ static void sam_regdump(struct sam_chan_s *chan, const char *msg)
  *
  * Returned Value:
  *   true:  This is the first register access of this type.
- *   flase: This is the same as the preceding register access.
+ *   false: This is the same as the preceding register access.
  *
  ****************************************************************************/
 
@@ -473,7 +448,7 @@ static bool sam_checkreg(struct sam_chan_s *chan, bool wr, uint32_t regaddr,
  * Name: sam_chan_getreg
  *
  * Description:
- *  Read an SPI register
+ *  Read an TC register
  *
  ****************************************************************************/
 
@@ -497,7 +472,7 @@ static inline uint32_t sam_chan_getreg(struct sam_chan_s *chan,
  * Name: sam_chan_putreg
  *
  * Description:
- *  Write a value to an SPI register
+ *  Write a value to an TC register
  *
  ****************************************************************************/
 
@@ -538,7 +513,7 @@ static inline void sam_chan_putreg(struct sam_chan_s *chan,
  *
  ****************************************************************************/
 
-static int sam_tc_interrupt(int irq, void *context, FAR void *arg)
+static int sam_tc_interrupt(int irq, void *context, void *arg)
 {
   struct sam_chan_s *chan = (struct sam_chan_s *)arg;
   uint32_t sr;
@@ -753,7 +728,7 @@ static inline struct sam_chan_s *sam_tc_initialize(int channel)
       tmrerr("ERROR: Initializing TC%d\n", chconfig->chan);
 
       memset(chan, 0, sizeof(struct sam_chan_s));
-      nxsem_init(&chan->exclsem, 0, 1);
+      nxmutex_init(&chan->lock);
       chan->base = chconfig->base;
       chan->pid  = chconfig->pid;
       chan->irq  = chconfig->irq;
@@ -802,7 +777,7 @@ static inline struct sam_chan_s *sam_tc_initialize(int channel)
 
   /* Get exclusive access to the timer/count data structure */
 
-  ret = sam_takesem(chan);
+  ret = nxmutex_lock(&chan->lock);
   if (ret < 0)
     {
       leave_critical_section(flags);
@@ -818,7 +793,7 @@ static inline struct sam_chan_s *sam_tc_initialize(int channel)
       /* No.. return a failure */
 
       tmrerr("ERROR: Channel %d is in-use\n", channel);
-      sam_givesem(chan);
+      nxmutex_unlock(&chan->lock);
       return NULL;
     }
 
@@ -884,7 +859,7 @@ TC_HANDLE sam_tc_allocate(int channel, int mode)
 
       sam_chan_putreg(chan, SAM_TC_CMR_OFFSET, mode);
       sam_regdump(chan, "Allocated");
-      sam_givesem(chan);
+      nxmutex_unlock(&chan->lock);
     }
 
   /* Return an opaque reference to the channel */
@@ -918,7 +893,7 @@ void sam_tc_free(TC_HANDLE handle)
    * is stopped and disabled.
    */
 
-  sam_tc_attach(handle, NULL, NULL, 0);
+  sam_tc_detach(handle);
   sam_tc_stop(handle);
 
   /* Mark the channel as available */

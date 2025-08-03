@@ -1,35 +1,22 @@
 /****************************************************************************
- * drivers/pipe/pipe_common.h
+ * drivers/pipes/pipe_common.h
  *
- *   Copyright (C) 2008-2009, 2015-2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,6 +28,8 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <nuttx/mutex.h>
+#include <nuttx/circbuf.h>
 #include <sys/types.h>
 
 #include <stdint.h>
@@ -50,17 +39,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-/* Pipe/FIFO support */
-
-#ifndef CONFIG_PIPES
-#  undef CONFIG_DEV_PIPE_MAXSIZE
-#  undef CONFIG_DEV_PIPE_SIZE
-#  undef CONFIG_DEV_FIFO_SIZE
-#  define CONFIG_DEV_PIPE_MAXSIZE 0
-#  define CONFIG_DEV_PIPE_SIZE 0
-#  define CONFIG_DEV_FIFO_SIZE 0
-#endif
 
 /* Pipe/FIFO size */
 
@@ -82,6 +60,17 @@
 
 #ifndef CONFIG_DEV_FIFO_SIZE
 #  define CONFIG_DEV_FIFO_SIZE 1024
+#endif
+
+/* Pipe/FIFO support */
+
+#ifndef CONFIG_PIPES
+#  undef CONFIG_DEV_PIPE_MAXSIZE
+#  undef CONFIG_DEV_PIPE_SIZE
+#  undef CONFIG_DEV_FIFO_SIZE
+#  define CONFIG_DEV_PIPE_MAXSIZE 0
+#  define CONFIG_DEV_PIPE_SIZE 0
+#  define CONFIG_DEV_FIFO_SIZE 0
 #endif
 
 /* Maximum number of threads than can be waiting for POLL events */
@@ -107,7 +96,6 @@
 #define PIPE_UNLINK(f)      do { (f) |= PIPE_FLAG_UNLINKED; } while (0)
 #define PIPE_IS_UNLINKED(f) (((f) & PIPE_FLAG_UNLINKED) != 0)
 
-
 /****************************************************************************
  * Public Types
  ****************************************************************************/
@@ -123,30 +111,32 @@ typedef uint8_t pipe_ndx_t;   /*  8-bit index */
 #endif
 
 /* This structure represents the state of one pipe.  A reference to this
- * structure is retained in the i_private field of the inode whenthe pipe/fifo
- * device is registered.
+ * structure is retained in the i_private field of the inode whenthe
+ * pipe/fifo device is registered.
  */
 
 struct pipe_dev_s
 {
-  sem_t      d_bfsem;       /* Used to serialize access to d_buffer and indices */
-  sem_t      d_rdsem;       /* Empty buffer - Reader waits for data write */
-  sem_t      d_wrsem;       /* Full buffer - Writer waits for data read */
-  pipe_ndx_t d_wrndx;       /* Index in d_buffer to save next byte written */
-  pipe_ndx_t d_rdndx;       /* Index in d_buffer to return the next byte read */
-  pipe_ndx_t d_bufsize;     /* allocated size of d_buffer in bytes */
-  uint8_t    d_nwriters;    /* Number of reference counts for write access */
-  uint8_t    d_nreaders;    /* Number of reference counts for read access */
-  uint8_t    d_pipeno;      /* Pipe minor number */
-  uint8_t    d_flags;       /* See PIPE_FLAG_* definitions */
-  uint8_t   *d_buffer;      /* Buffer allocated when device opened */
+  rmutex_t         d_bflock;      /* Used to serialize access to d_buffer and indices */
+  sem_t            d_rdsem;       /* Empty buffer - Reader waits for data write AND
+                                   * block O_RDONLY open until there is at least one writer */
+  sem_t            d_wrsem;       /* Full buffer - Writer waits for data read AND
+                                   * block O_WRONLY open until there is at least one reader */
+  pipe_ndx_t       d_bufsize;     /* allocated size of d_buffer in bytes */
+  pipe_ndx_t       d_pollinthrd;  /* Buffer threshold for POLLIN to occur */
+  pipe_ndx_t       d_polloutthrd; /* Buffer threshold for POLLOUT to occur */
+  uint8_t          d_nwriters;    /* Number of reference counts for write access */
+  uint8_t          d_nreaders;    /* Number of reference counts for read access */
+  uint8_t          d_flags;       /* See PIPE_FLAG_* definitions */
+  int16_t          d_crefs;       /* References to dev */
+  struct circbuf_s d_buffer;      /* Buffer allocated when device opened */
 
   /* The following is a list if poll structures of threads waiting for
    * driver events. The 'struct pollfd' reference for each open is also
    * retained in the f_priv field of the 'struct file'.
    */
 
-  struct pollfd *d_fds[CONFIG_DEV_PIPE_NPOLLWAITERS];
+  FAR struct pollfd *d_fds[CONFIG_DEV_PIPE_NPOLLWAITERS];
 };
 
 /****************************************************************************

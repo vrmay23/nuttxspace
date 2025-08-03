@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/z80/src/ez80/ez80_rtc_lowerhalf.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -27,12 +29,12 @@
 #include <sys/types.h>
 #include <stdbool.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/mutex.h>
 #include <nuttx/timers/rtc.h>
-
-#include "up_arch.h"
 
 #include "chip.h"
 #include "ez80_rtc.h"
@@ -71,7 +73,7 @@ struct ez80_lowerhalf_s
    * this file.
    */
 
-  sem_t devsem;         /* Threads can only exclusively access the RTC */
+  mutex_t devlock;         /* Threads can only exclusively access the RTC */
 
 #ifdef CONFIG_RTC_ALARM
   /* Alarm callback information */
@@ -119,23 +121,14 @@ static const struct rtc_ops_s g_rtc_ops =
     ez80_cancelalarm,   /* cancelalarm */
     ez80_rdalarm        /* rdalarm */
 #endif
-#ifdef CONFIG_RTC_PERIODIC
-  , NULL,               /* setperiodic */
-    NULL                /* cancelperiodic */
-#endif
-#ifdef CONFIG_RTC_IOCTL
-  , NULL                /* ioctl */
-#endif
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL                /* destroy */
-#endif
 };
 
 /* eZ80 RTC device state */
 
 static struct ez80_lowerhalf_s g_rtc_lowerhalf =
 {
-  &g_rtc_ops           /* ops */
+  &g_rtc_ops,          /* ops */
+  NXMUTEX_INITIALIZER,
 };
 
 /****************************************************************************
@@ -223,7 +216,7 @@ static int ez80_rdtime(FAR struct rtc_lowerhalf_s *lower,
   ret = up_rtc_gettime(&ts);
   if (ret < 0)
     {
-      goto errout_with_errno;
+      goto errout;
     }
 
   /* Convert the one second epoch time to a struct tm.  This operation
@@ -233,15 +226,15 @@ static int ez80_rdtime(FAR struct rtc_lowerhalf_s *lower,
 
   if (!gmtime_r(&ts.tv_sec, (FAR struct tm *)rtctime))
     {
-      goto errout_with_errno;
+      ret = -get_errno();
+      goto errout;
     }
 
   return OK;
 
-errout_with_errno:
-  ret = get_errno();
-  DEBUGASSERT(ret > 0);
-  return -ret;
+errout:
+  DEBUGASSERT(ret < 0);
+  return ret;
 
 #else
   time_t timer;
@@ -296,7 +289,7 @@ static int ez80_settime(FAR struct rtc_lowerhalf_s *lower,
    * rtc_time is cast compatible with struct tm.
    */
 
-  ts.tv_sec  = mktime((FAR struct tm *)rtctime);
+  ts.tv_sec  = timegm((FAR struct tm *)rtctime);
   ts.tv_nsec = 0;
 
   /* Now set the time (to one second accuracy) */
@@ -357,7 +350,7 @@ static int ez80_setalarm(FAR struct rtc_lowerhalf_s *lower,
 
   priv = (FAR struct ez80_lowerhalf_s *)lower;
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
@@ -384,8 +377,7 @@ static int ez80_setalarm(FAR struct rtc_lowerhalf_s *lower,
       cbinfo->priv = NULL;
     }
 
-  nxsem_post(&priv->devsem);
-
+  nxmutex_unlock(&priv->devlock);
   return ret;
 }
 #endif
@@ -415,6 +407,7 @@ static int ez80_setrelative(FAR struct rtc_lowerhalf_s *lower,
   struct tm time;
   time_t seconds;
   int ret = -EINVAL;
+  irqstate_t flags;
 
   DEBUGASSERT(lower != NULL && alarminfo != NULL && alarminfo->id == 0);
 
@@ -422,7 +415,7 @@ static int ez80_setrelative(FAR struct rtc_lowerhalf_s *lower,
    * about being suspended and working on an old time.
    */
 
-  sched_lock();
+  flags = enter_critical_section();
 
   /* Get the current time in broken out format */
 
@@ -431,7 +424,7 @@ static int ez80_setrelative(FAR struct rtc_lowerhalf_s *lower,
     {
       /* Convert to seconds since the epoch */
 
-      seconds = mktime(&time);
+      seconds = timegm(&time);
 
       /* Add the seconds offset.  Add one to the number of seconds
        * because we are unsure of the phase of the timer.
@@ -451,7 +444,7 @@ static int ez80_setrelative(FAR struct rtc_lowerhalf_s *lower,
       ret = ez80_setalarm(lower, &setalarm);
     }
 
-  sched_unlock();
+  leave_critical_section(flags);
   return ret;
 }
 #endif
@@ -484,7 +477,7 @@ static int ez80_cancelalarm(FAR struct rtc_lowerhalf_s *lower, int alarmid)
 
   priv = (FAR struct ez80_lowerhalf_s *)lower;
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
@@ -499,7 +492,7 @@ static int ez80_cancelalarm(FAR struct rtc_lowerhalf_s *lower, int alarmid)
   /* Then cancel the alarm */
 
   ret = ez80_rtc_cancelalarm();
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
 
   return ret;
 }
@@ -526,6 +519,7 @@ static int ez80_rdalarm(FAR struct rtc_lowerhalf_s *lower,
                         FAR struct lower_rdalarm_s *alarminfo)
 {
   int ret = -EINVAL;
+  irqstate_t flags;
 
   DEBUGASSERT(lower != NULL && alarminfo != NULL &&
               alarminfo->time != NULL && alarminfo->id == 0);
@@ -534,9 +528,9 @@ static int ez80_rdalarm(FAR struct rtc_lowerhalf_s *lower,
    * about being suspended and working on an old time.
    */
 
-  sched_lock();
+  flags = enter_critical_section();
   ret = ez80_rtc_rdalarm((FAR struct tm *)alarminfo->time);
-  sched_unlock();
+  leave_critical_section(flags);
 
   return ret;
 }
@@ -570,8 +564,6 @@ static int ez80_rdalarm(FAR struct rtc_lowerhalf_s *lower,
 
 FAR struct rtc_lowerhalf_s *ez80_rtc_lowerhalf(void)
 {
-  nxsem_init(&g_rtc_lowerhalf.devsem, 0, 1);
-
   return (FAR struct rtc_lowerhalf_s *)&g_rtc_lowerhalf;
 }
 

@@ -1,35 +1,22 @@
 /****************************************************************************
  * fs/mount/fs_procfs_mount.c
  *
- *   Copyright (C) 2017-2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,6 +27,7 @@
 #include <nuttx/config.h>
 #include <nuttx/compiler.h>
 
+#include <inttypes.h>
 #include <sys/types.h>
 #include <sys/statfs.h>
 #include <sys/stat.h>
@@ -58,9 +46,9 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/fs/procfs.h>
-#include <nuttx/fs/dirent.h>
 
 #include "mount/mount.h"
+#include "fs_heap.h"
 
 #if !defined(CONFIG_DISABLE_MOUNTPOINT) && defined(CONFIG_FS_PROCFS)
 #if !defined(CONFIG_FS_PROCFS_EXCLUDE_MOUNT) || \
@@ -116,30 +104,30 @@ struct mount_info_s
 /* Helpers */
 
 static void    mount_sprintf(FAR struct mount_info_s *info,
-                 FAR const char *fmt, ...);
+                             FAR const char *fmt, ...) printf_like(2, 3);
 #ifndef CONFIG_FS_PROCFS_EXCLUDE_MOUNT
 static int     mount_entry(FAR const char *mountpoint,
-                 FAR struct statfs *statbuf, FAR void *arg);
+                           FAR struct statfs *statbuf, FAR void *arg);
 #endif
 #ifndef CONFIG_FS_PROCFS_EXCLUDE_BLOCKS
 static int     blocks_entry(FAR const char *mountpoint,
-                 FAR struct statfs *statbuf, FAR void *arg);
+                            FAR struct statfs *statbuf, FAR void *arg);
 #endif
 #ifndef CONFIG_FS_PROCFS_EXCLUDE_USAGE
 static int     usage_entry(FAR const char *mountpoint,
-                 FAR struct statfs *statbuf, FAR void *arg);
+                           FAR struct statfs *statbuf, FAR void *arg);
 #endif
 
 /* File system methods */
 
 static int     mount_open(FAR struct file *filep, FAR const char *relpath,
-                 int oflags, mode_t mode);
+                          int oflags, mode_t mode);
 static int     mount_close(FAR struct file *filep);
 static ssize_t mount_read(FAR struct file *filep, FAR char *buffer,
-                 size_t buflen);
+                          size_t buflen);
 
 static int     mount_dup(FAR const struct file *oldp,
-                 FAR struct file *newp);
+                         FAR struct file *newp);
 
 static int     mount_stat(FAR const char *relpath, FAR struct stat *buf);
 
@@ -152,13 +140,13 @@ static int     mount_stat(FAR const char *relpath, FAR struct stat *buf);
  * with any compiler.
  */
 
-const struct procfs_operations mount_procfsoperations =
+const struct procfs_operations g_mount_operations =
 {
   mount_open,          /* open */
   mount_close,         /* close */
   mount_read,          /* read */
   NULL,                /* write */
-
+  NULL,                /* poll */
   mount_dup,           /* dup */
 
   NULL,                /* opendir */
@@ -219,8 +207,8 @@ static void mount_sprintf(FAR struct mount_info_s *info,
  ****************************************************************************/
 
 #ifndef CONFIG_FS_PROCFS_EXCLUDE_MOUNT
-static int mount_entry(FAR const char *mountpoint, FAR struct statfs *statbuf,
-                       FAR void *arg)
+static int mount_entry(FAR const char *mountpoint,
+                       FAR struct statfs *statbuf, FAR void *arg)
 {
   FAR struct mount_info_s *info = (FAR struct mount_info_s *)arg;
   FAR const char *fstype;
@@ -250,8 +238,8 @@ static int mount_entry(FAR const char *mountpoint, FAR struct statfs *statbuf,
  ****************************************************************************/
 
 #ifndef CONFIG_FS_PROCFS_EXCLUDE_BLOCKS
-static int blocks_entry(FAR const char *mountpoint, FAR struct statfs *statbuf,
-                        FAR void *arg)
+static int blocks_entry(FAR const char *mountpoint,
+                        FAR struct statfs *statbuf, FAR void *arg)
 {
   FAR struct mount_info_s *info = (FAR struct mount_info_s *)arg;
 
@@ -261,14 +249,17 @@ static int blocks_entry(FAR const char *mountpoint, FAR struct statfs *statbuf,
 
   if (!info->header)
     {
-      mount_sprintf(info, "  Block  Number\n");
-      mount_sprintf(info, "  Size   Blocks     Used Available Mounted on\n");
+      mount_sprintf(info,
+                    "  Block    Number\n");
+      mount_sprintf(info,
+                    "  Size     Blocks       Used   Available Mounted on\n");
       info->header = true;
     }
 
   /* Generate blocks list one line at a time */
 
-  mount_sprintf(info, "%6ld %8ld %8ld  %8ld %s\n",
+  mount_sprintf(info, "%6zu %10" PRIuOFF " %10" PRIuOFF
+                "  %10" PRIuOFF " %s\n",
                 statbuf->f_bsize, statbuf->f_blocks,
                 statbuf->f_blocks - statbuf->f_bavail, statbuf->f_bavail,
                 mountpoint);
@@ -289,20 +280,14 @@ static int blocks_entry(FAR const char *mountpoint, FAR struct statfs *statbuf,
  ****************************************************************************/
 
 #ifndef CONFIG_FS_PROCFS_EXCLUDE_USAGE
-static int usage_entry(FAR const char *mountpoint, FAR struct statfs *statbuf,
-                       FAR void *arg)
+static int usage_entry(FAR const char *mountpoint,
+                       FAR struct statfs *statbuf, FAR void *arg)
 {
   FAR struct mount_info_s *info = (FAR struct mount_info_s *)arg;
   FAR const char *fstype;
-#ifdef CONFIG_HAVE_LONG_LONG
-  uint64_t size;
-  uint64_t used;
-  uint64_t free;
-#else
-  uint32_t size;
-  uint32_t used;
-  uint32_t free;
-#endif
+  fsblkcnt_t size;
+  fsblkcnt_t used;
+  fsblkcnt_t free;
   int which;
   char sizelabel;
   char freelabel;
@@ -318,7 +303,8 @@ static int usage_entry(FAR const char *mountpoint, FAR struct statfs *statbuf,
 
   if (!info->header)
     {
-      mount_sprintf(info, "  Filesystem    Size      Used  Available Mounted on\n");
+      mount_sprintf(info,
+        "  Filesystem      Size      Used  Available Mounted on\n");
       info->header = true;
     }
 
@@ -326,15 +312,9 @@ static int usage_entry(FAR const char *mountpoint, FAR struct statfs *statbuf,
 
   fstype = fs_gettype(statbuf);
 
-#ifdef CONFIG_HAVE_LONG_LONG
-  size = (uint64_t)statbuf->f_bsize * statbuf->f_blocks;
-  free = (uint64_t)statbuf->f_bsize * statbuf->f_bavail;
-  used = (uint64_t)size - free;
-#else
   size = statbuf->f_bsize * statbuf->f_blocks;
   free = statbuf->f_bsize * statbuf->f_bavail;
   used = size - free;
-#endif
 
   /* Find the label for size */
 
@@ -371,15 +351,9 @@ static int usage_entry(FAR const char *mountpoint, FAR struct statfs *statbuf,
 
   /* Generate usage list one line at a time */
 
-#ifdef CONFIG_HAVE_LONG_LONG
-  mount_sprintf(info, "  %-10s %6llu%c %8llu%c  %8llu%c %s\n", fstype,
-                size, sizelabel, used, usedlabel, free, freelabel,
-                mountpoint);
-#else
-  mount_sprintf(info, "  %-10s %6ld%c %8ld%c  %8ld%c %s\n", fstype,
-                size, sizelabel, used, usedlabel, free, freelabel,
-                mountpoint);
-#endif
+  mount_sprintf(info,
+    "  %-10s %8" PRIuOFF "%c %8" PRIuOFF "%c  %8" PRIuOFF "%c %s\n",
+    fstype, size, sizelabel, used, usedlabel, free, freelabel, mountpoint);
 
   return (info->totalsize >= info->buflen) ? 1 : 0;
 }
@@ -438,7 +412,7 @@ static int mount_open(FAR struct file *filep, FAR const char *relpath,
   /* Allocate a container to hold the task and node selection */
 
   procfile = (FAR struct mount_file_s *)
-    kmm_zalloc(sizeof(struct mount_file_s));
+    fs_heap_zalloc(sizeof(struct mount_file_s));
   if (!procfile)
     {
       ferr("ERROR: Failed to allocate file container\n");
@@ -470,7 +444,7 @@ static int mount_close(FAR struct file *filep)
 
   /* Release the file container structure */
 
-  kmm_free(procfile);
+  fs_heap_free(procfile);
   filep->f_priv = NULL;
   return OK;
 }
@@ -568,7 +542,7 @@ static int mount_dup(FAR const struct file *oldp, FAR struct file *newp)
   /* Allocate a new container to hold the task and node selection */
 
   newfile = (FAR struct mount_file_s *)
-    kmm_malloc(sizeof(struct mount_file_s));
+    fs_heap_malloc(sizeof(struct mount_file_s));
   if (!newfile)
     {
       ferr("ERROR: Failed to allocate file container\n");
@@ -592,7 +566,7 @@ static int mount_dup(FAR const struct file *oldp, FAR struct file *newp)
  *
  ****************************************************************************/
 
-static int mount_stat(const char *relpath, struct stat *buf)
+static int mount_stat(FAR const char *relpath, FAR struct stat *buf)
 {
   memset(buf, 0, sizeof(struct stat));
   buf->st_mode = S_IFREG | S_IROTH | S_IRGRP | S_IRUSR;

@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/stm32/clicker2-stm32/src/stm32_mmcsd.c
  *
- *   Copyright (C) 2017 Verge Inc. All rights reserved.
- *   Author:  Anthony Merlino <anthony@vergeaero.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -66,8 +53,8 @@
 #  error Only the Mikroe uSD click boards are supported
 #endif
 
-/* Can't support MMC/SD features if mountpoints are disabled or if SDIO support
- * is not enabled.
+/* Can't support MMC/SD features if mountpoints are disabled or if SDIO
+ * support is not enabled.
  */
 
 #if defined(CONFIG_DISABLE_MOUNTPOINT)
@@ -120,7 +107,7 @@ struct stm32_mmcsd_state_s
   xcpt_t              handler;  /* Interrupt handler */
   bool                cd;       /* TRUE: card is inserted */
   spi_mediachange_t   callback; /* SPI media change callback */
-  FAR void            *cbarg;   /* Argument to pass to media change callback */
+  void                *cbarg;   /* Argument to pass to media change callback */
   struct work_s       work;     /* For deferring card detect interrupt work */
 };
 
@@ -129,15 +116,19 @@ struct stm32_mmcsd_state_s
  ****************************************************************************/
 
 static bool stm32_cardinserted_internal(struct stm32_mmcsd_state_s *state);
-static void stm32_mmcsd_carddetect(FAR void *arg);
-static int stm32_mmcsd_setup(FAR struct stm32_mmcsd_state_s *);
+static void stm32_mmcsd_carddetect(void *arg);
+static int stm32_mmcsd_setup(struct stm32_mmcsd_state_s *);
 
 #ifdef CONFIG_CLICKER2_STM32_MB1_MMCSD
-static int stm32_mb1_mmcsd_carddetect(int irq, FAR void *regs, FAR void *arg);
+static int stm32_mb1_mmcsd_carddetect(int irq,
+                                      void *regs,
+                                      void *arg);
 #endif
 
 #ifdef CONFIG_CLICKER2_STM32_MB2_MMCSD
-static int stm32_mb2_mmcsd_carddetect(int irq, FAR void *regs, FAR void *arg);
+static int stm32_mb2_mmcsd_carddetect(int irq,
+                                      void *regs,
+                                      void *arg);
 #endif
 
 /****************************************************************************
@@ -147,7 +138,7 @@ static int stm32_mb2_mmcsd_carddetect(int irq, FAR void *regs, FAR void *arg);
 /* MMCSD device state */
 
 #ifdef CONFIG_CLICKER2_STM32_MB1_MMCSD
-static int stm32_mb1_mmcsd_carddetect(int irq, void *regs, FAR void *arg);
+static int stm32_mb1_mmcsd_carddetect(int irq, void *regs, void *arg);
 
 static struct stm32_mmcsd_state_s g_mb1_mmcsd =
 {
@@ -162,7 +153,7 @@ static struct stm32_mmcsd_state_s g_mb1_mmcsd =
 #endif
 
 #ifdef CONFIG_CLICKER2_STM32_MB2_MMCSD
-static int stm32_mb2_mmcsd_carddetect(int irq, void *regs, FAR void *arg);
+static int stm32_mb2_mmcsd_carddetect(int irq, void *regs, void *arg);
 
 static struct stm32_mmcsd_state_s g_mb2_mmcsd =
 {
@@ -208,10 +199,11 @@ static bool stm32_cardinserted_internal(struct stm32_mmcsd_state_s *state)
  *
  ****************************************************************************/
 
-static void stm32_mmcsd_carddetect(FAR void *arg)
+static void stm32_mmcsd_carddetect(void *arg)
 {
   bool cd;
-  FAR struct stm32_mmcsd_state_s *state = (FAR struct stm32_mmcsd_state_s *)arg;
+  struct stm32_mmcsd_state_s *state =
+                                   (struct stm32_mmcsd_state_s *)arg;
 
   /* Get the current card insertion state */
 
@@ -241,7 +233,7 @@ static void stm32_mmcsd_carddetect(FAR void *arg)
 }
 
 #ifdef CONFIG_CLICKER2_STM32_MB1_MMCSD
-static int stm32_mb1_mmcsd_carddetect(int irq, FAR void *regs, FAR void *arg)
+static int stm32_mb1_mmcsd_carddetect(int irq, void *regs, void *arg)
 {
   if (work_available(&g_mb1_mmcsd.work))
     {
@@ -254,7 +246,7 @@ static int stm32_mb1_mmcsd_carddetect(int irq, FAR void *regs, FAR void *arg)
 #endif
 
 #ifdef CONFIG_CLICKER2_STM32_MB2_MMCSD
-static int stm32_mb2_mmcsd_carddetect(int irq, FAR void *regs, FAR void *arg)
+static int stm32_mb2_mmcsd_carddetect(int irq, void *regs, void *arg)
 {
   if (work_available(&g_mb2_mmcsd.work))
     {
@@ -270,6 +262,7 @@ static int stm32_mmcsd_setup(struct stm32_mmcsd_state_s *state)
 {
   struct spi_dev_s *spi;
   int ret;
+
   /* Initialize the SPI bus and get an instance of the SPI interface */
 
   spi = stm32_spibus_initialize(state->spidev);
@@ -304,7 +297,8 @@ static int stm32_mmcsd_setup(struct stm32_mmcsd_state_s *state)
   stm32_automount_event(state->slotno, stm32_cardinserted(state->slotno));
 #endif
 
-  mcinfo("INFO: mmcsd%d card has been initialized successfully\n", state->minor);
+  mcinfo("INFO: mmcsd%d card has been initialized successfully\n",
+         state->minor);
   return OK;
 }
 
@@ -372,6 +366,7 @@ bool stm32_cardinserted(int slotno)
     }
 #endif
 #ifdef CONFIG_CLICKER2_STM32_MB2_MMCSD
+
   if (slotno == g_mb2_mmcsd.slotno)
     {
       state = &g_mb2_mmcsd;
@@ -389,7 +384,7 @@ bool stm32_cardinserted(int slotno)
   return stm32_cardinserted_internal(state);
 }
 
-/*****************************************************************************
+/****************************************************************************
  * Name: stm32_spi2register
  *
  * Description:
@@ -407,7 +402,7 @@ int stm32_spi2register(struct spi_dev_s *dev, spi_mediachange_t callback,
   return OK;
 }
 
-/*****************************************************************************
+/****************************************************************************
  * Name: stm32_spi3register
  *
  * Description:

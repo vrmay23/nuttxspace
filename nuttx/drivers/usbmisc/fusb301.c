@@ -1,37 +1,22 @@
 /****************************************************************************
  * drivers/usbmisc/fusb301.c
  *
- * FUSB301 USB-C controller driver
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Copyright (C) 2016-2017 Haltian Ltd. All rights reserved.
- *   Authors: Harri Luhtala <harri.luhtala@haltian.com>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -47,6 +32,7 @@
 
 #include <nuttx/fs/fs.h>
 #include <nuttx/kmalloc.h>
+#include <nuttx/mutex.h>
 #include <nuttx/i2c/i2c_master.h>
 
 #include <nuttx/usb/fusb301.h>
@@ -80,7 +66,7 @@ struct fusb301_dev_s
   FAR struct i2c_master_s *i2c;         /* I2C interface */
   uint8_t addr;                         /* I2C address */
   volatile bool int_pending;            /* Interrupt received but handled */
-  sem_t devsem;                         /* Manages exclusive access */
+  mutex_t devlock;                      /* Manages exclusive access */
   FAR struct fusb301_config_s *config;  /* Platform specific configuration */
   FAR struct pollfd *fds[CONFIG_FUSB301_NPOLLWAITERS];
 };
@@ -97,7 +83,6 @@ static ssize_t fusb301_write(FAR struct file *filep, FAR const char *buffer,
 static int fusb301_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
 static int fusb301_poll(FAR struct file *filep, FAR struct pollfd *fds,
                         bool setup);
-static void fusb301_notify(FAR struct fusb301_dev_s *priv);
 
 /****************************************************************************
  * Private Data
@@ -111,10 +96,9 @@ static const struct file_operations g_fusb301ops =
   fusb301_write, /* write */
   NULL,          /* seek */
   fusb301_ioctl, /* ioctl */
+  NULL,          /* mmap */
+  NULL,          /* truncate */
   fusb301_poll   /* poll */
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL         /* unlink */
-#endif
 };
 
 /****************************************************************************
@@ -489,7 +473,8 @@ static int fusb301_open(FAR struct file *filep)
   ret = fusb301_getreg(priv, FUSB301_DEV_ID_REG);
   if (ret < 0)
     {
-      fusb301_err("ERROR: No response at given address 0x%02X\n", priv->addr);
+      fusb301_err("ERROR: No response at given address 0x%02X\n",
+                  priv->addr);
       ret = -EFAULT;
     }
   else
@@ -529,7 +514,9 @@ static int fusb301_close(FAR struct file *filep)
  *   This routine is called when the FUSB301 device is read.
  ****************************************************************************/
 
-static ssize_t fusb301_read(FAR struct file *filep, FAR char *buffer, size_t buflen)
+static ssize_t fusb301_read(FAR struct file *filep,
+                            FAR char *buffer,
+                            size_t buflen)
 {
   FAR struct inode *inode = filep->f_inode;
   FAR struct fusb301_dev_s *priv = inode->i_private;
@@ -544,7 +531,7 @@ static ssize_t fusb301_read(FAR struct file *filep, FAR char *buffer, size_t buf
 
   ptr = (struct fusb301_result_s *)buffer;
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
@@ -559,7 +546,7 @@ static ssize_t fusb301_read(FAR struct file *filep, FAR char *buffer, size_t buf
   ptr->status = fusb301_getreg(priv, FUSB301_STATUS_REG);
   ptr->dev_type = fusb301_getreg(priv, FUSB301_TYPE_REG);
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return sizeof(struct fusb301_result_s);
 }
 
@@ -590,7 +577,7 @@ static int fusb301_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   FAR struct fusb301_dev_s *priv = inode->i_private;
   int ret;
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
@@ -602,7 +589,7 @@ static int fusb301_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   {
   case USBCIOC_READ_DEVID:
     {
-      ret = fusb301_read_device_id(priv, (uint8_t *)arg);
+      ret = fusb301_read_device_id(priv, (FAR uint8_t *)arg);
     }
     break;
 
@@ -626,13 +613,13 @@ static int fusb301_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   case USBCIOC_READ_STATUS:
     {
-      ret = fusb301_read_status(priv, (uint8_t *)arg);
+      ret = fusb301_read_status(priv, (FAR uint8_t *)arg);
     }
     break;
 
   case USBCIOC_READ_DEVTYPE:
     {
-      ret = fusb301_read_devtype(priv, (uint8_t *)arg);
+      ret = fusb301_read_devtype(priv, (FAR uint8_t *)arg);
     }
     break;
 
@@ -650,7 +637,7 @@ static int fusb301_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
     break;
   }
 
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return ret;
 }
 
@@ -660,7 +647,9 @@ static int fusb301_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
  *   This routine is called during FUSB301 device poll
  ****************************************************************************/
 
-static int fusb301_poll(FAR struct file *filep, FAR struct pollfd *fds, bool setup)
+static int fusb301_poll(FAR struct file *filep,
+                        FAR struct pollfd *fds,
+                        bool setup)
 {
   FAR struct inode *inode;
   FAR struct fusb301_dev_s *priv;
@@ -668,13 +657,13 @@ static int fusb301_poll(FAR struct file *filep, FAR struct pollfd *fds, bool set
   int ret = OK;
   int i;
 
-  DEBUGASSERT(filep && fds);
+  DEBUGASSERT(fds);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv = (FAR struct fusb301_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv = inode->i_private;
 
-  ret = nxsem_wait(&priv->devsem);
+  ret = nxmutex_lock(&priv->devlock);
   if (ret < 0)
     {
       return ret;
@@ -718,7 +707,7 @@ static int fusb301_poll(FAR struct file *filep, FAR struct pollfd *fds, bool set
       flags = enter_critical_section();
       if (priv->int_pending)
         {
-          fusb301_notify(priv);
+          poll_notify(&fds, 1, POLLIN);
         }
 
       leave_critical_section(flags);
@@ -727,7 +716,7 @@ static int fusb301_poll(FAR struct file *filep, FAR struct pollfd *fds, bool set
     {
       /* This is a request to tear down the poll. */
 
-      struct pollfd **slot = (struct pollfd **)fds->priv;
+      FAR struct pollfd **slot = (FAR struct pollfd **)fds->priv;
       DEBUGASSERT(slot != NULL);
 
       /* Remove all memory of the poll setup */
@@ -737,40 +726,8 @@ static int fusb301_poll(FAR struct file *filep, FAR struct pollfd *fds, bool set
     }
 
 out:
-  nxsem_post(&priv->devsem);
+  nxmutex_unlock(&priv->devlock);
   return ret;
-}
-
-/****************************************************************************
- * Name: fusb301_notify
- *
- * Description:
- *   Notify thread about data to be available
- *
- ****************************************************************************/
-
-static void fusb301_notify(FAR struct fusb301_dev_s *priv)
-{
-  DEBUGASSERT(priv != NULL);
-
-  int i;
-
-  /* If there are threads waiting on poll() for FUSB301 data to become available,
-   * then wake them up now.  NOTE: we wake up all waiting threads because we
-   * do not know that they are going to do.  If they all try to read the data,
-   * then some make end up blocking after all.
-   */
-
-  for (i = 0; i < CONFIG_FUSB301_NPOLLWAITERS; i++)
-    {
-      struct pollfd *fds = priv->fds[i];
-      if (fds)
-        {
-          fds->revents |= POLLIN;
-          fusb301_info("Report events: %02x\n", fds->revents);
-          nxsem_post(fds->sem);
-        }
-    }
 }
 
 /****************************************************************************
@@ -791,7 +748,7 @@ static int fusb301_int_handler(int irq, FAR void *context, FAR void *arg)
   flags = enter_critical_section();
   priv->int_pending = true;
 
-  fusb301_notify(priv);
+  poll_notify(priv->fds, CONFIG_FUSB301_NPOLLWAITERS, POLLIN);
   leave_critical_section(flags);
 
   return OK;
@@ -811,16 +768,17 @@ int fusb301_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
 
   /* Initialize the FUSB301 device structure */
 
-  priv = (FAR struct fusb301_dev_s *)kmm_zalloc(sizeof(struct fusb301_dev_s));
+  priv = (FAR struct fusb301_dev_s *)
+                kmm_zalloc(sizeof(struct fusb301_dev_s));
   if (!priv)
     {
       fusb301_err("ERROR: Failed to allocate instance\n");
       return -ENOMEM;
     }
 
-  /* Initialize device structure semaphore */
+  /* Initialize device structure mutex */
 
-  nxsem_init(&priv->devsem, 0, 1);
+  nxmutex_init(&priv->devlock);
 
   priv->int_pending = false;
   priv->i2c         = i2c;
@@ -849,8 +807,7 @@ int fusb301_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   return OK;
 
 errout_with_priv:
-  nxsem_destroy(&priv->devsem);
+  nxmutex_destroy(&priv->devlock);
   kmm_free(priv);
-
   return ret;
 }

@@ -1,39 +1,22 @@
 /****************************************************************************
  * libs/libc/netdb/lib_dns.h
- * DNS resolver code header file.
  *
- *   Copyright (C) 2007-2009, 2011-2012, 2014 Gregory Nutt.
- *   All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Inspired by/based on uIP logic by Adam Dunkels:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- *   Copyright (c) 2002-2003, Adam Dunkels. All rights reserved.
- *   Author Adam Dunkels <adam@dunkels.com>
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote
- *    products derived from this software without specific prior
- *    written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
- * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
- * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -80,6 +63,10 @@
 #  define CONFIG_NETDB_RESOLVCONF_PATH "/etc/resolv.conf"
 #endif
 
+#ifndef CONFIG_NETDB_DNSSERVER_NAMESERVERS
+#  define CONFIG_NETDB_DNSSERVER_NAMESERVERS 1
+#endif
+
 #define DNS_MAX_ADDRSTR   48
 #define DNS_MAX_LINE      64
 #define NETDB_DNS_KEYWORD "nameserver"
@@ -117,10 +104,10 @@ extern "C"
 #endif
 
 #ifndef CONFIG_NETDB_RESOLVCONF
-/* The DNS server address */
+/* The DNS server addresses */
 
-EXTERN union dns_addr_u g_dns_server;
-EXTERN bool g_dns_address;     /* true: We have the address of the DNS server */
+EXTERN union dns_addr_u g_dns_servers[];
+EXTERN uint8_t g_dns_nservers;
 #endif
 
 /****************************************************************************
@@ -128,34 +115,44 @@ EXTERN bool g_dns_address;     /* true: We have the address of the DNS server */
  ****************************************************************************/
 
 /****************************************************************************
- * Name: dns_initialize
+ * Name: dns_lock
  *
  * Description:
- *   Make sure that the DNS client has been properly initialized for use.
+ *   Take the DNS mutex, ignoring errors due to the receipt of signals.
  *
  ****************************************************************************/
 
-bool dns_initialize(void);
+void dns_lock(void);
 
 /****************************************************************************
- * Name: dns_semtake
+ * Name: dns_unlock
  *
  * Description:
- *   Take the DNS semaphore, ignoring errors do to the receipt of signals.
+ *   Release the DNS mutex
  *
  ****************************************************************************/
 
-void dns_semtake(void);
+void dns_unlock(void);
 
 /****************************************************************************
- * Name: dns_semgive
+ * Name: dns_breaklock
  *
  * Description:
- *   Release the DNS semaphore
+ *   Break the DNS lock
  *
  ****************************************************************************/
 
-void dns_semgive(void);
+void dns_breaklock(FAR unsigned int *count);
+
+/****************************************************************************
+ * Name: dns_restorelock
+ *
+ * Description:
+ *   Restore the DNS lock
+ *
+ ****************************************************************************/
+
+void dns_restorelock(unsigned int count);
 
 /****************************************************************************
  * Name: dns_bind
@@ -173,7 +170,7 @@ void dns_semgive(void);
  *
  ****************************************************************************/
 
-int dns_bind(void);
+int dns_bind(sa_family_t family, bool stream);
 
 /****************************************************************************
  * Name: dns_query
@@ -183,7 +180,6 @@ int dns_bind(void);
  *   return its IP address in 'ipaddr'
  *
  * Input Parameters:
- *   sd       - The socket descriptor previously initialized by dsn_bind().
  *   hostname - The hostname string to be resolved.
  *   addr     - The location to return the IP addresses associated with the
  *     hostname.
@@ -196,8 +192,25 @@ int dns_bind(void);
  *
  ****************************************************************************/
 
-int dns_query(int sd, FAR const char *hostname, FAR union dns_addr_u *addr,
+int dns_query(FAR const char *hostname, FAR union dns_addr_u *addr,
               FAR int *naddr);
+
+/****************************************************************************
+ * Name: dns_is_queryfamily
+ *
+ * Description:
+ *   Determine if the specified address family is available for DNS query.
+ *
+ * Input Parameters:
+ *   family - The address family. AF_INET or AF_INET6 is specified.
+ *
+ * Returned Value:
+ *   Returns true if the address family specified in the family argument
+ *   is available.
+ *
+ ****************************************************************************/
+
+bool dns_is_queryfamily(sa_family_t family);
 
 /****************************************************************************
  * Name: dns_save_answer
@@ -209,6 +222,7 @@ int dns_query(int sd, FAR const char *hostname, FAR union dns_addr_u *addr,
  *   hostname - The hostname string to be cached.
  *   addr     - The IP addresses associated with the hostname.
  *   naddr    - The count of the IP addresses.
+ *   ttl      - The TTL of the IP addresses.
  *
  * Returned Value:
  *   None
@@ -217,7 +231,23 @@ int dns_query(int sd, FAR const char *hostname, FAR union dns_addr_u *addr,
 
 #if CONFIG_NETDB_DNSCLIENT_ENTRIES > 0
 void dns_save_answer(FAR const char *hostname,
-                     FAR const union dns_addr_u *addr, int naddr);
+                     FAR const union dns_addr_u *addr, int naddr,
+                     uint32_t ttl);
+#endif
+
+/****************************************************************************
+ * Name: dns_clear_answer
+ *
+ * Description:
+ *   Clear the resolved hostname in the DNS cache
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+#if CONFIG_NETDB_DNSCLIENT_ENTRIES > 0
+void dns_clear_answer(void);
 #endif
 
 /****************************************************************************

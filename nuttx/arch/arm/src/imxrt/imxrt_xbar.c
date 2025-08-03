@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/imxrt/imxrt_xbar.c
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *   Author: David Sidrane <david_s5@nscdg.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,7 +30,7 @@
 #include <stdint.h>
 #include <errno.h>
 #include "chip.h"
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "imxrt_xbar.h"
 
 /****************************************************************************
@@ -54,11 +41,13 @@
  * Private Data
  ****************************************************************************/
 
+static const uint16_t g_xbars_masks[] = IMXRT_XBAR_SEL_MASKS;
+
 static const uintptr_t g_xbars_addresses[] =
 {
   IMXRT_XBAR1_BASE,
   IMXRT_XBAR2_BASE,
-#if (defined(CONFIG_ARCH_FAMILY_IMXRT105x) || defined (CONFIG_ARCH_FAMILY_IMXRT106x))
+#if (defined(IMXRT_XBAR3_BASE))
   IMXRT_XBAR3_BASE
 #endif
 };
@@ -95,7 +84,24 @@ int imxrt_xbar_connect(uint16_t mux_index_out, uint16_t mux_index_input)
   mux_select = IMXRT_SEL(mux_index_out);
   mux_input  = IMXRT_SEL(mux_index_input);
   xbar_index = IMXRT_XBAR(mux_index_out);
-  clearbits  = IMXRT_SEL0_MASK;
+  clearbits  = g_xbars_masks[xbar_index];
+
+  switch (xbar_index)
+    {
+      case 0:
+        imxrt_clockall_xbar1();
+        break;
+      case 1:
+        imxrt_clockall_xbar2();
+        break;
+      case 2:
+#if defined(IMXRT_XBAR3_BASE)
+        imxrt_clockall_xbar3();
+        break;
+#endif
+      default:
+        break;
+    }
 
   /* Verify:
    * 1) The Xbar index is valid.
@@ -104,14 +110,17 @@ int imxrt_xbar_connect(uint16_t mux_index_out, uint16_t mux_index_input)
    * 4) Input index is input.
    */
 
-  if (xbar_index < sizeof(g_xbars_addresses) / sizeof(g_xbars_addresses[0]) &&
+  if (xbar_index < sizeof(g_xbars_addresses) /
+      sizeof(g_xbars_addresses[0]) &&
       (mux_index_out & XBAR_OUTPUT) == XBAR_OUTPUT &&
       (mux_index_input & XBAR_INPUT) == XBAR_INPUT)
     {
       address = g_xbars_addresses[xbar_index];
       address += (mux_select / IMXRT_SEL_PER_REG) * sizeof(uint16_t);
 
-      /* There are 2 selects per Register LSB is even selects and MSB is odd */
+      /* There are 2 selects per Register LSB is even selects and
+       * MSB is odd
+       */
 
       if (mux_select & 1)
         {

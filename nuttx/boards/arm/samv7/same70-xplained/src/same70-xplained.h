@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/samv7/same70-xplained/src/same70-xplained.h
  *
- *   Copyright (C) 2015, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -112,38 +99,12 @@
 
 #if !defined(CONFIG_FS_AUTOMOUNTER) || !defined(HAVE_HSMCI)
 #  undef HAVE_AUTOMOUNTER
-#  undef CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT
+#  undef CONFIG_SAMV7_HSMCI0_AUTOMOUNT
 #endif
 
-#ifndef CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT
+#ifndef CONFIG_SAMV7_HSMCI0_AUTOMOUNT
 #  undef HAVE_AUTOMOUNTER
 #endif
-
-#ifdef HAVE_AUTOMOUNTER
-#  ifdef CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT
-  /* HSMCI0 Automounter defaults */
-
-#    ifndef CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT_FSTYPE
-#      define CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT_FSTYPE "vfat"
-#    endif
-
-#    ifndef CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT_BLKDEV
-#      define CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT_BLKDEV "/dev/mmcds0"
-#    endif
-
-#    ifndef CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT_MOUNTPOINT
-#      define CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT_MOUNTPOINT "/mnt/sdcard0"
-#    endif
-
-#    ifndef CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT_DDELAY
-#      define CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT_DDELAY 1000
-#    endif
-
-#    ifndef CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT_UDELAY
-#      define CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT_UDELAY 2000
-#    endif
-#  endif /* CONFIG_SAME70XPLAINED_HSMCI0_AUTOMOUNT */
-#endif /* HAVE_AUTOMOUNTER */
 
 /* USB Device */
 
@@ -158,11 +119,19 @@
 
 /* Check if we should enable the USB monitor before starting NSH */
 
+#ifndef CONFIG_USBMONITOR
+#  undef HAVE_USBMONITOR
+#endif
+
 #ifndef HAVE_USBDEV
 #  undef CONFIG_USBDEV_TRACE
 #endif
 
-#if !defined(CONFIG_USBMONITOR) || !defined(CONFIG_USBDEV_TRACE)
+#ifndef HAVE_USBHOST
+#  undef CONFIG_USBHOST_TRACE
+#endif
+
+#if !defined(CONFIG_USBDEV_TRACE) && !defined(CONFIG_USBHOST_TRACE)
 #  undef HAVE_USBMONITOR
 #endif
 
@@ -266,7 +235,7 @@
  *
  *   ------ --------- ---------
  *   SAME70 SAME70    Ethernet
- *   Pin    Function  Functio
+ *   Pin    Function  Function
  *   ------ --------- ---------
  *   PD0    GTXCK     REF_CLK
  *   PD1    GTXEN     TXEN
@@ -306,8 +275,8 @@
  * When a button is pressed it will drive the I/O line to GND.
  *
  * NOTE: There are no pull-up resistors connected to the generic user buttons
- * so it is necessary to enable the internal pull-up in the SAM E70 to use the
- * button.
+ * so it is necessary to enable the internal pull-up in the SAM E70 to use
+ * the button.
  */
 
 #define GPIO_SW0      (GPIO_INPUT | GPIO_CFG_PULLUP | GPIO_CFG_DEGLITCH | \
@@ -334,16 +303,16 @@
  *   ------ ----------------- ---------------------
  */
 
-#define GPIO_MCI0_CD (GPIO_INPUT | GPIO_CFG_DEFAULT | GPIO_CFG_DEGLITCH | \
-                      GPIO_INT_BOTHEDGES | GPIO_PORT_PIOC | GPIO_PIN16)
-#define IRQ_MCI0_CD   SAM_IRQ_PC16
+#define GPIO_HSMCI0_CD (GPIO_INPUT | GPIO_CFG_DEFAULT | GPIO_CFG_DEGLITCH | \
+                        GPIO_INT_BOTHEDGES | GPIO_PORT_PIOC | GPIO_PIN16)
+#define IRQ_HSMCI0_CD   SAM_IRQ_PC16
 
 /* USB Host
  *
- * The SAM E70 Xplained has a Micro-USB connector for use with the SAM E70 USB
- * module labeled as TARGET USB on the kit. In USB host mode VBUS voltage is
- * provided by the kit and has to be enabled by setting the "VBUS Host Enable"
- * pin (PC16) low.
+ * The SAM E70 Xplained has a Micro-USB connector for use with the SAM E70
+ * USB module labeled as TARGET USB on the kit. In USB host mode VBUS voltage
+ * is provided by the kit and has to be enabled by setting the "VBUS Host
+ * Enable" pin (PC16) low.
  */
 
 #define GPIO_VBUSON (GPIO_OUTPUT | GPIO_CFG_DEFAULT | GPIO_OUTPUT_SET | \
@@ -358,8 +327,10 @@
  * AD1 PC31  microBUS2 Analog               PC31 AFE1_AD6   GPIO_AFE1_AD6
  * AD2 PD30  microBUS2 GPIO reset output    PD30
  * AD3 PA19  microBUS1 GPIO reset output    PA19
- * AD4 PC13  (both) I2C-SDA                 PC13 *** Does not support I2C SDA ***
- * AD5 PC30  (both) I2C-SCL                 PC30 *** Does not support I2C SCL ***
+ * AD4 PC13  (both) I2C-SDA                 PC13
+ *                                           *** Does not support I2C SDA ***
+ * AD5 PC30  (both) I2C-SCL                 PC30
+ *                                           *** Does not support I2C SCL ***
  * AD6 PA17  *** Not used ***
  * AD7 PC12  *** Not used ***
  * D0  PD28  (both) HDR_RX                  PD28 URXD3      GPIO_UART3_RXD
@@ -410,13 +381,13 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Public data
+ * Public Data
  ****************************************************************************/
 
 #ifndef __ASSEMBLY__
 
 /****************************************************************************
- * Public Functions
+ * Public Functions Definitions
  ****************************************************************************/
 
 /****************************************************************************
@@ -451,8 +422,32 @@ void sam_sdram_config(void);
  *
  ****************************************************************************/
 
-#if defined(CONFIG_LIB_BOARDCTL) || defined(CONFIG_BOARD_LATE_INITIALIZE)
+#if defined(CONFIG_BOARDCTL) || defined(CONFIG_BOARD_LATE_INITIALIZE)
 int sam_bringup(void);
+#endif
+
+/****************************************************************************
+ * Name: sam_afec_initialize
+ *
+ * Description:
+ *   Initialize and register the ADC driver.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_SAMV7_AFEC
+int sam_afec_setup(void);
+#endif
+
+/****************************************************************************
+ * Name: sam_pwm_setup
+ *
+ * Description:
+ *   Initialize PWM and register the PWM device.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_SAMV7_PWM
+int sam_pwm_setup(void);
 #endif
 
 /****************************************************************************
@@ -477,20 +472,6 @@ int sam_dacdev_initialize(void);
 
 #ifdef CONFIG_SAMV7_SPI
 void sam_spidev_initialize(void);
-#endif
-
-/****************************************************************************
- * Name: sam_hsmci_initialize
- *
- * Description:
- *   Initialize HSMCI support
- *
- ****************************************************************************/
-
-#ifdef HAVE_HSMCI
-int sam_hsmci_initialize(int slot, int minor);
-#else
-# define sam_hsmci_initialize(s,m) (-ENOSYS)
 #endif
 
 /****************************************************************************
@@ -541,92 +522,6 @@ void sam_netinitialize(void);
 
 #ifdef HAVE_MACADDR
 int sam_emac0_setmac(void);
-#endif
-
-/****************************************************************************
- * Name: sam_cardinserted
- *
- * Description:
- *   Check if a card is inserted into the selected HSMCI slot
- *
- ****************************************************************************/
-
-#ifdef HAVE_HSMCI
-bool sam_cardinserted(int slotno);
-#else
-#  define sam_cardinserted(slotno) (false)
-#endif
-
-/****************************************************************************
- * Name: sam_writeprotected
- *
- * Description:
- *   Check if the card in the MMCSD slot is write protected
- *
- ****************************************************************************/
-
-#ifdef HAVE_HSMCI
-bool sam_writeprotected(int slotno);
-#endif
-
-/****************************************************************************
- * Name:  sam_automount_initialize
- *
- * Description:
- *   Configure auto-mounters for each enable and so configured HSMCI
- *
- * Input Parameters:
- *   None
- *
- *  Returned Value:
- *    None
- *
- ****************************************************************************/
-
-#ifdef HAVE_AUTOMOUNTER
-void sam_automount_initialize(void);
-#endif
-
-/****************************************************************************
- * Name:  sam_automount_event
- *
- * Description:
- *   The HSMCI card detection logic has detected an insertion or removal
- *   event.  It has already scheduled the MMC/SD block driver operations.
- *   Now we need to schedule the auto-mount event which will occur with a
- *   substantial delay to make sure that everything has settle down.
- *
- * Input Parameters:
- *   slotno - Identifies the HSMCI0 slot: HSMCI0 or HSMCI1_SLOTNO.
- *       There is a terminology problem here:  Each HSMCI supports two slots,
- *      slot A and slot B. Only slot A is used.  So this is not a really a
- *      slot, but an HSCMI peripheral number.
- *   inserted - True if the card is inserted in the slot.  False otherwise.
- *
- *  Returned Value:
- *    None
- *
- *  Assumptions:
- *    Interrupts are disabled.
- *
- ****************************************************************************/
-
-#ifdef HAVE_AUTOMOUNTER
-void sam_automount_event(int slotno, bool inserted);
-#endif
-
-/****************************************************************************
- * Name: sam_writeprotected
- *
- * Description:
- *   Check if the card in the MMCSD slot is write protected
- *
- ****************************************************************************/
-
-#ifdef HAVE_HSMCI
-bool sam_writeprotected(int slotno);
-#else
-#  define sam_writeprotected(slotno) (false)
 #endif
 
 /****************************************************************************

@@ -1,36 +1,22 @@
 /****************************************************************************
  * boards/arm/stm32/stm3210e-eval/src/stm32_pmbuttons.c
  *
- *   Copyright (C) 2012, 2015-2016 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *            Diego Sanchez <dsanchez@nx-engineering.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,9 +32,10 @@
 #include <arch/irq.h>
 
 #include <stdbool.h>
+#include <sys/param.h>
 #include <debug.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "nvic.h"
 #include "stm32_pwr.h"
 #include "stm32_pm.h"
@@ -59,6 +46,7 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
 /* Configuration ************************************************************/
 
 #ifndef CONFIG_ARCH_BUTTONS
@@ -66,7 +54,7 @@
 #endif
 
 #define BUTTON_MIN   0
-#ifdef CONFIG_DJOYSTICK
+#ifdef CONFIG_INPUT_DJOYSTICK
 #  define BUTTON_MAX 2
 #else
 #  define BUTTON_MAX 7
@@ -111,16 +99,7 @@
 #  define CONFIG_PM_BUTTON_ACTIVITY 10
 #endif
 
-#define PM_IDLE_DOMAIN 0 /* Revisit */
-
 /* Miscellaneous Definitions ************************************************/
-
-#ifndef MIN
-#  define MIN(a,b) (a < b ? a : b)
-#endif
-#ifndef MAX
-#  define MAX(a,b) (a > b ? a : b)
-#endif
 
 #define MIN_BUTTON MIN(CONFIG_PM_BUTTONS_MIN, CONFIG_PM_IRQBUTTONS_MIN)
 #define MAX_BUTTON MAX(CONFIG_PM_BUTTONS_MAX, CONFIG_PM_IRQBUTTONS_MAX)
@@ -148,7 +127,8 @@
  *   Handle a button wake-up interrupt
  *
  ****************************************************************************/
-static int button_handler(int irq, FAR void *context, FAR void *arg)
+
+static int button_handler(int irq, void *context, void *arg)
 {
   /* At this point the MCU should have already awakened.  The state
    * change will be handled in the IDLE loop when the system is re-awakened
@@ -189,7 +169,7 @@ void stm32_pmbuttons(void)
 #ifdef CONFIG_ARCH_IRQBUTTONS
   for (i = CONFIG_PM_IRQBUTTONS_MIN; i <= CONFIG_PM_IRQBUTTONS_MAX; i++)
     {
-      ret = board_button_irq(i, button_handler, (void*)i);
+      ret = board_button_irq(i, button_handler, (void *)i);
       if (ret < 0)
         {
           serr("ERROR: board_button_irq failed: %d\n", ret);

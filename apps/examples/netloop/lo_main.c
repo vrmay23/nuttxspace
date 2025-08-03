@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/netloop/lo_main.c
+ * apps/examples/netloop/lo_main.c
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -114,7 +101,8 @@ static int lo_client(void)
   tv.tv_sec  = 5;
   tv.tv_usec = 0;
 
-  ret = setsockopt(sockfd, SOL_TCP, TCP_KEEPIDLE, &tv, sizeof(struct timeval));
+  ret = setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE,
+                   &tv, sizeof(struct timeval));
   if (ret < 0)
     {
       ret = -errno;
@@ -125,7 +113,8 @@ static int lo_client(void)
   tv.tv_sec  = 1;
   tv.tv_usec = 0;
 
-  ret = setsockopt(sockfd, SOL_TCP, TCP_KEEPINTVL, &tv, sizeof(struct timeval));
+  ret = setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPINTVL,
+                   &tv, sizeof(struct timeval));
   if (ret < 0)
     {
       ret = -errno;
@@ -134,7 +123,7 @@ static int lo_client(void)
     }
 
   value = 3;
-  ret = setsockopt(sockfd, SOL_TCP, TCP_KEEPCNT, &value, sizeof(int));
+  ret = setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT, &value, sizeof(int));
   if (ret < 0)
     {
       ret = -errno;
@@ -149,8 +138,10 @@ static int lo_client(void)
   myaddr.sin_port        = htons(LISTENER_PORT);
   myaddr.sin_addr.s_addr = htonl(LO_ADDRESS);
 
-  printf("lo_client: Connecting to %08x:%d...\n", LO_ADDRESS, LISTENER_PORT);
-  if (connect( sockfd, (struct sockaddr*)&myaddr, sizeof(struct sockaddr_in)) < 0)
+  printf("lo_client: Connecting to %08x:%d...\n",
+         LO_ADDRESS, LISTENER_PORT);
+  if (connect(sockfd,
+              (struct sockaddr *)&myaddr, sizeof(struct sockaddr_in)) < 0)
     {
       ret = -errno;
       printf("lo_client: connect failure: %d\n", ret);
@@ -163,7 +154,7 @@ static int lo_client(void)
 
   for (i = 0; ; i++)
     {
-      sprintf(outbuf, "Loopback message %d", i);
+      snprintf(outbuf, sizeof(outbuf), "Loopback message %d", i);
       len = strlen(outbuf);
 
       printf("lo_client: Sending '%s' (%d bytes)\n", outbuf, len);
@@ -179,7 +170,8 @@ static int lo_client(void)
       else if (nbytessent != len)
         {
           ret = -EINVAL;
-          printf("lo_client: Bad send length: %d Expected: %d\n", nbytessent, len);
+          printf("lo_client: Bad send length: %d Expected: %d\n",
+                 nbytessent, len);
           goto errout_with_socket;
         }
 
@@ -205,7 +197,8 @@ static int lo_client(void)
       if (nbytesrecvd != len)
         {
           ret = -EINVAL;
-          printf("lo_client: Bad recv length: %d Expected: %d\n", nbytesrecvd, len);
+          printf("lo_client: Bad recv length: %d Expected: %d\n",
+                 nbytesrecvd, len);
           goto errout_with_socket;
         }
       else if (memcmp(inbuf, outbuf, len) != 0)
@@ -216,7 +209,8 @@ static int lo_client(void)
         }
 
 #ifdef CONFIG_EXAMPLES_NETLOOP_KEEPALIVE
-      /* Send four messages, then wait a longer amount of time ... longer than
+      /* Send four messages, then wait a longer amount of time ...
+       * longer than:
        * TCP_KEEPIDLE + TCP_KEEPINTVL * TCP_KEEPCNT = 5 + 3 * 1 = 8 seconds.
        */
 

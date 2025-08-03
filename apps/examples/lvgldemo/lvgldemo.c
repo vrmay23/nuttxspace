@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/lvgdemo/lvgldemo.c
+ * apps/examples/lvgldemo/lvgldemo.c
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -38,33 +25,25 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-
-#include <sys/boardctl.h>
 #include <unistd.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <pthread.h>
-#include <time.h>
+#include <sys/boardctl.h>
 
-#include <graphics/lvgl.h>
-
-#include "fbdev.h"
-#include "tp.h"
-#include "tp_cal.h"
-#include "demo.h"
-#include "lv_test_theme_1.h"
-#include "lv_test_theme_2.h"
+#include <lvgl/lvgl.h>
+#include <lvgl/demos/lv_demos.h>
+#ifdef CONFIG_LV_USE_NUTTX_LIBUV
+#include <uv.h>
+#endif
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Should we perform board-specific driver initialization?  There are two
+/* Should we perform board-specific driver initialization? There are two
  * ways that board initialization can occur:  1) automatically via
  * board_late_initialize() during bootupif CONFIG_BOARD_LATE_INITIALIZE
  * or 2).
  * via a call to boardctl() if the interface is enabled
- * (CONFIG_LIB_BOARDCTL=y).
+ * (CONFIG_BOARDCTL=y).
  * If this task is running as an NSH built-in application, then that
  * initialization has probably already been performed otherwise we do it
  * here.
@@ -72,68 +51,50 @@
 
 #undef NEED_BOARDINIT
 
-#if defined(CONFIG_LIB_BOARDCTL) && !defined(CONFIG_NSH_ARCHINIT)
+#if defined(CONFIG_BOARDCTL) && !defined(CONFIG_NSH_ARCHINIT)
 #  define NEED_BOARDINIT 1
 #endif
+
+/****************************************************************************
+ * Private Types
+ ****************************************************************************/
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
-/****************************************************************************
- * Name: tick_func
- *
- * Description:
- *   Calls lv_tick_inc(...) every 5ms.
- *
- * Input Parameters:
- *   data
- *
- * Returned Value:
- *   NULL
- *
- ****************************************************************************/
-
-static FAR void *tick_func(void *data)
+#ifdef CONFIG_LV_USE_NUTTX_LIBUV
+static void lv_nuttx_uv_loop(uv_loop_t *loop, lv_nuttx_result_t *result)
 {
-  static long last_ms;
-  long    ms;
-  struct timespec spec;
+  lv_nuttx_uv_t uv_info;
+  void *data;
 
-  while (1)
-    {
-      long diff;
+  uv_loop_init(loop);
 
-      /* Calculate how much time elapsed */
+  lv_memset(&uv_info, 0, sizeof(uv_info));
+  uv_info.loop = loop;
+  uv_info.disp = result->disp;
+  uv_info.indev = result->indev;
+#ifdef CONFIG_UINPUT_TOUCH
+  uv_info.uindev = result->utouch_indev;
+#endif
 
-      clock_gettime(CLOCK_REALTIME, &spec);
-      ms = (long)spec.tv_nsec / 1000000;
-      diff = ms - last_ms;
-
-      /* Handle overflow */
-
-      if (diff < 0)
-        {
-          diff = 1000 + diff;
-        }
-
-      lv_tick_inc(diff);
-      usleep(5000);
-
-      last_ms = ms;
-    }
-
-  /* Never will reach here */
-
-  return NULL;
+  data = lv_nuttx_uv_init(&uv_info);
+  uv_run(loop, UV_RUN_DEFAULT);
+  lv_nuttx_uv_deinit(&data);
 }
+#endif
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: main or lvgldemo_main
+ * Name: main or lv_demos_main
  *
  * Description:
  *
@@ -147,105 +108,74 @@ static FAR void *tick_func(void *data)
 
 int main(int argc, FAR char *argv[])
 {
-  lv_disp_drv_t disp_drv;
-  pthread_t tick_thread;
+  lv_nuttx_dsc_t info;
+  lv_nuttx_result_t result;
 
-  lv_disp_buf_t disp_buf;
-  static lv_color_t buf[CONFIG_LV_VDB_SIZE];
+#ifdef CONFIG_LV_USE_NUTTX_LIBUV
+  uv_loop_t ui_loop;
+  lv_memzero(&ui_loop, sizeof(ui_loop));
+#endif
+
+  if (lv_is_initialized())
+    {
+      LV_LOG_ERROR("LVGL already initialized! aborting.");
+      return -1;
+    }
 
 #ifdef NEED_BOARDINIT
   /* Perform board-specific driver initialization */
 
   boardctl(BOARDIOC_INIT, 0);
 
-#ifdef CONFIG_BOARDCTL_FINALINIT
-  /* Perform architecture-specific final-initialization (if configured) */
-
-  boardctl(BOARDIOC_FINALINIT, 0);
 #endif
-#endif
-
-  /* LittlevGL initialization */
 
   lv_init();
 
-  /* Display interface initialization */
+  lv_nuttx_dsc_init(&info);
 
-  fbdev_init();
-
-  /* Basic LittlevGL display driver initialization */
-
-  lv_disp_buf_init(&disp_buf, buf, NULL, LV_HOR_RES_MAX * 10);
-  lv_disp_drv_init(&disp_drv);
-  disp_drv.flush_cb = fbdev_flush;
-  disp_drv.buffer = &disp_buf;
-  lv_disp_drv_register(&disp_drv);
-
-  /* Tick interface initialization */
-
-  pthread_create(&tick_thread, NULL, tick_func, NULL);
-
-  /* Touchpad Initialization */
-
-  tp_init();
-  lv_indev_drv_t indev_drv;
-  lv_indev_drv_init(&indev_drv);
-  indev_drv.type = LV_INDEV_TYPE_POINTER;
-
-  /* This function will be called periodically (by the library) to get the
-   * mouse position and state.
-   */
-
-  indev_drv.read_cb = tp_read;
-  lv_indev_drv_register(&indev_drv);
-
-  /* Demo initialization */
-
-#if defined(CONFIG_EXAMPLES_LVGLDEMO_SIMPLE)
-
-  demo_create();
-
-#elif defined(CONFIG_EXAMPLES_LVGLDEMO_THEME_1)
-
-  lv_theme_t *theme = NULL;
-
-#if   defined(CONFIG_EXAMPLES_LVGLDEMO_THEME_1_DEFAULT)
-  theme = lv_theme_default_init(EXAMPLES_LVGLDEMO_THEME_1_HUE, NULL);
-#elif defined(CONFIG_EXAMPLES_LVGLDEMO_THEME_1_ALIEN)
-  theme = lv_theme_alien_init(EXAMPLES_LVGLDEMO_THEME_1_HUE,   NULL);
-#elif defined(CONFIG_EXAMPLES_LVGLDEMO_THEME_1_NIGHT)
-  theme = lv_theme_night_init(EXAMPLES_LVGLDEMO_THEME_1_HUE, NULL);
-#elif defined(CONFIG_EXAMPLES_LVGLDEMO_THEME_1_MONO)
-  theme = lv_theme_mono_init(EXAMPLES_LVGLDEMO_THEME_1_HUE, NULL);
-#elif defined(CONFIG_EXAMPLES_LVGLDEMO_THEME_1_MATERIAL)
-  theme = lv_theme_material_init(EXAMPLES_LVGLDEMO_THEME_1_HUE, NULL);
-#elif defined(CONFIG_EXAMPLES_LVGLDEMO_THEME_1_ZEN)
-  theme = lv_theme_zen_init(EXAMPLES_LVGLDEMO_THEME_1_HUE, NULL);
-#elif defined(CONFIG_EXAMPLES_LVGLDEMO_THEME_1_NEMO)
-  theme = lv_theme_nemo_init(EXAMPLES_LVGLDEMO_THEME_1_HUE, NULL);
-#else
-#  error "No theme selected for this application"
+#ifdef CONFIG_LV_USE_NUTTX_LCD
+  info.fb_path = "/dev/lcd0";
 #endif
 
-  lv_test_theme_1(theme);
-
-#elif defined(CONFIG_EXAMPLES_LVGLDEMO_THEME_2)
-  lv_test_theme_2();
-#else
-#  error "No LVGL demo selected"
+#ifdef CONFIG_INPUT_TOUCHSCREEN
+  info.input_path = CONFIG_EXAMPLES_LVGLDEMO_INPUT_DEVPATH;
 #endif
 
-  /* Start TP calibration */
+  lv_nuttx_init(&info, &result);
 
-  tp_cal_create();
-
-  /* Handle LittlevGL tasks */
-
-  while (1)
+  if (result.disp == NULL)
     {
-      lv_task_handler();
-      usleep(10000);
+      LV_LOG_ERROR("lv_demos initialization failure!");
+      return 1;
     }
 
-  return EXIT_SUCCESS;
+  if (!lv_demos_create(&argv[1], argc - 1))
+    {
+      lv_demos_show_help();
+
+      /* we can add custom demos here */
+
+      goto demo_end;
+    }
+
+#ifdef CONFIG_LV_USE_NUTTX_LIBUV
+  lv_nuttx_uv_loop(&ui_loop, &result);
+#else
+  while (1)
+    {
+      uint32_t idle;
+      idle = lv_timer_handler();
+
+      /* Minimum sleep of 1ms */
+
+      idle = idle ? idle : 1;
+      usleep(idle * 1000);
+    }
+#endif
+
+demo_end:
+  lv_nuttx_deinit(&result);
+  lv_deinit();
+
+  return 0;
 }

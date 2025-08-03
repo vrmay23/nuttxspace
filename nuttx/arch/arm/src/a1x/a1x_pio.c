@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/a1x/a1x_pio.c
  *
- *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -48,9 +35,7 @@
 #include <nuttx/arch.h>
 #include <arch/board/board.h>
 
-#include "up_internal.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "chip.h"
 #include "a1x_pio.h"
 #include "hardware/a1x_pio.h"
@@ -70,6 +55,7 @@
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
 /****************************************************************************
  * Name: a1x_pio_pin
  *
@@ -106,12 +92,11 @@ static inline int a1x_pio_pin(pio_pinset_t cfgset)
  ****************************************************************************/
 
 #ifdef CONFIG_A1X_PIO_IRQ
-static int a1x_pio_interrupt(int irq, void *context)
+static int a1x_pio_interrupt(int irq, void *context, void *arg)
 {
   uint32_t status;
   uint32_t mask;
   uint32_t pending;
-  int irq;
 
   /* Read the set of pending GPIO interrupts */
 
@@ -163,13 +148,15 @@ static int a1x_pio_interrupt(int irq, void *context)
             {
               /* Yes.. dispatch the interrupt */
 
-              arm_doirq(irq, regs);
+              arm_doirq(irq, context);
             }
 
           irq++;
           pending >>= 1;
         }
     }
+
+  return OK;
 }
 #endif
 
@@ -189,18 +176,15 @@ static int a1x_pio_interrupt(int irq, void *context)
 #ifdef CONFIG_A1X_PIO_IRQ
 void a1x_pio_irqinitialize(void)
 {
-  int ret;
-
   /* Disable all external PIO interrupts */
 
   putreg32(0, A1X_PIO_INT_CTL);
 
   /* Attach the PIO interrupt handler */
 
-  ret = irq_attach(A1X_IRQ_PIO)
-  if (ret < 0)
+  if (irq_attach(A1X_IRQ_PIO, a1x_pio_interrupt, NULL) < 0)
     {
-      return ret;
+      return;
     }
 
   /* And enable the PIO interrupt */
@@ -260,6 +244,7 @@ int a1x_pio_config(pio_pinset_t cfgset)
         break;
 
       default:
+        leave_critical_section(flags);
         return -EINVAL;
     }
 
@@ -300,6 +285,7 @@ int a1x_pio_config(pio_pinset_t cfgset)
         break;
 
       default:
+        leave_critical_section(flags);
         return -EINVAL;
     }
 
@@ -398,13 +384,13 @@ bool a1x_pio_read(pio_pinset_t pinset)
   return ((regval & PIO_DAT(pin)) != 0);
 }
 
-/************************************************************************************
+/****************************************************************************
  * Name: a1x_pio_irqenable
  *
  * Description:
  *   Enable the interrupt for specified PIO IRQ
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifdef CONFIG_A1X_PIO_IRQ
 void a1x_pio_irqenable(int irq)
@@ -417,27 +403,27 @@ void a1x_pio_irqenable(int irq)
     {
       /* Convert the IRQ number to a bit position */
 
-      pin = irq - A1X_PIO_EINT0
+      pin = irq - A1X_PIO_EINT0;
 
-      /* Un-mask the interrupt be setting the corresponding bit in the PIO INT CTL
-       * register.
+      /* Un-mask the interrupt be setting the corresponding bit in the
+       * PIO INT CTL register.
        */
 
       flags   = enter_critical_section();
       regval  = getreg32(A1X_PIO_INT_CTL);
-      regval |= PIO_INT_CTL(irq);
+      regval |= PIO_INT_CTL(pin);
       leave_critical_section(flags);
     }
 }
 #endif
 
-/************************************************************************************
+/****************************************************************************
  * Name: a1x_pio_irqdisable
  *
  * Description:
  *   Disable the interrupt for specified PIO IRQ
  *
- ************************************************************************************/
+ ****************************************************************************/
 #ifdef CONFIG_A1X_PIO_IRQ
 
 void a1x_pio_irqdisable(int irq)
@@ -450,15 +436,15 @@ void a1x_pio_irqdisable(int irq)
     {
       /* Convert the IRQ number to a bit position */
 
-      pin = irq - A1X_PIO_EINT0
+      pin = irq - A1X_PIO_EINT0;
 
-      /* Mask the interrupt be clearning the corresponding bit in the PIO INT CTL
-       * register.
+      /* Mask the interrupt be clearning the corresponding bit in the
+       * PIO INT CTL register.
        */
 
       flags   = enter_critical_section();
       regval  = getreg32(A1X_PIO_INT_CTL);
-      regval &= ~PIO_INT_CTL(irq);
+      regval &= ~PIO_INT_CTL(pin);
       leave_critical_section(flags);
     }
 }

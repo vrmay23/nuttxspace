@@ -1,38 +1,26 @@
 /****************************************************************************
  * drivers/sensors/veml6070.c
- * Character driver for the Vishay UV-A Light Sensor VEML6070
  *
- *   Copyright (C) 2016 Alan Carvalho de Assis. All rights reserved.
- *   Author: Alan Carvalho de Assis <acassis@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
+
+/* Character driver for the Vishay UV-A Light Sensor VEML6070 */
 
 /****************************************************************************
  * Included Files
@@ -40,6 +28,7 @@
 
 #include <nuttx/config.h>
 
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <stdlib.h>
@@ -52,14 +41,6 @@
 #include <nuttx/sensors/veml6070.h>
 
 #if defined(CONFIG_I2C) && defined(CONFIG_SENSORS_VEML6070)
-
-/****************************************************************************
- * Pre-process Definitions
- ****************************************************************************/
-
-#ifndef CONFIG_VEML6070_I2C_FREQUENCY
-#  define CONFIG_VEML6070_I2C_FREQUENCY 100000
-#endif
 
 /****************************************************************************
  * Private Types
@@ -78,16 +59,14 @@ struct veml6070_dev_s
 /* I2C Helpers */
 
 static int     veml6070_read8(FAR struct veml6070_dev_s *priv, int offset,
-                 FAR uint8_t *regval);
+                              FAR uint8_t *regval);
 static int     veml6070_write8(FAR struct veml6070_dev_s *priv,
-                 uint8_t regval);
+                               uint8_t regval);
 
 /* Character driver methods */
 
-static int     veml6070_open(FAR struct file *filep);
-static int     veml6070_close(FAR struct file *filep);
 static ssize_t veml6070_read(FAR struct file *filep, FAR char *buffer,
-                 size_t buflen);
+                             size_t buflen);
 static ssize_t veml6070_write(FAR struct file *filep,
                  FAR const char *buffer, size_t buflen);
 
@@ -97,16 +76,10 @@ static ssize_t veml6070_write(FAR struct file *filep,
 
 static const struct file_operations g_veml6070_fops =
 {
-  veml6070_open,   /* open */
-  veml6070_close,  /* close */
+  NULL,            /* open */
+  NULL,            /* close */
   veml6070_read,   /* read */
   veml6070_write,  /* write */
-  NULL,            /* seek */
-  NULL,            /* ioctl */
-  NULL             /* poll */
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL           /* unlink */
-#endif
 };
 
 /****************************************************************************
@@ -184,32 +157,6 @@ static int veml6070_write8(FAR struct veml6070_dev_s *priv, uint8_t regval)
 }
 
 /****************************************************************************
- * Name: veml6070_open
- *
- * Description:
- *   This function is called whenever the VEML6070 device is opened.
- *
- ****************************************************************************/
-
-static int veml6070_open(FAR struct file *filep)
-{
-  return OK;
-}
-
-/****************************************************************************
- * Name: veml6070_close
- *
- * Description:
- *   This routine is called when the VEML6070 device is closed.
- *
- ****************************************************************************/
-
-static int veml6070_close(FAR struct file *filep)
-{
-  return OK;
-}
-
-/****************************************************************************
  * Name: veml6070_read
  ****************************************************************************/
 
@@ -222,11 +169,10 @@ static ssize_t veml6070_read(FAR struct file *filep, FAR char *buffer,
   int msb = 1;
   uint16_t regdata;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct veml6070_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Check if the user is reading the right size */
 
@@ -301,7 +247,8 @@ static ssize_t veml6070_write(FAR struct file *filep,
  *
  * Input Parameters:
  *   devpath - The full path to the driver to register. E.g., "/dev/uvlight0"
- *   i2c - An instance of the I2C interface to use to communicate with VEML6070
+ *   i2c - An instance of the I2C interface to use to communicate with
+ *         VEML6070
  *   addr - The I2C address of the VEML6070.
  *
  * Returned Value:
@@ -312,6 +259,7 @@ static ssize_t veml6070_write(FAR struct file *filep,
 int veml6070_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
                        uint8_t addr)
 {
+  FAR struct veml6070_dev_s *priv;
   int ret;
 
   /* Sanity check */
@@ -320,9 +268,7 @@ int veml6070_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
 
   /* Initialize the VEML6070 device structure */
 
-  FAR struct veml6070_dev_s *priv =
-    (FAR struct veml6070_dev_s *)kmm_malloc(sizeof(struct veml6070_dev_s));
-
+  priv = kmm_malloc(sizeof(struct veml6070_dev_s));
   if (priv == NULL)
     {
       snerr("ERROR: Failed to allocate instance\n");

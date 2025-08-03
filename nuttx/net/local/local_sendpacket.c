@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/local/local_sendpacket.c
  *
- *   Copyright (C) 2015, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -47,26 +34,9 @@
 #include <debug.h>
 
 #include <nuttx/fs/fs.h>
+#include "devif/devif.h"
 
 #include "local/local.h"
-
-#if defined(CONFIG_NET) && defined(CONFIG_NET_LOCAL)
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#define LOCAL_PREAMBLE_SIZE 8
-
-/****************************************************************************
- * Private Data
- ****************************************************************************/
-
-static const uint8_t g_preamble[LOCAL_PREAMBLE_SIZE] =
-{
-  LOCAL_SYNC_BYTE, LOCAL_SYNC_BYTE, LOCAL_SYNC_BYTE, LOCAL_SYNC_BYTE,
-  LOCAL_SYNC_BYTE, LOCAL_SYNC_BYTE, LOCAL_SYNC_BYTE, LOCAL_END_BYTE
-};
 
 /****************************************************************************
  * Private Functions
@@ -84,43 +54,108 @@ static const uint8_t g_preamble[LOCAL_PREAMBLE_SIZE] =
  *   len      Length of data to send
  *
  * Returned Value:
- *   Zero is returned on success; a negated errno value is returned on any
- *   failure.
+ *   On success, the number of bytes written are returned (zero indicates
+ *   nothing was written).  On any failure, a negated errno value is returned
  *
  ****************************************************************************/
 
 static int local_fifo_write(FAR struct file *filep, FAR const uint8_t *buf,
                             size_t len)
 {
-  ssize_t nwritten;
+  ssize_t nwritten = 0;
+  ssize_t ret = 0;
 
-  while (len > 0)
+  while (len != nwritten)
     {
-      nwritten = file_write(filep, buf, len);
-      if (nwritten < 0)
+      ret = file_write(filep, buf + nwritten, len - nwritten);
+      if (ret < 0)
         {
-          if (nwritten != -EINTR)
+          if (ret == -EINTR)
             {
-              nerr("ERROR: nx_write failed: %d\n", nwritten);
-              return (int)nwritten;
+              continue;
             }
+          else if (ret == -EAGAIN)
+            {
+              break;
+            }
+          else
+            {
+              nerr("ERROR: file_write failed: %zd\n", ret);
+              break;
+            }
+        }
 
-          ninfo("Ignoring signal\n");
-        }
-      else
-        {
-          DEBUGASSERT(nwritten > 0 && nwritten <= len);
-          len -= nwritten;
-          buf += nwritten;
-        }
+      nwritten += ret;
     }
 
-  return OK;
+  return nwritten > 0 ? nwritten : ret;
 }
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: local_send_preamble
+ *
+ * Description:
+ *   Send a packet on the write-only FIFO.
+ *
+ * Input Parameters:
+ * conn      A reference to local connection structure
+ * filep     File structure of write-only FIFO.
+ * buf       Data to send
+ * len       Length of data to send
+ *
+ * Returned Value:
+ *   Packet length is returned on success; a negated errno value is returned
+ *   on any failure.
+ *
+ ****************************************************************************/
+
+int local_send_preamble(FAR struct local_conn_s *conn,
+                        FAR struct file *filep,
+                        FAR const struct iovec *buf,
+                        size_t len, size_t rcvsize)
+{
+  FAR const struct iovec *end = buf + len;
+  FAR const struct iovec *iov;
+  int ret;
+  lc_size_t pathlen;
+  lc_size_t pktlen;
+
+  /* Send the packet length */
+
+  for (pktlen = 0, iov = buf; iov != end; iov++)
+    {
+      pktlen += iov->iov_len;
+    }
+
+  if (pktlen > rcvsize - sizeof(lc_size_t))
+    {
+      nerr("ERROR: Packet is too big: %d\n", pktlen);
+      return -EMSGSIZE;
+    }
+
+  pathlen = strlen(conn->lc_path);
+  ret = local_fifo_write(&conn->lc_outfile, (FAR const uint8_t *)&pathlen,
+                         sizeof(lc_size_t));
+  if (ret != sizeof(lc_size_t))
+    {
+      nerr("ERROR: local send path length failed ret: %d\n", ret);
+      return ret;
+    }
+
+  ret = local_fifo_write(filep, (FAR const uint8_t *)&pktlen,
+                         sizeof(lc_size_t));
+  if (ret != sizeof(lc_size_t))
+    {
+      return ret;
+    }
+
+  return local_fifo_write(&conn->lc_outfile, (uint8_t *)conn->lc_path,
+                          pathlen);
+}
 
 /****************************************************************************
  * Name: local_send_packet
@@ -134,36 +169,41 @@ static int local_fifo_write(FAR struct file *filep, FAR const uint8_t *buf,
  *   len      Length of data to send
  *
  * Returned Value:
- *   Zero is returned on success; a negated errno value is returned on any
- *   failure.
+ *   Packet length is returned on success; a negated errno value is returned
+ *   on any failure.
  *
  ****************************************************************************/
 
-int local_send_packet(FAR struct file *filep, FAR const uint8_t *buf,
+int local_send_packet(FAR struct file *filep, FAR const struct iovec *buf,
                       size_t len)
 {
-  uint16_t len16;
-  int ret;
+  FAR const struct iovec *end = buf + len;
+  FAR const struct iovec *iov;
+  int ret = -EINVAL;
+  lc_size_t sendlen;
 
-  /* Send the packet preamble */
-
-  ret = local_fifo_write(filep, g_preamble, LOCAL_PREAMBLE_SIZE);
-  if (ret == OK)
+  for (sendlen = 0, iov = buf; iov != end; iov++)
     {
-      /* Send the packet length */
-
-      len16 = len;
-      ret = local_fifo_write(filep, (FAR const uint8_t *)&len16,
-                             sizeof(uint16_t));
-      if (ret == OK)
+      ret = local_fifo_write(filep, iov->iov_base, iov->iov_len);
+      if (ret < 0)
         {
-          /* Send the packet data */
+          if (ret != -EAGAIN)
+            {
+              nerr("ERROR: local send packet failed ret: %d\n", ret);
+            }
 
-          ret = local_fifo_write(filep, buf, len);
+          break;
+        }
+
+      if (ret > 0)
+        {
+          sendlen += ret;
+          if (ret != iov->iov_len)
+            {
+              break;
+            }
         }
     }
 
-  return ret;
+  return sendlen > 0 ? sendlen : ret;
 }
-
-#endif /* CONFIG_NET && CONFIG_NET_LOCAL */

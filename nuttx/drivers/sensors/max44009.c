@@ -1,36 +1,22 @@
 /****************************************************************************
  * drivers/sensors/max44009.c
  *
- *   Copyright (C) 2014-2018 Haltian Ltd. All rights reserved.
- *   Authors: Dmitry Nikolaev <dmitry.nikolaev@haltian.com>
- *            Juha Niskanen <juha.niskanen@haltian.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,6 +26,7 @@
 
 #include <nuttx/config.h>
 #include <sys/types.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <poll.h>
@@ -48,6 +35,7 @@
 #include <nuttx/fs/fs.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/kmalloc.h>
+#include <nuttx/mutex.h>
 #include <nuttx/random.h>
 
 #include <nuttx/sensors/max44009.h>
@@ -60,10 +48,6 @@
 #  define max44009_dbg(x, ...)      _info(x, ##__VA_ARGS__)
 #else
 #  define max44009_dbg(x, ...)      sninfo(x, ##__VA_ARGS__)
-#endif
-
-#ifndef CONFIG_MAX44009_I2C_FREQUENCY
-#  define CONFIG_MAX44009_I2C_FREQUENCY 400000
 #endif
 
 /* Registers */
@@ -88,12 +72,12 @@
 struct max44009_dev_s
 {
   FAR struct max44009_config_s *config;
-  sem_t dev_sem;
+  mutex_t dev_lock;
   FAR struct i2c_master_s *i2c;
   uint8_t addr;
   uint8_t cref;
   bool int_pending;
-  struct pollfd *fds[CONFIG_MAX44009_NPOLLWAITERS];
+  FAR struct pollfd *fds[CONFIG_MAX44009_NPOLLWAITERS];
 };
 
 /****************************************************************************
@@ -126,10 +110,9 @@ static const struct file_operations g_alsops =
   max44009_write,  /* write */
   NULL,            /* seek */
   max44009_ioctl,  /* ioctl */
+  NULL,            /* mmap */
+  NULL,            /* truncate */
   max44009_poll    /* poll */
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL           /* unlink */
-#endif
 };
 
 /****************************************************************************
@@ -183,14 +166,14 @@ static int max44009_write_reg8(FAR struct max44009_dev_s *dev,
       .frequency = CONFIG_MAX44009_I2C_FREQUENCY,
       .addr      = dev->addr,
       .flags     = 0,
-      .buffer    = (void *)&command[0],
+      .buffer    = (FAR void *)&command[0],
       .length    = 1
     },
     {
       .frequency = CONFIG_MAX44009_I2C_FREQUENCY,
       .addr      = dev->addr,
       .flags     = I2C_M_NOSTART,
-      .buffer    = (void *)&command[1],
+      .buffer    = (FAR void *)&command[1],
       .length    = 1
     }
   };
@@ -230,13 +213,12 @@ static int max44009_open(FAR struct file *filep)
   unsigned int use_count;
   int ret;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv = (FAR struct max44009_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv = inode->i_private;
 
-  ret = nxsem_wait_uninterruptible(&priv->dev_sem);
+  ret = nxmutex_lock(&priv->dev_lock);
   if (ret < 0)
     {
       return ret;
@@ -251,7 +233,7 @@ static int max44009_open(FAR struct file *filep)
       if (ret < 0)
         {
           max44009_dbg("Cannot power on sensor: %d\n", ret);
-          goto out_sem;
+          goto out_lock;
         }
 
       priv->config->irq_enable(priv->config, true);
@@ -267,8 +249,8 @@ static int max44009_open(FAR struct file *filep)
 
   max44009_dbg("Sensor is powered on\n");
 
-out_sem:
-  nxsem_post(&priv->dev_sem);
+out_lock:
+  nxmutex_unlock(&priv->dev_lock);
   return ret;
 }
 
@@ -279,13 +261,12 @@ static int max44009_close(FAR struct file *filep)
   int use_count;
   int ret;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv = (FAR struct max44009_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv = inode->i_private;
 
-  ret = nxsem_wait_uninterruptible(&priv->dev_sem);
+  ret = nxmutex_lock(&priv->dev_lock);
   if (ret < 0)
     {
       return ret;
@@ -309,7 +290,7 @@ static int max44009_close(FAR struct file *filep)
     }
 
   max44009_dbg("CLOSED\n");
-  nxsem_post(&priv->dev_sem);
+  nxmutex_unlock(&priv->dev_lock);
   return OK;
 }
 
@@ -322,13 +303,12 @@ static ssize_t max44009_read(FAR struct file *filep, FAR char *buffer,
   int ret;
   struct max44009_data_s data;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv = (FAR struct max44009_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv = inode->i_private;
 
-  ret = nxsem_wait_uninterruptible(&priv->dev_sem);
+  ret = nxmutex_lock(&priv->dev_lock);
   if (ret < 0)
     {
       return (ssize_t)ret;
@@ -350,7 +330,7 @@ static ssize_t max44009_read(FAR struct file *filep, FAR char *buffer,
         }
     }
 
-  nxsem_post(&priv->dev_sem);
+  nxmutex_unlock(&priv->dev_lock);
   return length;
 }
 
@@ -726,13 +706,12 @@ static int max44009_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   FAR struct max44009_dev_s *priv;
   int ret;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv = (FAR struct max44009_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv = inode->i_private;
 
-  ret = nxsem_wait_uninterruptible(&priv->dev_sem);
+  ret = nxmutex_lock(&priv->dev_lock);
   if (ret < 0)
     {
       return ret;
@@ -763,7 +742,7 @@ static int max44009_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       break;
     }
 
-  nxsem_post(&priv->dev_sem);
+  nxmutex_unlock(&priv->dev_lock);
   return ret;
 }
 
@@ -784,9 +763,7 @@ static void max44009_notify(FAR struct max44009_dev_s *priv)
       FAR struct pollfd *fds = priv->fds[i];
       if (fds)
         {
-          fds->revents |= POLLIN;
-          max44009_dbg("Report events: %02x\n", fds->revents);
-          nxsem_post(fds->sem);
+          poll_notify(&fds, 1, POLLIN);
           priv->int_pending = false;
         }
     }
@@ -800,13 +777,13 @@ static int max44009_poll(FAR struct file *filep, FAR struct pollfd *fds,
   int ret = OK;
   int i;
 
-  DEBUGASSERT(filep && fds);
+  DEBUGASSERT(fds);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv = (FAR struct max44009_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv = inode->i_private;
 
-  ret = nxsem_wait_uninterruptible(&priv->dev_sem);
+  ret = nxmutex_lock(&priv->dev_lock);
   if (ret < 0)
     {
       return ret;
@@ -849,14 +826,15 @@ static int max44009_poll(FAR struct file *filep, FAR struct pollfd *fds,
 
       if (priv->int_pending)
         {
-          max44009_notify(priv);
+          poll_notify(&fds, 1, POLLIN);
+          priv->int_pending = false;
         }
     }
   else if (fds->priv)
     {
       /* This is a request to tear down the poll. */
 
-      struct pollfd **slot = (struct pollfd **)fds->priv;
+      FAR struct pollfd **slot = (FAR struct pollfd **)fds->priv;
       DEBUGASSERT(slot != NULL);
 
       /* Remove all memory of the poll setup */
@@ -866,8 +844,7 @@ static int max44009_poll(FAR struct file *filep, FAR struct pollfd *fds,
     }
 
 out:
-
-  nxsem_post(&priv->dev_sem);
+  nxmutex_unlock(&priv->dev_lock);
   return ret;
 }
 
@@ -907,12 +884,13 @@ int max44009_register(FAR const char *devpath, FAR struct i2c_master_s *i2c,
   priv->addr = addr;
   priv->i2c = i2c;
   priv->config = config;
-  nxsem_init(&priv->dev_sem, 0, 1);
+  nxmutex_init(&priv->dev_lock);
 
   ret = register_driver(devpath, &g_alsops, 0666, priv);
   max44009_dbg("Registered with %d\n", ret);
   if (ret < 0)
     {
+      nxmutex_destroy(&priv->dev_lock);
       kmm_free(priv);
       max44009_dbg("Error occurred during the driver registering\n");
       return ret;

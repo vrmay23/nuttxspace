@@ -1,36 +1,22 @@
 /****************************************************************************
  * arch/arm/src/stm32/stm32f40xxx_rtcc.c
  *
- *   Copyright (C) 2012-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *   Modified: Neil Hancock
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,18 +26,19 @@
 
 #include <nuttx/config.h>
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <sched.h>
 #include <time.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
-#include <nuttx/time.h>
+#include <nuttx/clock.h>
 
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "stm32_rcc.h"
 #include "stm32_pwr.h"
 #include "stm32_exti.h"
@@ -91,13 +78,13 @@
 
 /* Proxy definitions to make the same code work for all the STM32 series ****/
 
-# define STM32_RCC_XXX       STM32_RCC_BDCR
-# define RCC_XXX_YYYRST      RCC_BDCR_BDRST
-# define RCC_XXX_RTCEN       RCC_BDCR_RTCEN
-# define RCC_XXX_RTCSEL_MASK RCC_BDCR_RTCSEL_MASK
-# define RCC_XXX_RTCSEL_LSE  RCC_BDCR_RTCSEL_LSE
-# define RCC_XXX_RTCSEL_LSI  RCC_BDCR_RTCSEL_LSI
-# define RCC_XXX_RTCSEL_HSE  RCC_BDCR_RTCSEL_HSE
+#  define STM32_RCC_XXX       STM32_RCC_BDCR
+#  define RCC_XXX_YYYRST      RCC_BDCR_BDRST
+#  define RCC_XXX_RTCEN       RCC_BDCR_RTCEN
+#  define RCC_XXX_RTCSEL_MASK RCC_BDCR_RTCSEL_MASK
+#  define RCC_XXX_RTCSEL_LSE  RCC_BDCR_RTCSEL_LSE
+#  define RCC_XXX_RTCSEL_LSI  RCC_BDCR_RTCSEL_LSI
+#  define RCC_XXX_RTCSEL_HSE  RCC_BDCR_RTCSEL_HSE
 
 /* Time conversions */
 
@@ -126,7 +113,7 @@ typedef unsigned int rtc_alarmreg_t;
 struct alm_cbinfo_s
 {
   volatile alm_callback_t ac_cb; /* Client callback function */
-  volatile FAR void *ac_arg;     /* Argument to pass with the callback function */
+  volatile void *ac_arg;         /* Argument to pass with the callback function */
 };
 #endif
 
@@ -172,7 +159,7 @@ static inline void rtc_enable_alarm(void);
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_RTC_INFO
-static void rtc_dumpregs(FAR const char *msg)
+static void rtc_dumpregs(const char *msg)
 {
   int rtc_state;
 
@@ -211,7 +198,7 @@ static void rtc_dumpregs(FAR const char *msg)
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_RTC_INFO
-static void rtc_dumptime(FAR const struct tm *tp, FAR const char *msg)
+static void rtc_dumptime(const struct tm *tp, const char *msg)
 {
   rtcinfo("%s:\n", msg);
   rtcinfo("  tm_sec: %08x\n", tp->tm_sec);
@@ -247,8 +234,8 @@ static void rtc_wprunlock(void)
 
   stm32_pwr_enablebkp(true);
 
-  /* The following steps are required to unlock the write protection on all the
-   * RTC registers (except for RTC_ISR[13:8], RTC_TAFCR, and RTC_BKPxR).
+  /* The following steps are required to unlock the write protection on all
+   * the RTC registers (except for RTC_ISR[13:8], RTC_TAFCR, and RTC_BKPxR):
    *
    * 1. Write 0xCA into the RTC_WPR register.
    * 2. Write 0x53 into the RTC_WPR register.
@@ -498,12 +485,12 @@ static int rtc_setup(void)
       /* Configure RTC pre-scaler with the required values */
 
 #ifdef CONFIG_STM32_RTC_HSECLOCK
-      /* For a 1 MHz clock this yields 0.9999360041 Hz on the second
-       * timer - which is pretty close.
+      /* STMicro app note AN4759 suggests using 7999 and 124 to
+       * get exactly 1MHz when using the RTC at 8MHz.
        */
 
-      putreg32(((uint32_t)7182 << RTC_PRER_PREDIV_S_SHIFT) |
-              ((uint32_t)0x7f << RTC_PRER_PREDIV_A_SHIFT),
+      putreg32(((uint32_t)7999 << RTC_PRER_PREDIV_S_SHIFT) |
+              ((uint32_t)124 << RTC_PRER_PREDIV_A_SHIFT),
               STM32_RTC_PRER);
 #else
       /* Correct values for 32.768 KHz LSE clock and inaccurate LSI clock */
@@ -575,9 +562,9 @@ static void rtc_resume(void)
 #ifdef CONFIG_RTC_ALARM
 static int stm32_rtc_alarm_handler(int irq, void *context, void *arg)
 {
-  FAR struct alm_cbinfo_s *cbinfo;
+  struct alm_cbinfo_s *cbinfo;
   alm_callback_t cb;
-  FAR void *cb_arg;
+  void *cb_arg;
   uint32_t isr;
   uint32_t cr;
   int ret = OK;
@@ -601,7 +588,7 @@ static int stm32_rtc_alarm_handler(int irq, void *context, void *arg)
               /* Alarm A callback */
 
               cb  = cbinfo->ac_cb;
-              cb_arg = (FAR void *)cbinfo->ac_arg;
+              cb_arg = (void *)cbinfo->ac_arg;
 
               cbinfo->ac_cb  = NULL;
               cbinfo->ac_arg = NULL;
@@ -626,7 +613,7 @@ static int stm32_rtc_alarm_handler(int irq, void *context, void *arg)
               /* Alarm B callback */
 
               cb  = cbinfo->ac_cb;
-              cb_arg = (FAR void *)cbinfo->ac_arg;
+              cb_arg = (void *)cbinfo->ac_arg;
 
               cbinfo->ac_cb  = NULL;
               cbinfo->ac_arg = NULL;
@@ -750,7 +737,7 @@ static int rtchw_set_alrmar(rtc_alarmreg_t alarmreg)
   /* Set the RTC Alarm register */
 
   putreg32(alarmreg, STM32_RTC_ALRMAR);
-  rtcinfo("  ALRMAR: %08x\n", getreg32(STM32_RTC_ALRMAR));
+  rtcinfo("  ALRMAR: %08" PRIx32 "\n", getreg32(STM32_RTC_ALRMAR));
 
   /* Enable RTC alarm */
 
@@ -852,7 +839,7 @@ static inline void rtc_enable_alarm(void)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-static int stm32_rtc_getalarmdatetime(rtc_alarmreg_t reg, FAR struct tm *tp)
+static int stm32_rtc_getalarmdatetime(rtc_alarmreg_t reg, struct tm *tp)
 {
   uint32_t data;
   uint32_t tmp;
@@ -867,16 +854,20 @@ static int stm32_rtc_getalarmdatetime(rtc_alarmreg_t reg, FAR struct tm *tp)
    * ranges of values correspond between struct tm and the time register.
    */
 
-  tmp = (data & (RTC_ALRMR_SU_MASK | RTC_ALRMR_ST_MASK)) >> RTC_ALRMR_SU_SHIFT;
+  tmp = (data & (RTC_ALRMR_SU_MASK | RTC_ALRMR_ST_MASK)) >>
+        RTC_ALRMR_SU_SHIFT;
   tp->tm_sec = rtc_bcd2bin(tmp);
 
-  tmp = (data & (RTC_ALRMR_MNU_MASK | RTC_ALRMR_MNT_MASK)) >> RTC_ALRMR_MNU_SHIFT;
+  tmp = (data & (RTC_ALRMR_MNU_MASK | RTC_ALRMR_MNT_MASK)) >>
+        RTC_ALRMR_MNU_SHIFT;
   tp->tm_min = rtc_bcd2bin(tmp);
 
-  tmp = (data & (RTC_ALRMR_HU_MASK | RTC_ALRMR_HT_MASK)) >> RTC_ALRMR_HU_SHIFT;
+  tmp = (data & (RTC_ALRMR_HU_MASK | RTC_ALRMR_HT_MASK)) >>
+        RTC_ALRMR_HU_SHIFT;
   tp->tm_hour = rtc_bcd2bin(tmp);
 
-  tmp = (data & (RTC_ALRMR_DU_MASK | RTC_ALRMR_DT_MASK)) >> RTC_ALRMR_DU_SHIFT;
+  tmp = (data & (RTC_ALRMR_DU_MASK | RTC_ALRMR_DT_MASK)) >>
+        RTC_ALRMR_DU_SHIFT;
   tp->tm_mday = rtc_bcd2bin(tmp);
 
   return OK;
@@ -981,13 +972,16 @@ int up_rtc_initialize(void)
 #if defined(CONFIG_STM32_RTC_HSECLOCK)
           /* Change to the new clock as the input to the RTC block */
 
-          modifyreg32(STM32_RCC_XXX, RCC_XXX_RTCSEL_MASK, RCC_XXX_RTCSEL_HSE);
+          modifyreg32(STM32_RCC_XXX, RCC_XXX_RTCSEL_MASK,
+                      RCC_XXX_RTCSEL_HSE);
 
 #elif defined(CONFIG_STM32_RTC_LSICLOCK)
-          modifyreg32(STM32_RCC_XXX, RCC_XXX_RTCSEL_MASK, RCC_XXX_RTCSEL_LSI);
+          modifyreg32(STM32_RCC_XXX, RCC_XXX_RTCSEL_MASK,
+                      RCC_XXX_RTCSEL_LSI);
 
 #elif defined(CONFIG_STM32_RTC_LSECLOCK)
-          modifyreg32(STM32_RCC_XXX, RCC_XXX_RTCSEL_MASK, RCC_XXX_RTCSEL_LSE);
+          modifyreg32(STM32_RCC_XXX, RCC_XXX_RTCSEL_MASK,
+                      RCC_XXX_RTCSEL_LSE);
 #endif
 
           putreg32(tr_bkp, STM32_RTC_TR);
@@ -997,7 +991,9 @@ int up_rtc_initialize(void)
 
           putreg32(RTC_MAGIC, RTC_MAGIC_REG);
 
-          /* Enable the RTC Clock by setting the RTCEN bit in the RCC register */
+          /* Enable the RTC Clock by setting the RTCEN bit in the RCC
+           * register
+           */
 
           modifyreg32(STM32_RCC_XXX, 0, RCC_XXX_RTCEN);
         }
@@ -1134,9 +1130,9 @@ int stm32_rtc_irqinitialize(void)
  ****************************************************************************/
 
 #ifdef CONFIG_STM32_HAVE_RTC_SUBSECONDS
-int stm32_rtc_getdatetime_with_subseconds(FAR struct tm *tp, FAR long *nsec)
+int stm32_rtc_getdatetime_with_subseconds(struct tm *tp, long *nsec)
 #else
-int up_rtc_getdatetime(FAR struct tm *tp)
+int up_rtc_getdatetime(struct tm *tp)
 #endif
 {
 #ifdef CONFIG_STM32_HAVE_RTC_SUBSECONDS
@@ -1211,7 +1207,7 @@ int up_rtc_getdatetime(FAR struct tm *tp)
 
   tmp = (dr & RTC_DR_WDU_MASK) >> RTC_DR_WDU_SHIFT;
   tp->tm_wday = tmp % 7;
-  tp->tm_yday = tp->tm_mday +
+  tp->tm_yday = tp->tm_mday - 1 +
                 clock_daysbeforemonth(tp->tm_mon,
                                       clock_isleapyear(tp->tm_year + 1900));
   tp->tm_isdst = 0;
@@ -1240,7 +1236,7 @@ int up_rtc_getdatetime(FAR struct tm *tp)
     }
 #endif /* CONFIG_STM32_HAVE_RTC_SUBSECONDS */
 
-  rtc_dumptime((FAR const struct tm *)tp, "Returning");
+  rtc_dumptime((const struct tm *)tp, "Returning");
   return OK;
 }
 
@@ -1268,7 +1264,7 @@ int up_rtc_getdatetime(FAR struct tm *tp)
  ****************************************************************************/
 
 #ifdef CONFIG_STM32_HAVE_RTC_SUBSECONDS
-int up_rtc_getdatetime(FAR struct tm *tp)
+int up_rtc_getdatetime(struct tm *tp)
 {
   return stm32_rtc_getdatetime_with_subseconds(tp, NULL);
 }
@@ -1290,7 +1286,7 @@ int up_rtc_getdatetime(FAR struct tm *tp)
  *
  ****************************************************************************/
 
-int stm32_rtc_setdatetime(FAR const struct tm *tp)
+int stm32_rtc_setdatetime(const struct tm *tp)
 {
   uint32_t tr;
   uint32_t dr;
@@ -1381,9 +1377,9 @@ int stm32_rtc_setdatetime(FAR const struct tm *tp)
  *
  ****************************************************************************/
 
-int up_rtc_settime(FAR const struct timespec *tp)
+int up_rtc_settime(const struct timespec *tp)
 {
-  FAR struct tm newtime;
+  struct tm newtime;
 
   /* Break out the time values (not that the time is set only to units of
    * seconds)
@@ -1408,9 +1404,9 @@ int up_rtc_settime(FAR const struct timespec *tp)
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-int stm32_rtc_setalarm(FAR struct alm_setalarm_s *alminfo)
+int stm32_rtc_setalarm(struct alm_setalarm_s *alminfo)
 {
-  FAR struct alm_cbinfo_s *cbinfo;
+  struct alm_cbinfo_s *cbinfo;
   rtc_alarmreg_t alarmreg;
   int ret = -EINVAL;
 
@@ -1597,7 +1593,7 @@ errout_with_wprunlock:
  ****************************************************************************/
 
 #ifdef CONFIG_RTC_ALARM
-int stm32_rtc_rdalarm(FAR struct alm_rdalarm_s *alminfo)
+int stm32_rtc_rdalarm(struct alm_rdalarm_s *alminfo)
 {
   rtc_alarmreg_t alarmreg;
   int ret = -EINVAL;

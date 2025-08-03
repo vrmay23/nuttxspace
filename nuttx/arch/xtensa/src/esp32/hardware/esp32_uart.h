@@ -1,26 +1,22 @@
 /****************************************************************************
  * arch/xtensa/src/esp32/hardware/esp32_uart.h
  *
- * Adapted from use in NuttX by:
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Derives from logic originally provided by Espressif Systems:
- *
- *   Copyright 2015-2016 Espressif Systems (Shanghai) PTE LTD
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
-
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -31,16 +27,18 @@
  * Included Files
  ****************************************************************************/
 
-#include "hardware/esp32_soc.h"
+#include "esp32_soc.h"
 
 /****************************************************************************
  * Pre-processor Macros
  ****************************************************************************/
 
 #define REG_UART_BASE(i)                 (DR_REG_UART_BASE + (i) * 0x10000 + (i > 1 ? 0xe000 : 0))
+#define AHB_FIFO_BASE(i)                 (AHB_REG_UART_BASE + (i) * 0x10000 + (i > 1 ? 0xe000 : 0))
 
 #define UART_FIFO_OFFSET                 0x00
-#define UART_FIFO_REG(i)                 (REG_UART_BASE(i) + UART_FIFO_OFFSET)
+#define AHB_UART_FIFO_REG(i)             (AHB_FIFO_BASE(i) + UART_FIFO_OFFSET)
+#define DR_UART_FIFO_REG(i)              (REG_UART_BASE(i) + UART_FIFO_OFFSET)
 
 /* UART_RXFIFO_RD_BYTE : RO ;bitpos:[7:0] ;default: 8'b0 ; */
 
@@ -323,7 +321,7 @@
 
 /* UART_TX_BRK_IDLE_DONE_INT_ST : RO ;bitpos:[13] ;default: 1'b0 ; */
 
-/* Description: This is the stauts bit for tx_brk_idle_done_int_raw when
+/* Description: This is the status bit for tx_brk_idle_done_int_raw when
  * tx_brk_idle_done_int_ena is set to 1.
  */
 
@@ -1695,7 +1693,7 @@
 
 /* UART_TX_MEM_EMPTY_THRHD : R/W ;bitpos:[30:28] ;default: 3'h0 ; */
 
-/* Description: refer to txfifo_empty_thrhd 's describtion. */
+/* Description: refer to txfifo_empty_thrhd 's description. */
 
 #define UART_TX_MEM_EMPTY_THRHD         0x00000007
 #define UART_TX_MEM_EMPTY_THRHD_M       ((UART_TX_MEM_EMPTY_THRHD_V) << (UART_TX_MEM_EMPTY_THRHD_S))
@@ -1704,7 +1702,7 @@
 
 /* UART_RX_MEM_FULL_THRHD : R/W ;bitpos:[27:25] ;default: 3'h0 ; */
 
-/* Description: refer to the rxfifo_full_thrhd's describtion. */
+/* Description: refer to the rxfifo_full_thrhd's description. */
 
 #define UART_RX_MEM_FULL_THRHD          0x00000007
 #define UART_RX_MEM_FULL_THRHD_M        ((UART_RX_MEM_FULL_THRHD_V) << (UART_RX_MEM_FULL_THRHD_S))
@@ -1713,7 +1711,7 @@
 
 /* UART_XOFF_THRESHOLD_H2 : R/W ;bitpos:[24:23] ;default: 2'h0 ; */
 
-/* Description: refer to the uart_xoff_threshold's describtion. */
+/* Description: refer to the uart_xoff_threshold's description. */
 
 #define UART_XOFF_THRESHOLD_H2          0x00000003
 #define UART_XOFF_THRESHOLD_H2_M        ((UART_XOFF_THRESHOLD_H2_V) << (UART_XOFF_THRESHOLD_H2_S))
@@ -1722,7 +1720,7 @@
 
 /* UART_XON_THRESHOLD_H2 : R/W ;bitpos:[22:21] ;default: 2'h0 ; */
 
-/* Description: refer to the uart_xon_threshold's describtion. */
+/* Description: refer to the uart_xon_threshold's description. */
 
 #define UART_XON_THRESHOLD_H2           0x00000003
 #define UART_XON_THRESHOLD_H2_M         ((UART_XON_THRESHOLD_H2_V) << (UART_XON_THRESHOLD_H2_S))
@@ -1731,7 +1729,7 @@
 
 /* UART_RX_TOUT_THRHD_H3 : R/W ;bitpos:[20:18] ;default: 3'h0 ; */
 
-/* Description: refer to the rx_tout_thrhd's describtion. */
+/* Description: refer to the rx_tout_thrhd's description. */
 
 #define UART_RX_TOUT_THRHD_H3           0x00000007
 #define UART_RX_TOUT_THRHD_H3_M         ((UART_RX_TOUT_THRHD_H3_V) << (UART_RX_TOUT_THRHD_H3_S))
@@ -1740,7 +1738,7 @@
 
 /* UART_RX_FLOW_THRHD_H3 : R/W ;bitpos:[17:15] ;default: 3'h0 ; */
 
-/* Description: refer to the rx_flow_thrhd's describtion. */
+/* Description: refer to the rx_flow_thrhd's description. */
 
 #define UART_RX_FLOW_THRHD_H3           0x00000007
 #define UART_RX_FLOW_THRHD_H3_M         ((UART_RX_FLOW_THRHD_H3_V) << (UART_RX_FLOW_THRHD_H3_S))
@@ -1804,12 +1802,30 @@
 #define UART_MEM_RX_STATUS_V            0xFFFFFF
 #define UART_MEM_RX_STATUS_S            0
 
+/* UART_RD_ADDRESS : bitpos:[12:2] */
+
+/* Description: Read address of the UART RX FIFO. (a pointer) */
+
+#define UART_RD_ADDRESS                 0x000007FF
+#define UART_RD_ADDRESS_M               ((UART_RD_ADDRESS_V) << (UART_RD_ADDRESS_S))
+#define UART_RD_ADDRESS_V               0x7FF
+#define UART_RD_ADDRESS_S               2
+
+/* UART_WR_ADDRESS : bitpos:[23:13] */
+
+/* Description: Write address of the UART RX FIFO. (a pointer) */
+
+#define UART_WR_ADDRESS                 0x000007FF
+#define UART_WR_ADDRESS_M               ((UART_WR_ADDRESS_V) << (UART_WR_ADDRESS_S))
+#define UART_WR_ADDRESS_V               0x7FF
+#define UART_WR_ADDRESS_S               13
+
 #define UART_MEM_CNT_STATUS_OFFSET      0x64
 #define UART_MEM_CNT_STATUS_REG(i)      (REG_UART_BASE(i) + UART_MEM_CNT_STATUS_OFFSET)
 
 /* UART_TX_MEM_CNT : RO ;bitpos:[5:3] ;default: 3'b0 ; */
 
-/* Description: refer to the txfifo_cnt's describtion. */
+/* Description: refer to the txfifo_cnt's description. */
 
 #define UART_TX_MEM_CNT                 0x00000007
 #define UART_TX_MEM_CNT_M               ((UART_TX_MEM_CNT_V) << (UART_TX_MEM_CNT_S))
@@ -1818,7 +1834,7 @@
 
 /* UART_RX_MEM_CNT : RO ;bitpos:[2:0] ;default: 3'b0 ; */
 
-/* Description: refer to the rxfifo_cnt's describtion. */
+/* Description: refer to the rxfifo_cnt's description. */
 
 #define UART_RX_MEM_CNT                 0x00000007
 #define UART_RX_MEM_CNT_M               ((UART_RX_MEM_CNT_V) << (UART_RX_MEM_CNT_S))

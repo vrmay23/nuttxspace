@@ -1,6 +1,8 @@
 /****************************************************************************
  * fs/mount/fs_umount2.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -32,10 +34,176 @@
 #include <nuttx/fs/fs.h>
 
 #include "inode/inode.h"
+#include "vfs/vfs.h"
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: nx_umount2
+ *
+ * Description:
+ *   nx_umount2() is similar to the standard 'umount2' interface except that
+ *   is not a cancellation point and it does not modify the errno variable.
+ *
+ *   nx_umount2() is an internal NuttX interface and should not be called
+ *   from applications.
+ *
+ * Returned Value:
+ *   Zero is returned on success; a negated value is returned on any failure.
+ *
+ ****************************************************************************/
+
+int nx_umount2(FAR const char *target, unsigned int flags)
+{
+  FAR struct inode *mountpt_inode;
+  FAR struct inode *blkdrvr_inode = NULL;
+  struct inode_search_s desc;
+  int ret;
+
+  /* Verify required pointer arguments */
+
+  if (!target)
+    {
+      ret = -EFAULT;
+      goto errout;
+    }
+
+  /* Find the mountpt */
+
+  SETUP_SEARCH(&desc, target, false);
+
+  ret = inode_find(&desc);
+  if (ret < 0)
+    {
+      goto errout_with_search;
+    }
+
+  /* Get the search results */
+
+  mountpt_inode = desc.node;
+  DEBUGASSERT(mountpt_inode != NULL);
+
+  /* Verify that the inode is a mountpoint */
+
+  if (!INODE_IS_MOUNTPT(mountpt_inode))
+    {
+      ret = -EINVAL;
+      goto errout_with_mountpt;
+    }
+
+  /* Unbind the block driver from the file system (destroying any fs
+   * private data.
+   */
+
+  if (!mountpt_inode->u.i_mops->unbind)
+    {
+      /* The filesystem does not support the unbind operation ??? */
+
+      ret = -EINVAL;
+      goto errout_with_mountpt;
+    }
+
+  /* The unbind method returns the number of references to the
+   * filesystem (i.e., open files), zero if the unbind was
+   * performed, or a negated error code on a failure.
+   */
+
+  /* Hold the semaphore through the unbind logic */
+
+  inode_lock();
+  ret = mountpt_inode->u.i_mops->unbind(mountpt_inode->i_private,
+                                       &blkdrvr_inode, flags);
+  if (ret < 0)
+    {
+      /* The inode is unhappy with the blkdrvr for some reason */
+
+      goto errout_with_lock;
+    }
+  else if (ret > 0)
+    {
+      ret = -EBUSY;
+      goto errout_with_lock;
+    }
+
+  /* Successfully unbound.  Convert the mountpoint inode to regular
+   * pseudo-file inode.
+   */
+
+  mountpt_inode->i_flags  &= ~FSNODEFLAG_TYPE_MASK;
+  mountpt_inode->i_private = NULL;
+  mountpt_inode->u.i_mops  = NULL;
+
+#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
+  /* If the node has children, then do not delete it. */
+
+  if (mountpt_inode->i_child != NULL)
+    {
+      /* Just decrement the reference count (without deleting it) */
+
+      atomic_fetch_sub(&mountpt_inode->i_crefs, 1);
+      inode_unlock();
+    }
+  else
+#endif
+    {
+      /* Remove the mountpoint inode from the inode tree.  The inode will
+       * not be deleted yet because there is still at least reference on
+       * it (from the mount)
+       */
+
+      ret = inode_remove(target);
+      inode_unlock();
+
+      /* The return value of -EBUSY is normal (in fact, it should
+       * not be OK)
+       */
+
+      if (ret != OK && ret != -EBUSY)
+        {
+          goto errout_with_mountpt;
+        }
+
+      /* Release the mountpoint inode and any block driver inode
+       * returned by the file system unbind above.  This should cause
+       * the inode to be deleted (unless there are other references)
+       */
+
+      inode_release(mountpt_inode);
+    }
+
+  /* Did the unbind method return a contained block driver */
+
+  if (blkdrvr_inode)
+    {
+      inode_release(blkdrvr_inode);
+    }
+
+  RELEASE_SEARCH(&desc);
+#ifdef CONFIG_FS_NOTIFY
+  notify_unmount(target);
+#endif
+  return OK;
+
+  /* A lot of goto's!  But they make the error handling much simpler */
+
+errout_with_lock:
+  inode_unlock();
+
+errout_with_mountpt:
+  inode_release(mountpt_inode);
+  if (blkdrvr_inode)
+    {
+      inode_release(blkdrvr_inode);
+    }
+
+errout_with_search:
+  RELEASE_SEARCH(&desc);
+
+errout:
+  return ret;
+}
 
 /****************************************************************************
  * Name: umount2
@@ -57,158 +225,14 @@
 
 int umount2(FAR const char *target, unsigned int flags)
 {
-  FAR struct inode *mountpt_inode;
-  FAR struct inode *blkdrvr_inode = NULL;
-  struct inode_search_s desc;
-  int errcode = OK;
   int ret;
 
-  /* Verify required pointer arguments */
-
-  if (!target)
-    {
-      errcode = EFAULT;
-      goto errout;
-    }
-
-  /* Find the mountpt */
-
-  SETUP_SEARCH(&desc, target, false);
-
-  ret = inode_find(&desc);
+  ret = nx_umount2(target, flags);
   if (ret < 0)
     {
-      errcode = ENOENT;
-      goto errout_with_search;
+      set_errno(-ret);
+      ret = ERROR;
     }
 
-  /* Get the search results */
-
-  mountpt_inode = desc.node;
-  DEBUGASSERT(mountpt_inode != NULL);
-
-  /* Verify that the inode is a mountpoint */
-
-  if (!INODE_IS_MOUNTPT(mountpt_inode))
-    {
-      errcode = EINVAL;
-      goto errout_with_mountpt;
-    }
-
-  /* Unbind the block driver from the file system (destroying any fs
-   * private data.
-   */
-
-  if (!mountpt_inode->u.i_mops->unbind)
-    {
-      /* The filesystem does not support the unbind operation ??? */
-
-      errcode = EINVAL;
-      goto errout_with_mountpt;
-    }
-
-  /* The unbind method returns the number of references to the
-   * filesystem (i.e., open files), zero if the unbind was
-   * performed, or a negated error code on a failure.
-   */
-
-  /* Hold the semaphore through the unbind logic */
-
-  ret = inode_semtake();
-  if (ret < 0)
-    {
-      errcode = -ret;
-      goto errout_with_mountpt;
-    }
-
-  ret = mountpt_inode->u.i_mops->unbind(mountpt_inode->i_private,
-                                       &blkdrvr_inode, flags);
-  if (ret < 0)
-    {
-      /* The inode is unhappy with the blkdrvr for some reason */
-
-      errcode = -ret;
-      goto errout_with_semaphore;
-    }
-  else if (ret > 0)
-    {
-      errcode = EBUSY;
-      goto errout_with_semaphore;
-    }
-
-  /* Successfully unbound.  Convert the mountpoint inode to regular
-   * pseudo-file inode.
-   */
-
-  mountpt_inode->i_flags  &= ~FSNODEFLAG_TYPE_MASK;
-  mountpt_inode->i_private = NULL;
-  mountpt_inode->u.i_mops  = NULL;
-
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  /* If the node has children, then do not delete it. */
-
-  if (mountpt_inode->i_child != NULL)
-    {
-      /* Just decrement the reference count (without deleting it) */
-
-      DEBUGASSERT(mountpt_inode->i_crefs > 0);
-      mountpt_inode->i_crefs--;
-    }
-  else
-#endif
-    {
-      /* Remove the mountpoint inode from the inode tree.  The inode will
-       * not be deleted yet because there is still at least reference on
-       * it (from the mount)
-       */
-
-      ret = inode_remove(target);
-      inode_semgive();
-
-      /* The return value of -EBUSY is normal (in fact, it should
-       * not be OK)
-       */
-
-      if (ret != OK && ret != -EBUSY)
-        {
-          errcode = -ret;
-          goto errout_with_mountpt;
-        }
-
-      /* Release the mountpoint inode and any block driver inode
-       * returned by the file system unbind above.  This should cause
-       * the inode to be deleted (unless there are other references)
-       */
-
-      inode_release(mountpt_inode);
-    }
-
-  /* Did the unbind method return a contained block driver */
-
-  if (blkdrvr_inode)
-    {
-      inode_release(blkdrvr_inode);
-    }
-
-  RELEASE_SEARCH(&desc);
-  return OK;
-
-  /* A lot of goto's!  But they make the error handling much simpler */
-
-errout_with_semaphore:
-  inode_semgive();
-
-errout_with_mountpt:
-  inode_release(mountpt_inode);
-  if (blkdrvr_inode)
-    {
-      inode_release(blkdrvr_inode);
-    }
-
-errout_with_search:
-  RELEASE_SEARCH(&desc);
-
-errout:
-  set_errno(errcode);
-  return ERROR;
+  return ret;
 }

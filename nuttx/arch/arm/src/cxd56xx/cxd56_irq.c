@@ -1,37 +1,22 @@
 /****************************************************************************
  * arch/arm/src/cxd56xx/cxd56_irq.c
  *
- *   Copyright 2018 Sony Semiconductor Solutions Corporation
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Copyright (C) 2012-2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,19 +27,19 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
+#include <assert.h>
 #include <debug.h>
 
+#include <nuttx/board.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <arch/irq.h>
+#include <nuttx/spinlock.h>
+#include <arch/board/board.h>
 
 #include "chip.h"
 #include "nvic.h"
 #include "ram_vectors.h"
-#include "up_arch.h"
-#include "up_internal.h"
-
-#include "cxd56_irq.h"
+#include "arm_internal.h"
 
 #ifdef CONFIG_SMP
 #  include "init/init.h"
@@ -72,40 +57,54 @@
 
 #define INTC_EN(n) (CXD56_INTC_BASE + 0x10 + (((n) >> 5) << 2))
 
+#if defined(CONFIG_SMP) && CONFIG_ARCH_INTERRUPTSTACK > 7
+#  define INTSTACK_ALLOC (CONFIG_SMP_NCPUS * INTSTACK_SIZE)
+#endif
+
 /****************************************************************************
  * Public Data
  ****************************************************************************/
-
-/* g_current_regs[] holds a references to the current interrupt level
- * register storage structure.  If is non-NULL only during interrupt
- * processing.  Access to g_current_regs[] must be through the macro
- * CURRENT_REGS for portability.
- */
-
-#ifdef CONFIG_SMP
-/* For the case of configurations with multiple CPUs, then there must be one
- * such value for each processor that can receive an interrupt.
- */
-
-volatile uint32_t *g_current_regs[CONFIG_SMP_NCPUS];
-#else
-volatile uint32_t *g_current_regs[1];
-#endif
 
 #ifdef CONFIG_SMP
 static volatile int8_t g_cpu_for_irq[CXD56_IRQ_NIRQS];
 extern void up_send_irqreq(int idx, int irq, int cpu);
 #endif
 
-/* This is the address of the  exception vector table (determined by the
- * linker script).
+#if defined(CONFIG_SMP) && CONFIG_ARCH_INTERRUPTSTACK > 7
+/* In the SMP configuration, we will need custom interrupt stacks.
+ * These definitions provide the aligned stack allocations.
  */
 
-extern uint32_t _vectors[];
+static uint64_t g_intstack_alloc[INTSTACK_ALLOC >> 3];
+
+/* These definitions provide the "top" of the push-down stacks. */
+
+const uint32_t g_cpu_intstack_top[CONFIG_SMP_NCPUS] =
+{
+  (uint32_t)g_intstack_alloc + INTSTACK_SIZE,
+#if CONFIG_SMP_NCPUS > 1
+  (uint32_t)g_intstack_alloc + (2 * INTSTACK_SIZE),
+#if CONFIG_SMP_NCPUS > 2
+  (uint32_t)g_intstack_alloc + (3 * INTSTACK_SIZE),
+#if CONFIG_SMP_NCPUS > 3
+  (uint32_t)g_intstack_alloc + (4 * INTSTACK_SIZE),
+#if CONFIG_SMP_NCPUS > 4
+  (uint32_t)g_intstack_alloc + (5 * INTSTACK_SIZE),
+#if CONFIG_SMP_NCPUS > 5
+  (uint32_t)g_intstack_alloc + (6 * INTSTACK_SIZE),
+#endif /* CONFIG_SMP_NCPUS > 5 */
+#endif /* CONFIG_SMP_NCPUS > 4 */
+#endif /* CONFIG_SMP_NCPUS > 3 */
+#endif /* CONFIG_SMP_NCPUS > 2 */
+#endif /* CONFIG_SMP_NCPUS > 1 */
+};
+#endif /* defined(CONFIG_SMP) && CONFIG_ARCH_INTERRUPTSTACK > 7 */
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
+
+static spinlock_t g_cxd56_lock = SP_UNLOCKED;
 
 /****************************************************************************
  * Private Functions
@@ -124,7 +123,7 @@ static void cxd56_dumpnvic(const char *msg, int irq)
 {
   irqstate_t flags;
 
-  flags = enter_critical_section();
+  flags = spin_lock_irqsave(&g_cxd56_lock);
   irqinfo("NVIC (%s, irq=%d):\n", msg, irq);
   irqinfo("  INTCTRL:    %08x VECTAB: %08x\n", getreg32(NVIC_INTCTRL),
           getreg32(NVIC_VECTAB));
@@ -153,15 +152,14 @@ static void cxd56_dumpnvic(const char *msg, int irq)
           getreg32(NVIC_IRQ48_51_PRIORITY),
           getreg32(NVIC_IRQ52_55_PRIORITY),
           getreg32(NVIC_IRQ56_59_PRIORITY));
-  leave_critical_section(flags);
+  spin_unlock_irqrestore(&g_cxd56_lock, flags);
 }
 #else
 #  define cxd56_dumpnvic(msg, irq)
 #endif
 
 /****************************************************************************
- * Name: cxd56_nmi, cxd56_busfault, cxd56_usagefault, cxd56_pendsv,
- *       cxd56_dbgmonitor, cxd56_pendsv, cxd56_reserved
+ * Name: cxd56_nmi, cxd56_pendsv, cxd56_pendsv, cxd56_reserved
  *
  * Description:
  *   Handlers for various exceptions.  None are handled and all are fatal
@@ -171,7 +169,7 @@ static void cxd56_dumpnvic(const char *msg, int irq)
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_FEATURES
-static int cxd56_nmi(int irq, FAR void *context, FAR void *arg)
+static int cxd56_nmi(int irq, void *context, void *arg)
 {
   up_irq_save();
   _err("PANIC!!! NMI received\n");
@@ -179,23 +177,7 @@ static int cxd56_nmi(int irq, FAR void *context, FAR void *arg)
   return 0;
 }
 
-static int cxd56_busfault(int irq, FAR void *context, FAR void *arg)
-{
-  up_irq_save();
-  _err("PANIC!!! Bus fault received\n");
-  PANIC();
-  return 0;
-}
-
-static int cxd56_usagefault(int irq, FAR void *context, FAR void *arg)
-{
-  up_irq_save();
-  _err("PANIC!!! Usage fault received\n");
-  PANIC();
-  return 0;
-}
-
-static int cxd56_pendsv(int irq, FAR void *context, FAR void *arg)
+static int cxd56_pendsv(int irq, void *context, void *arg)
 {
   up_irq_save();
   _err("PANIC!!! PendSV received\n");
@@ -203,15 +185,7 @@ static int cxd56_pendsv(int irq, FAR void *context, FAR void *arg)
   return 0;
 }
 
-static int cxd56_dbgmonitor(int irq, FAR void *context, FAR void *arg)
-{
-  up_irq_save();
-  _err("PANIC!!! Debug Monitor received\n");
-  PANIC();
-  return 0;
-}
-
-static int cxd56_reserved(int irq, FAR void *context, FAR void *arg)
+static int cxd56_reserved(int irq, void *context, void *arg)
 {
   up_irq_save();
   _err("PANIC!!! Reserved interrupt\n");
@@ -229,7 +203,6 @@ static int cxd56_reserved(int irq, FAR void *context, FAR void *arg)
  *
  ****************************************************************************/
 
-#ifdef CONFIG_ARMV7M_USEBASEPRI
 static inline void cxd56_prioritize_syscall(int priority)
 {
   uint32_t regval;
@@ -241,9 +214,8 @@ static inline void cxd56_prioritize_syscall(int priority)
   regval |= (priority << NVIC_SYSH_PRIORITY_PR11_SHIFT);
   putreg32(regval, NVIC_SYSH8_11_PRIORITY);
 }
-#endif
 
-static int excinfo(int irq, uint32_t *regaddr, uint32_t *bit)
+static int excinfo(int irq, uintptr_t *regaddr, uint32_t *bit)
 {
   *regaddr = NVIC_SYSHCON;
   switch (irq)
@@ -319,7 +291,7 @@ void up_irqinitialize(void)
    * vector table that requires special initialization.
    */
 
-  up_ramvec_initialize();
+  arm_ramvec_initialize();
 #endif
 
   /* Set all interrupts (and exceptions) to the default priority */
@@ -348,18 +320,14 @@ void up_irqinitialize(void)
       regaddr += 4;
     }
 
-  /* currents_regs is non-NULL only while processing an interrupt */
-
-  CURRENT_REGS = NULL;
-
   /* Attach the SVCall and Hard Fault exception handlers.  The SVCall
    * exception is used for performing context switches; The Hard Fault
    * must also be caught because a SVCall may show up as a Hard Fault
    * under certain conditions.
    */
 
-  irq_attach(CXD56_IRQ_SVCALL, up_svcall, NULL);
-  irq_attach(CXD56_IRQ_HARDFAULT, up_hardfault, NULL);
+  irq_attach(CXD56_IRQ_SVCALL, arm_svcall, NULL);
+  irq_attach(CXD56_IRQ_HARDFAULT, arm_hardfault, NULL);
 
   /* Set the priority of the SVCall interrupt */
 
@@ -369,16 +337,14 @@ void up_irqinitialize(void)
 
 #endif
 
-#ifdef CONFIG_ARMV7M_USEBASEPRI
   cxd56_prioritize_syscall(NVIC_SYSH_SVCALL_PRIORITY);
-#endif
 
   /* If the MPU is enabled, then attach and enable the Memory Management
    * Fault handler.
    */
 
 #ifdef CONFIG_ARM_MPU
-  irq_attach(CXD56_IRQ_MEMFAULT, up_memfault, NULL);
+  irq_attach(CXD56_IRQ_MEMFAULT, arm_memfault, NULL);
   up_enable_irq(CXD56_IRQ_MEMFAULT);
 #endif
 
@@ -387,31 +353,17 @@ void up_irqinitialize(void)
 #ifdef CONFIG_DEBUG_FEATURES
   irq_attach(CXD56_IRQ_NMI, cxd56_nmi, NULL);
 #  ifndef CONFIG_ARM_MPU
-  irq_attach(CXD56_IRQ_MEMFAULT, up_memfault, NULL);
+  irq_attach(CXD56_IRQ_MEMFAULT, arm_memfault, NULL);
 #  endif
-  irq_attach(CXD56_IRQ_BUSFAULT, cxd56_busfault, NULL);
-  irq_attach(CXD56_IRQ_USAGEFAULT, cxd56_usagefault, NULL);
+  irq_attach(CXD56_IRQ_BUSFAULT, arm_busfault, NULL);
+  irq_attach(CXD56_IRQ_USAGEFAULT, arm_usagefault, NULL);
   irq_attach(CXD56_IRQ_PENDSV, cxd56_pendsv, NULL);
-  irq_attach(CXD56_IRQ_DBGMONITOR, cxd56_dbgmonitor, NULL);
+  arm_enable_dbgmonitor();
+  irq_attach(CXD56_IRQ_DBGMONITOR, arm_dbgmonitor, NULL);
   irq_attach(CXD56_IRQ_RESERVED, cxd56_reserved, NULL);
 #endif
 
   cxd56_dumpnvic("initial", CXD56_IRQ_NIRQS);
-
-  /* If a debugger is connected, try to prevent it from catching hardfaults.
-   * If CONFIG_ARMV7M_USEBASEPRI, no hardfaults are expected in normal
-   * operation.
-   */
-
-#if defined(CONFIG_DEBUG_FEATURES) && !defined(CONFIG_ARMV7M_USEBASEPRI)
-    {
-      uint32_t regval;
-
-      regval  = getreg32(NVIC_DEMCR);
-      regval &= ~NVIC_DEMCR_VCHARDERR;
-      putreg32(regval, NVIC_DEMCR);
-    }
-#endif
 
   /* And finally, enable interrupts */
 
@@ -450,7 +402,7 @@ void up_disable_irq(int irq)
 
       /* If a different cpu requested, send an irq request */
 
-      if (cpu != (int8_t)up_cpu_index())
+      if (cpu != (int8_t)this_cpu())
         {
           up_send_irqreq(1, irq, cpu);
           return;
@@ -459,14 +411,14 @@ void up_disable_irq(int irq)
       g_cpu_for_irq[irq] = -1;
 #endif
 
-      irqstate_t flags = spin_lock_irqsave();
+      irqstate_t flags = spin_lock_irqsave(&g_cxd56_lock);
       irq -= CXD56_IRQ_EXTINT;
       bit  = 1 << (irq & 0x1f);
 
       regval  = getreg32(INTC_EN(irq));
       regval &= ~bit;
       putreg32(regval, INTC_EN(irq));
-      spin_unlock_irqrestore(flags);
+      spin_unlock_irqrestore(&g_cxd56_lock, flags);
       putreg32(bit, NVIC_IRQ_CLEAR(irq));
     }
   else
@@ -499,7 +451,7 @@ void up_enable_irq(int irq)
   if (irq >= CXD56_IRQ_EXTINT)
     {
 #ifdef CONFIG_SMP
-      int cpu = up_cpu_index();
+      int cpu = this_cpu();
 
       /* Set the caller cpu for this irq */
 
@@ -507,21 +459,21 @@ void up_enable_irq(int irq)
 
       /* EXTINT needs to be handled on CPU0 to avoid deadlock */
 
-      if (irq > CXD56_IRQ_EXTINT && irq != CXD56_IRQ_SW_INT && 0 != cpu)
+      if (irq > CXD56_IRQ_EXTINT && irq != CXD56_IRQ_SMP_CALL && 0 != cpu)
         {
           up_send_irqreq(0, irq, 0);
           return;
         }
 #endif
 
-      irqstate_t flags = spin_lock_irqsave();
+      irqstate_t flags = spin_lock_irqsave(&g_cxd56_lock);
       irq -= CXD56_IRQ_EXTINT;
       bit  = 1 << (irq & 0x1f);
 
       regval  = getreg32(INTC_EN(irq));
       regval |= bit;
       putreg32(regval, INTC_EN(irq));
-      spin_unlock_irqrestore(flags);
+      spin_unlock_irqrestore(&g_cxd56_lock, flags);
       putreg32(bit, NVIC_IRQ_ENABLE(irq));
     }
   else
@@ -538,15 +490,19 @@ void up_enable_irq(int irq)
 }
 
 /****************************************************************************
- * Name: up_ack_irq
+ * Name: arm_ack_irq
  *
  * Description:
  *   Acknowledge the IRQ
  *
  ****************************************************************************/
 
-void up_ack_irq(int irq)
+void arm_ack_irq(int irq)
 {
+#ifdef CONFIG_ARCH_LEDS_CPU_ACTIVITY
+  board_autoled_on(LED_CPU);
+#endif
+
   /* Check for external interrupt */
 
   if (irq >= CXD56_IRQ_EXTINT)
@@ -602,5 +558,21 @@ int up_prioritize_irq(int irq, int priority)
 
   cxd56_dumpnvic("prioritize", irq);
   return OK;
+}
+#endif
+
+/****************************************************************************
+ * Name: up_get_intstackbase
+ *
+ * Description:
+ *   Return a pointer to the "alloc" the correct interrupt stack allocation
+ *   for the current CPU.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_SMP) && CONFIG_ARCH_INTERRUPTSTACK > 7
+uintptr_t up_get_intstackbase(int cpu)
+{
+  return g_cpu_intstack_top[cpu] - INTSTACK_SIZE;
 }
 #endif

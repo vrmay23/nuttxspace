@@ -1,36 +1,22 @@
 /****************************************************************************
- * lib/unistd/lib_sysconf.c
+ * libs/libc/unistd/lib_sysconf.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author:  Michael Jung <mijung@gmx.net>
- *            Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,8 +26,17 @@
 
 #include <nuttx/config.h>
 
+#include <nuttx/atexit.h>
+
 #include <unistd.h>
+#include <sched.h>
 #include <errno.h>
+
+#ifdef CONFIG_MM_PGSIZE
+#  define DEFAULT_MM_PGSIZE CONFIG_MM_PGSIZE
+#else
+#  define DEFAULT_MM_PGSIZE CONFIG_PTHREAD_STACK_MIN
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -222,8 +217,50 @@ long sysconf(int name)
 
   switch (name)
     {
+#ifdef CONFIG_FS_AIO
+      case _SC_ASYNCHRONOUS_IO:
+        return _POSIX_ASYNCHRONOUS_IO;
+#endif
+      case _SC_PRIORITIZED_IO:
+        return _POSIX_PRIORITIZED_IO;
+      case _SC_AIO_MAX:
+        return _POSIX_AIO_MAX;
+#ifdef CONFIG_LIBC_PASSWD_LINESIZE
+      case _SC_GETPW_R_SIZE_MAX:
+        return _POSIX_GETPW_R_SIZE_MAX;
+#endif
+      case _SC_CPUTIME:
+        return _POSIX_CPUTIME;
+      case _SC_THREAD_CPUTIME:
+        return _POSIX_THREAD_CPUTIME;
+      case _SC_REALTIME_SIGNALS:
+        return _POSIX_REALTIME_SIGNALS;
+      case _SC_CLK_TCK:
+        return CLOCKS_PER_SEC;
+
       case _SC_OPEN_MAX:
-        return CONFIG_NFILE_DESCRIPTORS;
+        return OPEN_MAX;
+
+      case _SC_ATEXIT_MAX:
+        return ATEXIT_MAX;
+
+      case _SC_NPROCESSORS_CONF:
+      case _SC_NPROCESSORS_ONLN:
+        return CONFIG_SMP_NCPUS;
+
+      case _SC_MONOTONIC_CLOCK:
+        return 1;
+
+      case _SC_PAGESIZE:
+        return DEFAULT_MM_PGSIZE;
+
+      case _SC_THREAD_STACK_MIN:
+        return CONFIG_PTHREAD_STACK_MIN;
+
+      /* threads limit to tcb_s->group->tg_nmembers(unint_8) */
+
+      case _SC_THREAD_THREADS_MAX:
+        return UINT8_MAX;
 
       default:
 #if 0 /* Assume valid but not implemented for the time being */

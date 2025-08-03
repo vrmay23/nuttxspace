@@ -1,8 +1,9 @@
 /****************************************************************************
- * boards/arm/stm32f0l0g0/nucleo-g070rb/src/stm32_buttons.c
+ * boards/arm/stm32f0l0g0/nucleo-g070rb/src/stm32_timer.c
  *
- *   Copyright (C) 2019 Fundação CERTI. All rights reserved.
- *   Author: Daniel Pereira Volpato <dpo@certi.org.br>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: Fundação CERTI. All rights reserved.
+ * SPDX-FileContributor: Daniel Pereira Volpato <dpo@certi.org.br>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -72,7 +73,7 @@
  *
  ****************************************************************************/
 
-int stm32_timer_driver_setup(FAR const char *devpath, int timer)
+int stm32_timer_driver_setup(const char *devpath, int timer)
 {
   return stm32_timer_initialize(devpath, timer);
 }

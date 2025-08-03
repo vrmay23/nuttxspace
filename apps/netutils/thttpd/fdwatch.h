@@ -1,13 +1,10 @@
 /****************************************************************************
- * netutils/thttpd/fdwatch.h
+ * apps/netutils/thttpd/fdwatch.h
  *
- *   Copyright (C) 2009 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * Derived from the file of the same name in THTTPD:
- *
- *   Copyright © 1999 by Jef Poskanzer <jef@mail.acme.com>.
- *   All rights reserved.
+ * SPDX-License-Identifier: BSD-2-Clause
+ * SPDX-FileCopyrightText: 2009 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 1999 by Jef Poskanzer <jef@mail.acme.com>.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,8 +30,8 @@
  *
  ****************************************************************************/
 
-#ifndef __NETUTILS_THTTPD_FDWATCH_H
-#define __NETUTILS_THTTPD_FDWATCH_H
+#ifndef __APPS_NETUTILS_THTTPD_FDWATCH_H
+#define __APPS_NETUTILS_THTTPD_FDWATCH_H
 
 /****************************************************************************
  * Included Files
@@ -56,7 +53,7 @@
 #endif
 
 /****************************************************************************
- * Private Types
+ * Public Types
  ****************************************************************************/
 
 struct fdwatch_s
@@ -107,4 +104,4 @@ extern int fdwatch_check_fd(struct fdwatch_s *fw, int fd);
 
 extern void *fdwatch_get_next_client_data(struct fdwatch_s *fw);
 
-#endif /* __NETUTILS_THTTPD_FDWATCH_H */
+#endif /* __APPS_NETUTILS_THTTPD_FDWATCH_H */

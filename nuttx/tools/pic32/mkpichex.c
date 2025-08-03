@@ -1,6 +1,8 @@
 /****************************************************************************
  * tools/pic32/mkpichex.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -205,14 +207,14 @@ static void adjust_extlin(struct hex_s *hexline)
   segment &= 0x1fff;
 
   /* Recalculate the checksum and make sure that there is a null terminator
-   * Since len=2, addr=0, type=4, the is a trivial calculation.
+   * Since len=2, addr=0, type=4, this is a trivial calculation.
    */
 
   chksum = (-(segment + (segment >> 8) + 6)) & 0xff;
 
   /* Then create the new output record */
 
-  snprintf(line, MAX_LINE-PAYLOAD_OFFSET, ":02000004%04X%02X\n",
+  snprintf(line, MAX_LINE - PAYLOAD_OFFSET, ":02000004%04X%02X\n",
            segment, chksum);
 }
 

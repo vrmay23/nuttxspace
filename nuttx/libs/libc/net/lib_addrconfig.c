@@ -1,8 +1,9 @@
 /****************************************************************************
- * libs/libc/net/lib_addrconf.c
+ * libs/libc/net/lib_addrconfig.c
  *
- *   Author: Max Nekludov <macscomp@gmail.com>
- *   Copyright (c) 2015, Max Nekludov. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2015, Max Nekludov. All rights reserved.
+ * SPDX-FileContributor: Author: Max Nekludov <macscomp@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,3 +49,7 @@
  ****************************************************************************/
 
 const struct in6_addr in6addr_any = IN6ADDR_ANY_INIT;
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/

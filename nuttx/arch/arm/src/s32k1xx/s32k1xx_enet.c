@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/s32k1xx/s32k1xx_enet.c
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,26 +31,29 @@
 #include <unistd.h>
 #include <time.h>
 #include <string.h>
+#include <assert.h>
 #include <debug.h>
 #include <errno.h>
+#include <endian.h>
 
 #include <arpa/inet.h>
 
 #include <nuttx/wdog.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
+#include <nuttx/spinlock.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/signal.h>
 #include <nuttx/net/mii.h>
-#include <nuttx/net/arp.h>
 #include <nuttx/net/phy.h>
+#include <nuttx/net/ip.h>
 #include <nuttx/net/netdev.h>
 
 #ifdef CONFIG_NET_PKT
 #  include <nuttx/net/pkt.h>
 #endif
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "chip.h"
 #include "s32k1xx_config.h"
 #include "hardware/s32k1xx_enet.h"
@@ -135,12 +125,6 @@
 #if defined(CONFIG_ARMV7M_DCACHE) && !defined(CONFIG_ARMV7M_DCACHE_WRITETHROUGH)
 #  error Write back D-Cache not yet supported
 #endif
-
-/* TX poll delay = 1 seconds. CLK_TCK is the number of clock ticks per
- * second.
- */
-
-#define S32K1XX_WDDELAY     (1*CLK_TCK)
 
 /* Align assuming that the D-Cache is enabled (probably 32-bytes).
  *
@@ -250,7 +234,7 @@
 
 #define CRITICAL_ERROR    (ENET_INT_UN | ENET_INT_RL | ENET_INT_EBERR )
 
-/* This is a helper pointer for accessing the contents of the Ethernet header */
+/* This is a helper pointer for accessing the contents of Ethernet header */
 
 #define BUF ((struct eth_hdr_s *)priv->dev.d_buf)
 
@@ -271,12 +255,12 @@ struct s32k1xx_driver_s
   uint8_t txhead;              /* The next TX descriptor to use */
   uint8_t rxtail;              /* The next RX descriptor to use */
   uint8_t phyaddr;             /* Selected PHY address */
-  WDOG_ID txpoll;              /* TX poll timer */
-  WDOG_ID txtimeout;           /* TX timeout timer */
+  struct wdog_s txtimeout;     /* TX timeout timer */
   struct work_s irqwork;       /* For deferring interrupt work to the work queue */
   struct work_s pollwork;      /* For deferring poll work to the work queue */
   struct enet_desc_s *txdesc;  /* A pointer to the list of TX descriptor */
   struct enet_desc_s *rxdesc;  /* A pointer to the list of RX descriptors */
+  spinlock_t lock;             /* Spinlock */
 
   /* This holds the information visible to the NuttX network */
 
@@ -295,7 +279,7 @@ static struct s32k1xx_driver_s g_enet[CONFIG_S32K1XX_ENET_NETHIFS];
  */
 
 static uint8_t g_desc_pool[NENET_NBUFFERS * sizeof(struct enet_desc_s)]
-               __attribute__((aligned(ENET_ALIGN)));
+               aligned_data(ENET_ALIGN);
 
 /* The DMA buffers.  Again, A unaligned uint8_t is used to allocate the
  * memory; 16 is added to assure that we can meet the descriptor alignment
@@ -303,7 +287,7 @@ static uint8_t g_desc_pool[NENET_NBUFFERS * sizeof(struct enet_desc_s)]
  */
 
 static uint8_t g_buffer_pool[NENET_NBUFFERS * S32K1XX_BUF_SIZE]
-               __attribute__((aligned(ENET_ALIGN)));
+               aligned_data(ENET_ALIGN);
 
 /****************************************************************************
  * Private Function Prototypes
@@ -319,41 +303,38 @@ static uint8_t g_buffer_pool[NENET_NBUFFERS * S32K1XX_BUF_SIZE]
 static inline uint32_t s32k1xx_swap32(uint32_t value);
 static inline uint16_t s32k1xx_swap16(uint16_t value);
 #else
-#  define s32k1xx_swap32 __builtin_bswap32
-#  define s32k1xx_swap16 __builtin_bswap16
+#  define s32k1xx_swap32 swap32
+#  define s32k1xx_swap16 swap16
 #endif
 #endif
 
 /* Common TX logic */
 
-static bool s32k1xx_txringfull(FAR struct s32k1xx_driver_s *priv);
-static int  s32k1xx_transmit(FAR struct s32k1xx_driver_s *priv);
+static bool s32k1xx_txringfull(struct s32k1xx_driver_s *priv);
+static int  s32k1xx_transmit(struct s32k1xx_driver_s *priv);
 static int  s32k1xx_txpoll(struct net_driver_s *dev);
 
 /* Interrupt handling */
 
-static void s32k1xx_dispatch(FAR struct s32k1xx_driver_s *priv);
-static void s32k1xx_receive(FAR struct s32k1xx_driver_s *priv);
-static void s32k1xx_txdone(FAR struct s32k1xx_driver_s *priv);
+static void s32k1xx_dispatch(struct s32k1xx_driver_s *priv);
+static void s32k1xx_receive(struct s32k1xx_driver_s *priv);
+static void s32k1xx_txdone(struct s32k1xx_driver_s *priv);
 
-static void s32k1xx_enet_interrupt_work(FAR void *arg);
-static int  s32k1xx_enet_interrupt(int irq, FAR void *context,
-                                   FAR void *arg);
+static void s32k1xx_enet_interrupt_work(void *arg);
+static int  s32k1xx_enet_interrupt(int irq, void *context,
+                                   void *arg);
 
 /* Watchdog timer expirations */
 
-static void s32k1xx_txtimeout_work(FAR void *arg);
-static void s32k1xx_txtimeout_expiry(int argc, uint32_t arg, ...);
-
-static void s32k1xx_poll_work(FAR void *arg);
-static void s32k1xx_polltimer_expiry(int argc, uint32_t arg, ...);
+static void s32k1xx_txtimeout_work(void *arg);
+static void s32k1xx_txtimeout_expiry(wdparm_t arg);
 
 /* NuttX callback functions */
 
 static int  s32k1xx_ifup(struct net_driver_s *dev);
 static int  s32k1xx_ifdown(struct net_driver_s *dev);
 
-static void s32k1xx_txavail_work(FAR void *arg);
+static void s32k1xx_txavail_work(void *arg);
 static int  s32k1xx_txavail(struct net_driver_s *dev);
 
 /* Internal ifup function that allows phy reset to be optional */
@@ -361,9 +342,8 @@ static int  s32k1xx_txavail(struct net_driver_s *dev);
 static int s32k1xx_ifup_action(struct net_driver_s *dev, bool resetphy);
 
 #ifdef CONFIG_NET_MCASTGROUP
-static int  s32k1xx_addmac(struct net_driver_s *dev,
-              FAR const uint8_t *mac);
-static int  s32k1xx_rmmac(struct net_driver_s *dev, FAR const uint8_t *mac);
+static int  s32k1xx_addmac(struct net_driver_s *dev, const uint8_t *mac);
+static int  s32k1xx_rmmac(struct net_driver_s *dev, const uint8_t *mac);
 #endif
 
 #ifdef CONFIG_NETDEV_IOCTL
@@ -453,7 +433,7 @@ static inline uint16_t s32k1xx_swap16(uint16_t value)
  *
  ****************************************************************************/
 
-static bool s32k1xx_txringfull(FAR struct s32k1xx_driver_s *priv)
+static bool s32k1xx_txringfull(struct s32k1xx_driver_s *priv)
 {
   uint8_t txnext;
 
@@ -491,7 +471,7 @@ static bool s32k1xx_txringfull(FAR struct s32k1xx_driver_s *priv)
  *
  ****************************************************************************/
 
-static int s32k1xx_transmit(FAR struct s32k1xx_driver_s *priv)
+static int s32k1xx_transmit(struct s32k1xx_driver_s *priv)
 {
   struct enet_desc_s *txdesc;
   irqstate_t flags;
@@ -562,7 +542,7 @@ static int s32k1xx_transmit(FAR struct s32k1xx_driver_s *priv)
 
   /* Make the following operations atomic */
 
-  flags = spin_lock_irqsave();
+  flags = spin_lock_irqsave(&priv->lock);
 
   /* Enable TX interrupts */
 
@@ -572,14 +552,14 @@ static int s32k1xx_transmit(FAR struct s32k1xx_driver_s *priv)
 
   /* Setup the TX timeout watchdog (perhaps restarting the timer) */
 
-  wd_start(priv->txtimeout, S32K1XX_TXTIMEOUT, s32k1xx_txtimeout_expiry, 1,
-           (wdparm_t)priv);
+  wd_start(&priv->txtimeout, S32K1XX_TXTIMEOUT,
+           s32k1xx_txtimeout_expiry, (wdparm_t)priv);
 
   /* Start the TX transfer (if it was not already waiting for buffers) */
 
   putreg32(ENET_TDAR, S32K1XX_ENET_TDAR);
 
-  spin_unlock_irqrestore(flags);
+  spin_unlock_irqrestore(&priv->lock, flags);
   return OK;
 }
 
@@ -610,54 +590,22 @@ static int s32k1xx_transmit(FAR struct s32k1xx_driver_s *priv)
 
 static int s32k1xx_txpoll(struct net_driver_s *dev)
 {
-  FAR struct s32k1xx_driver_s *priv =
-    (FAR struct s32k1xx_driver_s *)dev->d_private;
+  struct s32k1xx_driver_s *priv =
+    (struct s32k1xx_driver_s *)dev->d_private;
 
-  /* If the polling resulted in data that should be sent out on the network,
-   * the field d_len is set to a value > 0.
+  /* Send the packet */
+
+  s32k1xx_transmit(priv);
+  priv->dev.d_buf = (uint8_t *)
+    s32k1xx_swap32((uint32_t)priv->txdesc[priv->txhead].data);
+
+  /* Check if there is room in the device to hold another packet. If
+   * not, return a non-zero value to terminate the poll.
    */
 
-  if (priv->dev.d_len > 0)
+  if (s32k1xx_txringfull(priv))
     {
-      /* Look up the destination MAC address and add it to the Ethernet
-       * header.
-       */
-
-#ifdef CONFIG_NET_IPv4
-#ifdef CONFIG_NET_IPv6
-      if (IFF_IS_IPv4(priv->dev.d_flags))
-#endif
-        {
-          arp_out(&priv->dev);
-        }
-#endif /* CONFIG_NET_IPv4 */
-
-#ifdef CONFIG_NET_IPv6
-#ifdef CONFIG_NET_IPv4
-      else
-#endif
-        {
-          neighbor_out(&priv->dev);
-        }
-#endif /* CONFIG_NET_IPv6 */
-
-      if (!devif_loopback(&priv->dev))
-        {
-          /* Send the packet */
-
-          s32k1xx_transmit(priv);
-          priv->dev.d_buf =
-            (uint8_t *)s32k1xx_swap32((uint32_t)priv->txdesc[priv->txhead].data);
-
-          /* Check if there is room in the device to hold another packet. If
-           * not, return a non-zero value to terminate the poll.
-           */
-
-          if (s32k1xx_txringfull(priv))
-            {
-              return -EBUSY;
-            }
-        }
+      return -EBUSY;
     }
 
   /* If zero is returned, the polling will continue until all connections
@@ -685,14 +633,14 @@ static int s32k1xx_txpoll(struct net_driver_s *dev)
  *
  ****************************************************************************/
 
-static inline void s32k1xx_dispatch(FAR struct s32k1xx_driver_s *priv)
+static inline void s32k1xx_dispatch(struct s32k1xx_driver_s *priv)
 {
   /* Update statistics */
 
   NETDEV_RXPACKETS(&priv->dev);
 
 #ifdef CONFIG_NET_PKT
-  /* When packet sockets are enabled, feed the frame into the packet tap */
+  /* When packet sockets are enabled, feed the frame into the tap */
 
   pkt_input(&priv->dev);
 #endif
@@ -705,34 +653,16 @@ static inline void s32k1xx_dispatch(FAR struct s32k1xx_driver_s *priv)
       ninfo("IPv4 frame\n");
       NETDEV_RXIPV4(&priv->dev);
 
-      /* Handle ARP on input then give the IPv4 packet to the network
-       * layer
-       */
+      /* Receive an IPv4 packet from the network device */
 
-      arp_ipin(&priv->dev);
       ipv4_input(&priv->dev);
 
       /* If the above function invocation resulted in data that should be
-       * sent out on the network, the field  d_len will set to a value > 0.
+       * sent out on the network, d_len field will set to a value > 0.
        */
 
       if (priv->dev.d_len > 0)
         {
-          /* Update the Ethernet header with the correct MAC address */
-
-#ifdef CONFIG_NET_IPv6
-          if (IFF_IS_IPv4(priv->dev.d_flags))
-#endif
-            {
-              arp_out(&priv->dev);
-            }
-#ifdef CONFIG_NET_IPv6
-          else
-            {
-              neighbor_out(&priv->dev);
-            }
-#endif
-
           /* And send the packet */
 
           s32k1xx_transmit(priv);
@@ -753,26 +683,11 @@ static inline void s32k1xx_dispatch(FAR struct s32k1xx_driver_s *priv)
       ipv6_input(&priv->dev);
 
       /* If the above function invocation resulted in data that should be
-       * sent out on the network, the field  d_len will set to a value > 0.
+       * sent out on the network, d_len field will set to a value > 0.
        */
 
       if (priv->dev.d_len > 0)
         {
-          /* Update the Ethernet header with the correct MAC address */
-
-#ifdef CONFIG_NET_IPv4
-          if (IFF_IS_IPv4(priv->dev.d_flags))
-            {
-              arp_out(&priv->dev);
-            }
-          else
-#endif
-#ifdef CONFIG_NET_IPv6
-            {
-              neighbor_out(&priv->dev);
-            }
-#endif
-
           /* And send the packet */
 
           s32k1xx_transmit(priv);
@@ -783,10 +698,10 @@ static inline void s32k1xx_dispatch(FAR struct s32k1xx_driver_s *priv)
 #ifdef CONFIG_NET_ARP
   /* Check for an ARP packet */
 
-  if (BUF->type == htons(ETHTYPE_ARP))
+  if (BUF->type == HTONS(ETHTYPE_ARP))
     {
       NETDEV_RXARP(&priv->dev);
-      arp_arpin(&priv->dev);
+      arp_input(&priv->dev);
 
       /* If the above function invocation resulted in data that should
        * be sent out on the network, the field  d_len will set to a
@@ -822,7 +737,7 @@ static inline void s32k1xx_dispatch(FAR struct s32k1xx_driver_s *priv)
  *
  ****************************************************************************/
 
-static void s32k1xx_receive(FAR struct s32k1xx_driver_s *priv)
+static void s32k1xx_receive(struct s32k1xx_driver_s *priv)
 {
   struct enet_desc_s *rxdesc;
   bool received;
@@ -873,8 +788,8 @@ static void s32k1xx_receive(FAR struct s32k1xx_driver_s *priv)
            * queue is not full.
            */
 
-          priv->dev.d_buf =
-            (uint8_t *)s32k1xx_swap32((uint32_t)priv->txdesc[priv->txhead].data);
+          priv->dev.d_buf = (uint8_t *)
+            s32k1xx_swap32((uint32_t)priv->txdesc[priv->txhead].data);
           rxdesc->status1 |= RXDESC_E;
 
           /* Update the index to the next descriptor */
@@ -911,7 +826,7 @@ static void s32k1xx_receive(FAR struct s32k1xx_driver_s *priv)
  *
  ****************************************************************************/
 
-static void s32k1xx_txdone(FAR struct s32k1xx_driver_s *priv)
+static void s32k1xx_txdone(struct s32k1xx_driver_s *priv)
 {
   struct enet_desc_s *txdesc;
   uint32_t regval;
@@ -921,7 +836,7 @@ static void s32k1xx_txdone(FAR struct s32k1xx_driver_s *priv)
    * canceled.
    */
 
-  wd_cancel(priv->txtimeout);
+  wd_cancel(&priv->txtimeout);
 
   /* Verify that the oldest descriptor descriptor completed */
 
@@ -963,7 +878,7 @@ static void s32k1xx_txdone(FAR struct s32k1xx_driver_s *priv)
     {
       /* No.. Cancel the TX timeout and disable further Tx interrupts. */
 
-      wd_cancel(priv->txtimeout);
+      wd_cancel(&priv->txtimeout);
 
       regval  = getreg32(S32K1XX_ENET_EIMR);
       regval &= ~TX_INTERRUPTS;
@@ -994,9 +909,9 @@ static void s32k1xx_txdone(FAR struct s32k1xx_driver_s *priv)
  *
  ****************************************************************************/
 
-static void s32k1xx_enet_interrupt_work(FAR void *arg)
+static void s32k1xx_enet_interrupt_work(void *arg)
 {
-  FAR struct s32k1xx_driver_s *priv = (FAR struct s32k1xx_driver_s *)arg;
+  struct s32k1xx_driver_s *priv = (struct s32k1xx_driver_s *)arg;
   uint32_t pending;
 #ifdef CONFIG_NET_MCASTGROUP
   uint32_t gaurstore;
@@ -1099,7 +1014,7 @@ static void s32k1xx_enet_interrupt_work(FAR void *arg)
  * Function: s32k1xx_enet_interrupt
  *
  * Description:
- *   Three interrupt sources will vector this this function:
+ *   Three interrupt sources will vector to this function:
  *   1. Ethernet MAC transmit interrupt handler
  *   2. Ethernet MAC receive interrupt handler
  *   3.
@@ -1115,9 +1030,9 @@ static void s32k1xx_enet_interrupt_work(FAR void *arg)
  *
  ****************************************************************************/
 
-static int s32k1xx_enet_interrupt(int irq, FAR void *context, FAR void *arg)
+static int s32k1xx_enet_interrupt(int irq, void *context, void *arg)
 {
-  register FAR struct s32k1xx_driver_s *priv = &g_enet[0];
+  register struct s32k1xx_driver_s *priv = &g_enet[0];
 
   /* Disable further Ethernet interrupts.  Because Ethernet interrupts are
    * also disabled if the TX timeout event occurs, there can be no race
@@ -1149,9 +1064,9 @@ static int s32k1xx_enet_interrupt(int irq, FAR void *context, FAR void *arg)
  *
  ****************************************************************************/
 
-static void s32k1xx_txtimeout_work(FAR void *arg)
+static void s32k1xx_txtimeout_work(void *arg)
 {
-  FAR struct s32k1xx_driver_s *priv = (FAR struct s32k1xx_driver_s *)arg;
+  struct s32k1xx_driver_s *priv = (struct s32k1xx_driver_s *)arg;
 
   /* Increment statistics and dump debug info */
 
@@ -1181,8 +1096,7 @@ static void s32k1xx_txtimeout_work(FAR void *arg)
  *   The last TX never completed.  Reset the hardware and start again.
  *
  * Input Parameters:
- *   argc - The number of available arguments
- *   arg  - The first argument
+ *   arg  - The argument
  *
  * Returned Value:
  *   None
@@ -1192,9 +1106,9 @@ static void s32k1xx_txtimeout_work(FAR void *arg)
  *
  ****************************************************************************/
 
-static void s32k1xx_txtimeout_expiry(int argc, uint32_t arg, ...)
+static void s32k1xx_txtimeout_expiry(wdparm_t arg)
 {
-  FAR struct s32k1xx_driver_s *priv = (FAR struct s32k1xx_driver_s *)arg;
+  struct s32k1xx_driver_s *priv = (struct s32k1xx_driver_s *)arg;
 
   /* Disable further Ethernet interrupts.  This will prevent some race
    * conditions with interrupt work.  There is still a potential race
@@ -1209,77 +1123,6 @@ static void s32k1xx_txtimeout_expiry(int argc, uint32_t arg, ...)
    */
 
   work_queue(ETHWORK, &priv->irqwork, s32k1xx_txtimeout_work, priv, 0);
-}
-
-/****************************************************************************
- * Function: s32k1xx_poll_work
- *
- * Description:
- *   Perform periodic polling from the worker thread
- *
- * Input Parameters:
- *   arg - The argument passed when work_queue() as called.
- *
- * Returned Value:
- *   OK on success
- *
- * Assumptions:
- *   The network is locked.
- *
- ****************************************************************************/
-
-static void s32k1xx_poll_work(FAR void *arg)
-{
-  FAR struct s32k1xx_driver_s *priv = (FAR struct s32k1xx_driver_s *)arg;
-
-  /* Check if there is there is a transmission in progress.  We cannot
-   * perform the TX poll if he are unable to accept another packet for
-   * transmission.
-   */
-
-  net_lock();
-  if (!s32k1xx_txringfull(priv))
-    {
-      /* If so, update TCP timing states and poll the network for new XMIT
-       * data. Hmmm.. might be bug here.  Does this mean if there is a
-       * transmit in progress, we will missing TCP time state updates?
-       */
-
-      devif_timer(&priv->dev, S32K1XX_WDDELAY, s32k1xx_txpoll);
-    }
-
-  /* Setup the watchdog poll timer again in any case */
-
-  wd_start(priv->txpoll, S32K1XX_WDDELAY, s32k1xx_polltimer_expiry,
-           1, (wdparm_t)priv);
-  net_unlock();
-}
-
-/****************************************************************************
- * Function: s32k1xx_polltimer_expiry
- *
- * Description:
- *   Periodic timer handler.  Called from the timer interrupt handler.
- *
- * Input Parameters:
- *   argc - The number of available arguments
- *   arg  - The first argument
- *
- * Returned Value:
- *   None
- *
- * Assumptions:
- *   Global interrupts are disabled by the watchdog logic.
- *
- ****************************************************************************/
-
-static void s32k1xx_polltimer_expiry(int argc, uint32_t arg, ...)
-{
-  FAR struct s32k1xx_driver_s *priv = (FAR struct s32k1xx_driver_s *)arg;
-
-  /* Schedule to perform the poll processing on the worker thread. */
-
-  work_queue(ETHWORK, &priv->pollwork, s32k1xx_poll_work, priv, 0);
 }
 
 /****************************************************************************
@@ -1305,15 +1148,15 @@ static void s32k1xx_polltimer_expiry(int argc, uint32_t arg, ...)
 
 static int s32k1xx_ifup_action(struct net_driver_s *dev, bool resetphy)
 {
-  FAR struct s32k1xx_driver_s *priv =
-    (FAR struct s32k1xx_driver_s *)dev->d_private;
+  struct s32k1xx_driver_s *priv =
+    (struct s32k1xx_driver_s *)dev->d_private;
   uint8_t *mac = dev->d_mac.ether.ether_addr_octet;
   uint32_t regval;
   int ret;
 
-  ninfo("Bringing up: %d.%d.%d.%d\n",
-        dev->d_ipaddr & 0xff, (dev->d_ipaddr >> 8) & 0xff,
-        (dev->d_ipaddr >> 16) & 0xff, dev->d_ipaddr >> 24);
+  ninfo("Bringing up: %u.%u.%u.%u\n",
+        ip4_addr1(dev->d_ipaddr), ip4_addr2(dev->d_ipaddr),
+        ip4_addr3(dev->d_ipaddr), ip4_addr4(dev->d_ipaddr));
 
   /* Initialize ENET buffers */
 
@@ -1379,11 +1222,6 @@ static int s32k1xx_ifup_action(struct net_driver_s *dev, bool resetphy)
   /* Indicate that there have been empty receive buffers produced */
 
   putreg32(ENET_RDAR, S32K1XX_ENET_RDAR);
-
-  /* Set and activate a timer process */
-
-  wd_start(priv->txpoll, S32K1XX_WDDELAY, s32k1xx_polltimer_expiry, 1,
-           (wdparm_t)priv);
 
   /* Clear all pending ENET interrupt */
 
@@ -1452,13 +1290,13 @@ static int s32k1xx_ifup(struct net_driver_s *dev)
 
 static int s32k1xx_ifdown(struct net_driver_s *dev)
 {
-  FAR struct s32k1xx_driver_s *priv =
-    (FAR struct s32k1xx_driver_s *)dev->d_private;
+  struct s32k1xx_driver_s *priv =
+    (struct s32k1xx_driver_s *)dev->d_private;
   irqstate_t flags;
 
-  ninfo("Taking down: %d.%d.%d.%d\n",
-        dev->d_ipaddr & 0xff, (dev->d_ipaddr >> 8) & 0xff,
-        (dev->d_ipaddr >> 16) & 0xff, dev->d_ipaddr >> 24);
+  ninfo("Taking down: %u.%u.%u.%u\n",
+        ip4_addr1(dev->d_ipaddr), ip4_addr2(dev->d_ipaddr),
+        ip4_addr3(dev->d_ipaddr), ip4_addr4(dev->d_ipaddr));
 
   /* Flush and disable the Ethernet interrupts at the NVIC */
 
@@ -1468,10 +1306,9 @@ static int s32k1xx_ifdown(struct net_driver_s *dev)
   up_disable_irq(S32K1XX_IRQ_ENET_RXDONE);
   putreg32(0, S32K1XX_ENET_EIMR);
 
-  /* Cancel the TX poll timer and TX timeout timers */
+  /* Cancel the TX timeout timers */
 
-  wd_cancel(priv->txpoll);
-  wd_cancel(priv->txtimeout);
+  wd_cancel(&priv->txtimeout);
 
   /* Put the EMAC in its reset, non-operational state.  This should be
    * a known configuration that will guarantee the s32k1xx_ifup() always
@@ -1504,9 +1341,9 @@ static int s32k1xx_ifdown(struct net_driver_s *dev)
  *
  ****************************************************************************/
 
-static void s32k1xx_txavail_work(FAR void *arg)
+static void s32k1xx_txavail_work(void *arg)
 {
-  FAR struct s32k1xx_driver_s *priv = (FAR struct s32k1xx_driver_s *)arg;
+  struct s32k1xx_driver_s *priv = (struct s32k1xx_driver_s *)arg;
 
   /* Ignore the notification if the interface is not yet up */
 
@@ -1551,8 +1388,8 @@ static void s32k1xx_txavail_work(FAR void *arg)
 
 static int s32k1xx_txavail(struct net_driver_s *dev)
 {
-  FAR struct s32k1xx_driver_s *priv =
-    (FAR struct s32k1xx_driver_s *)dev->d_private;
+  struct s32k1xx_driver_s *priv =
+    (struct s32k1xx_driver_s *)dev->d_private;
 
   /* Is our single work structure available?  It may not be if there are
    * pending interrupt actions and we will have to ignore the Tx
@@ -1670,7 +1507,7 @@ static uint32_t s32k1xx_enet_hash_index(const uint8_t *mac)
  ****************************************************************************/
 
 #ifdef CONFIG_NET_MCASTGROUP
-static int s32k1xx_addmac(struct net_driver_s *dev, FAR const uint8_t *mac)
+static int s32k1xx_addmac(struct net_driver_s *dev, const uint8_t *mac)
 {
   uint32_t crc;
   uint32_t hashindex;
@@ -1718,7 +1555,7 @@ static int s32k1xx_addmac(struct net_driver_s *dev, FAR const uint8_t *mac)
  ****************************************************************************/
 
 #ifdef CONFIG_NET_MCASTGROUP
-static int s32k1xx_rmmac(struct net_driver_s *dev, FAR const uint8_t *mac)
+static int s32k1xx_rmmac(struct net_driver_s *dev, const uint8_t *mac)
 {
   uint32_t crc;
   uint32_t hashindex;
@@ -1770,8 +1607,8 @@ static int s32k1xx_ioctl(struct net_driver_s *dev, int cmd,
                          unsigned long arg)
 {
 #ifdef CONFIG_NETDEV_PHY_IOCTL
-  FAR struct s32k1xx_driver_s *priv =
-    (FAR struct s32k1xx_driver_s *)dev->d_private;
+  struct s32k1xx_driver_s *priv =
+    (struct s32k1xx_driver_s *)dev->d_private;
 #endif
   int ret;
 
@@ -2404,7 +2241,8 @@ static void s32k1xx_initbuffers(struct s32k1xx_driver_s *priv)
 
   /* Get an aligned RX descriptor (array) address */
 
-  addr        +=  CONFIG_S32K1XX_ENET_NTXBUFFERS * sizeof(struct enet_desc_s);
+  addr        +=  CONFIG_S32K1XX_ENET_NTXBUFFERS *
+                  sizeof(struct enet_desc_s);
   priv->rxdesc = (struct enet_desc_s *)addr;
 
   /* Get the beginning of the first aligned buffer */
@@ -2604,12 +2442,9 @@ int s32k1xx_netinitialize(int intf)
 #ifdef CONFIG_NETDEV_IOCTL
   priv->dev.d_ioctl   = s32k1xx_ioctl;    /* Support PHY ioctl() calls */
 #endif
-  priv->dev.d_private = (void *)g_enet;   /* Used to recover private state from dev */
+  priv->dev.d_private = g_enet;           /* Used to recover private state from dev */
 
-  /* Create a watchdog for timing polling for and timing of transmissions */
-
-  priv->txpoll        = wd_create();      /* Create periodic poll timer */
-  priv->txtimeout     = wd_create();      /* Create TX timeout timer */
+  spin_lock_init(&priv->lock);
 
 #ifdef CONFIG_NET_ETHERNET
   /* Determine a semi-unique MAC address from MCU UID
@@ -2661,7 +2496,7 @@ int s32k1xx_netinitialize(int intf)
 }
 
 /****************************************************************************
- * Name: up_netinitialize
+ * Name: arm_netinitialize
  *
  * Description:
  *   Initialize the first network interface.  If there are more than one
@@ -2672,7 +2507,7 @@ int s32k1xx_netinitialize(int intf)
  ****************************************************************************/
 
 #if CONFIG_S32K1XX_ENET_NETHIFS == 1 && !defined(CONFIG_NETDEV_LATEINIT)
-void up_netinitialize(void)
+void arm_netinitialize(void)
 {
   s32k1xx_netinitialize(0);
 }

@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/stm32/stm32f4discovery/src/stm32_cs43l22.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Taras Drozdovskiy <t.drozdovskiy@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -75,7 +62,7 @@ struct stm32_mwinfo_s
   /* Extensions for the stm32f4discovery board */
 
   cs43l22_handler_t handler;
-  FAR void *arg;
+  void *arg;
 };
 
 /****************************************************************************
@@ -92,11 +79,11 @@ struct stm32_mwinfo_s
  *   enable  - Enable or disable the PIO interrupt
  */
 
-static int  cs43l22_attach(FAR const struct cs43l22_lower_s *lower,
-                           cs43l22_handler_t isr, FAR void *arg);
-static bool cs43l22_enable(FAR const struct cs43l22_lower_s *lower,
+static int  cs43l22_attach(const struct cs43l22_lower_s *lower,
+                           cs43l22_handler_t isr, void *arg);
+static bool cs43l22_enable(const struct cs43l22_lower_s *lower,
                            bool enable);
-static void cs43l22_hw_reset(FAR const struct cs43l22_lower_s *lower);
+static void cs43l22_hw_reset(const struct cs43l22_lower_s *lower);
 
 /****************************************************************************
  * Private Data
@@ -147,13 +134,14 @@ static struct stm32_mwinfo_s g_cs43l22info =
  *
  ****************************************************************************/
 
-static int cs43l22_attach(FAR const struct cs43l22_lower_s *lower,
-                         cs43l22_handler_t isr,  FAR void *arg)
+static int cs43l22_attach(const struct cs43l22_lower_s *lower,
+                         cs43l22_handler_t isr,  void *arg)
 {
   if (isr)
     {
       /* Just save the address of the handler and its argument for now.  The
-       * new handler will called via cs43l22_interrupt() when the interrupt occurs.
+       * new handler will called via cs43l22_interrupt() when the interrupt
+       * occurs.
        */
 
       audinfo("Attaching %p\n", isr);
@@ -171,7 +159,8 @@ static int cs43l22_attach(FAR const struct cs43l22_lower_s *lower,
   return OK;
 }
 
-static bool cs43l22_enable(FAR const struct cs43l22_lower_s *lower, bool enable)
+static bool cs43l22_enable(const struct cs43l22_lower_s *lower,
+                           bool enable)
 {
   static bool enabled;
   irqstate_t flags;
@@ -187,14 +176,17 @@ static bool cs43l22_enable(FAR const struct cs43l22_lower_s *lower, bool enable)
       if (enable && g_cs43l22info.handler)
         {
           audinfo("Enabling\n");
+
           /* TODO: stm32_pioirqenable(IRQ_INT_CS43L22); */
+
           enabled = true;
         }
       else
         {
-
           audinfo("Disabling\n");
+
           /* TODO: stm32_pioirqdisable(IRQ_INT_CS43L22); */
+
           enabled = false;
         }
     }
@@ -205,9 +197,9 @@ static bool cs43l22_enable(FAR const struct cs43l22_lower_s *lower, bool enable)
 }
 
 #if 0
-static int cs43l22_interrupt(int irq, FAR void *context)
+static int cs43l22_interrupt(int irq, void *context)
 {
-   Just forward the interrupt to the CS43L22 driver
+  /* Just forward the interrupt to the CS43L22 driver */
 
   audinfo("handler %p\n", g_cs43l22info.handler);
   if (g_cs43l22info.handler)
@@ -215,15 +207,17 @@ static int cs43l22_interrupt(int irq, FAR void *context)
       return g_cs43l22info.handler(&g_cs43l22info.lower, g_cs43l22info.arg);
     }
 
-   We got an interrupt with no handler.  This should not
-   happen.
+  /* We got an interrupt with no handler.  This should not
+   * happen.
+   */
 
-   TODO: stm32_pioirqdisable(IRQ_INT_CS43L22);
+  /* TODO: stm32_pioirqdisable(IRQ_INT_CS43L22); */
+
   return OK;
 }
 #endif
 
-static void cs43l22_hw_reset(FAR const struct cs43l22_lower_s *lower)
+static void cs43l22_hw_reset(const struct cs43l22_lower_s *lower)
 {
   int i;
 
@@ -261,10 +255,10 @@ static void cs43l22_hw_reset(FAR const struct cs43l22_lower_s *lower)
 
 int stm32_cs43l22_initialize(int minor)
 {
-  FAR struct audio_lowerhalf_s *cs43l22;
-  FAR struct audio_lowerhalf_s *pcm;
-  FAR struct i2c_master_s *i2c;
-  FAR struct i2s_dev_s *i2s;
+  struct audio_lowerhalf_s *cs43l22;
+  struct audio_lowerhalf_s *pcm;
+  struct i2c_master_s *i2c;
+  struct i2s_dev_s *i2s;
   static bool initialized = false;
   char devname[12];
   int ret;
@@ -272,10 +266,11 @@ int stm32_cs43l22_initialize(int minor)
   audinfo("minor %d\n", minor);
   DEBUGASSERT(minor >= 0 && minor <= 25);
 
-  /* Have we already initialized?  Since we never uninitialize we must prevent
-   * multiple initializations.  This is necessary, for example, when the
-   * touchscreen example is used as a built-in application in NSH and can be
-   * called numerous time.  It will attempt to initialize each time.
+  /* Have we already initialized?  Since we never uninitialize we must
+   * prevent multiple initializations.  This is necessary, for example,
+   * when the touchscreen example is used as a built-in application in
+   * NSH and can be called numerous time.  It will attempt to initialize
+   * each time.
    */
 
   if (!initialized)
@@ -284,7 +279,7 @@ int stm32_cs43l22_initialize(int minor)
 
       /* Configure the CS43L22 interrupt pin */
 
-      /* TODO: (void)stm32_configgpio(PIO_INT_CS43L22); */
+      /* TODO: stm32_configgpio(PIO_INT_CS43L22); */
 
       /* Get an instance of the I2C interface for the CS43L22 chip select */
 
@@ -295,9 +290,10 @@ int stm32_cs43l22_initialize(int minor)
           ret = -ENODEV;
           goto errout;
         }
+
       /* Get an instance of the I2S interface for the CS43L22 data channel */
 
-      i2s = stm32_i2sdev_initialize(CS43L22_I2S_BUS);
+      i2s = stm32_i2sbus_initialize(CS43L22_I2S_BUS);
       if (!i2s)
         {
           auderr("ERROR: Failed to initialize I2S%d\n", CS43L22_I2S_BUS);
@@ -305,8 +301,8 @@ int stm32_cs43l22_initialize(int minor)
           goto errout_with_i2c;
         }
 
-      /* Configure the DAC master clock.  This clock is provided by PCK2 (PB10)
-       * that is connected to the CS43L22 MCLK.
+      /* Configure the DAC master clock.  This clock is provided by
+       * PCK2 (PB10) that is connected to the CS43L22 MCLK.
        */
 
       /* Configure CS43L22 interrupts */
@@ -332,6 +328,7 @@ int stm32_cs43l22_initialize(int minor)
           ret = -ENODEV;
           goto errout_with_irq;
         }
+
       /* No we can embed the CS43L22/I2C/I2S conglomerate into a PCM decoder
        * instance so that we will have a PCM front end for the the CS43L22
        * driver.
@@ -344,9 +341,10 @@ int stm32_cs43l22_initialize(int minor)
           ret = -ENODEV;
           goto errout_with_cs43l22;
         }
+
       /* Create a device name */
 
-      snprintf(devname, 12, "pcm%d",  minor);
+      snprintf(devname, sizeof(devname), "pcm%d",  minor);
 
       /* Finally, we can register the PCM/CS43L22/I2C/I2S audio device.
        *
@@ -375,7 +373,6 @@ int stm32_cs43l22_initialize(int minor)
 errout_with_pcm:
 errout_with_cs43l22:
 errout_with_irq:
-
 #if 0
   irq_detach(IRQ_INT_CS43L22);
 errout_with_i2s:

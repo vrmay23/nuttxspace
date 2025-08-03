@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/xmc4/xmc4_irq.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,6 +27,7 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
+#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
@@ -49,8 +37,7 @@
 
 #include "nvic.h"
 #include "ram_vectors.h"
-#include "up_arch.h"
-#include "up_internal.h"
+#include "arm_internal.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -70,28 +57,6 @@
 
 #define NVIC_ENA_OFFSET    (0)
 #define NVIC_CLRENA_OFFSET (NVIC_IRQ0_31_CLEAR - NVIC_IRQ0_31_ENABLE)
-
-/****************************************************************************
- * Public Data
- ****************************************************************************/
-
-/* g_current_regs[] holds a references to the current interrupt level
- * register storage structure.  If is non-NULL only during interrupt
- * processing.  Access to g_current_regs[] must be through the macro
- * CURRENT_REGS for portability.
- */
-
-volatile uint32_t *g_current_regs[1];
-
-/* This is the address of the  exception vector table (determined by the
- * linker script).
- */
-
-extern uint32_t _vectors[];
-
-/****************************************************************************
- * Private Data
- ****************************************************************************/
 
 /****************************************************************************
  * Private Functions
@@ -116,40 +81,61 @@ static void xmc4_dump_nvic(const char *msg, int irq)
   irqinfo("  INTCTRL:    %08x VECTAB: %08x\n",
           getreg32(NVIC_INTCTRL), getreg32(NVIC_VECTAB));
 #if 0
-  irqinfo("  SYSH ENABLE MEMFAULT: %08x BUSFAULT: %08x USGFAULT: %08x SYSTICK: %08x\n",
-          getreg32(NVIC_SYSHCON_MEMFAULTENA), getreg32(NVIC_SYSHCON_BUSFAULTENA),
-          getreg32(NVIC_SYSHCON_USGFAULTENA), getreg32(NVIC_SYSTICK_CTRL_ENABLE));
+  irqinfo("  SYSH ENABLE MEMFAULT: %08x BUSFAULT: %08x USGFAULT: %08x "
+          "SYSTICK: %08x\n",
+          getreg32(NVIC_SYSHCON_MEMFAULTENA),
+          getreg32(NVIC_SYSHCON_BUSFAULTENA),
+          getreg32(NVIC_SYSHCON_USGFAULTENA),
+          getreg32(NVIC_SYSTICK_CTRL_ENABLE));
 #endif
   irqinfo("  IRQ ENABLE: %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ0_31_ENABLE), getreg32(NVIC_IRQ32_63_ENABLE),
-          getreg32(NVIC_IRQ64_95_ENABLE), getreg32(NVIC_IRQ96_127_ENABLE));
+          getreg32(NVIC_IRQ0_31_ENABLE),
+          getreg32(NVIC_IRQ32_63_ENABLE),
+          getreg32(NVIC_IRQ64_95_ENABLE),
+          getreg32(NVIC_IRQ96_127_ENABLE));
   irqinfo("  SYSH_PRIO:  %08x %08x %08x\n",
-          getreg32(NVIC_SYSH4_7_PRIORITY), getreg32(NVIC_SYSH8_11_PRIORITY),
+          getreg32(NVIC_SYSH4_7_PRIORITY),
+          getreg32(NVIC_SYSH8_11_PRIORITY),
           getreg32(NVIC_SYSH12_15_PRIORITY));
   irqinfo("  IRQ PRIO:   %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ0_3_PRIORITY), getreg32(NVIC_IRQ4_7_PRIORITY),
-          getreg32(NVIC_IRQ8_11_PRIORITY), getreg32(NVIC_IRQ12_15_PRIORITY));
+          getreg32(NVIC_IRQ0_3_PRIORITY),
+          getreg32(NVIC_IRQ4_7_PRIORITY),
+          getreg32(NVIC_IRQ8_11_PRIORITY),
+          getreg32(NVIC_IRQ12_15_PRIORITY));
   irqinfo("              %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ16_19_PRIORITY), getreg32(NVIC_IRQ20_23_PRIORITY),
-          getreg32(NVIC_IRQ24_27_PRIORITY), getreg32(NVIC_IRQ28_31_PRIORITY));
+          getreg32(NVIC_IRQ16_19_PRIORITY),
+          getreg32(NVIC_IRQ20_23_PRIORITY),
+          getreg32(NVIC_IRQ24_27_PRIORITY),
+          getreg32(NVIC_IRQ28_31_PRIORITY));
   irqinfo("              %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ32_35_PRIORITY), getreg32(NVIC_IRQ36_39_PRIORITY),
-          getreg32(NVIC_IRQ40_43_PRIORITY), getreg32(NVIC_IRQ44_47_PRIORITY));
+          getreg32(NVIC_IRQ32_35_PRIORITY),
+          getreg32(NVIC_IRQ36_39_PRIORITY),
+          getreg32(NVIC_IRQ40_43_PRIORITY),
+          getreg32(NVIC_IRQ44_47_PRIORITY));
   irqinfo("              %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ48_51_PRIORITY), getreg32(NVIC_IRQ52_55_PRIORITY),
-          getreg32(NVIC_IRQ56_59_PRIORITY), getreg32(NVIC_IRQ60_63_PRIORITY));
+          getreg32(NVIC_IRQ48_51_PRIORITY),
+          getreg32(NVIC_IRQ52_55_PRIORITY),
+          getreg32(NVIC_IRQ56_59_PRIORITY),
+          getreg32(NVIC_IRQ60_63_PRIORITY));
   irqinfo("              %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ64_67_PRIORITY), getreg32(NVIC_IRQ68_71_PRIORITY),
-          getreg32(NVIC_IRQ72_75_PRIORITY), getreg32(NVIC_IRQ76_79_PRIORITY));
+          getreg32(NVIC_IRQ64_67_PRIORITY),
+          getreg32(NVIC_IRQ68_71_PRIORITY),
+          getreg32(NVIC_IRQ72_75_PRIORITY),
+          getreg32(NVIC_IRQ76_79_PRIORITY));
   irqinfo("              %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ80_83_PRIORITY), getreg32(NVIC_IRQ84_87_PRIORITY),
-          getreg32(NVIC_IRQ88_91_PRIORITY), getreg32(NVIC_IRQ92_95_PRIORITY));
+          getreg32(NVIC_IRQ80_83_PRIORITY),
+          getreg32(NVIC_IRQ84_87_PRIORITY),
+          getreg32(NVIC_IRQ88_91_PRIORITY),
+          getreg32(NVIC_IRQ92_95_PRIORITY));
   irqinfo("              %08x %08x %08x %08x\n",
-          getreg32(NVIC_IRQ96_99_PRIORITY), getreg32(NVIC_IRQ100_103_PRIORITY),
-          getreg32(NVIC_IRQ104_107_PRIORITY), getreg32(NVIC_IRQ108_111_PRIORITY));
+          getreg32(NVIC_IRQ96_99_PRIORITY),
+          getreg32(NVIC_IRQ100_103_PRIORITY),
+          getreg32(NVIC_IRQ104_107_PRIORITY),
+          getreg32(NVIC_IRQ108_111_PRIORITY));
 #if XMC4_IRQ_NVECTORS > 111
   irqinfo("              %08x %08x\n",
-          getreg32(NVIC_IRQ112_115_PRIORITY), getreg32(NVIC_IRQ116_119_PRIORITY));
+          getreg32(NVIC_IRQ112_115_PRIORITY),
+          getreg32(NVIC_IRQ116_119_PRIORITY));
 #endif
 
   leave_critical_section(flags);
@@ -159,8 +145,7 @@ static void xmc4_dump_nvic(const char *msg, int irq)
 #endif
 
 /****************************************************************************
- * Name: xmc4_nmi, xmc4_busfault, xmc4_usagefault, xmc4_pendsv,
- *       xmc4_dbgmonitor, xmc4_pendsv, xmc4_reserved
+ * Name: xmc4_nmi, xmc4_pendsv, xmc4_pendsv, xmc4_reserved
  *
  * Description:
  *   Handlers for various exceptions.  None are handled and all are fatal
@@ -170,7 +155,7 @@ static void xmc4_dump_nvic(const char *msg, int irq)
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_FEATURES
-static int xmc4_nmi(int irq, FAR void *context, FAR void *arg)
+static int xmc4_nmi(int irq, void *context, void *arg)
 {
   up_irq_save();
   _err("PANIC!!! NMI received\n");
@@ -178,23 +163,7 @@ static int xmc4_nmi(int irq, FAR void *context, FAR void *arg)
   return 0;
 }
 
-static int xmc4_busfault(int irq, FAR void *context, FAR void *arg)
-{
-  up_irq_save();
-  _err("PANIC!!! Bus fault received\n");
-  PANIC();
-  return 0;
-}
-
-static int xmc4_usagefault(int irq, FAR void *context, FAR void *arg)
-{
-  up_irq_save();
-  _err("PANIC!!! Usage fault received\n");
-  PANIC();
-  return 0;
-}
-
-static int xmc4_pendsv(int irq, FAR void *context, FAR void *arg)
+static int xmc4_pendsv(int irq, void *context, void *arg)
 {
   up_irq_save();
   _err("PANIC!!! PendSV received\n");
@@ -202,15 +171,7 @@ static int xmc4_pendsv(int irq, FAR void *context, FAR void *arg)
   return 0;
 }
 
-static int xmc4_dbgmonitor(int irq, FAR void *context, FAR void *arg)
-{
-  up_irq_save();
-  _err("PANIC!!! Debug Monitor received\n");
-  PANIC();
-  return 0;
-}
-
-static int xmc4_reserved(int irq, FAR void *context, FAR void *arg)
+static int xmc4_reserved(int irq, void *context, void *arg)
 {
   up_irq_save();
   _err("PANIC!!! Reserved interrupt\n");
@@ -228,7 +189,6 @@ static int xmc4_reserved(int irq, FAR void *context, FAR void *arg)
  *
  ****************************************************************************/
 
-#ifdef CONFIG_ARMV7M_USEBASEPRI
 static inline void xmc4_prioritize_syscall(int priority)
 {
   uint32_t regval;
@@ -240,7 +200,6 @@ static inline void xmc4_prioritize_syscall(int priority)
   regval |= (priority << NVIC_SYSH_PRIORITY_PR11_SHIFT);
   putreg32(regval, NVIC_SYSH8_11_PRIORITY);
 }
-#endif
 
 /****************************************************************************
  * Name: xmc4_irqinfo
@@ -260,17 +219,17 @@ static int xmc4_irqinfo(int irq, uintptr_t *regaddr, uint32_t *bit,
 
   if (irq >= XMC4_IRQ_FIRST)
     {
-      if (irq < (XMC4_IRQ_FIRST+32))
+      if (irq < (XMC4_IRQ_FIRST + 32))
         {
            *regaddr = (NVIC_IRQ0_31_ENABLE + offset);
            *bit     = 1 << (irq - XMC4_IRQ_FIRST);
         }
-      else if (irq < (XMC4_IRQ_FIRST+64))
+      else if (irq < (XMC4_IRQ_FIRST + 64))
         {
            *regaddr = (NVIC_IRQ32_63_ENABLE + offset);
            *bit     = 1 << (irq - XMC4_IRQ_FIRST - 32);
         }
-      else if (irq < (XMC4_IRQ_FIRST+96))
+      else if (irq < (XMC4_IRQ_FIRST + 96))
         {
            *regaddr = (NVIC_IRQ64_95_ENABLE + offset);
            *bit     = 1 << (irq - XMC4_IRQ_FIRST - 64);
@@ -368,7 +327,7 @@ void up_irqinitialize(void)
    * vector table that requires special initialization.
    */
 
-  up_ramvec_initialize();
+  arm_ramvec_initialize();
 #endif
 
   /* Set all interrupts (and exceptions) to the default priority */
@@ -388,34 +347,29 @@ void up_irqinitialize(void)
       putreg32(DEFPRIORITY32, regaddr);
     }
 
-  /* currents_regs is non-NULL only while processing an interrupt */
-
-  CURRENT_REGS = NULL;
-
   /* Attach the SVCall and Hard Fault exception handlers.  The SVCall
    * exception is used for performing context switches; The Hard Fault
    * must also be caught because a SVCall may show up as a Hard Fault
    * under certain conditions.
    */
 
-  irq_attach(XMC4_IRQ_SVCALL, up_svcall, NULL);
-  irq_attach(XMC4_IRQ_HARDFAULT, up_hardfault, NULL);
+  irq_attach(XMC4_IRQ_SVCALL, arm_svcall, NULL);
+  irq_attach(XMC4_IRQ_HARDFAULT, arm_hardfault, NULL);
 
   /* Set the priority of the SVCall interrupt */
 
 #ifdef CONFIG_ARCH_IRQPRIO
   /* up_prioritize_irq(XMC4_IRQ_PENDSV, NVIC_SYSH_PRIORITY_MIN); */
 #endif
-#ifdef CONFIG_ARMV7M_USEBASEPRI
+
   xmc4_prioritize_syscall(NVIC_SYSH_SVCALL_PRIORITY);
-#endif
 
   /* If the MPU is enabled, then attach and enable the Memory Management
    * Fault handler.
    */
 
 #ifdef CONFIG_ARM_MPU
-  irq_attach(XMC4_IRQ_MEMFAULT, up_memfault, NULL);
+  irq_attach(XMC4_IRQ_MEMFAULT, arm_memfault, NULL);
   up_enable_irq(XMC4_IRQ_MEMFAULT);
 #endif
 
@@ -424,12 +378,13 @@ void up_irqinitialize(void)
 #ifdef CONFIG_DEBUG_FEATURES
   irq_attach(XMC4_IRQ_NMI, xmc4_nmi, NULL);
 #ifndef CONFIG_ARM_MPU
-  irq_attach(XMC4_IRQ_MEMFAULT, up_memfault, NULL);
+  irq_attach(XMC4_IRQ_MEMFAULT, arm_memfault, NULL);
 #endif
-  irq_attach(XMC4_IRQ_BUSFAULT, xmc4_busfault, NULL);
-  irq_attach(XMC4_IRQ_USAGEFAULT, xmc4_usagefault, NULL);
+  irq_attach(XMC4_IRQ_BUSFAULT, arm_busfault, NULL);
+  irq_attach(XMC4_IRQ_USAGEFAULT, arm_usagefault, NULL);
   irq_attach(XMC4_IRQ_PENDSV, xmc4_pendsv, NULL);
-  irq_attach(XMC4_IRQ_DBGMONITOR, xmc4_dbgmonitor, NULL);
+  arm_enable_dbgmonitor();
+  irq_attach(XMC4_IRQ_DBGMONITOR, arm_dbgmonitor, NULL);
   irq_attach(XMC4_IRQ_RESERVED, xmc4_reserved, NULL);
 #endif
 
@@ -525,14 +480,14 @@ void up_enable_irq(int irq)
 }
 
 /****************************************************************************
- * Name: up_ack_irq
+ * Name: arm_ack_irq
  *
  * Description:
  *  Acknowledge the IRQ
  *
  ****************************************************************************/
 
-void up_ack_irq(int irq)
+void arm_ack_irq(int irq)
 {
 #if 0 /* Does not appear to be necessary in most cases */
   xmc4_clrpend(irq);

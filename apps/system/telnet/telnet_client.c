@@ -1,23 +1,12 @@
 /****************************************************************************
  * apps/system/telnet/telnet_client.c
  *
- * Leveraged from libtelnet, https://github.com/seanmiddleditch/libtelnet.
- * Modified and re-released under the BSD license:
- *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * The original authors of libtelnet are listed below.  Per their licesne,
- * "The author or authors of this code dedicate any and all copyright
- * interest in this code to the public domain. We make this dedication for
- * the benefit of the public at large and to the detriment of our heirs and
- * successors.  We intend this dedication to be an overt act of
- * relinquishment in perpetuity of all present and future rights to this
- * code under copyright law."
- *
- *   Author: Sean Middleditch <sean@sourcemud.org>
- *   (Also listed in the AUTHORS file are Jack Kelly <endgame.dos@gmail.com>
- *   and Katherine Flavel <kate@elide.org>)
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2017 Gregory Nutt. All rights reserved.
+ * SPDX-FileContributor: Sean Middleditch <sean@sourcemud.org>
+ * SPDX-FileContributor: Jack Kelly <endgame.dos@gmail.com>
+ * SPDX-FileContributor: Katherine Flavel <kate@elide.org>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,6 +37,21 @@
  *
  ****************************************************************************/
 
+/* Leveraged from libtelnet, https://github.com/seanmiddleditch/libtelnet.
+ * Modified and re-released under the BSD license.
+ *
+ * The original authors of libtelnet are listed below.  Per their licesne,
+ * "The author or authors of this code dedicate any and all copyright
+ * interest in this code to the public domain. We make this dedication for
+ * the benefit of the public at large and to the detriment of our heirs and
+ * successors.  We intend this dedication to be an overt act of
+ * relinquishment in perpetuity of all present and future rights to this
+ * code under copyright law."
+ *
+ *   Author: Sean Middleditch <sean@sourcemud.org>
+ *   (Also listed in the AUTHORS file are Jack Kelly <endgame.dos@gmail.com>
+ *   and Katherine Flavel <kate@elide.org>)
+ */
 /****************************************************************************
  * Included Files
  ****************************************************************************/
@@ -77,8 +81,8 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifdef CONFIG_NSH_TELNETD_PORT
-#  define DEFAULT_PORT CONFIG_NSH_TELNETD_PORT
+#ifdef CONFIG_SYSTEM_TELNETD_PORT
+#  define DEFAULT_PORT CONFIG_SYSTEM_TELNETD_PORT
 #else
 #  define DEFAULT_PORT 23
 #endif
@@ -115,13 +119,17 @@ static const struct telnet_telopt_s g_telopts[] =
 
 static void send_local_input(char *buffer, int size)
 {
-  static char crlf[] = { '\r', '\n' };
+  static char crlf[] =
+  {
+    '\r', '\n'
+  };
+
   int i;
 
   for (i = 0; i != size; ++i)
     {
-      /* If we got a CR or LF, replace with CRLF NOTE that usually you'd get a
-       * CR in UNIX, but in raw mode we get LF instead (not sure why).
+      /* If we got a CR or LF, replace with CRLF NOTE that usually you'd get
+       * a CR in UNIX, but in raw mode we get LF instead (not sure why).
        */
 
       if (buffer[i] == '\r' || buffer[i] == '\n')
@@ -165,6 +173,7 @@ static void telnet_ev_send(int sock, const char *buffer, size_t size)
             {
               fprintf(stderr, "send() unexpectedly returned 0\n");
             }
+
           telnet_free(g_telnet);
           exit(1);
         }
@@ -199,6 +208,7 @@ static void _event_handler(struct telnet_s *telnet,
     /* Request to enable remote feature (or receipt) */
 
     case TELNET_EV_WILL:
+
       /* We'll agree to turn off our echo if server wants us to stop */
 
       if (ev->neg.telopt == TELNET_TELOPT_ECHO)
@@ -230,6 +240,7 @@ static void _event_handler(struct telnet_s *telnet,
     /* Respond to TTYPE commands */
 
     case TELNET_EV_TTYPE:
+
       /* Respond with our terminal type, if requested */
 
       if (ev->ttype.cmd == TELNET_TTYPE_SEND)
@@ -251,6 +262,7 @@ static void _event_handler(struct telnet_s *telnet,
       exit(1);
 
     default:
+
       /* Ignore */
 
       break;
@@ -262,10 +274,13 @@ static void show_usage(const char *progname, int exitcode)
   fprintf(stderr, "Usage:\n");
   fprintf(stderr, "\t%s <server-IP-addr> [<port>]\n", progname);
   fprintf(stderr, "Where:\n");
-  fprintf(stderr, "\t<server-IP-addr> is the address of the Telnet server.  Either\n");
+  fprintf(stderr,
+    "\t<server-IP-addr> is the address of the Telnet server.  Either\n");
   fprintf(stderr, "\t\tIPv4 form: ddd.ddd.ddd.ddd\n");
-  fprintf(stderr, "\t\tIPv6 form: xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx\n");
-  fprintf(stderr, "\t<port> is the (optional) listening port of the Telnet server.\n");
+  fprintf(stderr,
+    "\t\tIPv6 form: xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx\n");
+  fprintf(stderr,
+    "\t<port> is the (optional) listening port of the Telnet server.\n");
   fprintf(stderr, "\t\tDefault: %u\n", DEFAULT_PORT);
   exit(exitcode);
 }
@@ -286,7 +301,9 @@ int main(int argc, FAR char *argv[])
 #ifdef CONFIG_NET_IPv4
     struct sockaddr_in ipv4;
 #endif
-  } server;
+  }
+
+  server;
   union
   {
 #ifdef CONFIG_NET_IPv6
@@ -295,7 +312,9 @@ int main(int argc, FAR char *argv[])
 #ifdef CONFIG_NET_IPv4
     struct sockaddr_in ipv4;
 #endif
-  } local;
+  }
+
+  local;
   struct pollfd pfd[2];
   sa_family_t family;
   uint16_t addrlen;
@@ -364,7 +383,7 @@ int main(int argc, FAR char *argv[])
   /* Create server socket */
 
   sock = socket(family, SOCK_STREAM, 0);
-   if (sock < 0)
+  if (sock < 0)
     {
       fprintf(stderr, "socket() failed: %d\n", errno);
       return 1;

@@ -10,6 +10,11 @@ config EXAMPLES_TOUCHSCREEN_BGCOLOR
 	default 0x007b68ee
 	depends on EXAMPLES_TOUCHSCREEN
 
+config SIM_RPMSG_MASTER
+	bool "Rpmsg Master"
+	default n
+	depends on RPMSG
+
 if SIM_TOUCHSCREEN
 
 comment "NX Server Options"
@@ -38,11 +43,43 @@ config SIM_LISTENERPRIO
 	---help---
 		The priority of the event listener thread. Default 80.
 
-config SIM_NOTIFYSIGNO
-	int "Notify Signal Number"
-	default 4
+endif
+
+config SIM_WTGAHRS2_UARTN
+	int "Wtgahrs2 sensor serial interface number"
+	default -1
+	depends on SENSORS_WTGAHRS2 && SIM_UART_NUMBER > 0
 	---help---
-		The signal number to use with nx_eventnotify().  Default: 4
+		We can select the number according to which SIM_UARTX_NAME is used to sensor.
+		This range is 0-4.
+
+config SIM_RNDIS_MACADDR
+	hex "RNDIS MAC address"
+	default 0xfadedeadbeef
+	depends on RNDIS
+	---help---
+		If the hardware has no built-in MAC address then the fixed,
+		software-assigned MAC address MAC address must provided
+		with this selection.
 
 endif
+
+if SIM_CANDEV_CHAR
+
+config SIM_CANDEV_CHAR_IDX
+	int "CAN chardev interface"
+	default 0
+	---help---
+		Host SocketCAN network interface used by simulated CAN character driver
+
+endif
+
+if SIM_CANDEV_SOCK
+
+config SIM_CANDEV_SOCK_IDX
+	int "CAN SocketCAN interface"
+	default 0
+	---help---
+		Host SocketCAN network interface used by simulated SocketCAN
+
 endif

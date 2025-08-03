@@ -1,6 +1,8 @@
 /****************************************************************************
  * fs/vfs/fs_rmdir.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -32,23 +34,14 @@
 #include <nuttx/fs/fs.h>
 
 #include "inode/inode.h"
+#include "vfs.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-#undef FS_HAVE_WRITABLE_MOUNTPOINT
-#if !defined(CONFIG_DISABLE_MOUNTPOINT) && CONFIG_NFILE_STREAMS > 0
-#  define FS_HAVE_WRITABLE_MOUNTPOINT 1
-#endif
-
-#undef FS_HAVE_PSEUDOFS_OPERATIONS
-#if !defined(CONFIG_DISABLE_PSEUDOFS_OPERATIONS) && CONFIG_NFILE_STREAMS > 0
-#  define FS_HAVE_PSEUDOFS_OPERATIONS 1
-#endif
-
 #undef FS_HAVE_RMDIR
-#if defined(FS_HAVE_WRITABLE_MOUNTPOINT) || defined(FS_HAVE_PSEUDOFS_OPERATIONS)
+#if !defined(CONFIG_DISABLE_MOUNTPOINT) || !defined(CONFIG_DISABLE_PSEUDOFS_OPERATIONS)
 #  define FS_HAVE_RMDIR 1
 #endif
 
@@ -143,15 +136,9 @@ int rmdir(FAR const char *pathname)
        * -EBUSY to indicate that the inode was not deleted now.
        */
 
-      ret = inode_semtake();
-      if (ret < 0)
-        {
-          errcode = -ret;
-          goto errout_with_inode;
-        }
-
+      inode_lock();
       ret = inode_remove(pathname);
-      inode_semgive();
+      inode_unlock();
 
       if (ret < 0 && ret != -EBUSY)
         {
@@ -175,6 +162,9 @@ int rmdir(FAR const char *pathname)
 
   inode_release(inode);
   RELEASE_SEARCH(&desc);
+#ifdef CONFIG_FS_NOTIFY
+  notify_unlink(pathname);
+#endif
   return OK;
 
 errout_with_inode:

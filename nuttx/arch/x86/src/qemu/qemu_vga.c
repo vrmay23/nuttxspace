@@ -1,14 +1,11 @@
 /****************************************************************************
- * drivers/lcd/vga.c
+ * arch/x86/src/qemu/qemu_vga.c
  *
- *   Copyright (C) 2011 Li Zhuoyi. All rights reserved.
- *   Author: Li Zhuoyi <lzyy.cn@gmail.com>
- *   History: 0.1 2012-11-30 initial version
- *
- * Derived from drivers/lcd/skeleton.c
- *
- *   Copyright (C) 2008-2009 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2011 Li Zhuoyi. All rights reserved.
+ * SPDX-FileCopyrightText: 2008-2009 Gregory Nutt. All rights reserved.
+ * SPDX-FileContributor: Li Zhuoyi <lzyy.cn@gmail.com>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -95,56 +92,123 @@
  * Private Function Prototypes
  ****************************************************************************/
 
-static int init_graph_vga(int width, int height,int chain4);
-static int vga_putrun(fb_coord_t row, fb_coord_t col, FAR const uint8_t *buffer,
-                      size_t npixels);
-static int vga_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t *buffer,
-                      size_t npixels);
-static int vga_getvideoinfo(FAR struct lcd_dev_s *dev,
-                            FAR struct fb_videoinfo_s *vinfo);
-static int vga_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
-                            FAR struct lcd_planeinfo_s *pinfo);
+static int init_graph_vga(int width, int height, int chain4);
+static int vga_putrun(struct lcd_dev_s *dev, fb_coord_t row, fb_coord_t col,
+                      const uint8_t *buffer, size_t npixels);
+static int vga_getrun(struct lcd_dev_s *dev, fb_coord_t row, fb_coord_t col,
+                      uint8_t *buffer, size_t npixels);
+static int vga_getvideoinfo(struct lcd_dev_s *dev,
+                            struct fb_videoinfo_s *vinfo);
+static int vga_getplaneinfo(struct lcd_dev_s *dev, unsigned int planeno,
+                            struct lcd_planeinfo_s *pinfo);
 static int vga_getpower(struct lcd_dev_s *dev);
 static int vga_setpower(struct lcd_dev_s *dev, int power);
 static int vga_getcontrast(struct lcd_dev_s *dev);
 static int vga_setcontrast(struct lcd_dev_s *dev, unsigned int contrast);
-static int vga_open(struct file *filep);
-static int vga_close(struct file *filep);
-static ssize_t vga_read(struct file *filep, FAR char *buf, size_t buflen);
-static ssize_t vga_write(struct file *filep, FAR const char *buf, size_t buflen);
-static off_t vga_seek(FAR struct file *filp, off_t offset, int whence);
+static ssize_t vga_read(struct file *filep, char *buf, size_t buflen);
+static ssize_t vga_write(struct file *filep, const char *buf,
+                         size_t buflen);
+static off_t vga_seek(struct file *filp, off_t offset, int whence);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static const uint8_t g_hor_regs[]  = { 0x0,  0x1,  0x2,  0x3,  0x4, 0x5,  0x13 };
+static const uint8_t g_hor_regs[]  =
+{
+  0x0,  0x1,  0x2,  0x3,  0x4, 0x5,  0x13
+};
 
-static const uint8_t g_width_256[] = { 0x5f, 0x3f, 0x40, 0x82, 0x4a,0x9a, 0x20 };
-static const uint8_t g_width_320[] = { 0x5f, 0x4f, 0x50, 0x82, 0x54,0x80, 0x28 };
-static const uint8_t g_width_360[] = { 0x6b, 0x59, 0x5a, 0x8e, 0x5e,0x8a, 0x2d };
-static const uint8_t g_width_376[] = { 0x6e, 0x5d, 0x5e, 0x91, 0x62,0x8f, 0x2f };
-static const uint8_t g_width_400[] = { 0x70, 0x63, 0x64, 0x92, 0x65,0x82, 0x32 };
+static const uint8_t g_width_256[] =
+{
+  0x5f, 0x3f, 0x40, 0x82, 0x4a, 0x9a, 0x20
+};
 
-static const uint8_t g_ver_regs[]  = { 0x6,  0x7,  0x9,  0x10, 0x11,0x12, 0x15, 0x16 };
+static const uint8_t g_width_320[] =
+{
+  0x5f, 0x4f, 0x50, 0x82, 0x54, 0x80, 0x28
+};
 
-static const uint8_t height_200[]  = { 0xbf, 0x1f, 0x41, 0x9c, 0x8e,0x8f, 0x96, 0xb9 };
-static const uint8_t height_224[]  = { 0x0b, 0x3e, 0x41, 0xda, 0x9c,0xbf, 0xc7, 0x04 };
-static const uint8_t height_240[]  = { 0x0d, 0x3e, 0x41, 0xea, 0xac,0xdf, 0xe7, 0x06 };
-static const uint8_t height_256[]  = { 0x23, 0xb2, 0x61, 0x0a, 0xac,0xff, 0x07, 0x1a };
-static const uint8_t height_270[]  = { 0x30, 0xf0, 0x61, 0x20, 0xa9,0x1b, 0x1f, 0x2f };
-static const uint8_t height_300[]  = { 0x70, 0xf0, 0x61, 0x5b, 0x8c,0x57, 0x58, 0x70 };
-static const uint8_t height_360[]  = { 0xbf, 0x1f, 0x40, 0x88, 0x85,0x67, 0x6d, 0xba };
-static const uint8_t height_400[]  = { 0xbf, 0x1f, 0x40, 0x9c, 0x8e,0x8f, 0x96, 0xb9 };
-static const uint8_t height_480[]  = { 0x0d, 0x3e, 0x40, 0xea, 0xac,0xdf, 0xe7, 0x06 };
-static const uint8_t height_564[]  = { 0x62, 0xf0, 0x60, 0x37, 0x89,0x33, 0x3c, 0x5c };
-static const uint8_t height_600[]  = { 0x70, 0xf0, 0x60, 0x5b, 0x8c,0x57, 0x58, 0x70 };
+static const uint8_t g_width_360[] =
+{
+  0x6b, 0x59, 0x5a, 0x8e, 0x5e, 0x8a, 0x2d
+};
+
+static const uint8_t g_width_376[] =
+{
+  0x6e, 0x5d, 0x5e, 0x91, 0x62, 0x8f, 0x2f
+};
+
+static const uint8_t g_width_400[] =
+{
+  0x70, 0x63, 0x64, 0x92, 0x65, 0x82, 0x32
+};
+
+static const uint8_t g_ver_regs[]  =
+{
+  0x6,  0x7,  0x9,  0x10, 0x11, 0x12, 0x15, 0x16
+};
+
+static const uint8_t height_200[]  =
+{
+  0xbf, 0x1f, 0x41, 0x9c, 0x8e, 0x8f, 0x96, 0xb9
+};
+
+static const uint8_t height_224[]  =
+{
+  0x0b, 0x3e, 0x41, 0xda, 0x9c, 0xbf, 0xc7, 0x04
+};
+
+static const uint8_t height_240[]  =
+{
+  0x0d, 0x3e, 0x41, 0xea, 0xac, 0xdf, 0xe7, 0x06
+};
+
+static const uint8_t height_256[]  =
+{
+  0x23, 0xb2, 0x61, 0x0a, 0xac, 0xff, 0x07, 0x1a
+};
+
+static const uint8_t height_270[]  =
+{
+  0x30, 0xf0, 0x61, 0x20, 0xa9, 0x1b, 0x1f, 0x2f
+};
+
+static const uint8_t height_300[]  =
+{
+  0x70, 0xf0, 0x61, 0x5b, 0x8c, 0x57, 0x58, 0x70
+};
+
+static const uint8_t height_360[]  =
+{
+  0xbf, 0x1f, 0x40, 0x88, 0x85, 0x67, 0x6d, 0xba
+};
+
+static const uint8_t height_400[]  =
+{
+  0xbf, 0x1f, 0x40, 0x9c, 0x8e, 0x8f, 0x96, 0xb9
+};
+
+static const uint8_t height_480[]  =
+{
+  0x0d, 0x3e, 0x40, 0xea, 0xac, 0xdf, 0xe7, 0x06
+};
+
+static const uint8_t height_564[]  =
+{
+  0x62, 0xf0, 0x60, 0x37, 0x89, 0x33, 0x3c, 0x5c
+};
+
+static const uint8_t height_600[]  =
+{
+  0x70, 0xf0, 0x60, 0x5b, 0x8c, 0x57, 0x58, 0x70
+};
 
 static const uint8_t g_bg_color    = 0x0f;
 static const uint8_t g_fg_color    = 0x01;
 
 static uint8_t g_runbuffer[VGA_XRES];
-static uint8_t *g_pscreen = (uint8_t*)(0xa0000);
+static uint8_t *g_pscreen = (uint8_t *)(0xa0000);
 
 static off_t g_curpos;
 
@@ -163,12 +227,11 @@ static struct lcd_dev_s g_lcddev =
 
 static const struct file_operations g_vgaops =
 {
-  vga_open,                  /* open */
-  vga_close,                 /* close */
-  vga_read,                  /* read */
-  vga_write,                 /* write */
-  vga_seek,                  /* seek */
-  0,                         /* ioctl */
+  NULL,         /* open */
+  NULL,         /* close */
+  vga_read,     /* read */
+  vga_write,    /* write */
+  vga_seek,     /* seek */
 };
 
 /****************************************************************************
@@ -187,7 +250,7 @@ static const struct file_operations g_vgaops =
  *   0=ok, -n=fail
  */
 
-static int init_graph_vga(int width, int height,int chain4)
+static int init_graph_vga(int width, int height, int chain4)
 {
   const uint8_t *w;
   const uint8_t *h;
@@ -337,27 +400,27 @@ static int init_graph_vga(int width, int height,int chain4)
       outb((uint8_t)a, 0x3c0);
     }
 
-  outb( 0x20, 0x3c0); /* enable video */
+  outb(0x20, 0x3c0); /* enable video */
 
   return 0;
 }
 
-static int vga_putrun(fb_coord_t row, fb_coord_t col, FAR const uint8_t *buffer,
-                      size_t npixels)
+static int vga_putrun(struct lcd_dev_s *dev, fb_coord_t row, fb_coord_t col,
+                      const uint8_t *buffer, size_t npixels)
 {
-  memcpy(&g_pscreen[row*VGA_XRES + col],buffer, npixels);
+  memcpy(&g_pscreen[row*VGA_XRES + col], buffer, npixels);
   return OK;
 }
 
-static int vga_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t *buffer,
-                      size_t npixels)
+static int vga_getrun(struct lcd_dev_s *dev, fb_coord_t row, fb_coord_t col,
+                      uint8_t *buffer, size_t npixels)
 {
-  memcpy(buffer,&g_pscreen[row*VGA_XRES + col],npixels);
+  memcpy(buffer, &g_pscreen[row*VGA_XRES + col], npixels);
   return OK;
 }
 
-static int vga_getvideoinfo(FAR struct lcd_dev_s *dev,
-                            FAR struct fb_videoinfo_s *vinfo)
+static int vga_getvideoinfo(struct lcd_dev_s *dev,
+                            struct fb_videoinfo_s *vinfo)
 {
   vinfo->fmt     = VGA_COLORFMT;
   vinfo->xres    = VGA_XRES;        /* Horizontal resolution in pixel columns */
@@ -366,14 +429,14 @@ static int vga_getvideoinfo(FAR struct lcd_dev_s *dev,
   return OK;
 }
 
-static int vga_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
-                            FAR struct lcd_planeinfo_s *pinfo)
+static int vga_getplaneinfo(struct lcd_dev_s *dev, unsigned int planeno,
+                            struct lcd_planeinfo_s *pinfo)
 {
   pinfo->putrun  = vga_putrun;      /* Put a run into LCD memory */
   pinfo->getrun  = vga_getrun;      /* Get a run from LCD memory */
   pinfo->buffer  = g_runbuffer;     /* Run scratch buffer */
-  pinfo->display = 0;
   pinfo->bpp     = VGA_BPP;         /* Bits-per-pixel */
+  pinfo->dev     = dev;             /* LCD device */
   return OK;
 }
 
@@ -397,17 +460,7 @@ static int vga_setcontrast(struct lcd_dev_s *dev, unsigned int contrast)
   return -ENOSYS;
 }
 
-static int vga_open(struct file * filep)
-{
-  return OK;
-}
-
-static int vga_close(struct file * filep)
-{
-  return OK;
-}
-
-static ssize_t vga_read(struct file *filep, FAR char *buf, size_t buflen)
+static ssize_t vga_read(struct file *filep, char *buf, size_t buflen)
 {
   if (buf == NULL || buflen < 1)
     {
@@ -415,10 +468,12 @@ static ssize_t vga_read(struct file *filep, FAR char *buf, size_t buflen)
     }
 
   /* memcpy(&buf,&g_pscreen[y*VGA_XRES + x],buflen); */
+
   return buflen;
 }
 
-static ssize_t vga_write(struct file *filep, FAR const char *buf, size_t buflen)
+static ssize_t vga_write(struct file *filep, const char *buf,
+                         size_t buflen)
 {
   int i;
   int j;
@@ -441,7 +496,7 @@ static ssize_t vga_write(struct file *filep, FAR const char *buf, size_t buflen)
   return buflen;
 }
 
-static off_t vga_seek(FAR struct file *filp, off_t offset, int whence)
+static off_t vga_seek(struct file *filp, off_t offset, int whence)
 {
   ssize_t newpos;
 
@@ -494,12 +549,12 @@ static off_t vga_seek(FAR struct file *filp, off_t offset, int whence)
  *
  ****************************************************************************/
 
-FAR struct lcd_dev_s *qemu_vga_initialize(void)
+struct lcd_dev_s *qemu_vga_initialize(void)
 {
   int ret = init_graph_vga(VGA_XRES, VGA_YRES, 1);
   if (ret < 0)
     {
-      gerr("ERROR: init_graph_vga returned %d\n",ret);
+      gerr("ERROR: init_graph_vga returned %d\n", ret);
     }
 
   memset(g_pscreen, 0, VGA_XRES * VGA_YRES);
@@ -511,7 +566,7 @@ void qemu_vga(void)
   int ret = init_graph_vga(VGA_XRES, VGA_YRES, 1);
   if (ret < 0)
     {
-      gerr("ERROR: init_graph_vga returned %d\n",ret);
+      gerr("ERROR: init_graph_vga returned %d\n", ret);
     }
 
   memset(g_pscreen, g_bg_color, VGA_XRES * VGA_YRES);

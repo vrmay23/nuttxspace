@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/usbhost/usbhost_enumerate.c
  *
- *   Copyright (C) 2011-2012, 2015, 2017 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -66,7 +53,9 @@ static void usbhost_putle16(uint8_t *dest, uint16_t val);
 static inline int usbhost_devdesc(const struct usb_devdesc_s *devdesc,
               FAR struct usbhost_id_s *id);
 static inline int usbhost_configdesc(const uint8_t *configdesc, int desclen,
-              FAR struct usbhost_id_s *id);
+                                     uint8_t start_ifnum,
+                                     uint8_t *ret_ifnum,
+                                     struct usbhost_id_s *id);
 static inline int usbhost_classbind(FAR struct usbhost_hubport_s *hport,
               FAR const uint8_t *configdesc, int desclen,
               FAR struct usbhost_id_s *id,
@@ -130,7 +119,7 @@ static inline int usbhost_devdesc(FAR const struct usb_devdesc_s *devdesc,
   id->vid = usbhost_getle16(devdesc->vendor);
   id->pid = usbhost_getle16(devdesc->product);
 
-  uinfo("class:%d subclass:%04x protocol:%04x vid:%d pid:%d\n",
+  uinfo("class:%d subclass:%d protocol:%d vid:%04x pid:%04x\n",
         id->base, id->subclass, id->proto, id->vid, id->pid);
   return OK;
 }
@@ -145,6 +134,8 @@ static inline int usbhost_devdesc(FAR const struct usb_devdesc_s *devdesc,
  ****************************************************************************/
 
 static inline int usbhost_configdesc(const uint8_t *configdesc, int cfglen,
+                                     uint8_t start_ifnum,
+                                     uint8_t *ret_ifnum,
                                      struct usbhost_id_s *id)
 {
   FAR struct usb_cfgdesc_s *cfgdesc;
@@ -176,9 +167,11 @@ static inline int usbhost_configdesc(const uint8_t *configdesc, int cfglen,
       /* What is the next descriptor? Is it an interface descriptor? */
 
       ifdesc = (struct usb_ifdesc_s *)configdesc;
-      if (ifdesc->type == USB_DESC_TYPE_INTERFACE)
+      if (ifdesc->type == USB_DESC_TYPE_INTERFACE &&
+          ifdesc->ifno >= start_ifnum)
         {
-          /* Yes, extract the class information from the interface descriptor.
+          /* Yes, extract the class information from the interface
+           * descriptor.
            * Typically these values are zero meaning that the "real" ID
            * information resides in the device descriptor.
            */
@@ -189,10 +182,11 @@ static inline int usbhost_configdesc(const uint8_t *configdesc, int cfglen,
           id->proto    = ifdesc->protocol;
           uinfo("class:%d subclass:%d protocol:%d\n",
                 id->base, id->subclass, id->proto);
+          *ret_ifnum = ifdesc->ifno;
           return OK;
         }
 
-     /* Increment the address of the next descriptor */
+      /* Increment the address of the next descriptor */
 
       configdesc += ifdesc->len;
       remaining  -= ifdesc->len;
@@ -281,8 +275,8 @@ static inline int usbhost_classbind(FAR struct usbhost_hubport_s *hport,
  *      into this caller-provided memory location.
  *
  * Returned Value:
- *   On success, zero (OK) is returned. On a failure, a negated errno value is
- *   returned indicating the nature of the failure
+ *   On success, zero (OK) is returned. On a failure, a negated errno value
+ *   is returned indicating the nature of the failure
  *
  * Assumptions:
  *   - Only a single class bound to a single device is supported.
@@ -430,11 +424,11 @@ int usbhost_enumerate(FAR struct usbhost_hubport_s *hport,
   ret = DRVR_CTRLOUT(hport->drvr, hport->ep0, ctrlreq, NULL);
   if (ret < 0)
     {
-      uerr("ERROR: Failed to set address: %d\n");
+      uerr("ERROR: Failed to set address: %d\n", ret);
       goto errout;
     }
 
-  nxsig_usleep(2*1000);
+  nxsig_usleep(2 * 1000);
 
   /* Assign the function address to the port */
 
@@ -459,7 +453,7 @@ int usbhost_enumerate(FAR struct usbhost_hubport_s *hport,
 
   ret = DRVR_CTRLIN(hport->drvr, hport->ep0, ctrlreq, buffer);
   if (ret < 0)
-   {
+    {
       uerr("ERROR: Failed to get configuration descriptor, length=%d: %d\n",
            USB_SIZEOF_CFGDESC, ret);
       goto errout;
@@ -467,12 +461,14 @@ int usbhost_enumerate(FAR struct usbhost_hubport_s *hport,
 
   /* Extract the full size of the configuration data */
 
-  cfglen = (unsigned int)usbhost_getle16(((struct usb_cfgdesc_s *)buffer)->totallen);
+  cfglen = (unsigned int)
+           usbhost_getle16(((struct usb_cfgdesc_s *)buffer)->totallen);
   uinfo("sizeof config data: %d\n", cfglen);
 
   if (cfglen > maxlen)
     {
-      uerr("ERROR: Configuration doesn't fit in buffer, length=%d, maxlen=%d\n",
+      uerr("ERROR: Configuration doesn't fit in buffer, "
+           "length=%d, maxlen=%zu\n",
            cfglen, maxlen);
       ret = -E2BIG;
       goto errout;
@@ -511,6 +507,10 @@ int usbhost_enumerate(FAR struct usbhost_hubport_s *hport,
       goto errout;
     }
 
+  /* Some devices may require some delay before initialization */
+
+  nxsig_usleep(100 * 1000);
+
   /* Was the class identification information provided in the device
    * descriptor? Or do we need to find it in the interface descriptor(s)?
    */
@@ -522,49 +522,63 @@ int usbhost_enumerate(FAR struct usbhost_hubport_s *hport,
        * case of multiple interface descriptors.
        */
 
-      ret = usbhost_configdesc(buffer, cfglen, &id);
-      if (ret < 0)
+      uint8_t ninterfaces = ((struct usb_cfgdesc_s *)buffer)->ninterfaces;
+      uint8_t ifnum = 0;
+
+      for (ifnum = 0; ifnum < ninterfaces; ifnum++)
         {
-          uerr("ERROR: usbhost_configdesc failed: %d\n", ret);
-          goto errout;
+          uinfo("Parsing interface: %d\n", ifnum);
+          ret = usbhost_configdesc(buffer, cfglen, ifnum, &ifnum, &id);
+          if (ret < 0)
+            {
+              uerr("ERROR: usbhost_configdesc failed: %d\n", ret);
+              goto errout;
+            }
+
+          ret = usbhost_classbind(hport, buffer, cfglen, &id, devclass);
+          if (ret < 0)
+            {
+              uerr("ERROR: usbhost_classbind failed %d\n", ret);
+            }
+
+          ret = OK;
         }
     }
-
-  /* Some devices may require some delay before initialization */
-
-  nxsig_usleep(100*1000);
-
-#ifdef CONFIG_USBHOST_COMPOSITE
-  /* Check if the device attached to the downstream port if a USB composite
-   * device and, if so, create the composite device wrapper and bind it to
-   * the HCD.
-   *
-   * usbhost_composite() will return a negated errno value is on any
-   * failure.  The value -ENOENT, in particular means that the attached
-   * device is not a composite device.  Other values would indicate other
-   * various, unexpected failures.  We make no real distinction here.
-   */
-
-  ret = usbhost_composite(hport, buffer, cfglen, &id, devclass);
-  if (ret >= 0)
-    {
-      uinfo("usbhost_composite has bound the composite device\n");
-    }
-
-  /* Apparently this is not a composite device */
-
   else
-#endif
     {
-      /* Parse the configuration descriptor and bind to the class instance
-       * for the device.  This needs to be the last thing done because the
-       * class driver will begin configuring the device.
+#ifdef CONFIG_USBHOST_COMPOSITE
+      /* Check if the device attached to the downstream port if a USB
+       * composite device and, if so, create the composite device wrapper
+       * and bind it to the HCD.
+       *
+       * usbhost_composite() will return a negated errno value is on any
+       * failure.  The value -ENOENT, in particular means that the attached
+       * device is not a composite device.  Other values would indicate other
+       * various, unexpected failures.  We make no real distinction here.
        */
 
-      ret = usbhost_classbind(hport, buffer, cfglen, &id, devclass);
-      if (ret < 0)
+      ret = usbhost_composite(hport, buffer, cfglen, &id, devclass);
+      if (ret >= 0)
         {
-          uerr("ERROR: usbhost_classbind failed %d\n", ret);
+          uinfo("usbhost_composite has bound the composite device\n");
+        }
+
+      /* Apparently this is not a composite device */
+
+      else
+#endif
+        {
+          /* Parse the configuration descriptor and bind to the class
+           * instance for the device.  This needs to be the last thing
+           * done because the class driver will begin configuring the
+           * device.
+           */
+
+          ret = usbhost_classbind(hport, buffer, cfglen, &id, devclass);
+          if (ret < 0)
+            {
+              uerr("ERROR: usbhost_classbind failed %d\n", ret);
+            }
         }
     }
 

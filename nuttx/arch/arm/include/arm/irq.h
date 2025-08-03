@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/include/arm/irq.h
  *
- *   Copyright (C) 2009-2011 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -50,7 +37,7 @@
 #endif
 
 /****************************************************************************
- * Pre-processor Definitions
+ * Pre-processor Prototypes
  ****************************************************************************/
 
 /* IRQ Stack Frame Format:
@@ -99,7 +86,11 @@
 #define REG_V7              REG_R10
 #define REG_SB              REG_R9
 #define REG_SL              REG_R10
-#define REG_FP              REG_R11
+#ifdef CONFIG_ARM_THUMB
+  #define REG_FP            REG_R7
+#else
+  #define REG_FP            REG_R11
+#endif /* CONFIG_ARM_THUMB */
 #define REG_IP              REG_R12
 #define REG_SP              REG_R13
 #define REG_LR              REG_R14
@@ -138,27 +129,19 @@
 #ifndef __ASSEMBLY__
 struct xcptcontext
 {
-  /* The following function pointer is non-zero if there
-   * are pending signals to be processed.
-   */
-
-  void *sigdeliver; /* Actual type is sig_deliver_t */
-
-  /* These are saved copies of LR and CPSR used during
+  /* These are saved copies of the context used during
    * signal processing.
-   *
-   * REVISIT:  Because there is only one copy of these save areas,
-   * only a single signal handler can be active.  This precludes
-   * queuing of signal actions.  As a result, signals received while
-   * another signal handler is executing will be ignored!
    */
 
-  uint32_t saved_pc;
-  uint32_t saved_cpsr;
+  uint32_t *saved_regs;
 
-  /* Register save area */
+  /* Register save area with XCPTCONTEXT_SIZE, only valid when:
+   * 1.The task isn't running or
+   * 2.The task is interrupted
+   * otherwise task is running, and regs contain the stale value.
+   */
 
-  uint32_t regs[XCPTCONTEXT_REGS];
+  uint32_t *regs;
 
   /* Extra fault address register saved for common paging logic.  In the
    * case of the prefetch abort, this value is the same as regs[REG_R15];
@@ -166,17 +149,22 @@ struct xcptcontext
    * address register (FAR) at the time of data abort exception.
    */
 
-#ifdef CONFIG_PAGING
+#ifdef CONFIG_LEGACY_PAGING
   uintptr_t far;
 #endif
 };
-#endif
+
+/****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+/* g_interrupt_context store irq status */
+
+extern volatile bool g_interrupt_context[CONFIG_SMP_NCPUS];
 
 /****************************************************************************
  * Inline functions
  ****************************************************************************/
-
-#ifndef __ASSEMBLY__
 
 /* Name: up_irq_save, up_irq_restore, and friends.
  *
@@ -187,9 +175,9 @@ struct xcptcontext
  * leave_critical section(), are probably what you really want.
  */
 
- /* Save the current interrupt enable state & disable IRQs. */
+/* Save the current interrupt enable state & disable IRQs. */
 
-static inline irqstate_t up_irq_save(void)
+static inline_function irqstate_t up_irq_save(void)
 {
   unsigned int flags;
   unsigned int temp;
@@ -200,25 +188,25 @@ static inline irqstate_t up_irq_save(void)
      "\tmsr    cpsr_c, %1"
      : "=r" (flags), "=r" (temp)
      :
-     : "memory");
+     : "cc", "memory");
   return flags;
 }
 
 /* Restore saved IRQ & FIQ state */
 
-static inline void up_irq_restore(irqstate_t flags)
+static inline_function void up_irq_restore(irqstate_t flags)
 {
   __asm__ __volatile__
     (
      "msr    cpsr_c, %0"
      :
      : "r" (flags)
-     : "memory");
+     : "cc", "memory");
 }
 
 /* Enable IRQs and return the previous IRQ state */
 
-static inline irqstate_t up_irq_enable(void)
+static inline_function irqstate_t up_irq_enable(void)
 {
   unsigned int flags;
   unsigned int temp;
@@ -229,20 +217,68 @@ static inline irqstate_t up_irq_enable(void)
      "\tmsr    cpsr_c, %1"
      : "=r" (flags), "=r" (temp)
      :
-     : "memory");
+     : "cc", "memory");
   return flags;
 }
-#endif /* __ASSEMBLY__ */
 
 /****************************************************************************
- * Public Data
+ * Name: up_cpu_index
+ *
+ * Description:
+ *   Return the real core number regardless CONFIG_SMP setting
+ *
  ****************************************************************************/
+
+#ifdef CONFIG_ARCH_HAVE_MULTICPU
+int up_cpu_index(void) noinstrument_function;
+#endif /* CONFIG_ARCH_HAVE_MULTICPU */
+
+noinstrument_function
+static inline_function bool up_interrupt_context(void)
+{
+#ifdef CONFIG_SMP
+  irqstate_t flags = up_irq_save();
+  bool ret = g_interrupt_context[up_cpu_index()];
+  up_irq_restore(flags);
+  return ret;
+#else
+  return g_interrupt_context[0];
+#endif
+}
+
+noinstrument_function
+static inline_function void up_set_interrupt_context(bool flag)
+{
+#ifdef CONFIG_ARCH_HAVE_MULTICPU
+  g_interrupt_context[up_cpu_index()] = flag;
+#else
+  g_interrupt_context[0] = flag;
+#endif
+}
+
+static inline_function uint32_t up_getsp(void)
+{
+  register uint32_t sp;
+
+  __asm__ __volatile__
+  (
+    "mov %0, sp\n"
+    : "=r" (sp)
+  );
+
+  return sp;
+}
+
+static inline_function uintptr_t up_getusrsp(void *regs)
+{
+  uint32_t *ptr = (uint32_t *)regs;
+  return ptr[REG_SP];
+}
 
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
 
-#ifndef __ASSEMBLY__
 #ifdef __cplusplus
 #define EXTERN extern "C"
 extern "C"
@@ -255,6 +291,6 @@ extern "C"
 #ifdef __cplusplus
 }
 #endif
-#endif
+#endif  /* __ASSEMBLY__ */
 
 #endif /* __ARCH_ARM_INCLUDE_ARM_IRQ_H */

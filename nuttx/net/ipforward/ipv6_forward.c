@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/ipforward/ipv6_forward.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -45,13 +32,17 @@
 #include <debug.h>
 
 #include <nuttx/mm/iob.h>
+#include <nuttx/net/ipv6ext.h>
 #include <nuttx/net/net.h>
 #include <nuttx/net/netdev.h>
 #include <nuttx/net/netstats.h>
 
+#include "nat/nat.h"
 #include "netdev/netdev.h"
 #include "sixlowpan/sixlowpan.h"
 #include "devif/devif.h"
+#include "icmpv6/icmpv6.h"
+#include "ipfilter/ipfilter.h"
 #include "ipforward/ipforward.h"
 
 #if defined(CONFIG_NET_IPFORWARD) && defined(CONFIG_NET_IPv6)
@@ -120,6 +111,12 @@ static int ipv6_hdrsize(FAR struct ipv6_hdr_s *ipv6)
       break;
 #endif
 
+#ifdef CONFIG_NET_IPFRAG
+    case NEXT_FRAGMENT_EH:
+      return IPv6_HDRLEN + EXTHDR_FRAG_LEN;
+      break;
+#endif
+
     default:
       nwarn("WARNING: Unrecognized proto: %u\n", ipv6->proto);
       return -EPROTONOSUPPORT;
@@ -157,12 +154,6 @@ static int ipv6_decr_ttl(FAR struct ipv6_hdr_s *ipv6)
 
   if (ttl <= 0)
     {
-#ifdef CONFIG_NET_ICMPv6
-      /* Return an ICMPv6 error packet back to the sender. */
-
-#  warning Missing logic
-#endif
-
       /* Return zero which must cause the packet to be dropped */
 
       return 0;
@@ -349,6 +340,27 @@ static int ipv6_dev_forward(FAR struct net_driver_s *dev,
 #endif
   int ret;
 
+#ifdef CONFIG_NET_IPFILTER
+  /* Do filter before forwarding, to make sure we drop silently before
+   * replying any other errors.
+   */
+
+  ret = ipv6_filter_fwd(dev, fwddev, ipv6);
+  if (ret < 0)
+    {
+      ninfo("Drop/Reject FORWARD packet due to filter %d\n", ret);
+
+      /* Let ipv6_forward reply the reject. */
+
+      if (ret == IPFILTER_TARGET_REJECT)
+        {
+          ret = -ENETUNREACH;
+        }
+
+      goto errout;
+    }
+#endif
+
   /* If the interface isn't "up", we can't forward. */
 
   if ((fwddev->d_flags & IFF_UP) == 0)
@@ -419,63 +431,42 @@ static int ipv6_dev_forward(FAR struct net_driver_s *dev,
         }
 #endif
 
-      /* Try to allocate the head of an IOB chain.  If this fails, the
-       * packet will be dropped; we are not operating in a context where
-       * waiting for an IOB is a good idea
-       */
+      /* Relay the device buffer */
 
-      fwd->f_iob = iob_tryalloc(false, IOBUSER_NET_IPFORWARD);
-      if (fwd->f_iob == NULL)
-        {
-          nwarn("WARNING: iob_tryalloc() failed\n");
-          ret = -ENOMEM;
-          goto errout_with_fwd;
-        }
-
-      /* Copy the L2/L3 headers plus any following payload into an IOB
-       * chain.  iob_trycopin() will not wait, but will fail there are no
-       * available IOBs.
-       *
-       * REVISIT: Consider an alternative design that does not require data
-       * copying.  This would require a pool of d_buf's that are managed by
-       * the network rather than the network device.
-       */
-
-      ret = iob_trycopyin(fwd->f_iob, (FAR const uint8_t *)ipv6,
-                          dev->d_len, 0, false, IOBUSER_NET_IPFORWARD);
-      if (ret < 0)
-        {
-          nwarn("WARNING: iob_trycopyin() failed: %d\n", ret);
-          goto errout_with_iobchain;
-        }
+      fwd->f_iob = dev->d_iob;
 
       /* Decrement the TTL in the copy of the IPv6 header (retaining the
-       * original TTL in the sourcee to handle the broadcast case).  If the
+       * original TTL in the source to handle the broadcast case).  If the
        * TTL decrements to zero, then do not forward the packet.
        */
 
-      ret = ipv6_decr_ttl((FAR struct ipv6_hdr_s *)fwd->f_iob->io_data);
+      ret = ipv6_decr_ttl(ipv6);
       if (ret < 1)
         {
           nwarn("WARNING: Hop limit exceeded... Dropping!\n");
           ret = -EMULTIHOP;
-          goto errout_with_iobchain;
+          goto errout_with_fwd;
         }
+
+#ifdef CONFIG_NET_NAT66
+      /* Try NAT outbound, rule matching will be performed in NAT module. */
+
+      ret = ipv6_nat_outbound(fwd->f_dev, ipv6, NAT_MANIP_SRC);
+      if (ret < 0)
+        {
+          nwarn("WARNING: Performing NAT66 outbound failed, dropping!\n");
+          goto errout_with_fwd;
+        }
+#endif
 
       /* Then set up to forward the packet according to the protocol. */
 
       ret = ipfwd_forward(fwd);
       if (ret >= 0)
         {
-          dev->d_len = 0;
+          netdev_iob_clear(dev);
           return OK;
         }
-    }
-
-errout_with_iobchain:
-  if (fwd != NULL && fwd->f_iob != NULL)
-    {
-      iob_free_chain(fwd->f_iob, IOBUSER_NET_IPFORWARD);
     }
 
 errout_with_fwd:
@@ -509,13 +500,24 @@ errout:
  ****************************************************************************/
 
 #ifdef CONFIG_NET_IPFORWARD_BROADCAST
-int ipv6_forward_callback(FAR struct net_driver_s *fwddev, FAR void *arg)
+static int ipv6_forward_callback(FAR struct net_driver_s *fwddev,
+                                 FAR void *arg)
 {
   FAR struct net_driver_s *dev = (FAR struct net_driver_s *)arg;
   FAR struct ipv6_hdr_s *ipv6;
+  FAR struct iob_s *iob;
   int ret;
 
-  DEBUGASSERT(fwddev != NULL && dev != NULL && dev->d_buf != NULL);
+  DEBUGASSERT(fwddev != NULL);
+
+  /* Only IFF_UP device and non-loopback device need forward packet */
+
+  if (!IFF_IS_UP(fwddev->d_flags) || fwddev->d_lltype == NET_LL_LOOPBACK)
+    {
+      return OK;
+    }
+
+  DEBUGASSERT(dev != NULL && dev->d_buf != NULL);
 
   /* Check if we are forwarding on the same device that we received the
    * packet from.
@@ -523,20 +525,34 @@ int ipv6_forward_callback(FAR struct net_driver_s *fwddev, FAR void *arg)
 
   if (fwddev != dev)
     {
+      /* Backup the forward IP packet */
+
+      iob = netdev_iob_clone(dev, true);
+      if (iob == NULL)
+        {
+          nerr("ERROR: IOB clone failed when forwarding broadcast.\n");
+          return -ENOMEM;
+        }
+
       /* Recover the pointer to the IPv6 header in the receiving device's
        * d_buf.
        */
 
-      ipv6 = (FAR struct ipv6_hdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev)];
+      ipv6 = IPv6BUF;
 
       /* Send the packet asynchrously on the forwarding device. */
 
       ret = ipv6_dev_forward(dev, fwddev, ipv6);
       if (ret < 0)
         {
+          iob_free_chain(iob);
           nwarn("WARNING: ipv6_dev_forward failed: %d\n", ret);
           return ret;
         }
+
+      /* Restore device iob with backup iob */
+
+      netdev_iob_replace(dev, iob);
     }
 
   return OK;
@@ -580,6 +596,11 @@ int ipv6_forward(FAR struct net_driver_s *dev, FAR struct ipv6_hdr_s *ipv6)
 {
   FAR struct net_driver_s *fwddev;
   int ret;
+#ifdef CONFIG_NET_ICMPv6
+  int icmpv6_reply_type;
+  int icmpv6_reply_code;
+  int icmpv6_reply_data;
+#endif /* CONFIG_NET_ICMP */
 
   /* Search for a device that can forward this packet. */
 
@@ -587,7 +608,8 @@ int ipv6_forward(FAR struct net_driver_s *dev, FAR struct ipv6_hdr_s *ipv6)
   if (fwddev == NULL)
     {
       nwarn("WARNING: Not routable\n");
-      return (ssize_t)-ENETUNREACH;
+      ret = -ENETUNREACH;
+      goto drop;
     }
 
   /* Check if we are forwarding on the same device that we received the
@@ -609,9 +631,9 @@ int ipv6_forward(FAR struct net_driver_s *dev, FAR struct ipv6_hdr_s *ipv6)
 #if defined(CONFIG_NET_6LOWPAN) /* REVISIT:  Currently only support for 6LoWPAN */
     {
       /* Single network device.  The use case here is where an endpoint acts
-       * as a hub in a star configuration.  This is typical for a wireless star
-       * configuration where not all endpoints are accessible from all other
-       * endpoints, but seems less useful for a wired network.
+       * as a hub in a star configuration.  This is typical for a wireless
+       * star configuration where not all endpoints are accessible from all
+       * other endpoints, but seems less useful for a wired network.
        */
 
       /* Perform any necessary packet conversions.  If the packet was handled
@@ -629,9 +651,11 @@ int ipv6_forward(FAR struct net_driver_s *dev, FAR struct ipv6_hdr_s *ipv6)
       else if (ret == PACKET_NOT_FORWARDED)
         {
 #ifdef CONFIG_NET_ETHERNET
-          /* REVISIT:  For Ethernet we may have to fix up the Ethernet header:
+          /* REVISIT:
+           *  For Ethernet we may have to fix up the Ethernet header:
            * - source MAC, the MAC of the current device.
-           * - dest MAC, the MAC associated with the destination IPv6 address.
+           * - dest MAC, the MAC associated with the destination IPv6
+           *   address.
            *   This  will involve ICMPv6 and Neighbor Discovery.
            */
 
@@ -653,7 +677,8 @@ int ipv6_forward(FAR struct net_driver_s *dev, FAR struct ipv6_hdr_s *ipv6)
 
 #else /* CONFIG_NET_6LOWPAN */
     {
-      nwarn("WARNING: Packet forwarding not supported in this configuration\n");
+      nwarn(
+         "WARNING: Packet forwarding not supported in this configuration\n");
       ret = -ENOSYS;
       goto drop;
     }
@@ -668,8 +693,51 @@ int ipv6_forward(FAR struct net_driver_s *dev, FAR struct ipv6_hdr_s *ipv6)
 
 drop:
   ipv6_dropstats(ipv6);
+
+#ifdef CONFIG_NET_ICMPv6
+  /* Try reply ICMPv6 to the sender. */
+
+  switch (ret)
+    {
+      case -ENETUNREACH:
+        icmpv6_reply_type = ICMPv6_DEST_UNREACHABLE;
+        icmpv6_reply_code = ICMPv6_ADDR_UNREACH;
+        icmpv6_reply_data = 0;
+        goto reply;
+
+      case -EFBIG:
+        icmpv6_reply_type = ICMPv6_PACKET_TOO_BIG;
+        icmpv6_reply_code = 0;
+        icmpv6_reply_data = NETDEV_PKTSIZE(fwddev) - NET_LL_HDRLEN(fwddev);
+        goto reply;
+
+      case -EMULTIHOP:
+        icmpv6_reply_type = ICMPv6_PACKET_TIME_EXCEEDED;
+        icmpv6_reply_code = ICMPV6_EXC_HOPLIMIT;
+        icmpv6_reply_data = 0;
+        goto reply;
+
+      default:
+        break; /* We don't know how to reply, just go on (to drop). */
+    }
+#endif
+
   dev->d_len = 0;
   return ret;
+
+#ifdef CONFIG_NET_ICMPv6
+reply:
+#  ifdef CONFIG_NET_NAT66
+  /* Before we reply ICMPv6, call NAT outbound to try to translate
+   * destination address & port back to original status.
+   */
+
+  ipv6_nat_outbound(dev, ipv6, NAT_MANIP_DST);
+#  endif /* CONFIG_NET_NAT66 */
+
+  icmpv6_reply(dev, icmpv6_reply_type, icmpv6_reply_code, icmpv6_reply_data);
+  return OK;
+#endif /* CONFIG_NET_ICMP */
 }
 
 /****************************************************************************

@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/z80/src/ez80/ez80_rtc.h
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -18,8 +20,8 @@
  *
  ****************************************************************************/
 
-#ifndef __ARCH_EZ80_SRC_EZ80_EZ80_RTC_H
-#define __ARCH_EZ80_SRC_EZ80_EZ80_RTC_H
+#ifndef __ARCH_Z80_SRC_EZ80_EZ80_RTC_H
+#define __ARCH_Z80_SRC_EZ80_EZ80_RTC_H
 
 /****************************************************************************
  * Included Files
@@ -191,4 +193,4 @@ int ez80_rtc_cancelalarm(void);
 
 #endif /* CONFIG_RTC_ALARM */
 #endif /* __ASSEMBLY__ */
-#endif /* __ARCH_EZ80_SRC_EZ80_RTC_H */
+#endif /* __ARCH_Z80_SRC_EZ80_RTC_H */

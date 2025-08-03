@@ -1,12 +1,11 @@
 /****************************************************************************
- * arch/arm/src/arm/lpc2378/lpc23xx_head.S
+ * arch/arm/src/lpc2378/lpc23xx_io.c
  *
- *   Copyright (C) 2010 Rommel Marcelo. All rights reserved.
- *   Author: Rommel Marcelo
- *
- * This file is part of the NuttX RTOS:
- *
- *   Copyright (C) 2010 Gregory Nutt. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2010 Rommel Marcelo. All rights reserved.
+ * SPDX-FileCopyrightText: 2010 Gregory Nutt. All rights reserved.
+ * SPDX-FileContributor: Rommel Marcelo
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,10 +37,10 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Included files
+ * Included Files
  ****************************************************************************/
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include <sys/types.h>
 #include "lpc23xx_scb.h"
 #include "lpc23xx_pinsel.h"
@@ -53,14 +52,14 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Name: IO_Init()
+ * Name: io_init()
  *
  * Description:
  *   Initialize the target board before running the main()
  *
  ****************************************************************************/
 
-void IO_Init(void)
+void io_init(void)
 {
   uint32_t regval;
 
@@ -79,7 +78,8 @@ void IO_Init(void)
   pinsel_putreg(0, PINSEL10_OFFSET);
 
 #if 0
-  regval = scb_getreg(SCB_PCONP_OFFSET) & ~(PCSDC | PCUART1 | PCI2C0 | PCSSP1 | PCEMC);
+  regval = scb_getreg(SCB_PCONP_OFFSET) &
+           ~(PCSDC | PCUART1 | PCI2C0 | PCSSP1 | PCEMC);
   scb_getreg(regval, SCB_PCONP_OFFSET);
 #endif
 
@@ -88,6 +88,7 @@ void IO_Init(void)
   scb_putreg(0, SCB_PCONP_OFFSET);
 
   /* Turn on UART0/2 / Timer0 */
+
   /* regval = PCUART0 | PCUART2 | PCTIM0 | PCRTC ; */
 
   regval = PCUART0 | PCUART2 | PCTIM0 ;
@@ -96,8 +97,8 @@ void IO_Init(void)
   /* Status LED P1.19 */
 
   dir_putreg8((1 << 3), FIO1DIR2_OFFSET);
-
-  /* other io setup here */
-
-  return;
 }
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/

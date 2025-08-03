@@ -1,35 +1,22 @@
 /****************************************************************************
- * drivers/djoystick.c
+ * drivers/input/djoystick.c
  *
- *   Copyright (C) 2014, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -54,6 +41,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <poll.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -77,9 +65,7 @@ struct djoy_upperhalf_s
 
   FAR const struct djoy_lowerhalf_s *du_lower;
 
-  djoy_buttonset_t du_enabled; /* Set of currently enabled button interrupts */
   djoy_buttonset_t du_sample;  /* Last sampled button states */
-  sem_t du_exclsem;            /* Supports exclusive access to the device */
 
   /* The following is a singly linked list of open references to the
    * joystick device.
@@ -96,10 +82,6 @@ struct djoy_open_s
 
   FAR struct djoy_open_s *do_flink;
 
-  /* The following will be true if we are closing */
-
-  volatile bool do_closing;
-
   /* Joystick event notification information */
 
   pid_t do_pid;
@@ -114,17 +96,13 @@ struct djoy_open_s
    * driver events.
    */
 
-  FAR struct pollfd *do_fds[CONFIG_DJOYSTICK_NPOLLWAITERS];
+  bool do_pollpending;
+  FAR struct pollfd *do_fds[CONFIG_INPUT_DJOYSTICK_NPOLLWAITERS];
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
-
-/* Semaphore helpers */
-
-static inline int djoy_takesem(sem_t *sem);
-#define djoy_givesem(s) nxsem_post(s);
 
 /* Sampling and Interrupt handling */
 
@@ -151,29 +129,22 @@ static int     djoy_poll(FAR struct file *filep, FAR struct pollfd *fds,
  * Private Data
  ****************************************************************************/
 
-static const struct file_operations djoy_fops =
+static const struct file_operations g_djoy_fops =
 {
   djoy_open,  /* open */
   djoy_close, /* close */
   djoy_read,  /* read */
-  0,          /* write */
-  0,          /* seek */
+  NULL,       /* write */
+  NULL,       /* seek */
   djoy_ioctl, /* ioctl */
+  NULL,       /* mmap */
+  NULL,       /* truncate */
   djoy_poll   /* poll */
 };
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: djoy_takesem
- ****************************************************************************/
-
-static inline int djoy_takesem(sem_t *sem)
-{
-  return nxsem_wait(sem);
-}
 
 /****************************************************************************
  * Name: djoy_enable
@@ -185,18 +156,10 @@ static void djoy_enable(FAR struct djoy_upperhalf_s *priv)
   FAR struct djoy_open_s *opriv;
   djoy_buttonset_t press;
   djoy_buttonset_t release;
-  irqstate_t flags;
-  int i;
 
   DEBUGASSERT(priv);
   lower = priv->du_lower;
   DEBUGASSERT(lower);
-
-  /* This routine is called both task level and interrupt level, so
-   * interrupts must be disabled.
-   */
-
-  flags = enter_critical_section();
 
   /* Visit each opened reference to the device */
 
@@ -205,19 +168,8 @@ static void djoy_enable(FAR struct djoy_upperhalf_s *priv)
 
   for (opriv = priv->du_open; opriv; opriv = opriv->do_flink)
     {
-      /* Are there any poll waiters? */
-
-      for (i = 0; i < CONFIG_DJOYSTICK_NPOLLWAITERS; i++)
-        {
-          if (opriv->do_fds[i])
-            {
-              /* Yes.. OR in the poll event buttons */
-
-              press   |= opriv->do_pollevents.dp_press;
-              release |= opriv->do_pollevents.dp_release;
-              break;
-            }
-        }
+      press   |= opriv->do_pollevents.dp_press;
+      release |= opriv->do_pollevents.dp_release;
 
       /* OR in the signal events */
 
@@ -241,8 +193,6 @@ static void djoy_enable(FAR struct djoy_upperhalf_s *priv)
 
       lower->dl_enable(lower, 0, 0, NULL, NULL);
     }
-
-  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -274,7 +224,6 @@ static void djoy_sample(FAR struct djoy_upperhalf_s *priv)
   djoy_buttonset_t press;
   djoy_buttonset_t release;
   irqstate_t flags;
-  int i;
 
   DEBUGASSERT(priv);
   lower = priv->du_lower;
@@ -297,8 +246,8 @@ static void djoy_sample(FAR struct djoy_upperhalf_s *priv)
    * newly released.
    */
 
-  change  = sample ^ priv->du_sample;
-  press   = change & sample;
+  change = sample ^ priv->du_sample;
+  press  = change & sample;
 
   DEBUGASSERT(lower->dl_supported);
   release = change & (lower->dl_supported(lower) & ~sample);
@@ -312,21 +261,12 @@ static void djoy_sample(FAR struct djoy_upperhalf_s *priv)
       if ((press & opriv->do_pollevents.dp_press)     != 0 ||
           (release & opriv->do_pollevents.dp_release) != 0)
         {
+          opriv->do_pollpending = true;
+
           /* Yes.. Notify all waiters */
 
-          for (i = 0; i < CONFIG_DJOYSTICK_NPOLLWAITERS; i++)
-            {
-              FAR struct pollfd *fds = opriv->do_fds[i];
-              if (fds)
-                {
-                  fds->revents |= (fds->events & POLLIN);
-                  if (fds->revents != 0)
-                    {
-                      iinfo("Report events: %02x\n", fds->revents);
-                      nxsem_post(fds->sem);
-                    }
-                }
-            }
+          poll_notify(opriv->do_fds, CONFIG_INPUT_DJOYSTICK_NPOLLWAITERS,
+                      POLLIN);
         }
 
       /* Have any signal events occurred? */
@@ -341,10 +281,6 @@ static void djoy_sample(FAR struct djoy_upperhalf_s *priv)
                              SI_QUEUE, &opriv->do_work);
         }
     }
-
-  /* Enable/disable interrupt handling */
-
-  djoy_enable(priv);
 
   priv->du_sample = sample;
   leave_critical_section(flags);
@@ -361,38 +297,29 @@ static int djoy_open(FAR struct file *filep)
   FAR struct djoy_open_s *opriv;
   FAR const struct djoy_lowerhalf_s *lower;
   djoy_buttonset_t supported;
-  int ret;
+  irqstate_t flags;
 
-  DEBUGASSERT(filep && filep->f_inode);
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv = (FAR struct djoy_upperhalf_s *)inode->i_private;
-
-  /* Get exclusive access to the driver structure */
-
-  ret = djoy_takesem(&priv->du_exclsem);
-  if (ret < 0)
-    {
-      ierr("ERROR: djoy_takesem failed: %d\n", ret);
-      return ret;
-    }
+  priv = inode->i_private;
 
   /* Allocate a new open structure */
 
-  opriv = (FAR struct djoy_open_s *)kmm_zalloc(sizeof(struct djoy_open_s));
+  opriv = kmm_zalloc(sizeof(struct djoy_open_s));
   if (!opriv)
     {
       ierr("ERROR: Failed to allocate open structure\n");
-      ret = -ENOMEM;
-      goto errout_with_sem;
+      return -ENOMEM;
     }
 
   /* Initialize the open structure */
 
   lower = priv->du_lower;
   DEBUGASSERT(lower && lower->dl_supported);
-  supported = lower->dl_supported(lower);
 
+  flags = enter_critical_section();
+
+  supported = lower->dl_supported(lower);
   opriv->do_pollevents.dp_press   = supported;
   opriv->do_pollevents.dp_release = supported;
 
@@ -401,14 +328,16 @@ static int djoy_open(FAR struct file *filep)
   opriv->do_flink = priv->du_open;
   priv->du_open = opriv;
 
+  /* Enable/disable interrupt handling */
+
+  djoy_enable(priv);
+
   /* Attach the open structure to the file structure */
 
   filep->f_priv = (FAR void *)opriv;
-  ret = OK;
 
-errout_with_sem:
-  djoy_givesem(&priv->du_exclsem);
-  return ret;
+  leave_critical_section(flags);
+  return OK;
 }
 
 /****************************************************************************
@@ -423,45 +352,14 @@ static int djoy_close(FAR struct file *filep)
   FAR struct djoy_open_s *curr;
   FAR struct djoy_open_s *prev;
   irqstate_t flags;
-  bool closing;
-  int ret;
 
-  DEBUGASSERT(filep && filep->f_priv && filep->f_inode);
+  DEBUGASSERT(filep->f_priv);
   opriv = filep->f_priv;
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv  = (FAR struct djoy_upperhalf_s *)inode->i_private;
-
-  /* Handle an improbable race conditions with the following atomic test
-   * and set.
-   *
-   * This is actually a pretty feeble attempt to handle this.  The
-   * improbable race condition occurs if two different threads try to
-   * close the joystick driver at the same time.  The rule:  don't do
-   * that!  It is feeble because we do not really enforce stale pointer
-   * detection anyway.
-   */
+  priv  = inode->i_private;
 
   flags = enter_critical_section();
-  closing = opriv->do_closing;
-  opriv->do_closing = true;
-  leave_critical_section(flags);
-
-  if (closing)
-    {
-      /* Another thread is doing the close */
-
-      return OK;
-    }
-
-  /* Get exclusive access to the driver structure */
-
-  ret = djoy_takesem(&priv->du_exclsem);
-  if (ret < 0)
-    {
-      ierr("ERROR: djoy_takesem failed: %d\n", ret);
-      return ret;
-    }
 
   /* Find the open structure in the list of open structures for the device */
 
@@ -473,8 +371,8 @@ static int djoy_close(FAR struct file *filep)
   if (!curr)
     {
       ierr("ERROR: Failed to find open entry\n");
-      ret = -ENOENT;
-      goto errout_with_exclsem;
+      leave_critical_section(flags);
+      return -ENOENT;
     }
 
   /* Remove the structure from the device */
@@ -488,6 +386,12 @@ static int djoy_close(FAR struct file *filep)
       priv->du_open = opriv->do_flink;
     }
 
+  /* Enable/disable interrupt handling */
+
+  djoy_enable(priv);
+
+  leave_critical_section(flags);
+
   /* Cancel any pending notification */
 
   nxsig_cancel_notification(&opriv->do_work);
@@ -495,15 +399,7 @@ static int djoy_close(FAR struct file *filep)
   /* And free the open structure */
 
   kmm_free(opriv);
-
-  /* Enable/disable interrupt handling */
-
-  djoy_enable(priv);
-  ret = OK;
-
-errout_with_exclsem:
-  djoy_givesem(&priv->du_exclsem);
-  return ret;
+  return OK;
 }
 
 /****************************************************************************
@@ -514,14 +410,16 @@ static ssize_t djoy_read(FAR struct file *filep, FAR char *buffer,
                          size_t len)
 {
   FAR struct inode *inode;
+  FAR struct djoy_open_s *opriv;
   FAR struct djoy_upperhalf_s *priv;
   FAR const struct djoy_lowerhalf_s *lower;
+  irqstate_t flags;
   int ret;
 
-  DEBUGASSERT(filep && filep->f_inode);
+  opriv = filep->f_priv;
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv  = (FAR struct djoy_upperhalf_s *)inode->i_private;
+  priv  = inode->i_private;
 
   /* Make sure that the buffer is sufficiently large to hold at least one
    * complete sample.
@@ -535,12 +433,7 @@ static ssize_t djoy_read(FAR struct file *filep, FAR char *buffer,
 
   /* Get exclusive access to the driver structure */
 
-  ret = djoy_takesem(&priv->du_exclsem);
-  if (ret < 0)
-    {
-      ierr("ERROR: djoy_takesem failed: %d\n", ret);
-      return ret;
-    }
+  flags = enter_critical_section();
 
   /* Read and return the current state of the joystick buttons */
 
@@ -548,9 +441,10 @@ static ssize_t djoy_read(FAR struct file *filep, FAR char *buffer,
   DEBUGASSERT(lower && lower->dl_sample);
   priv->du_sample = lower->dl_sample(lower);
   *(FAR djoy_buttonset_t *)buffer = priv->du_sample;
+  opriv->do_pollpending = false;
   ret = sizeof(djoy_buttonset_t);
 
-  djoy_givesem(&priv->du_exclsem);
+  leave_critical_section(flags);
   return (ssize_t)ret;
 }
 
@@ -564,22 +458,18 @@ static int djoy_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   FAR struct djoy_upperhalf_s *priv;
   FAR struct djoy_open_s *opriv;
   FAR const struct djoy_lowerhalf_s *lower;
+  irqstate_t flags;
   int ret;
 
-  DEBUGASSERT(filep && filep->f_priv && filep->f_inode);
+  DEBUGASSERT(filep->f_priv);
   opriv = filep->f_priv;
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv  = (FAR struct djoy_upperhalf_s *)inode->i_private;
+  priv  = inode->i_private;
 
   /* Get exclusive access to the driver structure */
 
-  ret = djoy_takesem(&priv->du_exclsem);
-  if (ret < 0)
-    {
-      ierr("ERROR: djoy_takesem failed: %d\n", ret);
-      return ret;
-    }
+  flags = enter_critical_section();
 
   /* Handle the ioctl command */
 
@@ -587,7 +477,8 @@ static int djoy_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   switch (cmd)
     {
     /* Command:     DJOYIOC_SUPPORTED
-     * Description: Report the set of button events supported by the hardware;
+     * Description: Report the set of button events supported by the
+     *              hardware;
      * Argument:    A pointer to writeable integer value in which to return
      *              the set of supported buttons.
      * Return:      Zero (OK) on success.  Minus one will be returned on
@@ -662,7 +553,7 @@ static int djoy_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
             opriv->do_notify.dn_press   = notify->dn_press;
             opriv->do_notify.dn_release = notify->dn_release;
             opriv->do_notify.dn_event   = notify->dn_event;
-            opriv->do_pid               = getpid();
+            opriv->do_pid               = nxsched_getpid();
 
             /* Enable/disable interrupt handling */
 
@@ -673,12 +564,12 @@ static int djoy_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       break;
 
     default:
-      ierr("ERROR: Unrecognized command: %ld\n", cmd);
+      ierr("ERROR: Unrecognized command: %d\n", cmd);
       ret = -ENOTTY;
       break;
     }
 
-  djoy_givesem(&priv->du_exclsem);
+  leave_critical_section(flags);
   return ret;
 }
 
@@ -690,25 +581,19 @@ static int djoy_poll(FAR struct file *filep, FAR struct pollfd *fds,
                      bool setup)
 {
   FAR struct inode *inode;
-  FAR struct djoy_upperhalf_s *priv;
   FAR struct djoy_open_s *opriv;
-  int ret;
+  irqstate_t flags;
+  int ret = OK;
   int i;
 
-  DEBUGASSERT(filep && filep->f_priv && filep->f_inode);
+  DEBUGASSERT(filep->f_priv);
   opriv = filep->f_priv;
   inode = filep->f_inode;
   DEBUGASSERT(inode->i_private);
-  priv  = (FAR struct djoy_upperhalf_s *)inode->i_private;
 
   /* Get exclusive access to the driver structure */
 
-  ret = djoy_takesem(&priv->du_exclsem);
-  if (ret < 0)
-    {
-      ierr("ERROR: djoy_takesem failed: %d\n", ret);
-      return ret;
-    }
+  flags = enter_critical_section();
 
   /* Are we setting up the poll?  Or tearing it down? */
 
@@ -718,7 +603,7 @@ static int djoy_poll(FAR struct file *filep, FAR struct pollfd *fds,
        * slot for the poll structure reference
        */
 
-      for (i = 0; i < CONFIG_DJOYSTICK_NPOLLWAITERS; i++)
+      for (i = 0; i < CONFIG_INPUT_DJOYSTICK_NPOLLWAITERS; i++)
         {
           /* Find an available slot */
 
@@ -728,16 +613,22 @@ static int djoy_poll(FAR struct file *filep, FAR struct pollfd *fds,
 
               opriv->do_fds[i] = fds;
               fds->priv = &opriv->do_fds[i];
+
+              if (opriv->do_pollpending)
+                {
+                  poll_notify(&fds, 1, POLLIN);
+                }
+
               break;
             }
         }
 
-      if (i >= CONFIG_DJOYSTICK_NPOLLWAITERS)
+      if (i >= CONFIG_INPUT_DJOYSTICK_NPOLLWAITERS)
         {
           ierr("ERROR: Too man poll waiters\n");
-          fds->priv    = NULL;
-          ret          = -EBUSY;
-          goto errout_with_dusem;
+          fds->priv = NULL;
+          ret       = -EBUSY;
+          goto errout;
         }
     }
   else if (fds->priv)
@@ -751,7 +642,7 @@ static int djoy_poll(FAR struct file *filep, FAR struct pollfd *fds,
         {
           ierr("ERROR: Poll slot not found\n");
           ret = -EIO;
-          goto errout_with_dusem;
+          goto errout;
         }
 #endif
 
@@ -761,8 +652,8 @@ static int djoy_poll(FAR struct file *filep, FAR struct pollfd *fds,
       fds->priv = NULL;
     }
 
-errout_with_dusem:
-  djoy_givesem(&priv->du_exclsem);
+errout:
+  leave_critical_section(flags);
   return ret;
 }
 
@@ -780,7 +671,7 @@ errout_with_dusem:
  *
  * Input Parameters:
  *   devname - The name of the discrete joystick device to be registers.
- *     This should be a string of the form "/priv/djoyN" where N is the
+ *     This should be a string of the form "/dev/djoyN" where N is the
  *     minor device number.
  *   lower - An instance of the platform-specific discrete joystick lower
  *     half driver.
@@ -793,7 +684,6 @@ errout_with_dusem:
 
 int djoy_register(FAR const char *devname,
                   FAR const struct djoy_lowerhalf_s *lower)
-
 {
   FAR struct djoy_upperhalf_s *priv;
   int ret;
@@ -804,7 +694,6 @@ int djoy_register(FAR const char *devname,
 
   priv = (FAR struct djoy_upperhalf_s *)
     kmm_zalloc(sizeof(struct djoy_upperhalf_s));
-
   if (!priv)
     {
       ierr("ERROR: Failed to allocate device structure\n");
@@ -819,18 +708,16 @@ int djoy_register(FAR const char *devname,
   /* Initialize the new djoystick driver instance */
 
   priv->du_lower = lower;
-  nxsem_init(&priv->du_exclsem, 0, 1);
 
   DEBUGASSERT(lower->dl_sample);
   priv->du_sample = lower->dl_sample(lower);
 
   /* And register the djoystick driver */
 
-  ret = register_driver(devname, &djoy_fops, 0666, priv);
+  ret = register_driver(devname, &g_djoy_fops, 0666, priv);
   if (ret < 0)
     {
       ierr("ERROR: register_driver failed: %d\n", ret);
-      nxsem_destroy(&priv->du_exclsem);
       kmm_free(priv);
     }
 

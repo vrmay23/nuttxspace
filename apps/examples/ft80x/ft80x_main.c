@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/ft80x/ft80x_main.c
+ * apps/examples/ft80x/ft80x_main.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -45,6 +32,7 @@
 #include <fcntl.h>
 #include <errno.h>
 
+#include <sys/param.h>
 #include <nuttx/lcd/ft80x.h>
 
 #include "graphics/ft80x.h"
@@ -75,13 +63,13 @@ struct ft80x_exampleinfo_s
  *  ft80x_prim_lines       LINES           Line drawing primitive
  *  ft80x_prim_linestrip   LINE_STRIP      Line strip drawing primitive
  *  ft80x_prim_edgestrip_r EDGE_STRIP_R    Edge strip right side drawing
-                                           primitive
+ *                                         primitive
  *  (To be provided)       EDGE_STRIP_L    Edge strip left side drawing
-                                           primitive
+ *                                         primitive
  *  (To be provided)       EDGE_STRIP_A    Edge strip above side drawing
-                                           primitive
+ *                                         primitive
  *  (To be provided)       EDGE_STRIP_B    Edge strip below side drawing
-                                           primitive
+ *                                         primitive
  *  ft80x_prim_rectangles  RECTS           Rectangle drawing primitive
  *  ft80x_prim_scissor     SCISSOR         Scissor primitive
  *  ft80x_prim_stencil     STENCIL         Stencil primitives
@@ -103,7 +91,6 @@ static const struct ft80x_exampleinfo_s g_primitives[] =
   { "Alpha Blend",  ft80x_prim_alphablend }
 };
 
-#define NPRIMITIVES (sizeof(g_primitives) / sizeof(struct ft80x_exampleinfo_s))
 #endif /* CONFIG_EXAMPLES_FT80X_PRIMITIVES */
 
 /* Co-processor display examples.  Only a small, but interesting, subset
@@ -111,7 +98,7 @@ static const struct ft80x_exampleinfo_s g_primitives[] =
  * possible options.
  *
  *  FUNCTION                 CoProc CMD USED DESCRIPTION
- *  ------------------------ --------------- ----------------------------------
+ *  ------------------------ --------------- --------------------------------
  *  ft80x_coproc_button      CMD_BUTTON      Draw a button
  *  ft80x_coproc_clock       CMD_CLOCK       Draw an analog clock
  *  ft80x_coproc_gauge       CMD_GAUGE       Draw a gauge
@@ -124,12 +111,12 @@ static const struct ft80x_exampleinfo_s g_primitives[] =
  *  ft80x_coproc_toggle      CMD_TOGGLE      Draw a toggle switch
  *  ft80x_coproc_number      CMD_NUMBER      Draw a decimal number
  *  ft80x_coproc_calibrate   CMD_CALIBRATE   Execute the touch screen
-                                             calibration routine
+ *                                           calibration routine
  *  ft80x_coproc_spinner     CMD_SPINNER     Start an animated spinner
  *  ft80x_coproc_screensaver CMD_SCREENSAVER Start an animated screensaver
  *  (To be provided)         CMD_SKETCH      Start a continuous sketch update
  *  (To be provided)         CMD_SNAPSHOT    Take a snapshot of the current
-                                             screen
+ *                                           screen
  *  ft80x_coproc_logo        CMD_LOGO        Play device log animation
  */
 
@@ -153,8 +140,6 @@ static const struct ft80x_exampleinfo_s g_coproc[] =
 #endif
   { "Logo",           ft80x_coproc_logo }
 };
-
-#define NCOPROC (sizeof(g_coproc) / sizeof(struct ft80x_exampleinfo_s))
 
 /****************************************************************************
  * Private Functions
@@ -197,7 +182,7 @@ static int ft80x_showname(int fd, FAR struct ft80x_dlbuffer_s *buffer,
   /* Clear the display */
 
   cmds.clearrgb.cmd = FT80X_CLEAR_COLOR_RGB(0, 0, 0x80);
-  cmds.clear.cmd    = FT80X_CLEAR(1 ,1, 1);
+  cmds.clear.cmd    = FT80X_CLEAR(1, 1, 1);
   cmds.colorrgb.cmd = FT80X_COLOR_RGB(0xff, 0xff, 0xff);
 
   /* Use the CMD_TEXT co-processor command to show the name of the next
@@ -323,7 +308,7 @@ int main(int argc, FAR char *argv[])
 
   ft80x_info("FT80x Primitive Functions\n");
 
-  for (i = 0; i < NPRIMITIVES; i++)
+  for (i = 0; i < nitems(g_primitives); i++)
     {
       ft80x_example(fd, buffer, &g_primitives[i]);
     }
@@ -333,7 +318,7 @@ int main(int argc, FAR char *argv[])
 
   ft80x_info("FT80x Co-processor Functions\n");
 
-  for (i = 0; i < NCOPROC; i++)
+  for (i = 0; i < nitems(g_coproc); i++)
     {
       ft80x_example(fd, buffer, &g_coproc[i]);
     }

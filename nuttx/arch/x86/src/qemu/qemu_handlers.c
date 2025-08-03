@@ -1,35 +1,22 @@
 /****************************************************************************
- *  arch/x86/src/qemu/qemu_handlers.c
+ * arch/x86/src/qemu/qemu_handlers.c
  *
- *   Copyright (C) 2011-2012, 2014-2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,11 +27,14 @@
 #include <nuttx/config.h>
 #include <nuttx/compiler.h>
 
+#include <assert.h>
+
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
 #include <arch/io.h>
+#include <sched/sched.h>
 
-#include "up_internal.h"
+#include "x86_internal.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -88,6 +78,8 @@ static void idt_outb(uint8_t val, uint16_t addr)
 #ifndef CONFIG_SUPPRESS_INTERRUPTS
 static uint32_t *common_handler(int irq, uint32_t *regs)
 {
+  struct tcb_s **running_task = &g_running_tasks[this_cpu()];
+  struct tcb_s *tcb;
   board_autoled_on(LED_INIRQ);
 
   /* Current regs non-zero indicates that we are processing an interrupt;
@@ -96,14 +88,15 @@ static uint32_t *common_handler(int irq, uint32_t *regs)
    * Nested interrupts are not supported.
    */
 
-  DEBUGASSERT(g_current_regs == NULL);
-  g_current_regs = regs;
+  DEBUGASSERT(up_current_regs() == NULL);
+  up_set_current_regs(regs);
+
+  x86_savestate((*running_task)->xcp.regs);
 
   /* Deliver the IRQ */
 
   irq_dispatch(irq, regs);
 
-#if defined(CONFIG_ARCH_FPU) || defined(CONFIG_ARCH_ADDRENV)
   /* Check for a context switch.  If a context switch occurred, then
    * g_current_regs will have a different value than it did on entry.  If an
    * interrupt level context switch has occurred, then restore the floating
@@ -111,14 +104,15 @@ static uint32_t *common_handler(int irq, uint32_t *regs)
    * returning from the interrupt.
    */
 
-  if (regs != g_current_regs)
+  if (regs != up_current_regs())
     {
 #ifdef CONFIG_ARCH_FPU
       /* Restore floating point registers */
 
-      up_restorefpu((uint32_t*)g_current_regs);
+      up_restorefpu(up_current_regs());
 #endif
 
+      tcb = this_task();
 #ifdef CONFIG_ARCH_ADDRENV
       /* Make sure that the address environment for the previously
        * running task is closed down gracefully (data caches dump,
@@ -126,10 +120,21 @@ static uint32_t *common_handler(int irq, uint32_t *regs)
        * thread at the head of the ready-to-run list.
        */
 
-      group_addrenv(NULL);
+      addrenv_switch(tcb);
 #endif
+
+      /* Update scheduler parameters */
+
+      nxsched_suspend_scheduler(*running_task);
+      nxsched_resume_scheduler(tcb);
+
+      /* Record the new "running" task when context switch occurred.
+       * g_running_tasks[] is only used by assertion logic for reporting
+       * crashes.
+       */
+
+      *running_task = tcb;
     }
-#endif
 
   /* If a context switch occurred while processing the interrupt then
    * g_current_regs may have change value.  If we return any value different
@@ -137,13 +142,13 @@ static uint32_t *common_handler(int irq, uint32_t *regs)
    * switch occurred during interrupt processing.
    */
 
-  regs = (uint32_t*)g_current_regs;
+  regs = up_current_regs();
 
   /* Set g_current_regs to NULL to indicate that we are no longer in an
    * interrupt handler.
    */
 
-  g_current_regs = NULL;
+  up_set_current_regs(NULL);
   return regs;
 }
 #endif
@@ -164,8 +169,8 @@ uint32_t *isr_handler(uint32_t *regs)
 {
 #ifdef CONFIG_SUPPRESS_INTERRUPTS
   board_autoled_on(LED_INIRQ);
-  PANIC(); /* Doesn't return */
-  return regs;               /* To keep the compiler happy */
+  PANIC();      /* Doesn't return */
+  return regs;  /* To keep the compiler happy */
 #else
   uint32_t *ret;
 
@@ -190,8 +195,8 @@ uint32_t *irq_handler(uint32_t *regs)
 {
 #ifdef CONFIG_SUPPRESS_INTERRUPTS
   board_autoled_on(LED_INIRQ);
-  PANIC(); /* Doesn't return */
-  return regs;               /* To keep the compiler happy */
+  PANIC();      /* Doesn't return */
+  return regs;  /* To keep the compiler happy */
 #else
   uint32_t *ret;
   int irq;

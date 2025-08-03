@@ -1,36 +1,22 @@
 /****************************************************************************
  * libs/libc/time/lib_gmtimer.c
  *
- *   Copyright (C) 2007, 2009, 2011, 2015, 2019 Gregory Nutt. All rights
- *     reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,11 +27,9 @@
 #include <nuttx/config.h>
 
 #include <stdbool.h>
-#include <time.h>
 #include <errno.h>
 #include <debug.h>
 
-#include <nuttx/time.h>
 #include <nuttx/clock.h>
 
 /****************************************************************************
@@ -171,26 +155,26 @@ static void clock_utc2calendar(time_t days, FAR int *year, FAR int *month,
   int  min;
   int  max;
   int  tmp;
-  bool leapyear;
+  bool leap_year;
 
   /* There is one leap year every four years, so we can get close with the
    * following:
    */
 
-  value   = days  / (4 * 365 + 1); /* Number of 4-years periods since the epoch */
-  days   -= value * (4 * 365 + 1); /* Remaining days */
-  value <<= 2;                     /* Years since the epoch */
+  value   = days  / (4 * DAYSPERNYEAR + 1); /* Number of 4-years periods since the epoch */
+  days   -= value * (4 * DAYSPERNYEAR + 1); /* Remaining days */
+  value <<= 2;                              /* Years since the epoch */
 
   /* Then we will brute force the next 0-3 years
    *
    * Is this year a leap year? (we'll need this later too)
    */
 
-  leapyear = clock_isleapyear(value + 1970);
+  leap_year = clock_isleapyear(value + EPOCH_YEAR);
 
   /* Get the number of days in the year */
 
-  tmp = (leapyear ? 366 : 365);
+  tmp = (leap_year ? DAYSPERLYEAR : DAYSPERNYEAR);
 
   /* Do we have that many days left to account for? */
 
@@ -203,19 +187,19 @@ static void clock_utc2calendar(time_t days, FAR int *year, FAR int *month,
 
       /* Is the next year a leap year? */
 
-      leapyear = clock_isleapyear(value + 1970);
+      leap_year = clock_isleapyear(value + EPOCH_YEAR);
 
       /* Get the number of days in the next year */
 
-      tmp = (leapyear ? 366 : 365);
+      tmp = (leap_year ? DAYSPERLYEAR : DAYSPERNYEAR);
     }
 
   /* At this point, 'value' has the years since 1970 and 'days' has number
-   * of days into that year.  'leapyear' is true if the year in 'value' is
+   * of days into that year.  'leap_year' is true if the year in 'value' is
    * a leap year.
    */
 
-  *year = 1970 + value;
+  *year = EPOCH_YEAR + value;
 
   /* Handle the month (zero based) */
 
@@ -232,7 +216,7 @@ static void clock_utc2calendar(time_t days, FAR int *year, FAR int *month,
        * month following the midpoint.
        */
 
-      tmp = clock_daysbeforemonth(value + 1, leapyear);
+      tmp = clock_daysbeforemonth(value + 1, leap_year);
 
       /* Does the number of days before this month that equal or exceed the
        * number of days we have remaining?
@@ -244,7 +228,7 @@ static void clock_utc2calendar(time_t days, FAR int *year, FAR int *month,
            * midpoint, 'value'.  Could it be the midpoint?
            */
 
-          tmp = clock_daysbeforemonth(value, leapyear);
+          tmp = clock_daysbeforemonth(value, leap_year);
           if (tmp > days)
             {
               /* No... The one we want is somewhere between min and value-1 */
@@ -273,14 +257,14 @@ static void clock_utc2calendar(time_t days, FAR int *year, FAR int *month,
     }
   while (min < max);
 
-  /* The selected month number is in value. Subtract the number of days in the
-   * selected month
+  /* The selected month number is in value. Subtract the number of days in
+   * the selected month
    */
 
-  days -= clock_daysbeforemonth(value, leapyear);
+  days -= clock_daysbeforemonth(value, leap_year);
 
-  /* At this point, value has the month into this year (zero based) and days has
-   * number of days into this month (zero based)
+  /* At this point, value has the month into this year (zero based) and days
+   * has number of days into this month (zero based)
    */
 
   *month = value + 1; /* 1-based */
@@ -301,7 +285,7 @@ static void clock_utc2calendar(time_t days, FAR int *year, FAR int *month,
  *
  ****************************************************************************/
 
-FAR struct tm *gmtime_r(FAR const time_t *timer, FAR struct tm *result)
+FAR struct tm *gmtime_r(FAR const time_t *timep, FAR struct tm *result)
 {
   time_t epoch;
   time_t jdn;
@@ -314,7 +298,7 @@ FAR struct tm *gmtime_r(FAR const time_t *timer, FAR struct tm *result)
 
   /* Get the seconds since the EPOCH */
 
-  epoch = *timer;
+  epoch = *timep;
   linfo("timer=%d\n", (int)epoch);
 
   /* Convert to days, hours, minutes, and seconds since the EPOCH */
@@ -330,30 +314,35 @@ FAR struct tm *gmtime_r(FAR const time_t *timer, FAR struct tm *result)
 
   sec    = epoch;
 
-  linfo("hour=%d min=%d sec=%d\n",
-        (int)hour, (int)min, (int)sec);
+  linfo("hour=%d min=%d sec=%d\n", hour, min, sec);
 
   /* Convert the days since the EPOCH to calendar day */
 
   clock_utc2calendar(jdn, &year, &month, &day);
 
-  linfo("jdn=%d year=%d month=%d day=%d\n",
-        (int)jdn, (int)year, (int)month, (int)day);
+  linfo("jdn=%d year=%d month=%d day=%d\n", (int)jdn, year, month, day);
 
   /* Then return the struct tm contents */
 
-  result->tm_year  = (int)year - 1900; /* Relative to 1900 */
-  result->tm_mon   = (int)month - 1;   /* zero-based */
-  result->tm_mday  = (int)day;         /* one-based */
-  result->tm_hour  = (int)hour;
-  result->tm_min   = (int)min;
-  result->tm_sec   = (int)sec;
+  result->tm_year   = year - TM_YEAR_BASE; /* Relative to 1900 */
+  result->tm_mon    = month - 1;           /* zero-based */
+  result->tm_mday   = day;                 /* one-based */
+  result->tm_hour   = hour;
+  result->tm_min    = min;
+  result->tm_sec    = sec;
 
-  result->tm_wday  = clock_dayoftheweek(day, month, year);
-  result->tm_yday  = day +
-                     clock_daysbeforemonth(result->tm_mon,
-                                           clock_isleapyear(year));
-  result->tm_isdst = 0;
+  result->tm_wday   = clock_dayoftheweek(day, month, year);
+  result->tm_yday   = day - 1 +
+                      clock_daysbeforemonth(result->tm_mon,
+                                            clock_isleapyear(year));
+  result->tm_isdst  = 0;
+  result->tm_gmtoff = 0;
+  result->tm_zone   = NULL;
 
   return result;
+}
+
+FAR struct tm *localtime_r(FAR const time_t *timep, FAR struct tm *result)
+{
+  return gmtime_r(timep, result);
 }

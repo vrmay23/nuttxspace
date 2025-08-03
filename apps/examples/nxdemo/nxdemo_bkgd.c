@@ -1,36 +1,22 @@
 /****************************************************************************
- * examples/nxdemo/nxdemo_bkgd.c
+ * apps/examples/nxdemo/nxdemo_bkgd.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *           Cherciu Mihail <m_cherciu@yahoo.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,8 +32,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <semaphore.h>
+#include <sys/param.h>
 #include <errno.h>
 #include <debug.h>
+#include <unistd.h>
 
 #include <nuttx/nx/nx.h>
 #include <nuttx/nx/nxglib.h>
@@ -82,21 +70,14 @@
 #  error "Unsupported CONFIG_EXAMPLES_NXDEMO_BPP"
 #endif
 
-#ifndef MIN
-#  define MIN(a, b) (a < b ? a : b)
-#endif
-
-#ifndef MAX
-#  define MAX(a, b) (a > b ? a : b)
-#endif
-
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
 static void nxdemo_redraw(NXWINDOW hwnd, FAR const struct nxgl_rect_s *rect,
                           bool morem, FAR void *arg);
-static void nxdemo_position(NXWINDOW hwnd, FAR const struct nxgl_size_s *size,
+static void nxdemo_position(NXWINDOW hwnd,
+                            FAR const struct nxgl_size_s *size,
                             FAR const struct nxgl_point_s *pos,
                             FAR const struct nxgl_rect_s *bounds,
                             FAR void *arg);
@@ -153,10 +134,11 @@ static void nxdemo_redraw(NXWINDOW hwnd, FAR const struct nxgl_rect_s *rect,
  * Name: nxdemo_position
  ****************************************************************************/
 
-static void nxdemo_position(NXWINDOW hwnd, FAR const struct nxgl_size_s *size,
-                                FAR const struct nxgl_point_s *pos,
-                                FAR const struct nxgl_rect_s *bounds,
-                                FAR void *arg)
+static void nxdemo_position(NXWINDOW hwnd,
+                            FAR const struct nxgl_size_s *size,
+                            FAR const struct nxgl_point_s *pos,
+                            FAR const struct nxgl_rect_s *bounds,
+                            FAR void *arg)
 {
   /* Report the position */
 
@@ -292,7 +274,7 @@ static void nxdemo_demo_1(NXWINDOW hwnd)
   center.x = g_nxdemo.xres >> 1;
   center.y = g_nxdemo.yres >> 1;
 
-  for (i = 0; i<MIN(g_nxdemo.xres, g_nxdemo.yres)>> 1; i++)
+  for (i = 0; i < (MIN(g_nxdemo.xres, g_nxdemo.yres) >> 1); i++)
     {
       circle_radius = i;
 
@@ -350,7 +332,7 @@ static void nxdemo_demo_2(NXWINDOW hwnd)
   center.x = g_nxdemo.xres >> 1;
   center.y = g_nxdemo.yres >> 1;
 
-  for (i = 0; i<MIN(g_nxdemo.xres, g_nxdemo.yres)>> 1; i++)
+  for (i = 0; i < (MIN(g_nxdemo.xres, g_nxdemo.yres) >> 1); i++)
     {
       rect.pt1.x = center.x - i;
       rect.pt1.y = center.y - i;
@@ -376,7 +358,6 @@ static void nxdemo_demo_2(NXWINDOW hwnd)
 
   for (i = MIN(g_nxdemo.xres, g_nxdemo.yres) >> 1; i > 1; i--)
     {
-
       rect.pt1.x = center.x - i;
       rect.pt1.y = center.y - i;
       rect.pt2.x = center.x + i;
@@ -492,7 +473,7 @@ static void nxdemo_demo_4(NXWINDOW hwnd)
   origin.x   = 0;
   origin.y   = 0;
 
-  src[0] = (FAR const void *)g_battery;
+  src[0] = g_battery;
 
   ret = nx_bitmap((NXWINDOW)hwnd,
                   &rect,

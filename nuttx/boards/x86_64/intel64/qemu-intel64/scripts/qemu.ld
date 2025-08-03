@@ -1,5 +1,7 @@
 /****************************************************************************
- * boards/x86_64/intel64/qemu/scripts/qemu.ld
+ * boards/x86_64/intel64/qemu-intel64/scripts/qemu.ld
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -22,17 +24,36 @@ OUTPUT_ARCH(i386:x86-64)
 ENTRY(__pmode_entry)
 SECTIONS
 {
-    . = 0x4M;
+
+    . = 0x0;
+
+    .realmode : {
+        . = ALIGN(8);
+        KEEP(*(.multiboot))
+        *(.realmode)
+    }
+
+    . = 0x1M;
     _kernel_physical_start = .;
+
+    .multiboot1 : {
+        . = ALIGN(8);
+        KEEP(*(.multiboot1))
+    }
 
     .loader.text : {
         . = ALIGN(8);
-        KEEP(*(.multiboot))
         *(.loader.text)
     }
 
     .loader.rodata : {
         *(.loader.rodata)
+        *(.note.nuttx)
+    }
+
+    .loader.tdata_tbss : {
+        *(.loader.tdata)
+        *(.loader.tbss)
     }
 
     .loader.data : {
@@ -59,10 +80,20 @@ SECTIONS
         _etext = ABSOLUTE(.);
     }
 
-    .rodata ALIGN(0x1000) : AT ( (LOADADDR (.text) + SIZEOF (.text) + 0xFFF) & 0xFFFFFFFFFFFFF000 )
+    .init_section ALIGN(0x1000) :
+    {
+        _sinit = ABSOLUTE(.);
+        KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*)))
+        KEEP(*(.init_array EXCLUDE_FILE(*crtbegin.o *crtbegin?.o *crtend.o *crtend?.o) .ctors))
+        . = ALIGN(4096);
+        _einit = ABSOLUTE(.);
+    }
+
+    .rodata ALIGN(0x1000) :
     {
         _srodata = ABSOLUTE(.);
         *(.rodata .rodata.*)
+        *(.lrodata .lrodata.*)
         *(.fixup)
         *(.gnu.warning)
         *(.glue_7)
@@ -71,26 +102,39 @@ SECTIONS
         *(.gcc_except_table)
         *(.gnu.linkonce.r.*)
         *(.eh_frame)
+        *(.note.gnu.*)
         _erodata = ABSOLUTE(.);
     }
 
-    .data ALIGN(0x1000) : AT ( (LOADADDR (.rodata) + SIZEOF (.rodata) + 0xFFF) & 0xFFFFFFFFFFFFF000 )
+    .tdata_tbss ALIGN(0x1000) :
+    {
+        _stdata = ABSOLUTE(.);
+        *(.tdata .tdata.* .gnu.linkonce.td.*);
+        _etdata = ABSOLUTE(.);
+        _stbss = ABSOLUTE(.);
+        *(.tbss .tbss.* .gnu.linkonce.tb.* .tcommon);
+        _etbss = ABSOLUTE(.);
+    }
+
+    .data ALIGN(0x1000) :
     {
         _sdata = ABSOLUTE(.);
         *(.data .data.*)
+        *(.ldata .ldata.*)
         *(.gnu.linkonce.d.*)
         CONSTRUCTORS
         . = ALIGN(4);
         _edata = ABSOLUTE(.);
     }
 
-    .bss ALIGN(0x1000) : AT ( (LOADADDR (.data) + SIZEOF (.data) + 0xFFF) & 0xFFFFFFFFFFFFF000 )
+    .bss ALIGN(0x1000) :
     {
         _sbss = ABSOLUTE(.);
         *(.bss .bss.*)
+        *(.lbss .lbss.*)
         *(.gnu.linkonce.b.*)
         *(COMMON)
-        . = ALIGN(4);
+        . = ALIGN(16);
         _ebss = ABSOLUTE(.);
     }
 

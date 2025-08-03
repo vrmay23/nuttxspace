@@ -1,6 +1,8 @@
 /****************************************************************************
  * sched/semaphore/sem_tickwait.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -27,6 +29,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <time.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -51,10 +54,6 @@
  *
  * Input Parameters:
  *   sem     - Semaphore object
- *   start   - The system time that the delay is relative to.  If the
- *             current time is not the same as the start time, then the
- *             delay will be adjust so that the end time will be the same
- *             in any event.
  *   delay   - Ticks to wait from the start time until the semaphore is
  *             posted.  If ticks is zero, then this function is equivalent
  *             to nxsem_trywait().
@@ -67,26 +66,11 @@
  *
  ****************************************************************************/
 
-int nxsem_tickwait(FAR sem_t *sem, clock_t start, uint32_t delay)
+int nxsem_tickwait(FAR sem_t *sem, uint32_t delay)
 {
-  FAR struct tcb_s *rtcb = this_task();
+  FAR struct tcb_s *rtcb;
   irqstate_t flags;
-  clock_t elapsed;
   int ret;
-
-  DEBUGASSERT(sem != NULL && up_interrupt_context() == false &&
-              rtcb->waitdog == NULL);
-
-  /* Create a watchdog.  We will not actually need this watchdog
-   * unless the semaphore is unavailable, but we will reserve it up
-   * front before we enter the following critical section.
-   */
-
-  rtcb->waitdog = wd_create();
-  if (!rtcb->waitdog)
-    {
-      return -ENOMEM;
-    }
 
   /* We will disable interrupts until we have completed the semaphore
    * wait.  We need to do this (as opposed to just disabling pre-emption)
@@ -105,7 +89,7 @@ int nxsem_tickwait(FAR sem_t *sem, clock_t start, uint32_t delay)
     {
       /* We got it! */
 
-      goto success_with_irqdisabled;
+      goto out;
     }
 
   /* We will have to wait for the semaphore.  Make sure that we were provided
@@ -114,50 +98,30 @@ int nxsem_tickwait(FAR sem_t *sem, clock_t start, uint32_t delay)
 
   if (delay == 0)
     {
-      /* Return the errno from nxsem_trywait() */
+      /* Timed out already before waiting */
 
-      goto errout_with_irqdisabled;
-    }
-
-  /* Adjust the delay for any time since the delay was calculated */
-
-  elapsed = clock_systimer() - start;
-  if (/* elapsed >= (UINT32_MAX / 2) || */ elapsed >= delay)
-    {
       ret = -ETIMEDOUT;
-      goto errout_with_irqdisabled;
+      goto out;
     }
 
-  delay -= elapsed;
+  rtcb = this_task();
 
   /* Start the watchdog with interrupts still disabled */
 
-  wd_start(rtcb->waitdog, delay, nxsem_timeout, 1, getpid());
+  wd_start(&rtcb->waitdog, delay, nxsem_timeout, (uintptr_t)rtcb);
 
   /* Now perform the blocking wait */
 
   ret = nxsem_wait(sem);
-  if (ret < 0)
-    {
-      goto errout_with_irqdisabled;
-    }
 
   /* Stop the watchdog timer */
 
-  wd_cancel(rtcb->waitdog);
+  wd_cancel(&rtcb->waitdog);
 
-  /* We can now restore interrupts and delete the watchdog */
+  /* We can now restore interrupts */
 
-  /* Success exits */
-
-success_with_irqdisabled:
-
-  /* Error exits */
-
-errout_with_irqdisabled:
+out:
   leave_critical_section(flags);
-  wd_delete(rtcb->waitdog);
-  rtcb->waitdog = NULL;
   return ret;
 }
 
@@ -170,10 +134,6 @@ errout_with_irqdisabled:
  *
  * Input Parameters:
  *   sem     - Semaphore object
- *   start   - The system time that the delay is relative to.  If the
- *             current time is not the same as the start time, then the
- *             delay will be adjust so that the end time will be the same
- *             in any event.
  *   delay   - Ticks to wait from the start time until the semaphore is
  *             posted.  If ticks is zero, then this function is equivalent
  *             to sem_trywait().
@@ -188,19 +148,27 @@ errout_with_irqdisabled:
  *
  ****************************************************************************/
 
-int nxsem_tickwait_uninterruptible(FAR sem_t *sem, clock_t start,
-                                   uint32_t delay)
+int nxsem_tickwait_uninterruptible(FAR sem_t *sem, uint32_t delay)
 {
+  clock_t end = clock_delay2abstick(delay);
   int ret;
 
-  do
+  for (; ; )
     {
       /* Take the semaphore (perhaps waiting) */
 
-      ret = nxsem_tickwait(sem, start, delay);
+      ret = nxsem_tickwait(sem, delay);
+      if (ret != -EINTR)
+        {
+          break;
+        }
+
+      delay = end - clock_systime_ticks();
+      if ((int32_t)delay < 0)
+        {
+          delay = 0;
+        }
     }
-  while (ret == -EINTR);
 
   return ret;
 }
-

@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/timers/arch_timer.c
  *
- *   Copyright (C) 2017 Pinecone Inc. All rights reserved.
- *   Author: Xiang Xiao <xiaoxiang@pinecone.net>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -47,27 +34,13 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifdef CONFIG_SCHED_TICKLESS
-
-#  ifdef CONFIG_SCHED_TICKLESS_ALARM
-#    error CONFIG_SCHED_TICKLESS_ALARM must be unset to use CONFIG_SCHED_TICKLESS
-#  endif
-
-#  ifndef CONFIG_SCHED_TICKLESS_LIMIT_MAX_SLEEP
-#    error CONFIG_SCHED_TICKLESS_LIMIT_MAX_SLEEP must be set to use CONFIG_SCHED_TICKLESS
-#  endif
-
+#if defined(CONFIG_SCHED_TICKLESS) && defined(CONFIG_SCHED_TICKLESS_ALARM)
+#  error CONFIG_SCHED_TICKLESS_ALARM must be unset to use the arch timer
 #endif
 
 #define CONFIG_BOARD_LOOPSPER100USEC ((CONFIG_BOARD_LOOPSPERMSEC+5)/10)
 #define CONFIG_BOARD_LOOPSPER10USEC  ((CONFIG_BOARD_LOOPSPERMSEC+50)/100)
 #define CONFIG_BOARD_LOOPSPERUSEC    ((CONFIG_BOARD_LOOPSPERMSEC+500)/1000)
-
-#define TIMER_START(l)               ((l)->ops->start(l))
-#define TIMER_GETSTATUS(l,s)         ((l)->ops->getstatus(l,s))
-#define TIMER_SETTIMEOUT(l,t)        ((l)->ops->settimeout(l,t))
-#define TIMER_SETCALLBACK(l,c,a)     ((l)->ops->setcallback(l,c,a))
-#define TIMER_MAXTIMEOUT(l,t)        ((l)->ops->maxtimeout(l,t))
 
 /****************************************************************************
  * Private Types
@@ -77,8 +50,7 @@ struct arch_timer_s
 {
   FAR struct timer_lowerhalf_s *lower;
   uint32_t *next_interval;
-  uint32_t maxtimeout;
-  uint64_t timebase;
+  clock_t timebase;
 };
 
 /****************************************************************************
@@ -91,27 +63,7 @@ static struct arch_timer_s g_timer;
  * Private Functions
  ****************************************************************************/
 
-#if defined(CONFIG_SCHED_TICKLESS) || defined(CONFIG_SCHED_CRITMONITOR) \
-    || defined(CONFIG_SCHED_IRQMONITOR_GETTIME)
-static inline void timespec_from_usec(FAR struct timespec *ts,
-                                      uint64_t microseconds)
-{
-  ts->tv_sec    = microseconds / USEC_PER_SEC;
-  microseconds -= (uint64_t)ts->tv_sec * USEC_PER_SEC;
-  ts->tv_nsec   = microseconds * NSEC_PER_USEC;
-}
-#endif
-
 #ifdef CONFIG_SCHED_TICKLESS
-static inline uint64_t timespec_to_usec(const FAR struct timespec *ts)
-{
-  return (uint64_t)ts->tv_sec * USEC_PER_SEC + ts->tv_nsec / NSEC_PER_USEC;
-}
-
-static inline bool timeout_diff(uint32_t new, uint32_t old)
-{
-  return new < old ? old - new >= USEC_PER_TICK : new - old >= USEC_PER_TICK;
-}
 
 static uint32_t update_timeout(uint32_t timeout)
 {
@@ -121,7 +73,7 @@ static uint32_t update_timeout(uint32_t timeout)
    * since caller already do it for us
    */
 
-  TIMER_GETSTATUS(g_timer.lower, &status);
+  TIMER_TICK_GETSTATUS(g_timer.lower, &status);
   if (g_timer.next_interval)
     {
       /* If the timer interrupt is in the process,
@@ -130,11 +82,11 @@ static uint32_t update_timeout(uint32_t timeout)
 
       *g_timer.next_interval = timeout;
     }
-  else if (timeout_diff(timeout, status.timeleft))
+  else if (timeout != status.timeleft)
     {
       /* Otherwise, update the timeout directly. */
 
-      TIMER_SETTIMEOUT(g_timer.lower, timeout);
+      TIMER_TICK_SETTIMEOUT(g_timer.lower, timeout);
       g_timer.timebase += status.timeout - status.timeleft;
     }
 
@@ -145,7 +97,7 @@ static uint32_t update_timeout(uint32_t timeout)
 static uint64_t current_usec(void)
 {
   struct timer_status_s status;
-  uint64_t timebase;
+  clock_t timebase;
 
   do
     {
@@ -154,7 +106,7 @@ static uint64_t current_usec(void)
     }
   while (timebase != g_timer.timebase);
 
-  return timebase + (status.timeout - status.timeleft);
+  return TICK2USEC(timebase) + (status.timeout - status.timeleft);
 }
 
 static void udelay_accurate(useconds_t microseconds)
@@ -213,27 +165,26 @@ static void udelay_coarse(useconds_t microseconds)
     }
 }
 
-static bool timer_callback(FAR uint32_t *next_interval_us, FAR void *arg)
+static bool timer_callback(FAR uint32_t *next_interval, FAR void *arg)
 {
 #ifdef CONFIG_SCHED_TICKLESS
   struct timer_status_s status;
-  uint32_t next_interval;
+  uint32_t temp_interval;
 
-  g_timer.timebase     += *next_interval_us;
-  next_interval         = g_timer.maxtimeout;
-  g_timer.next_interval = &next_interval;
+  g_timer.timebase     += *next_interval;
+  temp_interval         = g_oneshot_maxticks;
+  g_timer.next_interval = &temp_interval;
   nxsched_timer_expiration();
   g_timer.next_interval = NULL;
 
-  TIMER_GETSTATUS(g_timer.lower, &status);
-  if (timeout_diff(next_interval, status.timeleft))
+  TIMER_TICK_GETSTATUS(g_timer.lower, &status);
+  if (temp_interval != status.timeleft)
     {
       g_timer.timebase += status.timeout - status.timeleft;
-      *next_interval_us = next_interval;
+      *next_interval = temp_interval;
     }
-
 #else
-  g_timer.timebase += USEC_PER_TICK;
+  g_timer.timebase++;
   nxsched_process_timer();
 #endif
 
@@ -246,19 +197,17 @@ static bool timer_callback(FAR uint32_t *next_interval_us, FAR void *arg)
 
 void up_timer_set_lowerhalf(FAR struct timer_lowerhalf_s *lower)
 {
-  g_timer.lower = lower;
-
-  TIMER_MAXTIMEOUT(g_timer.lower, &g_timer.maxtimeout);
-
 #ifdef CONFIG_SCHED_TICKLESS
-  g_oneshot_maxticks = g_timer.maxtimeout / USEC_PER_TICK;
-  TIMER_SETTIMEOUT(g_timer.lower, g_timer.maxtimeout);
+  TIMER_TICK_MAXTIMEOUT(lower, &g_oneshot_maxticks);
+  TIMER_TICK_SETTIMEOUT(lower, g_oneshot_maxticks);
 #else
-  TIMER_SETTIMEOUT(g_timer.lower, USEC_PER_TICK);
+  TIMER_TICK_SETTIMEOUT(lower, 1);
 #endif
 
-  TIMER_SETCALLBACK(g_timer.lower, timer_callback, NULL);
-  TIMER_START(g_timer.lower);
+  TIMER_SETCALLBACK(lower, timer_callback, NULL);
+  TIMER_START(lower);
+
+  g_timer.lower = lower;
 }
 
 /****************************************************************************
@@ -294,28 +243,16 @@ void up_timer_set_lowerhalf(FAR struct timer_lowerhalf_s *lower)
  *
  ****************************************************************************/
 
-#ifdef CONFIG_CLOCK_TIMEKEEPING
-int up_timer_getcounter(FAR uint64_t *cycles)
+void weak_function up_timer_getmask(FAR clock_t *mask)
 {
-  int ret = -EAGAIN;
+  uint32_t maxticks;
 
-  if (g_timer.lower != NULL)
-    {
-      *cycles = current_usec() / USEC_PER_TICK;
-      ret = 0;
-    }
-
-  return ret;
-}
-
-void up_timer_getmask(FAR uint64_t *mask)
-{
-  uint32_t maxticks = g_timer.maxtimeout / USEC_PER_TICK;
+  TIMER_TICK_MAXTIMEOUT(g_timer.lower, &maxticks);
 
   *mask = 0;
   while (1)
     {
-      uint64_t next = (*mask << 1) | 1;
+      clock_t next = (*mask << 1) | 1;
       if (next > maxticks)
         {
           break;
@@ -325,20 +262,32 @@ void up_timer_getmask(FAR uint64_t *mask)
     }
 }
 
-#elif defined(CONFIG_SCHED_TICKLESS)
-int up_timer_gettime(FAR struct timespec *ts)
+int weak_function up_timer_gettick(FAR clock_t *ticks)
 {
   int ret = -EAGAIN;
 
   if (g_timer.lower != NULL)
     {
-      timespec_from_usec(ts, current_usec());
-      ret = 0;
+      *ticks = current_usec() / USEC_PER_TICK;
+      ret = OK;
     }
 
   return ret;
 }
-#endif
+
+int weak_function up_timer_gettime(struct timespec *ts)
+{
+  int ret = -EAGAIN;
+
+  if (g_timer.lower != NULL)
+    {
+      ts->tv_sec  = current_usec() / USEC_PER_SEC;
+      ts->tv_nsec = (current_usec() % USEC_PER_SEC) * NSEC_PER_USEC;
+      ret = OK;
+    }
+
+  return ret;
+}
 
 /****************************************************************************
  * Name: up_timer_cancel
@@ -377,14 +326,14 @@ int up_timer_gettime(FAR struct timespec *ts)
  ****************************************************************************/
 
 #ifdef CONFIG_SCHED_TICKLESS
-int up_timer_cancel(FAR struct timespec *ts)
+int weak_function up_timer_tick_cancel(FAR clock_t *ticks)
 {
   int ret = -EAGAIN;
 
   if (g_timer.lower != NULL)
     {
-      timespec_from_usec(ts, update_timeout(g_timer.maxtimeout));
-      ret = 0;
+      *ticks = update_timeout(g_oneshot_maxticks);
+      ret = OK;
     }
 
   return ret;
@@ -417,22 +366,22 @@ int up_timer_cancel(FAR struct timespec *ts)
  ****************************************************************************/
 
 #ifdef CONFIG_SCHED_TICKLESS
-int up_timer_start(FAR const struct timespec *ts)
+int weak_function up_timer_tick_start(clock_t ticks)
 {
   int ret = -EAGAIN;
 
   if (g_timer.lower != NULL)
     {
-      update_timeout(timespec_to_usec(ts));
-      ret = 0;
+      update_timeout(ticks);
+      ret = OK;
     }
 
   return ret;
 }
 #endif
 
-/********************************************************************************
- * Name: up_critmon_*
+/****************************************************************************
+ * Name: up_perf_*
  *
  * Description:
  *   The first interface simply provides the current time value in unknown
@@ -448,12 +397,17 @@ int up_timer_start(FAR const struct timespec *ts)
  *
  *   The second interface simple converts an elapsed time into well known
  *   units.
- ********************************************************************************/
+ ****************************************************************************/
 
-#ifdef CONFIG_SCHED_CRITMONITOR
-uint32_t up_critmon_gettime(void)
+#ifndef CONFIG_ARCH_HAVE_PERF_EVENTS
+void up_perf_init(FAR void *arg)
 {
-  uint32_t ret = 0;
+  UNUSED(arg);
+}
+
+clock_t up_perf_gettime(void)
+{
+  clock_t ret = 0;
 
   if (g_timer.lower != NULL)
     {
@@ -463,11 +417,16 @@ uint32_t up_critmon_gettime(void)
   return ret;
 }
 
-void up_critmon_convert(uint32_t elapsed, FAR struct timespec *ts)
+unsigned long up_perf_getfreq(void)
 {
-  timespec_from_usec(ts, elapsed);
+  return USEC_PER_SEC;
 }
-#endif
+
+void up_perf_convert(clock_t elapsed, FAR struct timespec *ts)
+{
+  clock_usec2time(ts, elapsed);
+}
+#endif /* CONFIG_ARCH_PERF_EVENTS */
 
 /****************************************************************************
  * Name: up_mdelay
@@ -478,7 +437,7 @@ void up_critmon_convert(uint32_t elapsed, FAR struct timespec *ts)
  *
  ****************************************************************************/
 
-void up_mdelay(unsigned int milliseconds)
+void weak_function up_mdelay(unsigned int milliseconds)
 {
   up_udelay(USEC_PER_MSEC * milliseconds);
 }
@@ -493,7 +452,7 @@ void up_mdelay(unsigned int milliseconds)
  *
  ****************************************************************************/
 
-void up_udelay(useconds_t microseconds)
+void weak_function up_udelay(useconds_t microseconds)
 {
   if (g_timer.lower != NULL)
     {
@@ -503,4 +462,19 @@ void up_udelay(useconds_t microseconds)
     {
       udelay_coarse(microseconds);
     }
+}
+
+/****************************************************************************
+ * Name: up_ndelay
+ *
+ * Description:
+ *   Delay inline for the requested number of nanoseconds.
+ *
+ *   *** NOT multi-tasking friendly ***
+ *
+ ****************************************************************************/
+
+void weak_function up_ndelay(unsigned long nanoseconds)
+{
+  up_udelay((nanoseconds + NSEC_PER_USEC - 1) / NSEC_PER_USEC);
 }

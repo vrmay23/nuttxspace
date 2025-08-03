@@ -1,5 +1,7 @@
 /****************************************************************************
- * boards/arm/stm32/fire-stm32v2/src/stm32_enc28j60.c
+ * boards/arm/stm32/stm32f4discovery/src/stm32_enc28j60.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -20,14 +22,14 @@
 
 /* 2MBit SPI FLASH OR ENC28J60
  *
- * --- ------ -------------- -----------------------------------------------------
+ * -- ---- ------------ -----------------------------------------------------
  * PIN NAME   SIGNAL         NOTES
- * --- ------ -------------- -----------------------------------------------------
+ * -- ---- ------------ -----------------------------------------------------
  *
- * 29  PA4    PA4-SPI1-NSS   10Mbit ENC28J60, SPI 2M FLASH
- * 30  PA5    PA5-SPI1-SCK   2.4" TFT + Touchscreen, 10Mbit ENC28J60, SPI 2M FLASH
- * 31  PA6    PA6-SPI1-MISO  2.4" TFT + Touchscreen, 10Mbit ENC28J60, SPI 2M FLASH
- * 32  PA7    PA7-SPI1-MOSI  2.4" TFT + Touchscreen, 10Mbit ENC28J60, SPI 2M FLASH
+ * 29 PA4 PA4-SPI1-NSS  10Mbit ENC28J60, SPI 2M FLASH
+ * 30 PA5 PA5-SPI1-SCK  2.4" TFT + Touchscreen, 10Mbit ENC28J60, SPI 2M FLASH
+ * 31 PA6 PA6-SPI1-MISO 2.4" TFT + Touchscreen, 10Mbit ENC28J60, SPI 2M FLASH
+ * 32 PA7 PA7-SPI1-MOSI 2.4" TFT + Touchscreen, 10Mbit ENC28J60, SPI 2M FLASH
  */
 
 /****************************************************************************
@@ -38,6 +40,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/spi/spi.h>
@@ -46,8 +49,7 @@
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "up_arch.h"
-#include "up_internal.h"
+#include "arm_internal.h"
 #include "stm32_spi.h"
 
 #include "stm32f4discovery.h"
@@ -62,15 +64,19 @@
 
 /* ENC28J60
  *
- * --- ------ -------------- -----------------------------------------------------
+ * --- ------ -------------- ------------------------------------------------
  * PIN NAME   SIGNAL         NOTES
- * --- ------ -------------- -----------------------------------------------------
+ * --- ------ -------------- ------------------------------------------------
  *
  * 29  PA4    PA4-SPI1-NSS   10Mbit ENC28J60, SPI 2M FLASH
- * 30  PA5    PA5-SPI1-SCK   2.4" TFT + Touchscreen, 10Mbit ENC28J60, SPI 2M FLASH
- * 31  PA6    PA6-SPI1-MISO  2.4" TFT + Touchscreen, 10Mbit ENC28J60, SPI 2M FLASH
- * 32  PA7    PA7-SPI1-MOSI  2.4" TFT + Touchscreen, 10Mbit ENC28J60, SPI 2M FLASH
- * 98  PE1    PE1-FSMC_NBL1  2.4" TFT + Touchscreen, 10Mbit EN28J60 Reset
+ * 30  PA5    PA5-SPI1-SCK   2.4" TFT + Touchscreen,
+ *                                    10Mbit ENC28J60, SPI 2M FLASH
+ * 31  PA6    PA6-SPI1-MISO  2.4" TFT + Touchscreen,
+ *                                    10Mbit ENC28J60, SPI 2M FLASH
+ * 32  PA7    PA7-SPI1-MOSI  2.4" TFT + Touchscreen,
+ *                                    10Mbit ENC28J60, SPI 2M FLASH
+ * 98  PE1    PE1-FSMC_NBL1  2.4" TFT + Touchscreen,
+ *                                    10Mbit EN28J60 Reset
  * 4   PE5    (no name)      10Mbps ENC28J60 Interrupt
  */
 
@@ -93,17 +99,17 @@ struct stm32_lower_s
 {
   const struct enc_lower_s lower;    /* Low-level MCU interface */
   xcpt_t                   handler;  /* ENC28J60 interrupt handler */
-  FAR void                *arg;      /* Argument that accompanies the interrupt */
+  void                    *arg;      /* Argument that accompanies the interrupt */
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
-static int  up_attach(FAR const struct enc_lower_s *lower, xcpt_t handler,
-                      FAR void *arg);
-static void up_enable(FAR const struct enc_lower_s *lower);
-static void up_disable(FAR const struct enc_lower_s *lower);
+static int  up_attach(const struct enc_lower_s *lower, xcpt_t handler,
+                      void *arg);
+static void up_enable(const struct enc_lower_s *lower);
+static void up_disable(const struct enc_lower_s *lower);
 
 /****************************************************************************
  * Private Data
@@ -134,10 +140,10 @@ static struct stm32_lower_s g_enclower =
  * Name: struct enc_lower_s methods
  ****************************************************************************/
 
-static int up_attach(FAR const struct enc_lower_s *lower, xcpt_t handler,
-                     FAR void *arg)
+static int up_attach(const struct enc_lower_s *lower, xcpt_t handler,
+                     void *arg)
 {
-  FAR struct stm32_lower_s *priv = (FAR struct stm32_lower_s *)lower;
+  struct stm32_lower_s *priv = (struct stm32_lower_s *)lower;
 
   /* Just save the handler for use when the interrupt is enabled */
 
@@ -146,9 +152,9 @@ static int up_attach(FAR const struct enc_lower_s *lower, xcpt_t handler,
   return OK;
 }
 
-static void up_enable(FAR const struct enc_lower_s *lower)
+static void up_enable(const struct enc_lower_s *lower)
 {
-  FAR struct stm32_lower_s *priv = (FAR struct stm32_lower_s *)lower;
+  struct stm32_lower_s *priv = (struct stm32_lower_s *)lower;
 
   DEBUGASSERT(priv->handler);
   stm32_gpiosetevent(GPIO_ENC28J60_INTR, false, true, true,
@@ -160,7 +166,7 @@ static void up_enable(FAR const struct enc_lower_s *lower)
  * lost.
  */
 
-static void up_disable(FAR const struct enc_lower_s *lower)
+static void up_disable(const struct enc_lower_s *lower)
 {
   stm32_gpiosetevent(GPIO_ENC28J60_INTR, false, true, true,
                      NULL, NULL);
@@ -171,17 +177,18 @@ static void up_disable(FAR const struct enc_lower_s *lower)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: up_netinitialize
+ * Name: arm_netinitialize
  ****************************************************************************/
 
-void up_netinitialize(void)
+void arm_netinitialize(void)
 {
-  FAR struct spi_dev_s *spi;
+  struct spi_dev_s *spi;
   int ret;
 
   /* Assumptions:
    * 1) ENC28J60 pins were configured in up_spi.c early in the boot-up phase.
-   * 2) Clocking for the SPI1 peripheral was also provided earlier in boot-up.
+   * 2) Clocking for the SPI1 peripheral was also provided earlier in
+   *    boot-up.
    */
 
   spi = stm32_spibus_initialize(ENC28J60_SPI_PORTNO);
@@ -191,7 +198,7 @@ void up_netinitialize(void)
       return;
     }
 
-  /* Take ENC28J60 out of reset (active low)*/
+  /* Take ENC28J60 out of reset (active low) */
 
   stm32_gpiowrite(GPIO_ENC28J60_RESET, true);
 

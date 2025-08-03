@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/local/local_accept.c
  *
- *   Copyright (C) 2015, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -38,14 +25,14 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#if defined(CONFIG_NET) && defined(CONFIG_NET_LOCAL_STREAM)
 
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
-#include <queue.h>
 #include <debug.h>
 
+#include <nuttx/nuttx.h>
+#include <nuttx/queue.h>
 #include <nuttx/net/net.h>
 
 #include "socket/socket.h"
@@ -69,14 +56,14 @@ static int local_waitlisten(FAR struct local_conn_s *server)
     {
       /* No.. wait for a connection or a signal */
 
-      ret = net_lockedwait(&server->lc_waitsem);
+      ret = net_sem_wait(&server->lc_waitsem);
       if (ret < 0)
         {
           return ret;
         }
     }
 
-  /* There is a client waiting for the connection */
+  /* There is an accept conn waiting to be processed */
 
   return OK;
 }
@@ -95,7 +82,8 @@ static int local_waitlisten(FAR struct local_conn_s *server)
  * Input Parameters:
  *   psock    The listening Unix domain socket structure
  *   addr     Receives the address of the connecting client
- *   addrlen  Input: allocated size of 'addr', Return: returned size of 'addr'
+ *   addrlen  Input: allocated size of 'addr',
+ *            Return: returned size of 'addr'
  *   newconn  The new, accepted  Unix domain connection structure
  *
  * Returned Value:
@@ -109,16 +97,17 @@ static int local_waitlisten(FAR struct local_conn_s *server)
  ****************************************************************************/
 
 int local_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
-                 FAR socklen_t *addrlen, FAR struct socket *newsock)
+                 FAR socklen_t *addrlen, FAR struct socket *newsock,
+                 int flags)
 {
-  FAR struct local_conn_s *server;
-  FAR struct local_conn_s *client;
+  FAR struct local_conn_s *server = psock->s_conn;
   FAR struct local_conn_s *conn;
-  int ret;
+  FAR dq_entry_t *waiter;
+  bool nonblock = !!(flags & SOCK_NONBLOCK);
+  int ret = OK;
 
   /* Some sanity checks */
 
-  DEBUGASSERT(psock && psock->s_conn);
   DEBUGASSERT(newsock && !newsock->s_conn);
 
   /* Is the socket a stream? */
@@ -128,15 +117,8 @@ int local_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
       return -EOPNOTSUPP;
     }
 
-  /* Verify that a valid memory block has been provided to receive the
-   * address
-   */
-
-  server = (FAR struct local_conn_s *)psock->s_conn;
-
   if (server->lc_proto != SOCK_STREAM ||
-      server->lc_state != LOCAL_STATE_LISTENING ||
-      server->lc_type  != LOCAL_TYPE_PATHNAME)
+      server->lc_state != LOCAL_STATE_LISTENING)
     {
       return -EOPNOTSUPP;
     }
@@ -145,105 +127,40 @@ int local_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
 
   for (; ; )
     {
-      /* Are there pending connections.  Remove the client from the
+      /* Are there pending connections.  Remove the accept from the
        * head of the waiting list.
        */
 
-      client = (FAR struct local_conn_s *)
-        dq_remfirst(&server->u.server.lc_waiters);
-
-      if (client)
+      waiter = dq_remfirst(&server->u.server.lc_waiters);
+      if (waiter)
         {
-          /* Decrement the number of pending clients */
+          conn = container_of(waiter, struct local_conn_s,
+                              u.accept.lc_waiter);
+
+          /* Decrement the number of pending accepts */
 
           DEBUGASSERT(server->u.server.lc_pending > 0);
           server->u.server.lc_pending--;
 
-          /* Create a new connection structure for the server side of the
-           * connection.
-           */
+          /* Setup the accept socket structure */
 
-          conn = local_alloc();
-          if (!conn)
+          newsock->s_domain = psock->s_domain;
+          newsock->s_type   = SOCK_STREAM;
+          newsock->s_sockif = psock->s_sockif;
+          newsock->s_conn   = (FAR void *)conn;
+
+          /* Return the address family */
+
+          if (addr != NULL && conn->lc_peer != NULL)
             {
-              nerr("ERROR:  Failed to allocate new connection structure\n");
-              ret = -ENOMEM;
-            }
-          else
-            {
-              /* Initialize the new connection structure */
-
-              conn->lc_crefs  = 1;
-              conn->lc_proto  = SOCK_STREAM;
-              conn->lc_type   = LOCAL_TYPE_PATHNAME;
-              conn->lc_state  = LOCAL_STATE_CONNECTED;
-
-              strncpy(conn->lc_path, client->lc_path, UNIX_PATH_MAX - 1);
-              conn->lc_path[UNIX_PATH_MAX - 1] = '\0';
-              conn->lc_instance_id = client->lc_instance_id;
-
-              /* Open the server-side write-only FIFO.  This should not
-               * block.
-               */
-
-              ret = local_open_server_tx(conn,
-                                         _SS_ISNONBLOCK(psock->s_flags));
-              if (ret < 0)
-                {
-                   nerr("ERROR: Failed to open write-only FIFOs for %s: %d\n",
-                        conn->lc_path, ret);
-                }
+              ret = local_getaddr(conn->lc_peer, addr, addrlen);
             }
 
-          /* Do we have a connection?  Is the write-side FIFO opened? */
-
-          if (ret == OK)
+          if (ret == OK && nonblock)
             {
-              DEBUGASSERT(conn->lc_outfile.f_inode != NULL);
-
-              /* Open the server-side read-only FIFO.  This should not
-               * block because the client side has already opening it
-               * for writing.
-               */
-
-              ret = local_open_server_rx(conn,
-                                         _SS_ISNONBLOCK(psock->s_flags));
-              if (ret < 0)
-                {
-                   nerr("ERROR: Failed to open read-only FIFOs for %s: %d\n",
-                        conn->lc_path, ret);
-                }
+              ret = local_set_nonblocking(conn);
             }
 
-          /* Do we have a connection?  Are the FIFOs opened? */
-
-          if (ret == OK)
-            {
-              DEBUGASSERT(conn->lc_infile.f_inode != NULL);
-
-              /* Return the address family */
-
-              if (addr != NULL)
-                {
-                  ret = local_getaddr(client, addr, addrlen);
-                }
-            }
-
-          if (ret == OK)
-            {
-              /* Setup the client socket structure */
-
-              newsock->s_crefs  = 1;
-              newsock->s_domain = psock->s_domain;
-              newsock->s_type   = SOCK_STREAM;
-              newsock->s_sockif = psock->s_sockif;
-              newsock->s_conn   = (FAR void *)conn;
-            }
-
-          /* Signal the client with the result of the connection */
-
-          client->u.client.lc_result = ret;
-          nxsem_post(&client->lc_waitsem);
           return ret;
         }
 
@@ -253,7 +170,7 @@ int local_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
 
       /* Was the socket opened non-blocking? */
 
-      if (_SS_ISNONBLOCK(psock->s_flags))
+      if (_SS_ISNONBLOCK(server->lc_conn.s_flags))
         {
           /* Yes.. return EAGAIN */
 
@@ -269,5 +186,3 @@ int local_accept(FAR struct socket *psock, FAR struct sockaddr *addr,
         }
     }
 }
-
-#endif /* CONFIG_NET && CONFIG_NET_LOCAL_STREAM */

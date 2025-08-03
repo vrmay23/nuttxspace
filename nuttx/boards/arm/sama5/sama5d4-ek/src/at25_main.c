@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/sama5/sama5d4-ek/src/at25_main.c
  *
- *   Copyright (C) 2014, 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -68,8 +55,8 @@
 #  error CONFIG_SAMA5D4EK_AT25_BLOCKMOUNT must be selected
 #endif
 
-#ifndef CONFIG_SAMA5D4EK_AT25_CHARDEV
-#  error CONFIG_SAMA5D4EK_AT25_CHARDEV must be selected
+#ifndef CONFIG_SAMA5D4EK_AT25_MTD
+#  error CONFIG_SAMA5D4EK_AT25_MTD must be selected
 #endif
 
 #ifdef CONFIG_BOOT_SDRAM_DATA
@@ -118,7 +105,7 @@ static char g_at25dev[DEVNAME_MAXSIZE];
  *
  ****************************************************************************/
 
-int at25_main(int argc, char *argv)
+int at25_main(int argc, char *argv[])
 {
   struct lib_rawinstream_s rawinstream;
   struct lib_memsostream_s memoutstream;
@@ -145,7 +132,7 @@ int at25_main(int argc, char *argv)
   fd = open(g_at25dev, O_WRONLY);
   if (fd < 0)
     {
-      int errcode = get_errno();
+      int errcode = errno;
       fprintf(stderr, "ERROR: Failed to open %s: %d\n", g_at25dev, errcode);
       return EXIT_FAILURE;
     }
@@ -159,7 +146,7 @@ int at25_main(int argc, char *argv)
    * which we can buffer the binary data.
    */
 
-  lib_memsostream(&memoutstream, (FAR char *)SAM_DDRCS_VSECTION,
+  lib_memsostream(&memoutstream, (char *)SAM_DDRCS_VSECTION,
                   CONFIG_SAMA5D4EK_AT25_PROGSIZE);
 
   /* We are ready to load the Intel HEX stream into DRAM.
@@ -172,9 +159,9 @@ int at25_main(int argc, char *argv)
   printf("Send Intel HEX file now\n");
   fflush(stdout);
 
-  ret = hex2bin(&rawinstream.public, &memoutstream.public,
-                (uint32_t)SAM_ISRAM_VSECTION,
-                (uint32_t)(SAM_ISRAM_VSECTION + CONFIG_SAMA5D4EK_AT25_PROGSIZE),
+  ret = hex2bin(&rawinstream.common, &memoutstream.common,
+                SAM_ISRAM_VSECTION,
+                SAM_ISRAM_VSECTION + CONFIG_SAMA5D4EK_AT25_PROGSIZE,
                 0);
   if (ret < 0)
     {
@@ -190,23 +177,23 @@ int at25_main(int argc, char *argv)
    * location.
    */
 
-  *(uint32_t *)(SAM_DDRCS_VSECTION + 0x14) = memoutstream.public.nput;
+  *(uint32_t *)(SAM_DDRCS_VSECTION + 0x14) = memoutstream.common.nput;
 
   /* The HEX file load was successful, write the data to FLASH */
 
   printf("Successfully loaded the Intel HEX file into memory...\n");
-  printf("  Writing %d bytes to the AT25 Serial FLASH\n",
-         memoutstream.public.nput);
+  printf("  Writing %" PRIdOFF " bytes to the AT25 Serial FLASH\n",
+         memoutstream.common.nput);
 
-  remaining = memoutstream.public.nput;
+  remaining = memoutstream.common.nput;
   src = (uint8_t *)SAM_DDRCS_VSECTION;
 
   do
     {
-      nwritten = write(fd, src, memoutstream.public.nput);
+      nwritten = write(fd, src, memoutstream.common.nput);
       if (nwritten <= 0)
         {
-          int errcode = get_errno();
+          int errcode = errno;
           if (errno != EINTR)
             {
               fprintf(stderr, "ERROR: Write failed: %d\n", errcode);
@@ -228,20 +215,20 @@ int at25_main(int argc, char *argv)
    * the same.
    */
 
-  printf("  Verifying %d bytes in the AT25 Serial FLASH\n",
-         memoutstream.public.nput);
+  printf("  Verifying %" PRIdOFF " bytes in the AT25 Serial FLASH\n",
+         memoutstream.common.nput);
 
   /* Open the AT25 device for writing */
 
   fd = open(g_at25dev, O_RDONLY);
   if (fd < 0)
     {
-      int errcode = get_errno();
+      int errcode = errno;
       fprintf(stderr, "ERROR: Failed to open %s: %d\n", g_at25dev, errcode);
       return EXIT_FAILURE;
     }
 
-  remaining = memoutstream.public.nput;
+  remaining = memoutstream.common.nput;
   src = (const uint8_t *)SAM_DDRCS_VSECTION;
 
   do
@@ -255,7 +242,7 @@ int at25_main(int argc, char *argv)
       nread = read(fd, g_iobuffer, rdsize);
       if (nread <= 0)
         {
-          int errcode = get_errno();
+          int errcode = errno;
           if (errno != EINTR)
             {
               fprintf(stderr, "ERROR: Read failed: %d\n", errcode);
@@ -267,8 +254,8 @@ int at25_main(int argc, char *argv)
         {
           if (memcmp(g_iobuffer, src, nread) != 0)
             {
-              fprintf(stderr, "ERROR: Verify failed at offset %d\n",
-                      memoutstream.public.nput - remaining);
+              fprintf(stderr, "ERROR: Verify failed at offset %"PRIdOFF"\n",
+                      memoutstream.common.nput - remaining);
               close(fd);
               return EXIT_FAILURE;
             }
@@ -279,8 +266,8 @@ int at25_main(int argc, char *argv)
     }
   while (remaining > 0);
 
-  printf("  Successfully verified %d bytes in the AT25 Serial FLASH\n",
-         memoutstream.public.nput);
+  printf("Successfully verified %"PRIdOFF" bytes in the AT25 Serial FLASH\n",
+         memoutstream.common.nput);
 
   close(fd);
   return EXIT_SUCCESS;

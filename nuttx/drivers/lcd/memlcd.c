@@ -1,37 +1,22 @@
 /****************************************************************************
  * drivers/lcd/memlcd.c
- * Driver for Sharp Memory LCD.
  *
- *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *           Librae <librae8226@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -45,10 +30,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/bits.h>
 #include <nuttx/spi/spi.h>
 #include <nuttx/lcd/lcd.h>
 #include <nuttx/lcd/memlcd.h>
@@ -71,7 +58,7 @@
 #  warning This platform does not support SPI LSB-bit order
 #endif
 
-/* Cisplay resolution */
+/* Display resolution */
 
 #if defined CONFIG_MEMLCD_LS013B7DH01
 #  define MEMLCD_XRES        144
@@ -79,6 +66,9 @@
 #elif defined CONFIG_MEMLCD_LS013B7DH03
 #  define MEMLCD_XRES        128
 #  define MEMLCD_YRES        128
+#elif defined CONFIG_MEMLCD_LS027B7DH01A
+#  define MEMLCD_XRES        400
+#  define MEMLCD_YRES        240
 #else
 #  error "This Memory LCD model is not supported yet."
 #endif
@@ -86,6 +76,7 @@
 /* lcd command */
 
 #define MEMLCD_CMD_UPDATE    (0x01)
+#define MEMLCD_CMD_VCOM      (0x02)
 #define MEMLCD_CMD_ALL_CLEAR (0x04)
 #define MEMLCD_CONTROL_BYTES (0)
 
@@ -102,8 +93,8 @@
 /* display memory allocation */
 #define MEMLCD_FBSIZE        (MEMLCD_XSTRIDE*MEMLCD_YRES)
 
-/* contrast setting, related to VCOM toggle frequency
- * higher frequency gives better contrast, instead, saves power
+/* Contrast setting, related to VCOM toggle frequency.
+ * Higher frequency gives better contrast, lower instead saves power.
  */
 
 #define MEMLCD_CONTRAST      24
@@ -119,8 +110,17 @@
 #define LS_BIT               (1 << 0)
 #define MS_BIT               (1 << 7)
 
+#define MEMLCD_WORK_PERIOD   MSEC2TICK(500)
+
+#define TOGGLE_VCOM(dev)                                                     \
+  do                                                                         \
+    {                                                                        \
+      dev->vcom = dev->vcom ? 0x00 : MEMLCD_CMD_VCOM;                        \
+    }                                                                        \
+  while (0);
+
 /****************************************************************************
- * Private Type Definition
+ * Private Types
  ****************************************************************************/
 
 struct memlcd_dev_s
@@ -135,7 +135,12 @@ struct memlcd_dev_s
   FAR struct memlcd_priv_s *priv; /* Board specific structure */
   uint8_t contrast;               /* Current contrast setting */
   uint8_t power;                  /* Current power setting */
-
+#ifdef CONFIG_MEMLCD_EXTCOMIN_MODE_HW
+  struct work_s work;
+  uint8_t vcom;
+#else
+  bool pol;                       /* Polarity  for extcomisr */
+#endif
   /* The memlcds does not support reading the display memory in SPI mode.
    * Since there is 1 BPP and is byte access, it is necessary to keep a
    * shadow copy of the framebuffer. At 128x128, it amounts to 2KB.
@@ -155,16 +160,19 @@ static void memlcd_deselect(FAR struct spi_dev_s *spi);
 
 /* lcd data transfer methods */
 
-static int memlcd_putrun(fb_coord_t row, fb_coord_t col,
+static int memlcd_putrun(FAR struct lcd_dev_s *dev,
+                         fb_coord_t row, fb_coord_t col,
                          FAR const uint8_t * buffer, size_t npixels);
-static int memlcd_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t * buffer,
-                         size_t npixels);
+static int memlcd_getrun(FAR struct lcd_dev_s *dev,
+                         fb_coord_t row, fb_coord_t col,
+                         FAR uint8_t * buffer, size_t npixels);
 
 /* lcd configuration */
 
 static int memlcd_getvideoinfo(FAR struct lcd_dev_s *dev,
                                FAR struct fb_videoinfo_s *vinfo);
-static int memlcd_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
+static int memlcd_getplaneinfo(FAR struct lcd_dev_s *dev,
+                               unsigned int planeno,
                                FAR struct lcd_planeinfo_s *pinfo);
 
 /* lcd specific controls */
@@ -194,13 +202,15 @@ static const struct fb_videoinfo_s g_videoinfo =
 
 static const struct lcd_planeinfo_s g_planeinfo =
 {
-  .putrun = memlcd_putrun,           /* Put a run into lcd memory */
-  .getrun = memlcd_getrun,           /* Get a run from lcd memory */
-  .buffer = (uint8_t *) g_runbuffer, /* Run scratch buffer */
-  .bpp = MEMLCD_BPP,                 /* Bits-per-pixel */
+  .putrun = memlcd_putrun,              /* Put a run into lcd memory */
+  .getrun = memlcd_getrun,              /* Get a run from lcd memory */
+  .buffer = (FAR uint8_t *)g_runbuffer, /* Run scratch buffer */
+  .bpp = MEMLCD_BPP,                    /* Bits-per-pixel */
 };
 
-/* This is the oled driver instance (only a single device is supported for now) */
+/* This is the oled driver instance (only a single device is supported
+ * for now).
+ */
 
 static struct memlcd_dev_s g_memlcddev =
 {
@@ -225,54 +235,51 @@ static struct memlcd_dev_s g_memlcddev =
  ****************************************************************************/
 
 /****************************************************************************
- * __set_bit - Set a bit in memory
+ * Name: memlcd_worker
  *
- * @nr: the bit to set
- * @addr: the address to start counting from
+ * Description:
+ *   Toggle VCOM bit
  *
- * Unlike set_bit(), this function is non-atomic and may be reordered.
- * If it's called on the same region of memory simultaneously, the effect
- * may be that only one operation succeeds.
+ * Input Parameters:
+ *   arg  - Reference to the memlcd_dev_s structure
+ *
+ * Returned Value:
+ *   None
  *
  ****************************************************************************/
-
-#define BIT(nr)            (1 << (nr))
-#define BITS_PER_BYTE        8
-#define BIT_MASK(nr)        (1 << ((nr) % BITS_PER_BYTE))
-#define BIT_BYTE(nr)        ((nr) / BITS_PER_BYTE)
-
-static inline void __set_bit(int nr, uint8_t * addr)
+#ifdef CONFIG_MEMLCD_EXTCOMIN_MODE_HW
+static void memlcd_worker(FAR void *arg)
 {
-  uint8_t mask = BIT_MASK(nr);
-  uint8_t *p = ((uint8_t *) addr) + BIT_BYTE(nr);
-  *p |= mask;
-}
+  FAR struct memlcd_dev_s *mlcd = arg;
+  uint16_t cmd = (uint16_t)mlcd->vcom;
 
-static inline void __clear_bit(int nr, uint8_t * addr)
-{
-  uint8_t mask = BIT_MASK(nr);
-  uint8_t *p = ((uint8_t *) addr) + BIT_BYTE(nr);
-  *p &= ~mask;
-}
+  TOGGLE_VCOM(mlcd);
 
-static inline int __test_bit(int nr, const volatile uint8_t * addr)
-{
-  return 1 & (addr[BIT_BYTE(nr)] >> (nr & (BITS_PER_BYTE - 1)));
+  memlcd_select(mlcd->spi);
+
+  up_udelay(2);
+
+  SPI_SNDBLOCK(mlcd->spi, &cmd, 2);
+
+  up_udelay(1);
+
+  memlcd_deselect(mlcd->spi);
+
+  work_queue(LPWORK, &mlcd->work, memlcd_worker, mlcd, MEMLCD_WORK_PERIOD);
 }
+#endif
 
 /****************************************************************************
  * Name: memlcd_select
  *
  * Description:
- *   Select the SPI, locking and  re-configuring if necessary
+ *   Select the SPI, locking and re-configuring if necessary
  *
  * Input Parameters:
  *   spi  - Reference to the SPI driver structure
  *
  * Returned Value:
  *   None
- *
- * Assumptions:
  *
  ****************************************************************************/
 
@@ -319,8 +326,6 @@ static void memlcd_select(FAR struct spi_dev_s *spi)
  * Returned Value:
  *   None
  *
- * Assumptions:
- *
  ****************************************************************************/
 
 static void memlcd_deselect(FAR struct spi_dev_s *spi)
@@ -340,19 +345,21 @@ static void memlcd_deselect(FAR struct spi_dev_s *spi)
  * Input Parameters:
  *   mlcd   - Reference to private driver structure
  *
- * Assumptions:
- *
  ****************************************************************************/
 
 static inline void memlcd_clear(FAR struct memlcd_dev_s *mlcd)
 {
-  uint16_t cmd = MEMLCD_CMD_ALL_CLEAR;
+  uint16_t cmd = MEMLCD_CMD_VCOM | MEMLCD_CMD_ALL_CLEAR;
 
   lcdinfo("Clear display\n");
   memlcd_select(mlcd->spi);
-  /* XXX Ensure 2us here */
+
+  up_udelay(2);
+
   SPI_SNDBLOCK(mlcd->spi, &cmd, 2);
-  /* XXX Ensure 6us here */
+
+  up_udelay(1);
+
   memlcd_deselect(mlcd->spi);
 }
 
@@ -363,10 +370,10 @@ static inline void memlcd_clear(FAR struct memlcd_dev_s *mlcd)
  *   This method enables/disables the polarity (VCOM) toggling behavior for
  *   the Memory LCD. Which is always used within setpower() call.
  *   Basically, the frequency shall be 1Hz~60Hz.
- *   If use hardware mode to toggle VCOM, we need to send specific command at a
- *   constant frequency to trigger the LCD internal hardware logic.
- *   While use software mode, we set up a timer to toggle EXTCOMIN connected IO,
- *   basically, it is a hardware timer to ensure a constant frequency.
+ *   If use hardware mode to toggle VCOM, we need to send specific command at
+ *   a constant frequency to trigger the LCD internal hardware logic.
+ *   While use software mode, we set up a timer to toggle EXTCOMIN connected
+ *   IO, basically, it is a hardware timer to ensure a constant frequency.
  *
  * Input Parameters:
  *   mlcd   - Reference to private driver structure
@@ -378,15 +385,10 @@ static inline void memlcd_clear(FAR struct memlcd_dev_s *mlcd)
 
 static int memlcd_extcominisr(int irq, FAR void *context, void *arg)
 {
-  static bool pol = 0;
-  struct memlcd_dev_s *mlcd = &g_memlcddev;
-#ifdef CONFIG_MEMLCD_EXTCOMIN_MODE_HW
-#  error "CONFIG_MEMLCD_EXTCOMIN_MODE_HW unsupported yet!"
-  /* Start a worker thread, do it in bottom half? */
-
-#else
-  pol = !pol;
-  mlcd->priv->setpolarity(pol);
+  FAR struct memlcd_dev_s *mlcd = &g_memlcddev;
+#ifndef CONFIG_MEMLCD_EXTCOMIN_MODE_HW
+  mlcd->pol = !mlcd->pol;
+  mlcd->priv->setpolarity(mlcd->pol);
 #endif
   return OK;
 }
@@ -398,6 +400,7 @@ static int memlcd_extcominisr(int irq, FAR void *context, void *arg)
  *   This method can be used to write a partial raster line to the LCD.
  *
  * Input Parameters:
+ *   dev     - The lcd device
  *   row     - Starting row to write to (range: 0 <= row < yres)
  *   col     - Starting column to write to (range: 0 <= col <= xres-npixels)
  *   buffer  - The buffer containing the run to be written to the LCD
@@ -406,10 +409,11 @@ static int memlcd_extcominisr(int irq, FAR void *context, void *arg)
  *
  ****************************************************************************/
 
-static int memlcd_putrun(fb_coord_t row, fb_coord_t col,
+static int memlcd_putrun(FAR struct lcd_dev_s *dev,
+                         fb_coord_t row, fb_coord_t col,
                          FAR const uint8_t * buffer, size_t npixels)
 {
-  FAR struct memlcd_dev_s *mlcd = (FAR struct memlcd_dev_s *)&g_memlcddev;
+  FAR struct memlcd_dev_s *mlcd = (FAR struct memlcd_dev_s *)dev;
   uint16_t cmd;
   uint8_t *p;
   uint8_t *pfb;
@@ -431,14 +435,16 @@ static int memlcd_putrun(fb_coord_t row, fb_coord_t col,
     {
       if ((*buffer & usrmask) != 0)
         {
-          __set_bit(col % 8 + i, p);
+          set_bit(col % 8 + i, p);
         }
       else
         {
-          __clear_bit(col % 8 + i, p);
+          clear_bit(col % 8 + i, p);
         }
 
-#ifdef CONFIG_LCD_PACKEDMSFIRST
+#ifdef CONFIG_MEMLCD_BYTE_PER_PIXEL
+      buffer++;
+#elif defined(CONFIG_LCD_PACKEDMSFIRST)
       if (usrmask == LS_BIT)
         {
           buffer++;
@@ -469,15 +475,15 @@ static int memlcd_putrun(fb_coord_t row, fb_coord_t col,
 
   memlcd_select(mlcd->spi);
 
-  /* XXX Ensure 6us here */
+  up_udelay(2);
 
   cmd = MEMLCD_CMD_UPDATE | row << 8;
   SPI_SNDBLOCK(mlcd->spi, &cmd, 2);
-  SPI_SNDBLOCK(mlcd->spi, pfb, MEMLCD_YRES / 8 + MEMLCD_CONTROL_BYTES);
-  cmd = 0xffff;
+  SPI_SNDBLOCK(mlcd->spi, pfb, MEMLCD_XRES / 8 + MEMLCD_CONTROL_BYTES);
+  cmd = 0x0000;
   SPI_SNDBLOCK(mlcd->spi, &cmd, 2);
 
-  /* XXX Ensure 2us here */
+  up_udelay(1);
 
   memlcd_deselect(mlcd->spi);
 
@@ -490,6 +496,7 @@ static int memlcd_putrun(fb_coord_t row, fb_coord_t col,
  * Description:
  *   This method can be used to read a partial raster line from the LCD.
  *
+ *  dev     - The lcd device
  *  row     - Starting row to read from (range: 0 <= row < yres)
  *  col     - Starting column to read read (range: 0 <= col <= xres-npixels)
  *  buffer  - The buffer in which to return the run read from the LCD
@@ -498,10 +505,11 @@ static int memlcd_putrun(fb_coord_t row, fb_coord_t col,
  *
  ****************************************************************************/
 
-static int memlcd_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t * buffer,
-                         size_t npixels)
+static int memlcd_getrun(FAR struct lcd_dev_s *dev,
+                         fb_coord_t row, fb_coord_t col,
+                         FAR uint8_t * buffer, size_t npixels)
 {
-  FAR struct memlcd_dev_s *mlcd = (FAR struct memlcd_dev_s *)&g_memlcddev;
+  FAR struct memlcd_dev_s *mlcd = (FAR struct memlcd_dev_s *)dev;
   uint8_t *p;
   uint8_t *pfb;
   uint8_t usrmask;
@@ -520,7 +528,7 @@ static int memlcd_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t * buffer,
   p = pfb + (col >> 3);
   for (i = 0; i < npixels; i++)
     {
-      if (__test_bit(col % 8 + i, p))
+      if (test_bit(col % 8 + i, p))
         {
           *buffer |= usrmask;
         }
@@ -529,7 +537,9 @@ static int memlcd_getrun(fb_coord_t row, fb_coord_t col, FAR uint8_t * buffer,
           *buffer &= ~usrmask;
         }
 
-#ifdef CONFIG_LCD_PACKEDMSFIRST
+#ifdef CONFIG_MEMLCD_BYTE_PER_PIXEL
+      buffer++;
+#elif defined(CONFIG_LCD_PACKEDMSFIRST)
       if (usrmask == LS_BIT)
         {
           buffer++;
@@ -582,12 +592,14 @@ static int memlcd_getvideoinfo(FAR struct lcd_dev_s *dev,
  *
  ****************************************************************************/
 
-static int memlcd_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
+static int memlcd_getplaneinfo(FAR struct lcd_dev_s *dev,
+                               unsigned int planeno,
                                FAR struct lcd_planeinfo_s *pinfo)
 {
   DEBUGASSERT(pinfo && planeno == 0);
   lcdinfo("planeno: %d bpp: %d\n", planeno, g_planeinfo.bpp);
   memcpy(pinfo, &g_planeinfo, sizeof(struct lcd_planeinfo_s));
+  pinfo->dev = dev;
   return OK;
 }
 
@@ -595,8 +607,9 @@ static int memlcd_getplaneinfo(FAR struct lcd_dev_s *dev, unsigned int planeno,
  * Name:  memlcd_getpower
  *
  * Description:
- *   Get the LCD panel power status (0: full off - CONFIG_LCD_MAXPOWER: full on.
- *   On backlit LCDs, this setting may correspond to the backlight setting.
+ *   Get the LCD panel power status (0: full off - CONFIG_LCD_MAXPOWER: full
+ *   on.  On backlit LCDs, this setting may correspond to the backlight
+ *   setting.
  *
  ****************************************************************************/
 
@@ -613,8 +626,9 @@ static int memlcd_getpower(FAR struct lcd_dev_s *dev)
  * Name:  memlcd_setpower
  *
  * Description:
- *   Enable/disable LCD panel power (0: full off - CONFIG_LCD_MAXPOWER: full on).
- *   On backlit LCDs, this setting may correspond to the backlight setting.
+ *   Enable/disable LCD panel power (0: full off - CONFIG_LCD_MAXPOWER: full
+ *   on).  On backlit LCDs, this setting may correspond to the backlight
+ *   setting.
  *
  ****************************************************************************/
 
@@ -700,7 +714,8 @@ static int memlcd_setcontrast(struct lcd_dev_s *dev, unsigned int contrast)
  * Input Parameters:
  *
  *   spi - A reference to the SPI driver instance.
- *   devno - A value in the range of 0 through CONFIG_memlcd_NINTERFACES-1.
+ *   priv - Board specific structure
+ *   devno - A value in the range of 0 through CONFIG_MEMLCD_NINTERFACES-1.
  *     This allows support for multiple OLED devices.
  *
  * Returned Value:
@@ -723,7 +738,12 @@ FAR struct lcd_dev_s *memlcd_initialize(FAR struct spi_dev_s *spi,
   mlcd->priv = priv;
   mlcd->spi = spi;
 
+#ifdef CONFIG_MEMLCD_EXTCOMIN_MODE_HW
+  mlcd->vcom = MEMLCD_CMD_VCOM;
+  work_queue(LPWORK, &mlcd->work, memlcd_worker, mlcd, MEMLCD_WORK_PERIOD);
+#else
   mlcd->priv->attachirq(memlcd_extcominisr, mlcd);
+#endif
 
   lcdinfo("done\n");
   return &mlcd->dev;

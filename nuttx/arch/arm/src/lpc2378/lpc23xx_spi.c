@@ -1,13 +1,11 @@
 /****************************************************************************
  * arch/arm/src/lpc2378/lpc23xx_spi.c
  *
- *   Copyright (C) 2013 Li Zhuoyi. All rights reserved.
- *   Author: Li Zhuoyi <lzyy.cn@gmail.com>
- *
- * Derived from  arch/arm/src/lpc17xx_40xx/lpc17_40_spi.c
- *
- *   Copyright (C) 2010-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2010-2017 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2013 Li Zhuoyi. All rights reserved.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-FileContributor: Li Zhuoyi <lzyy.cn@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -47,18 +45,17 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <arch/board/board.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 #include <nuttx/spi/spi.h>
 
-#include "up_internal.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "chip.h"
 #include "lpc23xx_pinsel.h"
 #include "lpc23xx_scb.h"
@@ -104,7 +101,7 @@
 struct lpc23xx_spidev_s
 {
   struct spi_dev_s spidev;     /* Externally visible part of the SPI interface */
-  sem_t            exclsem;    /* Held while chip is selected for mutual exclusion */
+  mutex_t          lock;       /* Held while chip is selected for mutual exclusion */
   uint32_t         frequency;  /* Requested clock frequency */
   uint32_t         actual;     /* Actual clock frequency */
   uint8_t          nbits;      /* Width of word in bits (8 to 16) */
@@ -117,15 +114,15 @@ struct lpc23xx_spidev_s
 
 /* SPI methods */
 
-static int      spi_lock(FAR struct spi_dev_s *dev, bool lock);
-static uint32_t spi_setfrequency(FAR struct spi_dev_s *dev,
+static int      spi_lock(struct spi_dev_s *dev, bool lock);
+static uint32_t spi_setfrequency(struct spi_dev_s *dev,
                                  uint32_t frequency);
-static void     spi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode);
-static void     spi_setbits(FAR struct spi_dev_s *dev, int nbits);
-static uint32_t spi_send(FAR struct spi_dev_s *dev, uint32_t wd);
-static void     spi_sndblock(FAR struct spi_dev_s *dev,
-                             FAR const void *buffer, size_t nwords);
-static void     spi_recvblock(FAR struct spi_dev_s *dev, FAR void *buffer,
+static void     spi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode);
+static void     spi_setbits(struct spi_dev_s *dev, int nbits);
+static uint32_t spi_send(struct spi_dev_s *dev, uint32_t wd);
+static void     spi_sndblock(struct spi_dev_s *dev,
+                             const void *buffer, size_t nwords);
+static void     spi_recvblock(struct spi_dev_s *dev, void *buffer,
                               size_t nwords);
 
 /****************************************************************************
@@ -159,9 +156,10 @@ static const struct spi_ops_s g_spiops =
 static struct lpc23xx_spidev_s g_spidev =
 {
   .spidev            =
-    {
-      &g_spiops
-    },
+  {
+    .ops             = &g_spiops,
+  },
+  .lock              = NXMUTEX_INITIALIZER,
 };
 
 /****************************************************************************
@@ -193,18 +191,18 @@ static struct lpc23xx_spidev_s g_spidev =
  *
  ****************************************************************************/
 
-static int spi_lock(FAR struct spi_dev_s *dev, bool lock)
+static int spi_lock(struct spi_dev_s *dev, bool lock)
 {
-  FAR struct lpc23xx_spidev_s *priv = (FAR struct lpc23xx_spidev_s *)dev;
+  struct lpc23xx_spidev_s *priv = (struct lpc23xx_spidev_s *)dev;
   int ret;
 
   if (lock)
     {
-      ret = nxsem_wait_uninterruptible(&priv->exclsem);
+      ret = nxmutex_lock(&priv->lock);
     }
   else
     {
-      ret = nxsem_post(&priv->exclsem);
+      ret = nxmutex_unlock(&priv->lock);
     }
 
   return ret;
@@ -225,16 +223,18 @@ static int spi_lock(FAR struct spi_dev_s *dev, bool lock)
  *
  ****************************************************************************/
 
-static uint32_t spi_setfrequency(FAR struct spi_dev_s *dev,
+static uint32_t spi_setfrequency(struct spi_dev_s *dev,
                                  uint32_t frequency)
 {
-  FAR struct lpc23xx_spidev_s *priv = (FAR struct lpc23xx_spidev_s *)dev;
+  struct lpc23xx_spidev_s *priv = (struct lpc23xx_spidev_s *)dev;
   uint32_t divisor;
   uint32_t actual;
 
   DEBUGASSERT(frequency <= SPI_CLOCK / 2);
 
-  /* Check if the requested frequency is the same as the frequency selection */
+  /* Check if the requested frequency is the same as the frequency
+   * selection.
+   */
 
   DEBUGASSERT(priv != NULL);
   if (priv->frequency == frequency)
@@ -248,7 +248,9 @@ static uint32_t spi_setfrequency(FAR struct spi_dev_s *dev,
 
   divisor = SPI_CLOCK / frequency;
 
-  /* The SPI CCR register must contain an even number greater than or equal to 8. */
+  /* The SPI CCR register must contain an even number greater than or equal
+   * to 8.
+   */
 
   if (divisor < 8)
     {
@@ -293,9 +295,9 @@ static uint32_t spi_setfrequency(FAR struct spi_dev_s *dev,
  *
  ****************************************************************************/
 
-static void spi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode)
+static void spi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode)
 {
-  FAR struct lpc23xx_spidev_s *priv = (FAR struct lpc23xx_spidev_s *)dev;
+  struct lpc23xx_spidev_s *priv = (struct lpc23xx_spidev_s *)dev;
   uint32_t regval;
 
   /* Has the mode changed? */
@@ -332,7 +334,7 @@ static void spi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode)
 
       putreg32(regval, SPI_CR);
 
-      /* Save the mode so that subsequent re-configuratins will be faster */
+      /* Save the mode so that subsequent re-configurations will be faster */
 
       priv->mode = mode;
     }
@@ -346,16 +348,16 @@ static void spi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode)
  *
  * Input Parameters:
  *   dev -  Device-specific state data
- *   nbits - The number of bits requests
+ *   nbits - The number of bits requested
  *
  * Returned Value:
  *   none
  *
  ****************************************************************************/
 
-static void spi_setbits(FAR struct spi_dev_s *dev, int nbits)
+static void spi_setbits(struct spi_dev_s *dev, int nbits)
 {
-  FAR struct lpc23xx_spidev_s *priv = (FAR struct lpc23xx_spidev_s *)dev;
+  struct lpc23xx_spidev_s *priv = (struct lpc23xx_spidev_s *)dev;
   uint32_t regval;
 
   DEBUGASSERT(nbits > 7 && nbits < 17);
@@ -373,7 +375,9 @@ static void spi_setbits(FAR struct spi_dev_s *dev, int nbits)
       regval |= SPI_CR_BITENABLE;
       putreg32(regval, SPI_CR);
 
-      /* Save the selection so the subsequence re-configurations will be faster */
+      /* Save the selection so that subsequent re-configurations will be
+       * faster.
+       */
 
       priv->nbits = nbits;
     }
@@ -395,7 +399,7 @@ static void spi_setbits(FAR struct spi_dev_s *dev, int nbits)
  *
  ****************************************************************************/
 
-static uint32_t spi_send(FAR struct spi_dev_s *dev, uint32_t wd)
+static uint32_t spi_send(struct spi_dev_s *dev, uint32_t wd)
 {
   /* Write the data to transmitted to the SPI Data Register */
 
@@ -434,10 +438,10 @@ static uint32_t spi_send(FAR struct spi_dev_s *dev, uint32_t wd)
  *
  ****************************************************************************/
 
-static void spi_sndblock(FAR struct spi_dev_s *dev,
-                         FAR const void *buffer, size_t nwords)
+static void spi_sndblock(struct spi_dev_s *dev,
+                         const void *buffer, size_t nwords)
 {
-  FAR uint8_t *ptr = (FAR uint8_t *)buffer;
+  uint8_t *ptr = (uint8_t *)buffer;
   uint8_t data;
 
   spiinfo("nwords: %d\n", nwords);
@@ -482,10 +486,10 @@ static void spi_sndblock(FAR struct spi_dev_s *dev,
  *
  ****************************************************************************/
 
-static void spi_recvblock(FAR struct spi_dev_s *dev, FAR void *buffer,
+static void spi_recvblock(struct spi_dev_s *dev, void *buffer,
                           size_t nwords)
 {
-  FAR uint8_t *ptr = (FAR uint8_t *)buffer;
+  uint8_t *ptr = (uint8_t *)buffer;
 
   spiinfo("nwords: %d\n", nwords);
   while (nwords)
@@ -532,9 +536,9 @@ static void spi_recvblock(FAR struct spi_dev_s *dev, FAR void *buffer,
  *
  ****************************************************************************/
 
-FAR struct spi_dev_s *lpc23_spibus_initialize(int port)
+struct spi_dev_s *lpc23_spibus_initialize(int port)
 {
-  FAR struct lpc23xx_spidev_s *priv = &g_spidev;
+  struct lpc23xx_spidev_s *priv = &g_spidev;
   irqstate_t flags;
   uint32_t regval;
 
@@ -582,11 +586,7 @@ FAR struct spi_dev_s *lpc23_spibus_initialize(int port)
 
   /* Select a default frequency of approx. 400KHz */
 
-  spi_setfrequency((FAR struct spi_dev_s *)priv, 400000);
-
-  /* Initialize the SPI semaphore that enforces mutually exclusive access */
-
-  nxsem_init(&priv->exclsem, 0, 1);
+  spi_setfrequency((struct spi_dev_s *)priv, 400000);
   return &priv->spidev;
 }
 

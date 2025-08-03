@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/z16/src/z16f/z16f_espi.c
  *
- *   Copyright (C) 2014, 2016-2017 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -47,11 +34,11 @@
 
 #include <arch/board/board.h>
 #include <nuttx/irq.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 #include <nuttx/spi/spi.h>
 
-#include "up_arch.h"
 #include "chip.h"
+#include "z16_internal.h"
 
 #ifdef CONFIG_Z16F_ESPI
 
@@ -64,10 +51,10 @@
 struct z16f_spi_s
 {
   struct spi_dev_s spi;        /* Externally visible part of the SPI interface */
+  mutex_t lock;                /* Assures mutually exclusive access to SPI */
   bool initialized;            /* TRUE: Controller has been initialized */
   uint8_t nbits;               /* Width of word in bits (1-8) */
   uint8_t mode;                /* Mode 0,1,2,3 */
-  sem_t exclsem;               /* Assures mutually exclusive access to SPI */
   uint32_t frequency;          /* Requested clock frequency */
   uint32_t actual;             /* Actual clock frequency */
 
@@ -96,15 +83,15 @@ static void     spi_putreg8(FAR struct z16f_spi_s *priv, uint8_t regval,
 static void     spi_putreg16(FAR struct z16f_spi_s *priv, uint16_t regval,
                   uintptr_t regaddr);
 #else
-# define        spi_getreg8(priv,regaddr)         getreg8(regaddr)
-# define        spi_putreg8(priv,regval,regaddr)  putreg8(regval, regaddr)
-# define        spi_putreg16(priv,regval,regaddr) putreg16(regval, regaddr)
+#  define       spi_getreg8(priv,regaddr)         getreg8(regaddr)
+#  define       spi_putreg8(priv,regval,regaddr)  putreg8(regval, regaddr)
+#  define       spi_putreg16(priv,regval,regaddr) putreg16(regval, regaddr)
 #endif
 
 #ifdef CONFIG_DEBUG_SPI_INFO
 static void     spi_dumpregs(FAR struct z16f_spi_s *priv, const char *msg);
 #else
-# define        spi_dumpregs(priv,msg)
+#  define       spi_dumpregs(priv,msg)
 #endif
 
 static void     spi_flush(FAR struct z16f_spi_s *priv);
@@ -159,7 +146,13 @@ static const struct spi_ops_s g_epsiops =
 
 /* ESPI driver state */
 
-static struct z16f_spi_s g_espi;
+static struct z16f_spi_s g_espi =
+{
+  {
+    &g_epsiops
+  },
+  NXMUTEX_INITIALIZER
+};
 
 /****************************************************************************
  * Public Data
@@ -182,7 +175,7 @@ static struct z16f_spi_s g_espi;
  *
  * Returned Value:
  *   true:  This is the first register access of this type.
- *   flase: This is the same as the preceding register access.
+ *   false: This is the same as the preceding register access.
  *
  ****************************************************************************/
 
@@ -375,11 +368,11 @@ static int spi_lock(FAR struct spi_dev_s *dev, bool lock)
   spiinfo("lock=%d\n", lock);
   if (lock)
     {
-      ret = nxsem_wait_uninterruptible(&priv->exclsem);
+      ret = nxmutex_lock(&priv->lock);
     }
   else
     {
-      ret = nxsem_post(&priv->exclsem);
+      ret = nxmutex_unlock(&priv->lock);
     }
 
   return ret;
@@ -409,7 +402,9 @@ static uint32_t spi_setfrequency(FAR struct spi_dev_s *dev,
 
   spiinfo("frequency=%d\n", frequency);
 
-  /* Check if the requested frequency is the same as the frequency selection */
+  /* Check if the requested frequency is the same as the frequency
+   * selection.
+   */
 
   if (priv->frequency == frequency)
     {
@@ -506,7 +501,7 @@ static void spi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode)
           break;
 
         default:
-          DEBUGASSERT(false);
+          DEBUGPANIC();
           return;
         }
 
@@ -527,7 +522,7 @@ static void spi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode)
  *
  * Input Parameters:
  *   dev -  Device-specific state data
- *   nbits - The number of bits requests
+ *   nbits - The number of bits requested
  *
  * Returned Value:
  *   none
@@ -561,7 +556,9 @@ static void spi_setbits(FAR struct spi_dev_s *dev, int nbits)
       spi_putreg8(priv, regval, Z16F_ESPI_MODE);
       spiinfo("ESPI MODE: %02x\n", regval);
 
-      /* Save the selection so the subsequence re-configurations will be faster */
+      /* Save the selection so that subsequent re-configurations will be
+       * faster.
+       */
 
       priv->nbits = nbits;
     }
@@ -803,8 +800,6 @@ FAR struct spi_dev_s *z16_spibus_initialize(int port)
       /* Initialize the ESPI state structure */
 
       flags = enter_critical_section();
-      priv->spi.ops = &g_epsiops;
-      nxsem_init(&priv->exclsem, 0, 1);
 
       /* Set up the SPI pin configuration (board-specific logic is required
        * to configure and manage all chip selects).

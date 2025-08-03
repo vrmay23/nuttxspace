@@ -1,6 +1,8 @@
 /****************************************************************************
  * fs/driver/fs_registerdriver.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -28,8 +30,10 @@
 #include <errno.h>
 
 #include <nuttx/fs/fs.h>
+#include <nuttx/sched_note.h>
 
 #include "inode/inode.h"
+#include "vfs/vfs.h"
 
 /****************************************************************************
  * Public Functions
@@ -44,7 +48,7 @@
  * Input Parameters:
  *   path - The path to the inode to create
  *   fops - The file operations structure
- *   mode - inmode privileges (not used)
+ *   mode - inmode privileges
  *   priv - Private, user data that will be associated with the inode.
  *
  * Returned Value:
@@ -65,17 +69,14 @@ int register_driver(FAR const char *path,
   FAR struct inode *node;
   int ret;
 
+  sched_note_mark(NOTE_TAG_DRIVERS, path);
+
   /* Insert a dummy node -- we need to hold the inode semaphore because we
    * will have a momentarily bad structure.
    */
 
-  ret = inode_semtake();
-  if (ret < 0)
-    {
-      return ret;
-    }
-
-  ret = inode_reserve(path, &node);
+  inode_lock();
+  ret = inode_reserve(path, mode, &node);
   if (ret >= 0)
     {
       /* We have it, now populate it with driver specific information.
@@ -85,13 +86,14 @@ int register_driver(FAR const char *path,
       INODE_SET_DRIVER(node);
 
       node->u.i_ops   = fops;
-#ifdef CONFIG_FILE_MODE
-      node->i_mode    = mode;
-#endif
       node->i_private = priv;
-      ret             = OK;
+      inode_unlock();
+#ifdef CONFIG_FS_NOTIFY
+      notify_create(path);
+#endif
+      return OK;
     }
 
-  inode_semgive();
+  inode_unlock();
   return ret;
 }

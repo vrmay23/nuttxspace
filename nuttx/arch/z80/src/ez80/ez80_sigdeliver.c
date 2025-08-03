@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/z80/src/ez80/ez80_sigdeliver.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -25,6 +27,7 @@
 #include <nuttx/config.h>
 
 #include <sched.h>
+#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
@@ -57,18 +60,11 @@ void z80_sigdeliver(void)
   FAR struct tcb_s *rtcb = this_task();
   chipreg_t regs[XCPTCONTEXT_REGS];
 
-  /* Save the errno.  This must be preserved throughout the signal handling
-   * so that the user code final gets the correct errno value (probably
-   * EINTR).
-   */
-
-  int saved_errno = rtcb->pterrno;
-
   board_autoled_on(LED_SIGNAL);
 
   sinfo("rtcb=%p sigdeliver=%p sigpendactionq.head=%p\n",
-         rtcb, rtcb->xcp.sigdeliver, rtcb->sigpendactionq.head);
-  DEBUGASSERT(rtcb->xcp.sigdeliver != NULL);
+         rtcb, rtcb->sigdeliver, rtcb->sigpendactionq.head);
+  DEBUGASSERT(rtcb->sigdeliver != NULL);
 
   /* Save the return state on the stack. */
 
@@ -84,7 +80,7 @@ void z80_sigdeliver(void)
 
   /* Deliver the signals */
 
-  ((sig_deliver_t)rtcb->xcp.sigdeliver)(rtcb);
+  (rtcb->sigdeliver)(rtcb);
 
   /* Output any debug messages BEFORE restoring errno (because they may
    * alter errno), then disable interrupts again and restore the original
@@ -93,7 +89,6 @@ void z80_sigdeliver(void)
 
   sinfo("Resuming\n");
   up_irq_save();
-  rtcb->pterrno        = saved_errno;
 
   /* Modify the saved return state with the actual saved values in the
    * TCB.  This depends on the fact that nested signal handling is
@@ -105,9 +100,9 @@ void z80_sigdeliver(void)
    * could be modified by a hostile program.
    */
 
-  regs[XCPT_PC]        = rtcb->xcp.saved_pc;
-  regs[XCPT_I]         = rtcb->xcp.saved_i;
-  rtcb->xcp.sigdeliver = NULL;  /* Allows next handler to be scheduled */
+  regs[XCPT_PC]    = rtcb->xcp.saved_pc;
+  regs[XCPT_I]     = rtcb->xcp.saved_i;
+  rtcb->sigdeliver = NULL;  /* Allows next handler to be scheduled */
 
   /* Modify the saved return state with the actual saved values in the
    * TCB.  This depends on the fact that nested signal handling is

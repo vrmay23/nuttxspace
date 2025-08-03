@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/armv7-r/arm_doirq.c
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,11 +33,9 @@
 
 #include <nuttx/board.h>
 #include <arch/board/board.h>
+#include <sched/sched.h>
 
-#include "up_arch.h"
-#include "up_internal.h"
-
-#include "group/group.h"
+#include "arm_internal.h"
 
 /****************************************************************************
  * Public Functions
@@ -58,6 +43,8 @@
 
 uint32_t *arm_doirq(int irq, uint32_t *regs)
 {
+  struct tcb_s *tcb = this_task();
+
   board_autoled_on(LED_INIRQ);
 
 #ifdef CONFIG_SUPPRESS_INTERRUPTS
@@ -65,41 +52,48 @@ uint32_t *arm_doirq(int irq, uint32_t *regs)
 #else
   /* Nested interrupts are not supported */
 
-  DEBUGASSERT(CURRENT_REGS == NULL);
+  DEBUGASSERT(!up_interrupt_context());
 
-  /* Current regs non-zero indicates that we are processing an interrupt;
-   * CURRENT_REGS is also used to manage interrupt level context switches.
+  /* if irq == GIC_SMP_CPUSTART
+   * We are initiating the multi-core jumping state to up_idle,
+   * and we will use this_task(). Therefore, it cannot be overridden.
    */
 
-  CURRENT_REGS = regs;
+#ifdef CONFIG_SMP
+  if (irq != GIC_SMP_CPUSTART)
+#endif
+    {
+      tcb->xcp.regs = regs;
+    }
+
+  /* Set irq flag */
+
+  up_set_interrupt_context(true);
 
   /* Deliver the IRQ */
 
   irq_dispatch(irq, regs);
+  tcb = this_task();
 
-#ifdef CONFIG_ARCH_FPU
-  /* Check for a context switch.  If a context switch occurred, then
-   * CURRENT_REGS will have a different value than it did on entry.  If an
-   * interrupt level context switch has occurred, then restore the floating
-   * point state and the establish the correct address environment before
-   * returning from the interrupt.
-   */
-
-  if (regs != CURRENT_REGS)
+  if (regs != tcb->xcp.regs)
     {
-      /* Restore floating point registers */
+      /* Update scheduler parameters */
 
-      up_restorefpu((uint32_t *)CURRENT_REGS);
+      nxsched_suspend_scheduler(g_running_tasks[this_cpu()]);
+      nxsched_resume_scheduler(tcb);
+
+      /* Record the new "running" task when context switch occurred.
+       * g_running_tasks[] is only used by assertion logic for reporting
+       * crashes.
+       */
+
+      g_running_tasks[this_cpu()] = tcb;
+      regs = tcb->xcp.regs;
     }
-#endif
 
-  /* Set CURRENT_REGS to NULL to indicate that we are no longer in an
-   * interrupt handler.
-   */
+  /* Set irq flag */
 
-  regs         = (uint32_t *)CURRENT_REGS;
-  CURRENT_REGS = NULL;
-
+  up_set_interrupt_context(false);
   board_autoled_off(LED_INIRQ);
 #endif
   return regs;

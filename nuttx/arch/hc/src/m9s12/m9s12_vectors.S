@@ -1,35 +1,22 @@
 /************************************************************************************
  * arch/hc/src/m9s12/m9s12_vectors.S
  *
- *	 Copyright (C) 2009, 2011 Gregory Nutt. All rights reserved.
- *	 Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *	  notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *	  notice, this list of conditions and the following disclaimer in
- *	  the documentation and/or other materials provided with the
- *	  distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *	  used to endorse or promote products derived from this software
- *	  without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ************************************************************************************/
 
@@ -57,8 +44,8 @@
  ************************************************************************************/
 
 	.globl		__start
-	.globl		up_doirq
-	.globl		up_fullcontextrestore
+	.globl		hc_doirq
+	.globl		hc_fullcontextrestore
 	.file		"m9s12_vectors.S"
 
 /************************************************************************************
@@ -217,7 +204,7 @@ handlers:
  * Description:
  *	 Common IRQ handling logic
  *
- *   On entry in to vcommon: (1) The interrupt stack fram is in place, and (2) the
+ *   On entry in to vcommon: (1) The interrupt stack frame is in place, and (2) the
  *   IRQ number is in B.
  *
  *   On entry into an I- or X-interrupt, into an SWI, or into an undefined
@@ -234,11 +221,11 @@ handlers:
  *                PCH
  *   High Address PCL   <-- SP before interrupt
  *
- *   This function will create the following stack frame and will call up_doirq():
+ *   This function will create the following stack frame and will call hc_doirq():
  *
  *   Low Address        <-- SP after state save
  *                [PPAGE]
- *                [soft regisers]
+ *                [soft registers]
  *                XYH
  *                XYL
  *                ZH
@@ -305,16 +292,16 @@ vcommon:
 	std		.Lspsave
 	std		2, -sp
 
-	/* Recover the IRQ number and call up_doirq() */
+	/* Recover the IRQ number and call hc_doirq() */
 
 	ldab	.Lbsave
-	CALL	up_doirq
+	CALL	hc_doirq
 	leas	2, sp
 
 	/* Check if the return value in d is the same as regs parameter passed in the TOS */
 
 	cpd		.Lspsave
-	bne		up_fullcontextrestore
+	bne		hc_fullcontextrestore
 
 	/* Restore registers and return */
 
@@ -346,7 +333,7 @@ vcommon:
 	.size	handlers, .-handlers
 
 /************************************************************************************
- * Name: up_fullcontextrestore
+ * Name: hc_fullcontextrestore
  *
  * Description:
  *   Given a pointer to a register save block that was previously created by either
@@ -354,7 +341,7 @@ vcommon:
  *   thread, thereby completing a context switch.
  *
  *   Low Address  [PPAGE]
- *                [soft regisers]
+ *                [soft registers]
  *                XYH
  *                XYL
  *                ZH
@@ -379,7 +366,7 @@ vcommon:
  *
  ************************************************************************************/
 
-up_fullcontextrestore:
+hc_fullcontextrestore:
 	/* Make sure that interrupts are disabled */
 
 	orcc	#0x50
@@ -419,7 +406,7 @@ up_fullcontextrestore:
 	movw	2, -sp, 2, -x		/* Copy A:B */
 	movw	1, -sp, 1, -x		/* Copy CCR */
 	rti							/* And return from interrupt */
-	.size	up_fullcontextrestore, .-up_fullcontextrestore
+	.size	hc_fullcontextrestore, .-hc_fullcontextrestore
 
 /************************************************************************************
  * .bss
@@ -432,7 +419,7 @@ up_fullcontextrestore:
 	.comm	.Lspsave, 2, 1
 
 /************************************************************************************
- *	Name: up_interruptstack/g_intstackbase
+ *	Name: g_intstackalloc/g_intstacktop
  *
  * Description:
  *	 If CONFIG_ARCH_INTERRUPTSTACK is defined, this sets aside memory for the
@@ -441,8 +428,8 @@ up_fullcontextrestore:
  ************************************************************************************/
 
 #if CONFIG_ARCH_INTERRUPTSTACK > 1
-	.comm	.up_interruptstack:, CONFIG_ARCH_INTERRUPTSTACK, 1
-up_interruptstack_base:
-	.size	up_interruptstack, .-up_interruptstack
+	.comm	.g_intstackalloc:, CONFIG_ARCH_INTERRUPTSTACK, 1
+g_intstacktop:
+	.size	g_intstackalloc, .-g_intstackalloc
 #endif
 	.end

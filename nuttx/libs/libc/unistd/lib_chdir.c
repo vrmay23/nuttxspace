@@ -1,35 +1,22 @@
 /****************************************************************************
  * libs/libc/unistd/lib_chdir.c
  *
- *   Copyright (C) 2008-2009, 2011 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,37 +28,10 @@
 
 #include <sys/stat.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 #include <errno.h>
 
 #include "libc.h"
-
-#ifndef CONFIG_DISABLE_ENVIRON
-
-/****************************************************************************
- * Private Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: _trimdir
- ****************************************************************************/
-
-#if 0
-static inline void _trimdir(char *path)
-{
-  /* Skip any trailing '/' characters (unless it is also the leading '/') */
-
-  int len = strlen(path) - 1;
-  while (len > 0 && path[len] == '/')
-    {
-      path[len] = '\0';
-      len--;
-    }
-}
-#else
-#  define _trimdir(p)
-#endif
 
 /****************************************************************************
  * Public Functions
@@ -100,8 +60,8 @@ static inline void _trimdir(char *path)
  *     'path' argument OR more that SYMLOOP_MAX symbolic links in the
  *     resolution of the 'path' argument.
  *   ENAMETOOLONG
- *     The length of the path argument exceeds PATH_MAX or a pathname component
- *     is longer than NAME_MAX.
+ *     The length of the path argument exceeds PATH_MAX or a pathname
+ *     component is longer than NAME_MAX.
  *   ENOENT
  *     A component of 'path' does not name an existing directory or path is
  *     an empty string.
@@ -112,64 +72,63 @@ static inline void _trimdir(char *path)
 
 int chdir(FAR const char *path)
 {
+  FAR char *oldpwd = NULL;
+  FAR char *abspath;
   struct stat buf;
-  char *oldpwd;
-  char *alloc;
-  int errcode;
   int ret;
-
-  /* Verify the input parameters */
-
-  if (!path)
-    {
-      errcode = ENOENT;
-      goto errout;
-    }
 
   /* Verify that 'path' refers to a directory */
 
   ret = stat(path, &buf);
-  if (ret != 0)
+  if (ret < 0)
     {
-      errcode = ENOENT;
-      goto errout;
+      return ret;
     }
 
   /* Something exists here... is it a directory? */
 
   if (!S_ISDIR(buf.st_mode))
     {
-      errcode = ENOTDIR;
-      goto errout;
+      set_errno(ENOTDIR);
+      return ERROR;
     }
 
-  /* Yes, it is a directory. Remove any trailing '/' characters from the path */
+  /* Yes, it is a directory.
+   * Remove any trailing '/' characters from the path
+   */
 
-  _trimdir(path);
+  abspath = lib_get_pathbuffer();
+  if (abspath != NULL)
+    {
+      oldpwd = realpath(path, abspath);
+    }
+
+  if (abspath == NULL || oldpwd == NULL)
+    {
+      lib_put_pathbuffer(abspath);
+      return ERROR;
+    }
+
+#ifndef CONFIG_DISABLE_ENVIRON
 
   /* Replace any preceding OLDPWD with the current PWD (this is to
    * support 'cd -' in NSH)
    */
 
-  sched_lock();
   oldpwd = getenv("PWD");
   if (!oldpwd)
     {
-      oldpwd = CONFIG_LIB_HOMEDIR;
+      oldpwd = CONFIG_LIBC_HOMEDIR;
     }
 
-  alloc = strdup(oldpwd);  /* kludge needed because environment is realloc'ed */
-  setenv("OLDPWD", alloc, TRUE);
-  lib_free(alloc);
+  setenv("OLDPWD", oldpwd, TRUE);
 
   /* Set the cwd to the input 'path' */
 
-  setenv("PWD", path, TRUE);
-  sched_unlock();
-  return OK;
-
-errout:
-  set_errno(errcode);
-  return ERROR;
-}
+  ret = setenv("PWD", abspath, TRUE);
 #endif /* !CONFIG_DISABLE_ENVIRON */
+
+  lib_put_pathbuffer(abspath);
+
+  return ret;
+}

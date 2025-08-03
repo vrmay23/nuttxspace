@@ -1,6 +1,8 @@
 /****************************************************************************
  * apps/nshlib/nsh_mntcmds.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -26,7 +28,6 @@
 
 #include <sys/types.h>
 #include <sys/mount.h>
-#include <sys/statfs.h>
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -55,7 +56,7 @@
 
 #if !defined(CONFIG_DISABLE_MOUNTPOINT) && !defined(CONFIG_NSH_DISABLE_DF)
 #ifdef NSH_HAVE_CATFILE
-int cmd_df(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
+int cmd_df(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
 #if defined(HAVE_DF_HUMANREADBLE) && defined(HAVE_DF_BLOCKOUTPUT)
   if (argc > 1 && strcmp(argv[1], "-h") == 0)
@@ -84,7 +85,7 @@ int cmd_df(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
  ****************************************************************************/
 
 #if !defined(CONFIG_DISABLE_MOUNTPOINT) && !defined(CONFIG_NSH_DISABLE_MOUNT)
-int cmd_mount(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
+int cmd_mount(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
   FAR const char *source;
   FAR char *fullsource;
@@ -236,7 +237,7 @@ errout:
 
 #if !defined(CONFIG_DISABLE_MOUNTPOINT) && defined(CONFIG_NET) && \
     defined(CONFIG_NFS) && !defined(CONFIG_NSH_DISABLE_NFSMOUNT)
-int cmd_nfsmount(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
+int cmd_nfsmount(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
   struct nfs_args data;
   FAR char *address;
@@ -360,9 +361,11 @@ int cmd_nfsmount(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
  ****************************************************************************/
 
 #if !defined(CONFIG_DISABLE_MOUNTPOINT) && !defined(CONFIG_NSH_DISABLE_UMOUNT)
-int cmd_umount(FAR struct nsh_vtbl_s *vtbl, int argc, char **argv)
+int cmd_umount(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
-  char *fullpath = nsh_getfullpath(vtbl, argv[1]);
+  UNUSED(argc);
+
+  FAR char *fullpath = nsh_getfullpath(vtbl, argv[1]);
   int ret = ERROR;
 
   if (fullpath)

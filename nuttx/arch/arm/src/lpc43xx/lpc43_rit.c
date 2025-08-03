@@ -1,35 +1,22 @@
 /****************************************************************************
- *  arch/arm/src/lpc43/lpc43_rit.c
+ * arch/arm/src/lpc43xx/lpc43_rit.c
  *
- *   Copyright (C) 2012, 2016 Gregory Nutt. All rights reserved.
- *   Author: Brandon Warhurst <warhurst_002@yahoo.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -54,7 +41,7 @@
 #include <nuttx/arch.h>
 #include <arch/board/board.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "hardware/lpc43_rit.h"
 #include "lpc43_rit.h"
 
@@ -79,14 +66,15 @@
  ****************************************************************************/
 
 static double sec_per_tick;
-static uint64_t internal_timer, alarm;
+static uint64_t g_internal_timer;
+static uint64_t g_alarm;
 struct timespec g_ts;
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
-static int lpc43_RIT_isr(int irq, FAR void *context, FAR void *arg)
+static int lpc43_rit_isr(int irq, void *context, void *arg)
 {
   irqstate_t flags;
 
@@ -94,13 +82,13 @@ static int lpc43_RIT_isr(int irq, FAR void *context, FAR void *arg)
 
   putreg32(RIT_CTRL_INT, LPC43_RIT_CTRL);
 
-  internal_timer += (uint64_t)RIT_TIMER_RESOLUTION;
-  if (alarm > 0 && internal_timer >= alarm)
+  g_internal_timer += (uint64_t)RIT_TIMER_RESOLUTION;
+  if (g_alarm > 0 && g_internal_timer >= g_alarm)
     {
       /* handle expired alarm */
 
-      g_ts.tv_sec = (uint32_t)(internal_timer / 1000000000);
-      g_ts.tv_nsec = (uint32_t)(internal_timer % 1000000000);
+      g_ts.tv_sec = (uint32_t)(g_internal_timer / 1000000000);
+      g_ts.tv_nsec = (uint32_t)(g_internal_timer % 1000000000);
       nxsched_alarm_expiration(&g_ts);
     }
 
@@ -108,27 +96,27 @@ static int lpc43_RIT_isr(int irq, FAR void *context, FAR void *arg)
   return OK;
 }
 
-static inline void lpc43_load_RIT_timer(uint32_t value)
+static inline void lpc43_load_rit_timer(uint32_t value)
 {
   putreg32(value, LPC43_RIT_COUNTER);
 }
 
-static inline void lpc43_load_RIT_compare(uint32_t value)
+static inline void lpc43_load_rit_compare(uint32_t value)
 {
   putreg32(value, LPC43_RIT_COMPVAL);
 }
 
-static inline void lpc43_set_RIT_timer_mask(uint32_t value)
+static inline void lpc43_set_rit_timer_mask(uint32_t value)
 {
   putreg32(value, LPC43_RIT_MASK);
 }
 
-static inline uint32_t lpc43_read_RIT_timer(void)
+static inline uint32_t lpc43_read_rit_timer(void)
 {
   return getreg32(LPC43_RIT_COUNTER);
 }
 
-static inline void lpc43_RIT_timer_start(void)
+static inline void lpc43_rit_timer_start(void)
 {
   uint32_t regval;
   regval = getreg32(LPC43_RIT_CTRL);
@@ -142,7 +130,7 @@ static inline void lpc43_RIT_timer_start(void)
   putreg32(regval, LPC43_RIT_CTRL);
 }
 
-static inline void lpc43_RIT_timer_stop(void)
+static inline void lpc43_rit_timer_stop(void)
 {
   uint32_t regval;
   regval = getreg32(LPC43_RIT_CTRL);
@@ -160,19 +148,19 @@ void up_timer_initialize(void)
   uint32_t mask_bits = 0;
   uint32_t mask_test = 0x80000000;
 
-  lpc43_RIT_timer_stop();
-  lpc43_load_RIT_timer(0);
-  internal_timer = 0;
+  lpc43_rit_timer_stop();
+  lpc43_load_rit_timer(0);
+  g_internal_timer = 0;
 
   /* Set up the IRQ here */
 
-  irq_attach(LPC43M4_IRQ_RITIMER, lpc43_RIT_isr, NULL);
+  irq_attach(LPC43M4_IRQ_RITIMER, lpc43_rit_isr, NULL);
 
   /* Compute how many seconds per tick we have on the main clock.  If it is
    * 204MHz for example, then there should be about 4.90ns per tick
    */
 
-  sec_per_tick = (double)1.0/(double)LPC43_CCLK;
+  sec_per_tick = (double)1.0 / (double)LPC43_CCLK;
 
   /* Given an RIT_TIMER_RESOLUTION, compute how many ticks it will take to
    * reach that resolution.  For example, if we wanted a 1/4uS timer
@@ -182,7 +170,7 @@ void up_timer_initialize(void)
    * We round up by 1 tick.
    */
 
-  ticks_per_int = RIT_TIMER_RESOLUTION/(1000000000*sec_per_tick)+1;
+  ticks_per_int = RIT_TIMER_RESOLUTION / (1000000000 * sec_per_tick) + 1;
 
   /* Now we need to compute the mask that will let us set up to generate an
    * interrupt every 1/4uS.  This isn't "tickless" per-se, and probably
@@ -201,15 +189,15 @@ void up_timer_initialize(void)
       mask_bits++;
     }
 
-  tmrinfo("mask_bits = %d, mask = %X, ticks_per_int = %d\r\n",
+  tmrinfo("mask_bits = %d, mask = %X, ticks_per_int = %d\n",
           mask_bits, (0xffffffff << (32 - mask_bits)), ticks_per_int);
 
   /* Set the mask and compare value so we get interrupts every
    * RIT_TIMER_RESOLUTION cycles.
    */
 
-  lpc43_set_RIT_timer_mask((0xFFFFFFFF << (32 - mask_bits)));
-  lpc43_load_RIT_compare(ticks_per_int);
+  lpc43_set_rit_timer_mask((0xffffffff << (32 - mask_bits)));
+  lpc43_load_rit_compare(ticks_per_int);
 
   /* Turn on the IRQ */
 
@@ -217,37 +205,38 @@ void up_timer_initialize(void)
 
   /* Start the timer */
 
-  lpc43_RIT_timer_start();
+  lpc43_rit_timer_start();
 }
 
-int up_timer_gettime(FAR struct timespec *ts)
+int up_timer_gettime(struct timespec *ts)
 {
-  ts->tv_sec = (uint32_t)(internal_timer / 1000000000);
-  ts->tv_nsec = (uint32_t)(internal_timer % 1000000000);
+  ts->tv_sec = (uint32_t)(g_internal_timer / 1000000000);
+  ts->tv_nsec = (uint32_t)(g_internal_timer % 1000000000);
 
   return OK;
 }
 
-int up_alarm_cancel(FAR struct timespec *ts)
+int up_alarm_cancel(struct timespec *ts)
 {
-  ts->tv_sec = (uint32_t)(internal_timer / 1000000000);
-  ts->tv_nsec = (uint32_t)(internal_timer % 1000000000);
-  alarm = 0;
+  ts->tv_sec = (uint32_t)(g_internal_timer / 1000000000);
+  ts->tv_nsec = (uint32_t)(g_internal_timer % 1000000000);
+  g_alarm = 0;
   return OK;
 }
 
-int up_alarm_start(FAR const struct timespec *ts)
+int up_alarm_start(const struct timespec *ts)
 {
   /* According to the docs, this version should expect to receive the time
    * in the future when the alarm should expire. So that's the way it's
    * coded.
    */
 
-  alarm = (uint64_t)ts->tv_sec * (uint64_t)1000000000 + (uint64_t)ts->tv_nsec;
+  g_alarm = (uint64_t)ts->tv_sec * (uint64_t)1000000000 +
+            (uint64_t)ts->tv_nsec;
   return OK;
 }
 
-int up_timer_cancel(FAR struct timespec *ts)
+int up_timer_cancel(struct timespec *ts)
 {
   /* Currently this is just an alarm and both are implemented.  This is *NOT*
    * how it is supposed to be and will be corrected, but for now, this is a
@@ -258,15 +247,16 @@ int up_timer_cancel(FAR struct timespec *ts)
   return up_alarm_cancel(ts);
 }
 
-int up_timer_start(FAR const struct timespec *ts)
+int up_timer_start(const struct timespec *ts)
 {
   /* According to the docs, this version should basically compute the time
    * in the future when an alarm should go off.  That is the way it could
    * potentially be implemented, so that's the way I did it.
    */
 
-  alarm = internal_timer;
-  alarm += (uint64_t)ts->tv_sec * (uint64_t)1000000000 + (uint64_t)ts->tv_nsec;
+  g_alarm = g_internal_timer;
+  g_alarm += (uint64_t)ts->tv_sec * (uint64_t)1000000000 +
+             (uint64_t)ts->tv_nsec;
   return OK;
 }
 

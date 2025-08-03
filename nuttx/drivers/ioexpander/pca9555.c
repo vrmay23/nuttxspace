@@ -1,41 +1,29 @@
 /****************************************************************************
  * drivers/ioexpander/pca9555.c
  *
- *   Copyright (C) 2015, 2016-2017 Gregory Nutt. All rights reserved.
- *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * References:
- *   "16-bit I2C-bus and SMBus I/O port with interrupt product datasheet",
- *   Rev. 08 - 22 October 2009, NXP
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
+
+/* References:
+ *   "16-bit I2C-bus and SMBus I/O port with interrupt product datasheet",
+ *   Rev. 08 - 22 October 2009, NXP
+ */
 
 /****************************************************************************
  * Included Files
@@ -85,11 +73,11 @@ static int pca9555_readbuf(FAR struct ioexpander_dev_s *dev, uint8_t pin,
              FAR bool *value);
 #ifdef CONFIG_IOEXPANDER_MULTIPIN
 static int pca9555_multiwritepin(FAR struct ioexpander_dev_s *dev,
-             FAR uint8_t *pins, FAR bool *values, int count);
+             FAR const uint8_t *pins, FAR const bool *values, int count);
 static int pca9555_multireadpin(FAR struct ioexpander_dev_s *dev,
-             FAR uint8_t *pins, FAR bool *values, int count);
+             FAR const uint8_t *pins, FAR bool *values, int count);
 static int pca9555_multireadbuf(FAR struct ioexpander_dev_s *dev,
-             FAR uint8_t *pins, FAR bool *values, int count);
+             FAR const uint8_t *pins, FAR bool *values, int count);
 #endif
 #ifdef CONFIG_IOEXPANDER_INT_ENABLE
 static FAR void *pca9555_attach(FAR struct ioexpander_dev_s *dev,
@@ -138,21 +126,6 @@ static const struct ioexpander_ops_s g_pca9555_ops =
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: pca9555_lock
- *
- * Description:
- *   Get exclusive access to the PCA9555
- *
- ****************************************************************************/
-
-static int pca9555_lock(FAR struct pca9555_dev_s *pca)
-{
-  return nxsem_wait_uninterruptible(&pca->exclsem);
-}
-
-#define pca9555_unlock(p) nxsem_post(&(p)->exclsem)
 
 /****************************************************************************
  * Name: pca9555_write
@@ -215,7 +188,7 @@ static inline int pca9555_writeread(FAR struct pca9555_dev_s *pca,
  ****************************************************************************/
 
 static int pca9555_setbit(FAR struct pca9555_dev_s *pca, uint8_t addr,
-                          uint8_t pin, int bitval)
+                          uint8_t pin, bool bitval)
 {
   uint8_t buf[2];
   int ret;
@@ -337,9 +310,15 @@ static int pca9555_direction(FAR struct ioexpander_dev_s *dev, uint8_t pin,
   FAR struct pca9555_dev_s *pca = (FAR struct pca9555_dev_s *)dev;
   int ret;
 
+  if (direction != IOEXPANDER_DIRECTION_IN &&
+      direction != IOEXPANDER_DIRECTION_OUT)
+    {
+      return -EINVAL;
+    }
+
   /* Get exclusive access to the PCA555 */
 
-  ret = pca9555_lock(pca);
+  ret = nxmutex_lock(&pca->lock);
   if (ret < 0)
     {
       return ret;
@@ -347,7 +326,7 @@ static int pca9555_direction(FAR struct ioexpander_dev_s *dev, uint8_t pin,
 
   ret = pca9555_setbit(pca, PCA9555_REG_CONFIG, pin,
                        (direction == IOEXPANDER_DIRECTION_IN));
-  pca9555_unlock(pca);
+  nxmutex_unlock(&pca->lock);
   return ret;
 }
 
@@ -371,25 +350,24 @@ static int pca9555_direction(FAR struct ioexpander_dev_s *dev, uint8_t pin,
  ****************************************************************************/
 
 static int pca9555_option(FAR struct ioexpander_dev_s *dev, uint8_t pin,
-                          int opt, FAR void *val)
+                          int opt, FAR void *value)
 {
   FAR struct pca9555_dev_s *pca = (FAR struct pca9555_dev_s *)dev;
   int ret = -EINVAL;
 
   if (opt == IOEXPANDER_OPTION_INVERT)
     {
-      int ival = (int)((intptr_t)val);
-
       /* Get exclusive access to the PCA555 */
 
-      ret = pca9555_lock(pca);
+      ret = nxmutex_lock(&pca->lock);
       if (ret < 0)
         {
           return ret;
         }
 
-      ret = pca9555_setbit(pca, PCA9555_REG_POLINV, pin, ival);
-      pca9555_unlock(pca);
+      ret = pca9555_setbit(pca, PCA9555_REG_POLINV, pin,
+                           ((uintptr_t)value == IOEXPANDER_VAL_INVERT));
+      nxmutex_unlock(&pca->lock);
     }
 
   return ret;
@@ -420,14 +398,14 @@ static int pca9555_writepin(FAR struct ioexpander_dev_s *dev, uint8_t pin,
 
   /* Get exclusive access to the PCA555 */
 
-  ret = pca9555_lock(pca);
+  ret = nxmutex_lock(&pca->lock);
   if (ret < 0)
     {
       return ret;
     }
 
   ret = pca9555_setbit(pca, PCA9555_REG_OUTPUT, pin, value);
-  pca9555_unlock(pca);
+  nxmutex_unlock(&pca->lock);
   return ret;
 }
 
@@ -458,14 +436,14 @@ static int pca9555_readpin(FAR struct ioexpander_dev_s *dev, uint8_t pin,
 
   /* Get exclusive access to the PCA555 */
 
-  ret = pca9555_lock(pca);
+  ret = nxmutex_lock(&pca->lock);
   if (ret < 0)
     {
       return ret;
     }
 
   ret = pca9555_getbit(pca, PCA9555_REG_INPUT, pin, value);
-  pca9555_unlock(pca);
+  nxmutex_unlock(&pca->lock);
   return ret;
 }
 
@@ -494,14 +472,14 @@ static int pca9555_readbuf(FAR struct ioexpander_dev_s *dev, uint8_t pin,
 
   /* Get exclusive access to the PCA555 */
 
-  ret = pca9555_lock(pca);
+  ret = nxmutex_lock(&pca->lock);
   if (ret < 0)
     {
       return ret;
     }
 
   ret = pca9555_getbit(pca, PCA9555_REG_OUTPUT, pin, value);
-  pca9555_unlock(pca);
+  nxmutex_unlock(&pca->lock);
   return ret;
 }
 
@@ -516,7 +494,7 @@ static int pca9555_readbuf(FAR struct ioexpander_dev_s *dev, uint8_t pin,
  ****************************************************************************/
 
 static int pca9555_getmultibits(FAR struct pca9555_dev_s *pca, uint8_t addr,
-                                FAR uint8_t *pins, FAR bool *values,
+                                FAR const uint8_t *pins, FAR bool *values,
                                 int count)
 {
   uint8_t buf[2];
@@ -578,8 +556,8 @@ static int pca9555_getmultibits(FAR struct pca9555_dev_s *pca, uint8_t addr,
  ****************************************************************************/
 
 static int pca9555_multiwritepin(FAR struct ioexpander_dev_s *dev,
-                                 FAR uint8_t *pins, FAR bool *values,
-                                 int count)
+                                 FAR const uint8_t *pins,
+                                 FAR const bool *values, int count)
 {
   FAR struct pca9555_dev_s *pca = (FAR struct pca9555_dev_s *)dev;
   uint8_t addr = PCA9555_REG_OUTPUT;
@@ -591,7 +569,7 @@ static int pca9555_multiwritepin(FAR struct ioexpander_dev_s *dev,
 
   /* Get exclusive access to the PCA555 */
 
-  ret = pca9555_lock(pca);
+  ret = nxmutex_lock(&pca->lock);
   if (ret < 0)
     {
       return ret;
@@ -606,7 +584,7 @@ static int pca9555_multiwritepin(FAR struct ioexpander_dev_s *dev,
   ret = pca9555_writeread(pca, &addr, 1, &buf[1], 2);
   if (ret < 0)
     {
-      pca9555_unlock(pca);
+      nxmutex_unlock(&pca->lock);
       return ret;
     }
 #else
@@ -624,7 +602,7 @@ static int pca9555_multiwritepin(FAR struct ioexpander_dev_s *dev,
       pin = pins[i];
       if (pin > 15)
         {
-          pca9555_unlock(pca);
+          nxmutex_unlock(&pca->lock);
           return -ENXIO;
         }
       else if (pin > 7)
@@ -654,7 +632,7 @@ static int pca9555_multiwritepin(FAR struct ioexpander_dev_s *dev,
 #endif
   ret = pca9555_write(pca, buf, 3);
 
-  pca9555_unlock(pca);
+  nxmutex_unlock(&pca->lock);
   return ret;
 }
 
@@ -676,7 +654,7 @@ static int pca9555_multiwritepin(FAR struct ioexpander_dev_s *dev,
  ****************************************************************************/
 
 static int pca9555_multireadpin(FAR struct ioexpander_dev_s *dev,
-                                FAR uint8_t *pins, FAR bool *values,
+                                FAR const uint8_t *pins, FAR bool *values,
                                 int count)
 {
   FAR struct pca9555_dev_s *pca = (FAR struct pca9555_dev_s *)dev;
@@ -684,7 +662,7 @@ static int pca9555_multireadpin(FAR struct ioexpander_dev_s *dev,
 
   /* Get exclusive access to the PCA555 */
 
-  ret = pca9555_lock(pca);
+  ret = nxmutex_lock(&pca->lock);
   if (ret < 0)
     {
       return ret;
@@ -692,7 +670,7 @@ static int pca9555_multireadpin(FAR struct ioexpander_dev_s *dev,
 
   ret = pca9555_getmultibits(pca, PCA9555_REG_INPUT,
                              pins, values, count);
-  pca9555_unlock(pca);
+  nxmutex_unlock(&pca->lock);
   return ret;
 }
 
@@ -714,7 +692,7 @@ static int pca9555_multireadpin(FAR struct ioexpander_dev_s *dev,
  ****************************************************************************/
 
 static int pca9555_multireadbuf(FAR struct ioexpander_dev_s *dev,
-                                FAR uint8_t *pins, FAR bool *values,
+                                FAR const uint8_t *pins, FAR bool *values,
                                 int count)
 {
   FAR struct pca9555_dev_s *pca = (FAR struct pca9555_dev_s *)dev;
@@ -722,7 +700,7 @@ static int pca9555_multireadbuf(FAR struct ioexpander_dev_s *dev,
 
   /* Get exclusive access to the PCA555 */
 
-  ret = pca9555_lock(pca);
+  ret = nxmutex_lock(&pca->lock);
   if (ret < 0)
     {
       return ret;
@@ -730,7 +708,7 @@ static int pca9555_multireadbuf(FAR struct ioexpander_dev_s *dev,
 
   ret = pca9555_getmultibits(pca, PCA9555_REG_OUTPUT,
                              pins, values, count);
-  pca9555_unlock(pca);
+  nxmutex_unlock(&pca->lock);
   return ret;
 }
 
@@ -768,10 +746,10 @@ static FAR void *pca9555_attach(FAR struct ioexpander_dev_s *dev,
 
   /* Get exclusive access to the PCA555 */
 
-  ret = pca9555_lock(pca);
+  ret = nxmutex_lock(&pca->lock);
   if (ret < 0)
     {
-      return ret;
+      return NULL;
     }
 
   /* Find and available in entry in the callback table */
@@ -794,7 +772,7 @@ static FAR void *pca9555_attach(FAR struct ioexpander_dev_s *dev,
 
   /* Add this callback to the table */
 
-  pca9555_unlock(pca);
+  nxmutex_unlock(&pca->lock);
   return handle;
 }
 
@@ -822,7 +800,7 @@ static int pca9555_detach(FAR struct ioexpander_dev_s *dev, FAR void *handle)
   DEBUGASSERT(pca != NULL && cb != NULL);
   DEBUGASSERT((uintptr_t)cb >= (uintptr_t)&pca->cb[0] &&
               (uintptr_t)cb <=
-              (uintptr_t)&pca->cb[CONFIG_TCA64XX_INT_NCALLBACKS - 1]);
+              (uintptr_t)&pca->cb[CONFIG_PCA9555_INT_NCALLBACKS - 1]);
   UNUSED(pca);
 
   cb->pinset = 0;
@@ -987,7 +965,7 @@ FAR struct ioexpander_dev_s *pca9555_initialize(
   pcadev->config->enable(pcadev->config, TRUE);
 #endif
 
-  nxsem_init(&pcadev->exclsem, 0, 1);
+  nxmutex_init(&pcadev->lock);
   return &pcadev->dev;
 }
 

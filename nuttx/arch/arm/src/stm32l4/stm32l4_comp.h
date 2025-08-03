@@ -1,8 +1,8 @@
-/************************************************************************************
- * arch/arm/src/stm32/stm32l4_comp.h
+/****************************************************************************
+ * arch/arm/src/stm32l4/stm32l4_comp.h
  *
- * Copyright (c) 2016 Motorola Mobility, LLC.
- * All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2016 Motorola Mobility LLC. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,14 +31,14 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_STM32L4_STM32L4_COMP_H
 #define __ARCH_ARM_SRC_STM32L4_STM32L4_COMP_H
 
-/************************************************************************************
+/****************************************************************************
  * Included Files
- ************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -46,9 +46,9 @@
 
 #include "hardware/stm32l4_comp.h"
 
-/************************************************************************************
+/****************************************************************************
  * Public Types
- ************************************************************************************/
+ ****************************************************************************/
 
 #if defined(CONFIG_STM32L4_STM32L4X3)
 
@@ -140,15 +140,15 @@ enum stm32l4_comp_speed_e
   STM32L4_COMP_SPEED_LOW
 };
 
-/* Comparator configuration ***********************************************************/
+/* Comparator configuration *************************************************/
 
 struct stm32l4_comp_config_s
 {
   struct
   {
-    FAR const struct comp_callback_s *cb;
-    bool                              rising;
-    bool                              falling;
+    const struct comp_callback_s *cb;
+    bool                          rising;
+    bool                          falling;
   } interrupt;
 
   uint8_t  inp;                 /* Plus input pin (see enum stm32l4_comp_inp_e) */
@@ -159,9 +159,9 @@ struct stm32l4_comp_config_s
   uint32_t csr;                 /* Control and status register */
 };
 
-/************************************************************************************
+/****************************************************************************
  * Public Function Prototypes
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ASSEMBLY__
 #ifdef __cplusplus
@@ -191,8 +191,9 @@ extern "C"
  *
  ****************************************************************************/
 
-FAR struct comp_dev_s* stm32l4_compinitialize(int intf,
-                                              FAR const struct stm32l4_comp_config_s *cfg);
+struct
+comp_dev_s *stm32l4_compinitialize(int intf,
+                                   const struct stm32l4_comp_config_s *cfg);
 
 #undef EXTERN
 #ifdef __cplusplus

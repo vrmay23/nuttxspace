@@ -1,33 +1,33 @@
-/*******************************************************************************************************************************
- * arch/arm/src/efm32/chip/efm32_calibrate.h
+/****************************************************************************
+ * arch/arm/src/efm32/hardware/efm32_calibrate.h
  *
- *  Copyright 2014 Silicon Laboratories, Inc. http://www.silabs.com</b>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2014 Silicon Laboratories, Inc.
+ * SPDX-FileCopyrightText: 2014 Pierre-noel Bouteville . All rights reserved.
+ * SPDX-FileCopyrightText: 2014 Gregory Nutt. All rights reserved.
+ * SPDX-FileContributor: Pierre-noel Bouteville <pnb990@gmail.com>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Permission is granted to anyone to use this software for any purpose,
  * including commercial applications, and to alter it and redistribute it
  * freely, subject to the following restrictions:
  *
  * 1. The origin of this software must not be misrepresented; you must not
- *    claim that you wrote the original software.@n
+ *    claim that you wrote the original software.
  * 2. Altered source versions must be plainly marked as such, and must not be
- *    misrepresented as being the original software.@n
+ *    misrepresented as being the original software.
  * 3. This notice may not be removed or altered from any source distribution.
  *
  * DISCLAIMER OF WARRANTY/LIMITATION OF REMEDIES: Silicon Laboratories, Inc.
  * has no obligation to support this Software. Silicon Laboratories, Inc. is
- * providing the Software "AS IS", with no express or implied warranties of any
- * kind, including, but not limited to, any implied warranties of
- * merchantability or fitness for any particular purpose or warranties against
- * infringement of any proprietary rights of a third party.
+ * providing the Software "AS IS", with no express or implied warranties of
+ * any kind, including, but not limited to, any implied warranties of
+ * merchantability or fitness for any particular purpose or warranties
+ * against infringement of any proprietary rights of a third party.
  *
  * Silicon Laboratories, Inc. will not be liable for any consequential,
  * incidental, or special damages, or any other relief, or for any claim by
  * any third party, arising from your use of this Software.
- *
- *   Copyright (C) 2014 Pierre-noel Bouteville . All rights reserved.
- *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
- *   Authors: Pierre-noel Bouteville <pnb990@gmail.com>
- *            Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -56,14 +56,14 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- *******************************************************************************************************************************/
+ ****************************************************************************/
 
-#ifndef __ARCH_ARM_SRC_EFM32_CHIP_EFM32_CALIBRATE_H
-#define __ARCH_ARM_SRC_EFM32_CHIP_EFM32_CALIBRATE_H
+#ifndef __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32_CALIBRATE_H
+#define __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32_CALIBRATE_H
 
-/*******************************************************************************************************************************
+/****************************************************************************
  * Included Files
- *******************************************************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 #include "hardware/efm32_memorymap.h"
@@ -72,17 +72,17 @@
 #  warning This is the EFM32GG header file; Review/modification needed for this architecture
 #endif
 
-/*******************************************************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- *******************************************************************************************************************************/
+ ****************************************************************************/
 
 #define CALIBRATE_MAX_REGISTERS    50 /* Max number of address/value pairs for calibration */
 
 #define CALIBRATE ((const struct efm32_calibrate_s *)EFM32_CALIBRATE_BASE)
 
-/*******************************************************************************************************************************
+/****************************************************************************
  * Public Type Definitions
- *******************************************************************************************************************************/
+ ****************************************************************************/
 
 struct efm32_calibrate_s
 {
@@ -90,4 +90,4 @@ struct efm32_calibrate_s
   const uint32_t value;   /* Default value for calibration register */
 };
 
-#endif /* __ARCH_ARM_SRC_EFM32_CHIP_EFM32_CALIBRATE_H */
+#endif /* __ARCH_ARM_SRC_EFM32_HARDWARE_EFM32_CALIBRATE_H */

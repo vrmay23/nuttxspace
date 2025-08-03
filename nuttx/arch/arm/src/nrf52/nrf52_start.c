@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/nrf52/nrf52_start.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -47,12 +34,10 @@
 #include <arch/board/board.h>
 #include <arch/irq.h>
 
-#include "up_arch.h"
-#include "up_internal.h"
-#include "nvic.h"
-
-#include "nrf52_clockconfig.h"
+#include "arm_internal.h"
+#include "hardware/nrf52_nvmc.h"
 #include "hardware/nrf52_utils.h"
+#include "nrf52_clockconfig.h"
 #include "nrf52_lowputc.h"
 #include "nrf52_start.h"
 #include "nrf52_gpio.h"
@@ -72,7 +57,7 @@
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_FEATURES
-#  define showprogress(c) up_lowputc(c)
+#  define showprogress(c) arm_lowputc(c)
 #else
 #  define showprogress(c)
 #endif
@@ -81,91 +66,65 @@
  * Private Functions
  ****************************************************************************/
 
+#ifdef CONFIG_ARMV7M_STACKCHECK
+/* we need to get r10 set before we can allow instrumentation calls */
+
+void __start(void) noinstrument_function;
+#endif
+
+#ifdef CONFIG_NRF52_FLASH_PREFETCH
+
 /****************************************************************************
- * Name: nrf52_fpuconfig
+ * Name: nrf52_enable_icache
  *
  * Description:
- *   Configure the FPU.  Relative bit settings:
+ *   Enable I-Cache for Flash
  *
- *     CPACR:  Enables access to CP10 and CP11
- *     CONTROL.FPCA: Determines whether the FP extension is active in the
- *       current context:
- *     FPCCR.ASPEN:  Enables automatic FP state preservation, then the
- *       processor sets this bit to 1 on successful completion of any FP
- *       instruction.
- *     FPCCR.LSPEN:  Enables lazy context save of FP state. When this is
- *       done, the processor reserves space on the stack for the FP state,
- *       but does not save that state information to the stack.
+ * Input Parameter:
+ *   enable - enable or disable I-Cache
  *
- *  Software must not change the value of the ASPEN bit or LSPEN bit while
- *  either:
- *   - the CPACR permits access to CP10 and CP11, that give access to the FP
- *     extension, or
- *   - the CONTROL.FPCA bit is set to 1
+ * Returned Values:
+ *   None
  *
  ****************************************************************************/
 
-#ifdef CONFIG_ARCH_FPU
-#ifndef CONFIG_ARMV7M_LAZYFPU
-static inline void nrf52_fpuconfig(void)
+void nrf52_enable_icache(bool enable)
 {
-  uint32_t regval;
-
-  /* Set CONTROL.FPCA so that we always get the extended context frame
-   * with the volatile FP registers stacked above the basic context.
-   */
-
-  regval = getcontrol();
-  regval |= (1 << 2);
-  setcontrol(regval);
-
-  /* Ensure that FPCCR.LSPEN is disabled, so that we don't have to contend
-   * with the lazy FP context save behaviour.  Clear FPCCR.ASPEN since we
-   * are going to turn on CONTROL.FPCA for all contexts.
-   */
-
-  regval = getreg32(NVIC_FPCCR);
-  regval &= ~((1 << 31) | (1 << 30));
-  putreg32(regval, NVIC_FPCCR);
-
-  /* Enable full access to CP10 and CP11 */
-
-  regval = getreg32(NVIC_CPACR);
-  regval |= ((3 << (2 * 10)) | (3 << (2 * 11)));
-  putreg32(regval, NVIC_CPACR);
+  if (enable)
+    {
+      modifyreg32(NRF52_NVMC_ICACHECNF, 0, NVMC_ICACHECNF_CACHEEN);
+    }
+  else
+    {
+      modifyreg32(NRF52_NVMC_ICACHECNF, NVMC_ICACHECNF_CACHEEN, 0);
+    }
 }
-#else
-static inline void nrf52_fpuconfig(void)
+
+/****************************************************************************
+ * Name: nrf52_enable_profile
+ *
+ * Description:
+ *   Enable profiling I-Cache for flash
+ *
+ * Input Parameter:
+ *   enable - enable or disable profiling for I-Cache
+ *
+ * Returned Values:
+ *   None
+ *
+ ****************************************************************************/
+
+void nrf52_enable_profile(bool enable)
 {
-  uint32_t regval;
-
-  /* Clear CONTROL.FPCA so that we do not get the extended context frame
-   * with the volatile FP registers stacked in the saved context.
-   */
-
-  regval = getcontrol();
-  regval &= ~(1 << 2);
-  setcontrol(regval);
-
-  /* Ensure that FPCCR.LSPEN is disabled, so that we don't have to contend
-   * with the lazy FP context save behaviour.  Clear FPCCR.ASPEN since we
-   * are going to keep CONTROL.FPCA off for all contexts.
-   */
-
-  regval = getreg32(NVIC_FPCCR);
-  regval &= ~((1 << 31) | (1 << 30));
-  putreg32(regval, NVIC_FPCCR);
-
-  /* Enable full access to CP10 and CP11 */
-
-  regval = getreg32(NVIC_CPACR);
-  regval |= ((3 << (2 * 10)) | (3 << (2 * 11)));
-  putreg32(regval, NVIC_CPACR);
+  if (enable)
+    {
+      modifyreg32(NRF52_NVMC_ICACHECNF, 0, NVMC_ICACHECNF_CACHEPROFEN);
+    }
+  else
+    {
+      modifyreg32(NRF52_NVMC_ICACHECNF, NVMC_ICACHECNF_CACHEPROFEN, 0);
+    }
 }
-#endif
-
-#else
-#  define nrf52_fpuconfig()
 #endif
 
 /****************************************************************************
@@ -173,7 +132,7 @@ static inline void nrf52_fpuconfig(void)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: _start
+ * Name: __start
  *
  * Description:
  *   This is the reset entry point.
@@ -184,6 +143,13 @@ void __start(void)
 {
   const uint32_t *src;
   uint32_t *dest;
+
+#ifdef CONFIG_ARMV7M_STACKCHECK
+  /* Set the stack limit before we attempt to call any functions */
+
+  __asm__ volatile("sub r10, sp, %0" : :
+                   "r"(CONFIG_IDLETHREAD_STACKSIZE - 64) :);
+#endif
 
   /* Make sure that interrupts are disabled */
 
@@ -202,7 +168,7 @@ void __start(void)
    * certain that there are no issues with the state of global variables.
    */
 
-  for (dest = &_sbss; dest < &_ebss; )
+  for (dest = (uint32_t *)_sbss; dest < (uint32_t *)_ebss; )
     {
       *dest++ = 0;
     }
@@ -215,14 +181,20 @@ void __start(void)
    * end of all of the other read-only data (.text, .rodata) at _eronly.
    */
 
-  for (src = &_eronly, dest = &_sdata; dest < &_edata; )
+  for (src = (const uint32_t *)_eronly,
+       dest = (uint32_t *)_sdata; dest < (uint32_t *)_edata;
+      )
     {
       *dest++ = *src++;
     }
 
   showprogress('C');
 
-#if defined(CONFIG_ARCH_FAMILY_NRF52832)
+#ifdef CONFIG_ARMV7M_STACKCHECK
+  arm_stack_check_init();
+#endif
+
+#if defined(CONFIG_ARCH_CHIP_NRF52832)
   /* Initialize the errdata work-around */
 
   nrf52832_errdata_init();
@@ -230,11 +202,15 @@ void __start(void)
 
   /* Initialize the FPU (if configured) */
 
-  nrf52_fpuconfig();
+  arm_fpuconfig();
 
 #ifdef CONFIG_NRF52_FLASH_PREFETCH
-  nrf_nvmc_enable_icache(true);
-  nrf_nvmc_enable_profile(true);
+  nrf52_enable_icache(true);
+  nrf52_enable_profile(true);
+#endif
+
+#ifdef CONFIG_ARCH_PERF_EVENTS
+  up_perf_init((void *)BOARD_SYSTICK_CLOCK);
 #endif
 
   showprogress('D');
@@ -266,6 +242,7 @@ void __start(void)
 
   showprogress('\r');
   showprogress('\n');
+
   nx_start();
 
   /* Shouldn't get here */

@@ -1,37 +1,22 @@
 /****************************************************************************
  * boards/arm/stm32l4/nucleo-l496zg/include/board.h
  *
- *   Copyright (C) 2016, 2019 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *            Mark Olsson <post@markolsson.se>
- *            David Sidrane <david_s5@nscdg.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -45,7 +30,7 @@
 #include <nuttx/config.h>
 
 #ifndef __ASSEMBLY__
-# include <stdint.h>
+#  include <stdint.h>
 #endif
 
 /* Do not include STM32 L4 header files here */
@@ -75,7 +60,7 @@
 #define STM32L4_HSE_FREQUENCY     8000000ul  /* 8 MHz from MCO output */
 #define STM32L4_LSE_FREQUENCY     32768
 
-#define HSE_CLOCK_CONFIG
+#define MSI_CLOCK_CONFIG
 
 #if defined(HSI_CLOCK_CONFIG)
 
@@ -88,9 +73,10 @@
 /* 'main' PLL config; we use this to generate our system clock via the R
  *  output.  We set it up as 16 MHz / 1 * 10 / 2 = 80 MHz
  *
- * XXX NOTE:  currently the main PLL is implicitly turned on and is implicitly
- * the system clock; this should be configurable since not all applications may
- * want things done this way.
+ * XXX NOTE:
+ * currently the main PLL is implicitly turned on and is implicitly
+ * the system clock; this should be configurable since not all
+ * applications may want things done this way.
  */
 
 #define STM32L4_PLLCFG_PLLN             RCC_PLLCFG_PLLN(10)
@@ -147,7 +133,6 @@
 
 #define STM32L4_RCC_CFGR_HPRE     RCC_CFGR_HPRE_SYSCLK      /* HCLK  = SYSCLK / 1 */
 #define STM32L4_HCLK_FREQUENCY    STM32L4_SYSCLK_FREQUENCY
-#define STM32L4_BOARD_HCLK        STM32L4_HCLK_FREQUENCY    /* Same as above, to satisfy compiler */
 
 /* APB1 clock (PCLK1) is HCLK/1 (80MHz) */
 
@@ -198,9 +183,10 @@
 /* 'main' PLL config; we use this to generate our system clock via the R
  *  output.  We set it up as 8 MHz / 1 * 20 / 2 = 80 MHz
  *
- * XXX NOTE:  currently the main PLL is implicitly turned on and is implicitly
- * the system clock; this should be configurable since not all applications may
- * want things done this way.
+ * XXX NOTE:
+ * currently the main PLL is implicitly turned on and is implicitly
+ * the system clock; this should be configurable since not all
+ * applications may want things done this way.
  */
 
 #define STM32L4_PLLCFG_PLLN             RCC_PLLCFG_PLLN(20)
@@ -257,7 +243,6 @@
 
 #define STM32L4_RCC_CFGR_HPRE     RCC_CFGR_HPRE_SYSCLK      /* HCLK  = SYSCLK / 1 */
 #define STM32L4_HCLK_FREQUENCY    STM32L4_SYSCLK_FREQUENCY
-#define STM32L4_BOARD_HCLK        STM32L4_HCLK_FREQUENCY    /* Same as above, to satisfy compiler */
 
 /* APB1 clock (PCLK1) is HCLK/1 (80MHz) */
 
@@ -309,9 +294,10 @@
 /* 'main' PLL config; we use this to generate our system clock via the R
  *  output.  We set it up as 4 MHz / 1 * 40 / 2 = 80 MHz
  *
- * XXX NOTE:  currently the main PLL is implicitly turned on and is implicitly
- * the system clock; this should be configurable since not all applications may
- * want things done this way.
+ * XXX NOTE:
+ * currently the main PLL is implicitly turned on and is implicitly
+ * the system clock; this should be configurable since not all
+ * applications may want things done this way.
  */
 
 #define STM32L4_PLLCFG_PLLN             RCC_PLLCFG_PLLN(40)
@@ -368,7 +354,6 @@
 
 #define STM32L4_RCC_CFGR_HPRE     RCC_CFGR_HPRE_SYSCLK      /* HCLK  = SYSCLK / 1 */
 #define STM32L4_HCLK_FREQUENCY    STM32L4_SYSCLK_FREQUENCY
-#define STM32L4_BOARD_HCLK        STM32L4_HCLK_FREQUENCY    /* Same as above, to satisfy compiler */
 
 /* APB1 clock (PCLK1) is HCLK/1 (80MHz) */
 
@@ -429,7 +414,8 @@
 #define BOARD_LPTIM1_FREQUENCY  (STM32L4_HCLK_FREQUENCY / 2)
 #define BOARD_LPTIM2_FREQUENCY  (STM32L4_HCLK_FREQUENCY / 2)
 
-/* SDMMC dividers.  Note that slower clocking is required when DMA is disabled
+/* SDMMC dividers.
+ * Note that slower clocking is required when DMA is disabled
  * in order to avoid RX overrun/TX underrun errors due to delayed responses
  * to service FIFOs in interrupt driven mode.  These values have not been
  * tuned!!!
@@ -485,7 +471,6 @@
 #define DMAMAP_SDMMC1  DMACHAN_SDMMC_1
 #define DMAMAP_SDMMC2  DMACHAN_SDMMC_2
 
-
 /* FLASH wait states
  *
  *  --------- ---------- -----------
@@ -529,13 +514,14 @@
 #define BOARD_LED3_BIT    (1 << BOARD_LED3)
 
 /* If CONFIG_ARCH_LEDS is defined, the usage by the board port is defined in
- * include/board.h and src/stm32_autoleds.c. The LEDs are used to encode OS-related
- * events as follows:
+ * include/board.h and src/stm32_autoleds.c. The LEDs are used to encode
+ * OS-related events as follows:
  *
  *
  *   SYMBOL                     Meaning                      LED state
  *                                                        Red   Green Blue
- *   ----------------------  --------------------------  ------ ------ ----*/
+ *   ----------------------  --------------------------  ------ ------ ----
+ */
 
 #define LED_STARTED        0 /* NuttX has been started   OFF    OFF   OFF  */
 #define LED_HEAPALLOCATE   1 /* Heap has been allocated  OFF    OFF   ON   */
@@ -566,43 +552,38 @@
 
 /* Alternate function pin selections ****************************************/
 
-#define GPIO_USART2_TX        GPIO_USART2_TX_2
-#define GPIO_USART2_RX        GPIO_USART2_RX_2
-#define GPIO_USART3_TX        GPIO_USART3_TX_2
-#define GPIO_USART3_RX        GPIO_USART3_RX_2
+#define GPIO_USART2_TX     GPIO_USART2_TX_2
+#define GPIO_USART2_RX     GPIO_USART2_RX_2
+#define GPIO_USART3_TX     GPIO_USART3_TX_2
+#define GPIO_USART3_RX     GPIO_USART3_RX_2
 
 #if defined(CONFIG_NUCLEO_CONSOLE_ARDUINO)
 /* USART6:
  *
- * These configurations assume that you are using a standard Arduio RS-232 shield
- * with the serial interface with RX on pin D0 and TX on pin D1:
+ * These configurations assume that you are using a standard Arduino RS-232
+ * shield with the serial interface with RX on pin D0 and TX on pin D1:
  *
  *   -------- ---------------
- *               STM32F7
- *   ARDUIONO FUNCTION  GPIO
+ *               STM32L4
+ *   ARDUINO  FUNCTION  GPIO
  *   -- ----- --------- -----
  *   DO RX    USART6_RX PG9
  *   D1 TX    USART6_TX PG14
  *   -- ----- --------- -----
  */
 
- # define GPIO_USART6_RX GPIO_USART6_RX_2
- # define GPIO_USART6_TX GPIO_USART6_TX_2
+ #  define GPIO_USART6_RX GPIO_USART6_RX_2
+ #  define GPIO_USART6_TX GPIO_USART6_TX_2
 #endif
 
 /* USART3:
  * Use  USART3 and the USB virtual COM port
  */
 
-#if defined(CONFIG_NUCLEO_CONSOLE_VIRTUAL)
-/* LPUART1 is connector to Virtual COM port PG6 and PG7, but there is no lpserial. */
+/* LPUART1 is connector to Virtual COM port PG6 and PG7. */
 
-/* #define GPIO_USART2_TX        GPIO_LPUART1_TX_3 */
-
-/* #define GPIO_USART2_RX        GPIO_LPUART1_RX_3 */
-
-#  error "No Nucleo virtual console before lpserial is unimplemented"
-#endif
+#define GPIO_LPUART1_TX    GPIO_LPUART1_TX_3
+#define GPIO_LPUART1_RX    GPIO_LPUART1_RX_3
 
 /* DMA channels *************************************************************/
 
@@ -688,9 +669,10 @@ extern "C"
  * Name: stm32l4_board_initialize
  *
  * Description:
- *   All STM32 architectures must provide the following entry point.  This entry point
- *   is called early in the initialization -- after all memory has been configured
- *   and mapped but before any devices have been initialized.
+ *   All STM32 architectures must provide the following entry point.  This
+ *   entry point is called early in the initialization -- after all memory
+ *   has been configured and mapped but before any devices have been
+ *   initialized.
  *
  ****************************************************************************/
 

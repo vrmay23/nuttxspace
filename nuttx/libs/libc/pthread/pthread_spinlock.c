@@ -1,35 +1,22 @@
 /****************************************************************************
  * libs/libc/pthread/pthread_spinlock.c
  *
- *   Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,19 +28,13 @@
 
 #include <sys/types.h>
 #include <sys/boardctl.h>
+#include <nuttx/spinlock.h>
 
+#include <assert.h>
+#include <errno.h>
+#include <debug.h>
 #include <pthread.h>
 #include <sched.h>
-
-/* The architecture specific spinlock.h header file must provide the
- * following:
- *
- *   SP_LOCKED    - A definition of the locked state value (usually 1)
- *   SP_UNLOCKED  - A definition of the unlocked state value (usually 0)
- *   spinlock_t   - The type of a spinlock memory object (usually uint8_t).
- */
-
-#include <arch/spinlock.h>
 
 #ifdef CONFIG_PTHREAD_SPINLOCKS
 
@@ -111,7 +92,7 @@ int pthread_spin_init(FAR pthread_spinlock_t *lock, int pshared)
   DEBUGASSERT(lock != NULL);
   if (lock != NULL)
     {
-      lock->sp_lock   = SP_UNLOCKED;
+      spin_lock_init(&lock->sp_lock);
       lock->sp_holder = IMPOSSIBLE_THREAD;
       ret             = OK;
     }
@@ -182,6 +163,7 @@ int pthread_spin_destroy(pthread_spinlock_t *lock)
 
 int pthread_spin_lock(pthread_spinlock_t *lock)
 {
+  struct boardioc_spinlock_s spinlock;
   pthread_t me = pthread_self();
   int ret;
 
@@ -195,17 +177,10 @@ int pthread_spin_lock(pthread_spinlock_t *lock)
       return EDEADLOCK;
     }
 
-  /* Loop until we successfully take the spinlock (i.e., until the previous
-   * state of the spinlock was SP_UNLOCKED).  NOTE that the test/set operaion
-   * is performed via boardctl() to avoid a variety of issues.  An option
-   * might be to move the implementation of up_testset() to libs/libc/machine.
-   */
-
-  do
-    {
-      ret = boardctl(BOARDIOC_TESTSET, (uintptr_t)&lock->sp_lock);
-    }
-  while (ret == 1);
+  spinlock.action = BOARDIOC_SPINLOCK_LOCK;
+  spinlock.lock = &lock->sp_lock;
+  spinlock.flags = NULL;
+  ret = boardctl(BOARDIOC_SPINLOCK, (uintptr_t)&spinlock);
 
   /* Check for success (previous state was SP_UNLOCKED) */
 
@@ -247,6 +222,7 @@ int pthread_spin_lock(pthread_spinlock_t *lock)
 
 int pthread_spin_trylock(pthread_spinlock_t *lock)
 {
+  struct boardioc_spinlock_s spinlock;
   pthread_t me = pthread_self();
   int ret;
 
@@ -263,21 +239,18 @@ int pthread_spin_trylock(pthread_spinlock_t *lock)
     {
       /* Perform the test/set operation via boardctl() */
 
-      ret = boardctl(BOARDIOC_TESTSET, (uintptr_t)&lock->sp_lock);
-      switch (ret)
+      spinlock.action = BOARDIOC_SPINLOCK_TRYLOCK;
+      spinlock.lock = &lock->sp_lock;
+      spinlock.flags = NULL;
+      ret = boardctl(BOARDIOC_SPINLOCK, (uintptr_t)&spinlock);
+      if (ret == 0) /* Previously unlocked.  We hold the spinlock */
         {
-          case 0:  /* Previously unlocked.  We hold the spinlock */
-            lock->sp_holder = me;
-            break;
-
-          case 1:  /* Previously locked.  We did not get the spinlock  */
-            ret = EBUSY;
-            break;
-
-          default:
-            DEBUGASSERT(ret < 0);
-            ret = -ret;
-            break;
+          lock->sp_holder = me;
+        }
+      else /* Previously locked.  We did not get the spinlock  */
+        {
+          DEBUGASSERT(ret < 0);
+          ret = -ret;
         }
     }
 
@@ -315,17 +288,18 @@ int pthread_spin_trylock(pthread_spinlock_t *lock)
 
 int pthread_spin_unlock(pthread_spinlock_t *lock)
 {
+  struct boardioc_spinlock_s spinlock;
   pthread_t me = pthread_self();
 
   DEBUGASSERT(lock != NULL &&
-              lock->sp_lock == SP_LOCKED &&
+              spin_is_locked(&lock->sp_lock) &&
               lock->sp_holder == me);
 
   if (lock == NULL)
     {
       return EINVAL;
     }
-  else if (lock->sp_lock != SP_LOCKED || lock->sp_holder != me)
+  else if (!spin_is_locked(&lock->sp_lock) || lock->sp_holder != me)
     {
       return EPERM;
     }
@@ -333,7 +307,11 @@ int pthread_spin_unlock(pthread_spinlock_t *lock)
   /* Release the lock */
 
   lock->sp_holder = IMPOSSIBLE_THREAD;
-  lock->sp_lock   = SP_UNLOCKED;
+  spinlock.action = BOARDIOC_SPINLOCK_UNLOCK;
+  spinlock.lock = &lock->sp_lock;
+  spinlock.flags = NULL;
+  boardctl(BOARDIOC_SPINLOCK, (uintptr_t)&spinlock);
+
   return OK;
 }
 

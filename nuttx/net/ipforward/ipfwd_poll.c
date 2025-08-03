@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/ipforward/ipfwd_poll.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -69,20 +56,19 @@
 static int ipfwd_packet_proto(FAR struct net_driver_s *dev)
 {
   FAR struct ipv6_hdr_s *ipv6;
-  int llhdrlen = NET_LL_HDRLEN(dev);
 
   /* Make sure the there is something in buffer that is at least as large as
    * the IPv6_HDR.
    */
 
-  if (dev->d_len > (IPv6_HDRLEN + llhdrlen))
+  if (dev->d_len > (IPv6_HDRLEN + NET_LL_HDRLEN(dev)))
     {
       if (dev->d_lltype == NET_LL_IEEE802154 ||
           dev->d_lltype == NET_LL_PKTRADIO)
         {
           /* There should be an IPv6 packet at the beginning of the buffer */
 
-          ipv6 = (FAR struct ipv6_hdr_s *)&dev->d_buf[llhdrlen];
+          ipv6 = IPv6BUF;
           if ((ipv6->vtc & IP_VERSION_MASK) == IPv6_VERSION)
             {
               /* Yes.. return the L2 protocol of the packet */
@@ -168,7 +154,7 @@ static void ipfwd_packet_conversion(FAR struct net_driver_s *dev, int proto)
  *
  * Assumptions:
  *   This function is called from the MAC device driver indirectly through
- *   devif_poll() and devif_timer().
+ *   devif_poll().
  *
  ****************************************************************************/
 
@@ -186,7 +172,7 @@ void ipfwd_poll(FAR struct net_driver_s *dev)
    * the packet was forwarded, then the new set will be zero.
    */
 
-  flags = devif_conn_event(dev, NULL, IPFWD_POLL, dev->d_conncb);
+  flags = devif_conn_event(dev, IPFWD_POLL, dev->d_conncb);
 
 #ifdef CONFIG_NET_6LOWPAN
   if ((flags & DEVPOLL_MASK) == 0)

@@ -1,35 +1,22 @@
 /****************************************************************************
- * arch/xtensa/common/xtensa.h
+ * arch/xtensa/src/common/xtensa.h
  *
- *   Copyright (C) 2016, 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,9 +27,14 @@
  * Included Files
  ****************************************************************************/
 
+#include <nuttx/config.h>
+
 #ifndef __ASSEMBLY__
+#  include <nuttx/arch.h>
 #  include <stdint.h>
+#  include <sys/types.h>
 #  include <stdbool.h>
+#  include <syscall.h>
 #endif
 
 #include <arch/chip/core-isa.h>
@@ -82,18 +74,25 @@
 
 /* Check if an interrupt stack size is configured */
 
-#define HAVE_INTERRUPTSTACK 1
-
-#if !defined(CONFIG_ARCH_INTERRUPTSTACK)
+#ifndef CONFIG_ARCH_INTERRUPTSTACK
 #  define CONFIG_ARCH_INTERRUPTSTACK 0
-#  undef  HAVE_INTERRUPTSTACK
-#elif CONFIG_ARCH_INTERRUPTSTACK < 16
-#  warning CONFIG_ARCH_INTERRUPTSTACK is to small
-#  undef  HAVE_INTERRUPTSTACK
+#else
+#  define INTSTACK_ALIGNMENT    16
+#  define INTSTACK_ALIGN_MASK   (INTSTACK_ALIGNMENT - 1)
+#  define INTSTACK_ALIGNDOWN(s) ((s) & ~INTSTACK_ALIGN_MASK)
+#  define INTSTACK_ALIGNUP(s)   (((s) + INTSTACK_ALIGN_MASK) & ~INTSTACK_ALIGN_MASK)
+#  define INTSTACK_SIZE         INTSTACK_ALIGNUP(CONFIG_ARCH_INTERRUPTSTACK)
 #endif
 
-#define INTERRUPTSTACK_SIZE  ((CONFIG_ARCH_INTERRUPTSTACK + 15) & ~15)
-#define INTERRUPT_STACKWORDS (INTERRUPTSTACK_SIZE >> 2)
+/* XTENSA requires at least a 16-byte stack alignment. */
+
+#define STACK_ALIGNMENT     16
+
+/* Stack alignment macros */
+
+#define STACK_ALIGN_MASK    (STACK_ALIGNMENT - 1)
+#define STACK_ALIGN_DOWN(a) ((a) & ~STACK_ALIGN_MASK)
+#define STACK_ALIGN_UP(a)   (((a) + STACK_ALIGN_MASK) & ~STACK_ALIGN_MASK)
 
 /* An IDLE thread stack size for CPU0 must be defined */
 
@@ -106,19 +105,9 @@
 #define IDLETHREAD_STACKSIZE  ((CONFIG_IDLETHREAD_STACKSIZE + 15) & ~15)
 #define IDLETHREAD_STACKWORDS (IDLETHREAD_STACKSIZE >> 2)
 
-/* Used for stack usage measurements */
+/* Context switching via system calls ***************************************/
 
-#define STACK_COLOR 0xdeadbeef
-
-/* In the XTENSA model, the state is copied from the stack to the TCB, but
- * only a referenced is passed to get the state from the TCB.
- *
- * REVISIT: It would not be too difficult to save only a pointer to the
- * state save area in the TCB and thus avoid the copy.
- */
-
-#define xtensa_savestate(regs)    xtensa_copystate(regs, (uint32_t*)CURRENT_REGS)
-#define xtensa_restorestate(regs) do { CURRENT_REGS = regs; } while (0)
+#define xtensa_context_restore() sys_call0(SYS_restore_context)
 
 /* Interrupt codes from other CPUs: */
 
@@ -147,6 +136,26 @@
 #define getreg32(a)       (*(volatile uint32_t *)(a))
 #define putreg32(v,a)     (*(volatile uint32_t *)(a) = (v))
 
+/* This is the value used to mark the stack for subsequent stack monitoring
+ * logic.
+ */
+
+#define STACK_COLOR    0xdeadbeef
+#define INTSTACK_COLOR 0xdeadbeef
+#define HEAP_COLOR     'h'
+
+#define _START_TEXT  _stext
+#define _END_TEXT    _etext
+#define _START_BSS   _sbss
+#define _END_BSS     _ebss
+#define _DATA_INIT   _eronly
+#define _START_DATA  _sdata
+#define _END_DATA    _edata
+#define _START_TDATA _stdata
+#define _END_TDATA   _etdata
+#define _START_TBSS  _stbss
+#define _END_TBSS    _etbss
+
 /****************************************************************************
  * Public Types
  ****************************************************************************/
@@ -156,61 +165,36 @@
  ****************************************************************************/
 
 #ifndef __ASSEMBLY__
-/* g_current_regs[] holds a references to the current interrupt level
- * register storage structure.  If is non-NULL only during interrupt
- * processing.  Access to g_current_regs[] must be through the macro
- * CURRENT_REGS for portability.
- */
-
-#ifdef CONFIG_SMP
-/* For the case of architectures with multiple CPUs, then there must be one
- * such value for each processor that can receive an interrupt.
- */
-
-int up_cpu_index(void); /* See include/nuttx/arch.h */
-extern volatile uint32_t *g_current_regs[CONFIG_SMP_NCPUS];
-#  define CURRENT_REGS (g_current_regs[up_cpu_index()])
-
-#else
-
-extern volatile uint32_t *g_current_regs[1];
-#  define CURRENT_REGS (g_current_regs[0])
-
-#endif
-
-#ifdef HAVE_INTERRUPTSTACK
+#if !defined(CONFIG_SMP) && CONFIG_ARCH_INTERRUPTSTACK > 15
 /* The (optional) interrupt stack */
 
-extern uint32_t g_intstack[INTERRUPT_STACKWORDS];
+extern uint8_t g_intstackalloc[]; /* Allocated interrupt stack */
+extern uint8_t g_intstacktop[];   /* Initial top of interrupt stack */
 #endif
 
 /* Address of the CPU0 IDLE thread */
 
 extern uint32_t g_idlestack[IDLETHREAD_STACKWORDS];
 
-/* These 'addresses' of these values are setup by the linker script.  They
- * are not actual uint32_t storage locations! They are only used meaningfully
- * in the following way:
- *
- *  - The linker script defines, for example, the symbol_sdata.
- *  - The declaration extern uint32_t _sdata; makes C happy.  C will believe
- *    that the value _sdata is the address of a uint32_t variable _data (it
- *    is not!).
- *  - We can recoved the linker value then by simply taking the address of
- *    of _data.  like:  uint32_t *pdata = &_sdata;
- */
+/* These symbols are setup by the linker script. */
 
-extern uint32_t _init_start;        /* Start of initialization logic */
-extern uint32_t _stext;             /* Start of .text */
-extern uint32_t _etext;             /* End+1 of .text + .rodata */
-extern uint32_t _sdata;             /* Start of .data */
-extern uint32_t _edata;             /* End+1 of .data */
-extern uint32_t _srodata;           /* Start of .rodata */
-extern uint32_t _erodata;           /* End+1 of .rodata */
-extern uint32_t _sbss;              /* Start of .bss */
-extern uint32_t _ebss;              /* End+1 of .bss */
-extern uint32_t _sheap;             /* Start of heap */
-extern uint32_t _eheap;             /* End+1 of heap */
+extern uint8_t _init_start[];        /* Start of initialization logic */
+extern uint8_t _stext[];             /* Start of .text */
+extern uint8_t _etext[];             /* End+1 of .text + .rodata */
+extern uint8_t _sdata[];             /* Start of .data */
+extern uint8_t _edata[];             /* End+1 of .data */
+extern uint8_t _srodata[];           /* Start of .rodata */
+extern uint8_t _erodata[];           /* End+1 of .rodata */
+extern uint8_t _sbss[];              /* Start of .bss */
+extern uint8_t _ebss[];              /* End+1 of .bss */
+extern uint8_t _sheap[];             /* Start of heap */
+extern uint8_t _eheap[];             /* End+1 of heap */
+extern uint8_t _stdata[];            /* Start of .tdata */
+extern uint8_t _etdata[];            /* End+1 of .tdata */
+extern uint8_t _stbss[];             /* Start of .tbss */
+extern uint8_t _etbss[];             /* End+1 of .tbss */
+extern uint8_t _sbss_extmem[];       /* start of external memory bss */
+extern uint8_t _ebss_extmem[];       /* End+1 of external memory bss */
 
 /****************************************************************************
  * Inline Functions
@@ -233,39 +217,29 @@ void modifyreg8(unsigned int addr, uint8_t clearbits, uint8_t setbits);
 void modifyreg16(unsigned int addr, uint16_t clearbits, uint16_t setbits);
 void modifyreg32(unsigned int addr, uint32_t clearbits, uint32_t setbits);
 
-/* Context switching */
-
-void xtensa_copystate(uint32_t *dest, uint32_t *src);
-
 /* Serial output */
 
-void up_puts(const char *str);
-void up_lowputs(const char *str);
-
-/* Debug */
-
-#ifdef CONFIG_ARCH_STACKDUMP
-void xtensa_dumpstate(void);
-#else
-#  define xtensa_dumpstate()
-#endif
+void xtensa_lowputs(const char *str);
 
 /* Common XTENSA functions */
 
 /* Initialization */
 
 #if XCHAL_CP_NUM > 0
-struct xtensa_cpstate_s;
-void xtensa_coproc_enable(struct xtensa_cpstate_s *cpstate, int cpset);
-void xtensa_coproc_disable(struct xtensa_cpstate_s *cpstate, int cpset);
+void xtensa_coproc_enable(int cpset);
+void xtensa_coproc_disable(int cpset);
 #endif
+
+/* Window Spill */
+
+void xtensa_window_spill(void);
 
 /* IRQs */
 
-uint32_t *xtensa_int_decode(uint32_t cpuints, uint32_t *regs);
+uint32_t *xtensa_int_decode(uint32_t *cpuints, uint32_t *regs);
 uint32_t *xtensa_irq_dispatch(int irq, uint32_t *regs);
-uint32_t xtensa_enable_cpuint(uint32_t *shadow, uint32_t intmask);
-uint32_t xtensa_disable_cpuint(uint32_t *shadow, uint32_t intmask);
+void xtensa_enable_cpuint(uint32_t *shadow, uint32_t intnum);
+void xtensa_disable_cpuint(uint32_t *shadow, uint32_t intnum);
 void xtensa_panic(int xptcode, uint32_t *regs) noreturn_function;
 void xtensa_user_panic(int exccause, uint32_t *regs) noreturn_function;
 uint32_t *xtensa_user(int exccause, uint32_t *regs);
@@ -273,25 +247,19 @@ uint32_t *xtensa_user(int exccause, uint32_t *regs);
 /* Software interrupt handler */
 
 #ifdef CONFIG_SMP
-void __cpu1_start(void) noreturn_function;
 int xtensa_intercpu_interrupt(int tocpu, int intcode);
-void xtensa_pause_handler(void);
-#endif
-
-/* Synchronous context switching */
-
-int xtensa_context_save(uint32_t *regs);
-void xtensa_context_restore(uint32_t *regs) noreturn_function;
-
-#if XCHAL_CP_NUM > 0
-void xtensa_coproc_savestate(struct xtensa_cpstate_s *cpstate);
-void xtensa_coproc_restorestate(struct xtensa_cpstate_s *cpstate);
+void xtensa_smp_call_handler(int irq, void *context, void *arg);
 #endif
 
 /* Signals */
 
-void _xtensa_sig_trampoline(void);
 void xtensa_sig_deliver(void);
+
+#ifdef CONFIG_LIB_SYSCALL
+void xtensa_dispatch_syscall(unsigned int nbr, uintptr_t parm1,
+                             uintptr_t parm2, uintptr_t parm3,
+                             uintptr_t parm4, uintptr_t parm5);
+#endif
 
 /* Chip-specific functions **************************************************/
 
@@ -313,33 +281,57 @@ void weak_function xtensa_dma_initialize(void);
 #if CONFIG_MM_REGIONS > 1
 void xtensa_add_region(void);
 #else
-# define xtensa_add_region()
+#  define xtensa_add_region()
 #endif
+
+/* Watchdog timer ***********************************************************/
+
+struct oneshot_lowerhalf_s *
+xtensa_oneshot_initialize(uint32_t irq, uint32_t freq);
 
 /* Serial output */
 
-void up_lowputc(char ch);
-void xtensa_early_serial_initialize(void);
-void xtensa_serial_initialize(void);
-
-void rpmsg_serialinit(void);
+void xtensa_lowputc(char ch);
+void xtensa_earlyserialinit(void);
+void xtensa_serialinit(void);
 
 /* Network */
 
 #if defined(CONFIG_NET) && !defined(CONFIG_NETDEV_LATEINIT)
-void up_netinitialize(void);
+void xtensa_netinitialize(void);
 #else
-# define up_netinitialize()
+#  define xtensa_netinitialize()
 #endif
 
 /* USB */
 
 #ifdef CONFIG_USBDEV
-void up_usbinitialize(void);
-void up_usbuninitialize(void);
+void xtensa_usbinitialize(void);
+void xtensa_usbuninitialize(void);
 #else
-# define up_usbinitialize()
-# define up_usbuninitialize()
+#  define xtensa_usbinitialize()
+#  define xtensa_usbuninitialize()
+#endif
+
+/* Power management *********************************************************/
+
+#ifdef CONFIG_PM
+void xtensa_pminitialize(void);
+#else
+#  define xtensa_pminitialize()
+#endif
+
+/* Interrupt handling *******************************************************/
+
+/* Exception Handlers */
+
+int xtensa_swint(int irq, void *context, void *arg);
+
+/* Debug ********************************************************************/
+
+#ifdef CONFIG_STACK_COLORATION
+size_t xtensa_stack_check(uintptr_t alloc, size_t size);
+void xtensa_stack_color(void *stackbase, size_t nbytes);
 #endif
 
 #endif /* __ASSEMBLY__ */

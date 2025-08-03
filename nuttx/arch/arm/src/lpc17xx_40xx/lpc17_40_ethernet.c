@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/lpc17xx_40xx/lpc17_40_ethernet.c
  *
- *   Copyright (C) 2010-2015, 2017-2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,10 +28,12 @@
 #if defined(CONFIG_NET) && defined(CONFIG_LPC17_40_ETHERNET)
 #include <sys/ioctl.h>
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
 #include <string.h>
+#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
@@ -57,14 +46,14 @@
 #include <nuttx/signal.h>
 #include <nuttx/net/mii.h>
 #include <nuttx/net/netconfig.h>
-#include <nuttx/net/arp.h>
+#include <nuttx/net/ip.h>
 #include <nuttx/net/netdev.h>
 
 #ifdef CONFIG_NET_PKT
 #  include <nuttx/net/pkt.h>
 #endif
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "chip.h"
 #include "hardware/lpc17_40_syscon.h"
 #include "lpc17_40_gpio.h"
@@ -157,10 +146,6 @@
 
 /* Timing *******************************************************************/
 
-/* TX poll deley = 1 seconds. CLK_TCK is the number of clock ticks per second */
-
-#define LPC17_40_WDDELAY        (1*CLK_TCK)
-
 /* TX timeout = 1 minute */
 
 #define LPC17_40_TXTIMEOUT      (60*CLK_TCK)
@@ -174,7 +159,7 @@
 
 /* Misc. Helpers ************************************************************/
 
-/* This is a helper pointer for accessing the contents of the Ethernet header */
+/* This is a helper pointer for accessing the contents of Ethernet header */
 
 #define BUF ((struct eth_hdr_s *)priv->lp_dev.d_buf)
 
@@ -307,8 +292,7 @@ struct lpc17_40_driver_s
   uint8_t  lp_phyaddr;          /* PHY device address */
 #endif
   uint32_t lp_inten;            /* Shadow copy of INTEN register */
-  WDOG_ID  lp_txpoll;           /* TX poll timer */
-  WDOG_ID  lp_txtimeout;        /* TX timeout timer */
+  struct wdog_s lp_txtimeout;   /* TX timeout timer */
 
   struct work_s lp_txwork;      /* TX work continuation */
   struct work_s lp_rxwork;      /* RX work continuation */
@@ -326,7 +310,7 @@ struct lpc17_40_driver_s
 
 /* A single packet buffer per interface is used */
 
-static uint8_t g_pktbuf[PKTBUF_SIZE * CONFIG_LPC17_40_NINTERFACES];
+static uint8_t g_pktbuf[CONFIG_LPC17_40_NINTERFACES][PKTBUF_SIZE];
 
 /* Array of ethernet driver status structures */
 
@@ -359,8 +343,8 @@ static void lpc17_40_checkreg(uint32_t addr, uint32_t val, bool iswrite);
 static uint32_t lpc17_40_getreg(uint32_t addr);
 static void lpc17_40_putreg(uint32_t val, uint32_t addr);
 #else
-# define lpc17_40_getreg(addr)     getreg32(addr)
-# define lpc17_40_putreg(val,addr) putreg32(val,addr)
+#  define lpc17_40_getreg(addr)     getreg32(addr)
+#  define lpc17_40_putreg(val,addr) putreg32(val,addr)
 #endif
 
 /* Common TX logic */
@@ -373,27 +357,21 @@ static int  lpc17_40_txpoll(struct net_driver_s *dev);
 
 static void lpc17_40_response(struct lpc17_40_driver_s *priv);
 
-static void lpc17_40_txdone_work(FAR void *arg);
-static void lpc17_40_rxdone_work(FAR void *arg);
-static int  lpc17_40_interrupt(int irq, void *context, FAR void *arg);
+static void lpc17_40_txdone_work(void *arg);
+static void lpc17_40_rxdone_work(void *arg);
+static int  lpc17_40_interrupt(int irq, void *context, void *arg);
 
 /* Watchdog timer expirations */
 
-static void lpc17_40_txtimeout_work(FAR void *arg);
-static void lpc17_40_txtimeout_expiry(int argc, uint32_t arg, ...);
-
-static void lpc17_40_poll_work(FAR void *arg);
-static void lpc17_40_poll_expiry(int argc, uint32_t arg, ...);
+static void lpc17_40_txtimeout_work(void *arg);
+static void lpc17_40_txtimeout_expiry(wdparm_t arg);
 
 /* NuttX callback functions */
 
-#ifdef CONFIG_NET_ICMPv6
-static void lpc17_40_ipv6multicast(FAR struct lpc17_40_driver_s *priv);
-#endif
 static int lpc17_40_ifup(struct net_driver_s *dev);
 static int lpc17_40_ifdown(struct net_driver_s *dev);
 
-static void lpc17_40_txavail_work(FAR void *arg);
+static void lpc17_40_txavail_work(void *arg);
 static int lpc17_40_txavail(struct net_driver_s *dev);
 
 #if defined(CONFIG_NET_MCASTGROUP) || defined(CONFIG_NET_ICMPv6)
@@ -427,7 +405,7 @@ static void lpc17_40_showmii(uint8_t phyaddr, const char *msg);
 #  endif
 
 #if defined(CONFIG_NETDEV_PHY_IOCTL) && defined(CONFIG_ARCH_PHY_INTERRUPT)
-static int  lpc17_40_phyintenable(FAR struct lpc17_40_driver_s *priv);
+static int  lpc17_40_phyintenable(struct lpc17_40_driver_s *priv);
 #endif
 static void lpc17_40_phywrite(uint8_t phyaddr, uint8_t regaddr,
                            uint16_t phydata);
@@ -667,9 +645,9 @@ static int lpc17_40_transmit(struct lpc17_40_driver_s *priv)
   *txdesc  = TXDESC_CONTROL_INT | TXDESC_CONTROL_LAST | TXDESC_CONTROL_CRC |
              (priv->lp_dev.d_len - 1);
 
-  /* Copy the packet data into the Tx buffer assignd to this descriptor.  It
+  /* Copy the packet data into the Tx buffer assigned to this descriptor.  It
    * should fit because each packet buffer is the MTU size and breaking up
-   * largerTCP messasges is handled by higher level logic.  The hardware
+   * larger TCP message is handled by higher level logic.  The hardware
    * does, however, support breaking up larger messages into many fragments,
    * however, that capability is not exploited here.
    *
@@ -699,8 +677,8 @@ static int lpc17_40_transmit(struct lpc17_40_driver_s *priv)
 
   /* Setup the TX timeout watchdog (perhaps restarting the timer) */
 
-  wd_start(priv->lp_txtimeout, LPC17_40_TXTIMEOUT,
-           lpc17_40_txtimeout_expiry, 1, (uint32_t)priv);
+  wd_start(&priv->lp_txtimeout, LPC17_40_TXTIMEOUT,
+           lpc17_40_txtimeout_expiry, (wdparm_t)priv);
   return OK;
 }
 
@@ -733,57 +711,18 @@ static int lpc17_40_txpoll(struct net_driver_s *dev)
 {
   struct lpc17_40_driver_s *priv =
     (struct lpc17_40_driver_s *)dev->d_private;
-  int ret = OK;
 
-  /* If the polling resulted in data that should be sent out on the network,
-   * the field d_len is set to a value > 0.
+  /* Send this packet.  In this context, we know that there is space
+   * for at least one more packet in the descriptor list.
    */
 
-  if (priv->lp_dev.d_len > 0)
-    {
-      /* Look up the destination MAC address and add it to the Ethernet
-       * header.
-       */
+  lpc17_40_transmit(priv);
 
-#ifdef CONFIG_NET_IPv4
-#ifdef CONFIG_NET_IPv6
-      if (IFF_IS_IPv4(priv->lp_dev.d_flags))
-#endif
-        {
-          arp_out(&priv->lp_dev);
-        }
-#endif /* CONFIG_NET_IPv4 */
-
-#ifdef CONFIG_NET_IPv6
-#ifdef CONFIG_NET_IPv4
-      else
-#endif
-        {
-          neighbor_out(&priv->lp_dev);
-        }
-#endif /* CONFIG_NET_IPv6 */
-
-      if (!devif_loopback(&priv->lp_dev))
-        {
-          /* Send this packet.  In this context, we know that there is space
-           * for at least one more packet in the descriptor list.
-           */
-
-          lpc17_40_transmit(priv);
-
-          /* Check if there is room in the device to hold another packet. If
-           * not, return any non-zero value to terminate the poll.
-           */
-
-          ret = lpc17_40_txdesc(priv);
-        }
-    }
-
-  /* If zero is returned, the polling will continue until all connections
-   * have been examined.
+  /* Check if there is room in the device to hold another packet. If
+   * not, return any non-zero value to terminate the poll.
    */
 
-  return ret;
+  return lpc17_40_txdesc(priv);
 }
 
 /****************************************************************************
@@ -854,9 +793,9 @@ static void lpc17_40_response(struct lpc17_40_driver_s *priv)
  *
  ****************************************************************************/
 
-static void lpc17_40_rxdone_work(FAR void *arg)
+static void lpc17_40_rxdone_work(void *arg)
 {
-  FAR struct lpc17_40_driver_s *priv = (FAR struct lpc17_40_driver_s *)arg;
+  struct lpc17_40_driver_s *priv = (struct lpc17_40_driver_s *)arg;
   irqstate_t flags;
   uint32_t *rxstat;
   bool fragment;
@@ -884,10 +823,6 @@ static void lpc17_40_rxdone_work(FAR void *arg)
   fragment = false;
   while (considx != prodidx)
     {
-      /* Update statistics */
-
-      NETDEV_RXPACKETS(&priv->lp_dev);
-
       /* Get the Rx status and packet length (-4+1) */
 
       rxstat   = (uint32_t *)(LPC17_40_RXSTAT_BASE + (considx << 3));
@@ -899,7 +834,7 @@ static void lpc17_40_rxdone_work(FAR void *arg)
 
       if ((*rxstat & RXSTAT_INFO_ERROR) != 0)
         {
-          nerr("ERROR: considx: %08x prodidx: %08x rxstat: %08x\n",
+          nerr("ERROR: considx: %08x prodidx: %08x rxstat: %08" PRIx32 "\n",
                considx, prodidx, *rxstat);
           NETDEV_RXERRORS(&priv->lp_dev);
         }
@@ -913,14 +848,14 @@ static void lpc17_40_rxdone_work(FAR void *arg)
       if (pktlen > CONFIG_NET_ETH_PKTSIZE + CONFIG_NET_GUARDSIZE)
         {
           nwarn("WARNING: Too big. considx: %08x prodidx: %08x pktlen: %d "
-                "rxstat: %08x\n",
+                "rxstat: %08" PRIx32 "\n",
                 considx, prodidx, pktlen, *rxstat);
           NETDEV_RXERRORS(&priv->lp_dev);
         }
       else if ((*rxstat & RXSTAT_INFO_LASTFLAG) == 0)
         {
           ninfo("Fragment. considx: %08x prodidx: %08x pktlen: %d "
-                "rxstat: %08x\n",
+                "rxstat: %08" PRIx32 "\n",
                 considx, prodidx, pktlen, *rxstat);
           NETDEV_RXFRAGMENTS(&priv->lp_dev);
           fragment = true;
@@ -928,7 +863,7 @@ static void lpc17_40_rxdone_work(FAR void *arg)
       else if (fragment)
         {
           ninfo("Last fragment. considx: %08x prodidx: %08x pktlen: %d "
-                "rxstat: %08x\n",
+                "rxstat: %08" PRIx32 "\n",
                 considx, prodidx, pktlen, *rxstat);
           NETDEV_RXFRAGMENTS(&priv->lp_dev);
           fragment = false;
@@ -966,7 +901,9 @@ static void lpc17_40_rxdone_work(FAR void *arg)
            pkt_input(&priv->lp_dev);
 #endif
 
-          /* We only accept IP packets of the configured type and ARP packets */
+          /* We only accept IP packets of the configured type and ARP
+           * packets
+           */
 
 #ifdef CONFIG_NET_IPv4
           if (BUF->type == HTONS(ETHTYPE_IP))
@@ -974,11 +911,8 @@ static void lpc17_40_rxdone_work(FAR void *arg)
               ninfo("IPv4 frame\n");
               NETDEV_RXIPV4(&priv->lp_dev);
 
-              /* Handle ARP on input then give the IPv4 packet to the
-               * network layer
-               */
+              /* Receive an IPv4 packet from the network device */
 
-              arp_ipin(&priv->lp_dev);
               ipv4_input(&priv->lp_dev);
 
               /* If the above function invocation resulted in data that
@@ -988,21 +922,6 @@ static void lpc17_40_rxdone_work(FAR void *arg)
 
               if (priv->lp_dev.d_len > 0)
                 {
-                  /* Update the Ethernet header with the correct MAC address */
-
-#ifdef CONFIG_NET_IPv6
-                  if (IFF_IS_IPv4(priv->lp_dev.d_flags))
-#endif
-                    {
-                      arp_out(&priv->lp_dev);
-                    }
-#ifdef CONFIG_NET_IPv6
-                  else
-                    {
-                      neighbor_out(&priv->lp_dev);
-                    }
-#endif
-
                   /* And send the packet */
 
                   lpc17_40_response(priv);
@@ -1027,21 +946,6 @@ static void lpc17_40_rxdone_work(FAR void *arg)
 
               if (priv->lp_dev.d_len > 0)
                 {
-                  /* Update the Ethernet header with the correct MAC address */
-
-#ifdef CONFIG_NET_IPv4
-                  if (IFF_IS_IPv4(priv->lp_dev.d_flags))
-                    {
-                      arp_out(&priv->lp_dev);
-                    }
-                  else
-#endif
-#ifdef CONFIG_NET_IPv6
-                    {
-                      neighbor_out(&priv->lp_dev);
-                    }
-#endif
-
                   /* And send the packet */
 
                   lpc17_40_response(priv);
@@ -1050,10 +954,10 @@ static void lpc17_40_rxdone_work(FAR void *arg)
           else
 #endif
 #ifdef CONFIG_NET_ARP
-          if (BUF->type == htons(ETHTYPE_ARP))
+          if (BUF->type == HTONS(ETHTYPE_ARP))
             {
               NETDEV_RXARP(&priv->lp_dev);
-              arp_arpin(&priv->lp_dev);
+              arp_input(&priv->lp_dev);
 
               /* If the above function invocation resulted in data that
                * should be sent out on the network, the field  d_len will
@@ -1073,6 +977,10 @@ static void lpc17_40_rxdone_work(FAR void *arg)
               NETDEV_RXDROPPED(&priv->lp_dev);
             }
         }
+
+      /* Update statistics */
+
+      NETDEV_RXPACKETS(&priv->lp_dev);
 
       /* Bump up the consumer index and resample the producer index (which
        * might also have gotten bumped up by the hardware).
@@ -1120,9 +1028,9 @@ static void lpc17_40_rxdone_work(FAR void *arg)
  *
  ****************************************************************************/
 
-static void lpc17_40_txdone_work(FAR void *arg)
+static void lpc17_40_txdone_work(void *arg)
 {
-  FAR struct lpc17_40_driver_s *priv = (FAR struct lpc17_40_driver_s *)arg;
+  struct lpc17_40_driver_s *priv = (struct lpc17_40_driver_s *)arg;
 
   /* Verify that the hardware is ready to send another packet.  Since a Tx
    * just completed, this must be the case.
@@ -1139,7 +1047,9 @@ static void lpc17_40_txdone_work(FAR void *arg)
   net_lock();
   if (priv->lp_txpending)
     {
-      /* Clear the pending condition, send the packet, and restore Rx interrupts */
+      /* Clear the pending condition, send the packet,
+       * and restore Rx interrupts
+       */
 
       priv->lp_txpending = false;
 
@@ -1176,7 +1086,7 @@ static void lpc17_40_txdone_work(FAR void *arg)
  *
  ****************************************************************************/
 
-static int lpc17_40_interrupt(int irq, void *context, FAR void *arg)
+static int lpc17_40_interrupt(int irq, void *context, void *arg)
 {
   register struct lpc17_40_driver_s *priv;
   uint32_t status;
@@ -1223,13 +1133,13 @@ static int lpc17_40_interrupt(int irq, void *context, FAR void *arg)
         {
           if ((status & ETH_INT_RXOVR) != 0)
             {
-              nerr("ERROR: RX Overrun. status: %08x\n", status);
+              nerr("ERROR: RX Overrun. status: %08" PRIx32 "\n", status);
               NETDEV_RXERRORS(&priv->lp_dev);
             }
 
           if ((status & ETH_INT_TXUNR) != 0)
             {
-              nerr("ERROR: TX Underrun. status: %08x\n", status);
+              nerr("ERROR: TX Underrun. status: %08" PRIx32 "\n", status);
               NETDEV_TXERRORS(&priv->lp_dev);
             }
 
@@ -1252,7 +1162,7 @@ static int lpc17_40_interrupt(int irq, void *context, FAR void *arg)
 
           if ((status & ETH_INT_RXERR) != 0)
             {
-              nerr("ERROR: RX ERROR: status: %08x\n", status);
+              nerr("ERROR: RX ERROR: status: %08" PRIx32 "\n", status);
               NETDEV_RXERRORS(&priv->lp_dev);
             }
 
@@ -1284,7 +1194,7 @@ static int lpc17_40_interrupt(int irq, void *context, FAR void *arg)
                */
 
               work_queue(ETHWORK, &priv->lp_rxwork,
-                         (worker_t)lpc17_40_rxdone_work, priv, 0);
+                         lpc17_40_rxdone_work, priv, 0);
             }
 
           /* Check for Tx events ********************************************/
@@ -1297,7 +1207,7 @@ static int lpc17_40_interrupt(int irq, void *context, FAR void *arg)
 
           if ((status & ETH_INT_TXERR) != 0)
             {
-              nerr("ERROR: TX ERROR: status: %08x\n", status);
+              nerr("ERROR: TX ERROR: status: %08" PRIx32 "\n", status);
               NETDEV_TXERRORS(&priv->lp_dev);
             }
 
@@ -1325,7 +1235,7 @@ static int lpc17_40_interrupt(int irq, void *context, FAR void *arg)
                * Cancel the pending Tx timeout
                */
 
-              wd_cancel(priv->lp_txtimeout);
+              wd_cancel(&priv->lp_txtimeout);
 
               /* Disable further Tx interrupts.  Tx interrupts may be
                * re-enabled again depending upon the actions of
@@ -1346,7 +1256,7 @@ static int lpc17_40_interrupt(int irq, void *context, FAR void *arg)
                */
 
               work_queue(ETHWORK, &priv->lp_txwork,
-                         (worker_t)lpc17_40_txdone_work, priv, 0);
+                         lpc17_40_txdone_work, priv, 0);
             }
         }
     }
@@ -1354,11 +1264,11 @@ static int lpc17_40_interrupt(int irq, void *context, FAR void *arg)
   /* Clear the pending interrupt */
 
 #if 0 /* Apparently not necessary */
-# if CONFIG_LPC17_40_NINTERFACES > 1
+#  if CONFIG_LPC17_40_NINTERFACES > 1
   lpc17_40_clrpend(priv->irq);
-# else
+#  else
   lpc17_40_clrpend(LPC17_40_IRQ_ETH);
-# endif
+#  endif
 #endif
 
   return OK;
@@ -1381,9 +1291,9 @@ static int lpc17_40_interrupt(int irq, void *context, FAR void *arg)
  *
  ****************************************************************************/
 
-static void lpc17_40_txtimeout_work(FAR void *arg)
+static void lpc17_40_txtimeout_work(void *arg)
 {
-  FAR struct lpc17_40_driver_s *priv = (FAR struct lpc17_40_driver_s *)arg;
+  struct lpc17_40_driver_s *priv = (struct lpc17_40_driver_s *)arg;
 
   /* Increment statistics and dump debug info */
 
@@ -1413,8 +1323,7 @@ static void lpc17_40_txtimeout_work(FAR void *arg)
  *   The last TX never completed.  Reset the hardware and start again.
  *
  * Input Parameters:
- *   argc - The number of available arguments
- *   arg  - The first argument
+ *   arg  - The argument
  *
  * Returned Value:
  *   None
@@ -1424,7 +1333,7 @@ static void lpc17_40_txtimeout_work(FAR void *arg)
  *
  ****************************************************************************/
 
-static void lpc17_40_txtimeout_expiry(int argc, uint32_t arg, ...)
+static void lpc17_40_txtimeout_expiry(wdparm_t arg)
 {
   struct lpc17_40_driver_s *priv = (struct lpc17_40_driver_s *)arg;
 
@@ -1447,168 +1356,6 @@ static void lpc17_40_txtimeout_expiry(int argc, uint32_t arg, ...)
                  priv, 0);
     }
 }
-
-/****************************************************************************
- * Function: lpc17_40_poll_work
- *
- * Description:
- *   Perform periodic polling from the worker thread
- *
- * Input Parameters:
- *   arg - The argument passed when work_queue() as called.
- *
- * Returned Value:
- *   OK on success
- *
- * Assumptions:
- *   Ethernet interrupts are disabled
- *
- ****************************************************************************/
-
-static void lpc17_40_poll_work(FAR void *arg)
-{
-  FAR struct lpc17_40_driver_s *priv = (FAR struct lpc17_40_driver_s *)arg;
-  unsigned int prodidx;
-  unsigned int considx;
-
-  /* Check if there is room in the send another TX packet.  We cannot perform
-   * the TX poll if he are unable to accept another packet for transmission.
-   */
-
-  net_lock();
-  if (lpc17_40_txdesc(priv) == OK)
-    {
-      /* If so, update TCP timing states and poll the network layer for new
-       * XMIT data. Hmmm.. might be bug here.  Does this mean if there is a
-       * transmit in progress, we will missing TCP time state updates?
-       */
-
-      devif_timer(&priv->lp_dev, LPC17_40_WDDELAY, lpc17_40_txpoll);
-    }
-
-  /* Simulate a fake receive to relaunch the data exchanges when a receive
-   * interrupt has been lost and all the receive buffers are used.
-   */
-
-  /* Get the current producer and consumer indices */
-
-  considx = lpc17_40_getreg(LPC17_40_ETH_RXCONSIDX) & ETH_RXCONSIDX_MASK;
-  prodidx = lpc17_40_getreg(LPC17_40_ETH_RXPRODIDX) & ETH_RXPRODIDX_MASK;
-
-  if (considx != prodidx)
-    {
-      work_queue(ETHWORK, &priv->lp_rxwork, (worker_t)lpc17_40_rxdone_work,
-                 priv, 0);
-    }
-
-  /* Setup the watchdog poll timer again */
-
-  wd_start(priv->lp_txpoll, LPC17_40_WDDELAY, lpc17_40_poll_expiry,
-           1, priv);
-  net_unlock();
-}
-
-/****************************************************************************
- * Function: lpc17_40_poll_expiry
- *
- * Description:
- *   Periodic timer handler.  Called from the timer interrupt handler.
- *
- * Input Parameters:
- *   argc - The number of available arguments
- *   arg  - The first argument
- *
- * Returned Value:
- *   None
- *
- * Assumptions:
- *   Global interrupts are disabled by the watchdog logic.
- *
- ****************************************************************************/
-
-static void lpc17_40_poll_expiry(int argc, uint32_t arg, ...)
-{
-  FAR struct lpc17_40_driver_s *priv = (FAR struct lpc17_40_driver_s *)arg;
-
-  DEBUGASSERT(arg);
-
-  /* Schedule to perform the interrupt processing on the worker thread. */
-
-  work_queue(ETHWORK, &priv->lp_pollwork, lpc17_40_poll_work, priv, 0);
-}
-
-/****************************************************************************
- * Function: lpc17_40_ipv6multicast
- *
- * Description:
- *   Configure the IPv6 multicast MAC address.
- *
- * Input Parameters:
- *   priv - A reference to the private driver state structure
- *
- * Returned Value:
- *   OK on success; Negated errno on failure.
- *
- * Assumptions:
- *
- ****************************************************************************/
-
-#ifdef CONFIG_NET_ICMPv6
-static void lpc17_40_ipv6multicast(FAR struct lpc17_40_driver_s *priv)
-{
-  struct net_driver_s *dev;
-  uint16_t tmp16;
-  uint8_t mac[6];
-
-  /* For ICMPv6, we need to add the IPv6 multicast address
-   *
-   * For IPv6 multicast addresses, the Ethernet MAC is derived by
-   * the four low-order octets OR'ed with the MAC 33:33:00:00:00:00,
-   * so for example the IPv6 address FF02:DEAD:BEEF::1:3 would map
-   * to the Ethernet MAC address 33:33:00:01:00:03.
-   *
-   * NOTES:  This appears correct for the ICMPv6 Router Solicitation
-   * Message, but the ICMPv6 Neighbor Solicitation message seems to
-   * use 33:33:ff:01:00:03.
-   */
-
-  mac[0] = 0x33;
-  mac[1] = 0x33;
-
-  dev    = &priv->lp_dev;
-  tmp16  = dev->d_ipv6addr[6];
-  mac[2] = 0xff;
-  mac[3] = tmp16 >> 8;
-
-  tmp16  = dev->d_ipv6addr[7];
-  mac[4] = tmp16 & 0xff;
-  mac[5] = tmp16 >> 8;
-
-  ninfo("IPv6 Multicast: %02x:%02x:%02x:%02x:%02x:%02x\n",
-        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-
-  lpc17_40_addmac(dev, mac);
-
-#ifdef CONFIG_NET_ICMPv6_AUTOCONF
-  /* Add the IPv6 all link-local nodes Ethernet address.  This is the
-   * address that we expect to receive ICMPv6 Router Advertisement
-   * packets.
-   */
-
-  lpc17_40_addmac(dev, g_ipv6_ethallnodes.ether_addr_octet);
-
-#endif /* CONFIG_NET_ICMPv6_AUTOCONF */
-#ifdef CONFIG_NET_ICMPv6_ROUTER
-  /* Add the IPv6 all link-local routers Ethernet address.  This is the
-   * address that we expect to receive ICMPv6 Router Solicitation
-   * packets.
-   */
-
-  lpc17_40_addmac(dev, g_ipv6_ethallrouters.ether_addr_octet);
-
-#endif /* CONFIG_NET_ICMPv6_ROUTER */
-}
-#endif /* CONFIG_NET_ICMPv6 */
 
 /****************************************************************************
  * Function: lpc17_40_ifup
@@ -1634,9 +1381,9 @@ static int lpc17_40_ifup(struct net_driver_s *dev)
   uint32_t regval;
   int ret;
 
-  ninfo("Bringing up: %d.%d.%d.%d\n",
-        dev->d_ipaddr & 0xff, (dev->d_ipaddr >> 8) & 0xff,
-        (dev->d_ipaddr >> 16) & 0xff, dev->d_ipaddr >> 24);
+  ninfo("Bringing up: %u.%u.%u.%u\n",
+        ip4_addr1(dev->d_ipaddr), ip4_addr2(dev->d_ipaddr),
+        ip4_addr3(dev->d_ipaddr), ip4_addr4(dev->d_ipaddr));
 
   /* Reset the Ethernet controller (again) */
 
@@ -1665,17 +1412,13 @@ static int lpc17_40_ifup(struct net_driver_s *dev)
            (uint32_t)priv->lp_dev.d_mac.ether.ether_addr_octet[0];
   lpc17_40_putreg(regval, LPC17_40_ETH_SA2);
 
-#ifdef CONFIG_NET_ICMPv6
-  /* Set up the IPv6 multicast address */
-
-  lpc17_40_ipv6multicast(priv);
-#endif
-
   /* Initialize Ethernet interface for the PHY setup */
 
   lpc17_40_macmode(priv->lp_mode);
 
-  /* Initialize EMAC DMA memory -- descriptors, status, packet buffers, etc. */
+  /* Initialize EMAC DMA memory --
+   * descriptors, status, packet buffers, etc.
+   */
 
   lpc17_40_txdescinit(priv);
   lpc17_40_rxdescinit(priv);
@@ -1754,11 +1497,6 @@ static int lpc17_40_ifup(struct net_driver_s *dev)
   regval |= ETH_CMD_TXEN;
   lpc17_40_putreg(regval, LPC17_40_ETH_CMD);
 
-  /* Set and activate a timer process */
-
-  wd_start(priv->lp_txpoll, LPC17_40_WDDELAY, lpc17_40_poll_expiry, 1,
-           (uint32_t)priv);
-
   /* Finally, make the interface up and enable the Ethernet interrupt at
    * the interrupt controller
    */
@@ -1799,10 +1537,9 @@ static int lpc17_40_ifdown(struct net_driver_s *dev)
   flags = enter_critical_section();
   up_disable_irq(LPC17_40_IRQ_ETH);
 
-  /* Cancel the TX poll timer and TX timeout timers */
+  /* Cancel the TX timeout timers */
 
-  wd_cancel(priv->lp_txpoll);
-  wd_cancel(priv->lp_txtimeout);
+  wd_cancel(&priv->lp_txtimeout);
 
   /* Reset the device and mark it as down. */
 
@@ -1829,16 +1566,16 @@ static int lpc17_40_ifdown(struct net_driver_s *dev)
  *
  ****************************************************************************/
 
-static void lpc17_40_txavail_work(FAR void *arg)
+static void lpc17_40_txavail_work(void *arg)
 {
-  FAR struct lpc17_40_driver_s *priv = (FAR struct lpc17_40_driver_s *)arg;
+  struct lpc17_40_driver_s *priv = (struct lpc17_40_driver_s *)arg;
 
   /* Ignore the notification if the interface is not yet up */
 
   net_lock();
   if (priv->lp_ifup)
     {
-      /* Check if there is room in the hardware to hold another outgoing packet. */
+      /* Check if there is room in the hardware to hold another packet. */
 
       if (lpc17_40_txdesc(priv) == OK)
         {
@@ -1872,8 +1609,8 @@ static void lpc17_40_txavail_work(FAR void *arg)
 
 static int lpc17_40_txavail(struct net_driver_s *dev)
 {
-  FAR struct lpc17_40_driver_s *priv =
-    (FAR struct lpc17_40_driver_s *)dev->d_private;
+  struct lpc17_40_driver_s *priv =
+    (struct lpc17_40_driver_s *)dev->d_private;
 
   /* Is our single poll work structure available?  It may not be if there
    * are pending polling actions and we will have to ignore the Tx
@@ -2045,9 +1782,9 @@ static int lpc17_40_addmac(struct net_driver_s *dev, const uint8_t *mac)
 
   /* Enabled multicast address filtering in the RxFilterControl register:
    *
-   *   AcceptUnicastHashEn: When set to ’1’, unicast frames that pass the
+   *   AcceptUnicastHashEn: When set to '1', unicast frames that pass the
    *     imperfect hash filter are accepted.
-   *   AcceptMulticastHashEn When set to ’1’, multicast frames that pass
+   *   AcceptMulticastHashEn When set to '1', multicast frames that pass
    *     the imperfect hash filter are accepted.
    */
 
@@ -2127,9 +1864,9 @@ static int lpc17_40_rmmac(struct net_driver_s *dev, const uint8_t *mac)
 
   if (regval == 0 && lpc17_40_getreg(regaddr2) == 0)
     {
-      /*   AcceptUnicastHashEn: When set to ’1’, unicast frames that pass
+      /*   AcceptUnicastHashEn: When set to '1', unicast frames that pass
        *     the imperfect hash filter are accepted.
-       *   AcceptMulticastHashEn When set to ’1’, multicast frames that
+       *   AcceptMulticastHashEn When set to '1', multicast frames that
        *     pass the imperfect hash filter are accepted.
        */
 
@@ -2225,7 +1962,7 @@ static int lpc17_40_eth_ioctl(struct net_driver_s *dev, int cmd,
 #endif /* ifdef CONFIG_NETDEV_PHY_IOCTL */
 
       default:
-        nerr("ERROR: Unrecognized IOCTL command: %d\n", command);
+        nerr("ERROR: Unrecognized IOCTL command: %d\n", cmd);
         ret = -ENOTTY;  /* Special return value for this case */
         break;
     }
@@ -3258,7 +2995,6 @@ static inline int lpc17_40_ethinitialize(int intf)
 #endif
 {
   struct lpc17_40_driver_s *priv;
-  uint8_t *pktbuf;
   uint32_t regval;
   int ret;
   int i;
@@ -3281,14 +3017,10 @@ static inline int lpc17_40_ethinitialize(int intf)
 
   lpc17_40_showpins();
 
-  /* Select the packet buffer */
-
-  pktbuf = &g_pktbuf[PKTBUF_SIZE * intf];
-
   /* Initialize the driver structure */
 
   memset(priv, 0, sizeof(struct lpc17_40_driver_s));
-  priv->lp_dev.d_buf     = pktbuf;          /* Single packet buffer */
+  priv->lp_dev.d_buf     = g_pktbuf[intf];     /* Single packet buffer */
   priv->lp_dev.d_ifup    = lpc17_40_ifup;      /* I/F down callback */
   priv->lp_dev.d_ifdown  = lpc17_40_ifdown;    /* I/F up (new IP address) callback */
   priv->lp_dev.d_txavail = lpc17_40_txavail;   /* New TX data callback */
@@ -3299,18 +3031,13 @@ static inline int lpc17_40_ethinitialize(int intf)
 #ifdef CONFIG_NETDEV_IOCTL
   priv->lp_dev.d_ioctl   = lpc17_40_eth_ioctl; /* Handle network IOCTL commands */
 #endif
-  priv->lp_dev.d_private = (void *)priv;    /* Used to recover private state from dev */
+  priv->lp_dev.d_private = priv;               /* Used to recover private state from dev */
 
 #if CONFIG_LPC17_40_NINTERFACES > 1
 # error "A mechanism to associate base address an IRQ with an interface is needed"
-  priv->lp_base          = ??;              /* Ethernet controller base address */
-  priv->lp_irq           = ??;              /* Ethernet controller IRQ number */
+  priv->lp_base          = ??;                 /* Ethernet controller base address */
+  priv->lp_irq           = ??;                 /* Ethernet controller IRQ number */
 #endif
-
-  /* Create a watchdog for timing polling for and timing of transmissions */
-
-  priv->lp_txpoll        = wd_create();     /* Create periodic poll timer */
-  priv->lp_txtimeout     = wd_create();     /* Create TX timeout timer */
 
   /* Reset the Ethernet controller and leave in the ifdown statue.  The
    * Ethernet controller will be properly re-initialized each time
@@ -3340,7 +3067,7 @@ static inline int lpc17_40_ethinitialize(int intf)
 }
 
 /****************************************************************************
- * Name: up_netinitialize
+ * Name: arm_netinitialize
  *
  * Description:
  *   Initialize the first network interface.  If there are more than one
@@ -3351,7 +3078,7 @@ static inline int lpc17_40_ethinitialize(int intf)
  ****************************************************************************/
 
 #if CONFIG_LPC17_40_NINTERFACES == 1 && !defined(CONFIG_NETDEV_LATEINIT)
-void up_netinitialize(void)
+void arm_netinitialize(void)
 {
   lpc17_40_ethinitialize(0);
 }

@@ -1,6 +1,8 @@
 /****************************************************************************
  * sched/pthread/pthread_mutex.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -57,30 +59,16 @@
 static void pthread_mutex_add(FAR struct pthread_mutex_s *mutex)
 {
   FAR struct tcb_s *rtcb = this_task();
+  irqstate_t flags;
 
   DEBUGASSERT(mutex->flink == NULL);
 
-  /* Check if this is a pthread.  The main thread may also lock and unlock
-   * mutexes.  The main thread, however, does not participate in the mutex
-   * consistency logic.  Presumably, when the main thread exits, all of the
-   * child pthreads will also terminate.
-   *
-   * REVISIT:  NuttX does not support that behavior at present; child
-   * pthreads will persist after the main thread exits.
-   */
+  /* Add the mutex to the list of mutexes held by this pthread */
 
-  if ((rtcb->flags & TCB_FLAG_TTYPE_MASK) == TCB_FLAG_TTYPE_PTHREAD)
-    {
-      FAR struct pthread_tcb_s *ptcb = (FAR struct pthread_tcb_s *)rtcb;
-      irqstate_t flags;
-
-      /* Add the mutex to the list of mutexes held by this pthread */
-
-      flags        = enter_critical_section();
-      mutex->flink = ptcb->mhead;
-      ptcb->mhead  = mutex;
-      leave_critical_section(flags);
-    }
+  flags        = spin_lock_irqsave(&rtcb->mutex_lock);
+  mutex->flink = rtcb->mhead;
+  rtcb->mhead  = mutex;
+  spin_unlock_irqrestore(&rtcb->mutex_lock, flags);
 }
 
 /****************************************************************************
@@ -100,47 +88,37 @@ static void pthread_mutex_add(FAR struct pthread_mutex_s *mutex)
 static void pthread_mutex_remove(FAR struct pthread_mutex_s *mutex)
 {
   FAR struct tcb_s *rtcb = this_task();
+  FAR struct pthread_mutex_s *curr;
+  FAR struct pthread_mutex_s *prev;
+  irqstate_t flags;
 
-  /* Check if this is a pthread.  The main thread may also lock and unlock
-   * mutexes.  The main thread, however, does not participate in the mutex
-   * consistency logic.
+  flags = spin_lock_irqsave(&rtcb->mutex_lock);
+
+  /* Remove the mutex from the list of mutexes held by this task */
+
+  for (prev = NULL, curr = rtcb->mhead;
+       curr != NULL && curr != mutex;
+       prev = curr, curr = curr->flink)
+    {
+    }
+
+  DEBUGASSERT(curr == mutex);
+
+  /* Remove the mutex from the list.  prev == NULL means that the mutex
+   * to be removed is at the head of the list.
    */
 
-  if ((rtcb->flags & TCB_FLAG_TTYPE_MASK) == TCB_FLAG_TTYPE_PTHREAD)
+  if (prev == NULL)
     {
-      FAR struct pthread_tcb_s *ptcb = (FAR struct pthread_tcb_s *)rtcb;
-      FAR struct pthread_mutex_s *curr;
-      FAR struct pthread_mutex_s *prev;
-      irqstate_t flags;
-
-      flags = enter_critical_section();
-
-      /* Remove the mutex from the list of mutexes held by this task */
-
-      for (prev = NULL, curr = ptcb->mhead;
-           curr != NULL && curr != mutex;
-           prev = curr, curr = curr->flink)
-        {
-        }
-
-      DEBUGASSERT(curr == mutex);
-
-      /* Remove the mutex from the list.  prev == NULL means that the mutex
-       * to be removed is at the head of the list.
-       */
-
-      if (prev == NULL)
-        {
-          ptcb->mhead = mutex->flink;
-        }
-      else
-        {
-          prev->flink = mutex->flink;
-        }
-
-      mutex->flink = NULL;
-      leave_critical_section(flags);
+      rtcb->mhead = mutex->flink;
     }
+  else
+    {
+      prev->flink = mutex->flink;
+    }
+
+  mutex->flink = NULL;
+  spin_unlock_irqrestore(&rtcb->mutex_lock, flags);
 }
 
 /****************************************************************************
@@ -156,8 +134,6 @@ static void pthread_mutex_remove(FAR struct pthread_mutex_s *mutex)
  *
  * Input Parameters:
  *  mutex - The mutex to be locked
- *  intr  - false: ignore EINTR errors when locking; true treat EINTR as
- *          other errors by returning the errno value
  *
  * Returned Value:
  *   0 on success or an errno value on failure.
@@ -165,7 +141,7 @@ static void pthread_mutex_remove(FAR struct pthread_mutex_s *mutex)
  ****************************************************************************/
 
 int pthread_mutex_take(FAR struct pthread_mutex_s *mutex,
-                       FAR const struct timespec *abs_timeout, bool intr)
+                       FAR const struct timespec *abs_timeout)
 {
   int ret = EINVAL;
 
@@ -174,23 +150,26 @@ int pthread_mutex_take(FAR struct pthread_mutex_s *mutex,
   DEBUGASSERT(mutex != NULL);
   if (mutex != NULL)
     {
-      /* Make sure that no unexpected context switches occur */
-
-      sched_lock();
-
       /* Error out if the mutex is already in an inconsistent state. */
 
       if ((mutex->flags & _PTHREAD_MFLAGS_INCONSISTENT) != 0)
         {
           ret = EOWNERDEAD;
         }
+#ifdef CONFIG_PTHREAD_MUTEX_TYPES
+      else if (mutex_is_hold(&mutex->mutex) &&
+               mutex->type != PTHREAD_MUTEX_RECURSIVE)
+        {
+          ret = EDEADLK;
+        }
+#endif
       else
         {
-          /* Take semaphore underlying the mutex.  pthread_sem_take
-           * returns zero on success and a positive errno value on failure.
+          /* mutex_clocklock returns zero when successful, and the negative
+           * errno value is returned when failed.
            */
 
-          ret = pthread_sem_take(&mutex->sem, abs_timeout, intr);
+          ret = -mutex_clocklock(&mutex->mutex, abs_timeout);
           if (ret == OK)
             {
               /* Check if the holder of the mutex has terminated without
@@ -200,19 +179,24 @@ int pthread_mutex_take(FAR struct pthread_mutex_s *mutex,
 
               if ((mutex->flags & _PTHREAD_MFLAGS_INCONSISTENT) != 0)
                 {
+                  /* If the holder thread has terminated, we need to reset
+                   * the mutex and return an error.
+                   */
+
+                  mutex_reset(&mutex->mutex);
                   ret = EOWNERDEAD;
                 }
 
-              /* Add the mutex to the list of mutexes held by this task */
+              /* If mutex is recursion, it is already in the linked list,
+               * and we should not add it to the link list again.
+               */
 
-              else
+              else if (!mutex_is_recursive(&mutex->mutex))
                 {
                   pthread_mutex_add(mutex);
                 }
             }
         }
-
-      sched_unlock();
     }
 
   return ret;
@@ -244,34 +228,37 @@ int pthread_mutex_trytake(FAR struct pthread_mutex_s *mutex)
   DEBUGASSERT(mutex != NULL);
   if (mutex != NULL)
     {
-      /* Make sure that no unexpected context switches occur */
-
-      sched_lock();
-
       /* Error out if the mutex is already in an inconsistent state. */
 
       if ((mutex->flags & _PTHREAD_MFLAGS_INCONSISTENT) != 0)
         {
           ret = EOWNERDEAD;
         }
+#ifdef CONFIG_PTHREAD_MUTEX_TYPES
+      else if (mutex_is_hold(&mutex->mutex) &&
+               mutex->type != PTHREAD_MUTEX_RECURSIVE)
+        {
+          ret = EBUSY;
+        }
+#endif
       else
         {
           /* Try to take the semaphore underlying the mutex */
 
-          ret = nxsem_trywait(&mutex->sem);
+          ret = mutex_trylock(&mutex->mutex);
           if (ret < 0)
             {
               ret = -ret;
             }
-          else
+          else if (!mutex_is_recursive(&mutex->mutex))
             {
-              /* Add the mutex to the list of mutexes held by this task */
+              /* If we successfully acquire the mutex, and we didn't get
+               * it before, add the mutex to the linked list.
+               */
 
               pthread_mutex_add(mutex);
             }
         }
-
-      sched_unlock();
     }
 
   return ret;
@@ -303,12 +290,105 @@ int pthread_mutex_give(FAR struct pthread_mutex_s *mutex)
     {
       /* Remove the mutex from the list of mutexes held by this task */
 
-      pthread_mutex_remove(mutex);
+      if (!mutex_is_recursive(&mutex->mutex))
+        {
+          pthread_mutex_remove(mutex);
+        }
 
-      /* Now release the underlying semaphore */
+      /* Now release the underlying mutex */
 
-      ret = pthread_sem_give(&mutex->sem);
+      ret = -mutex_unlock(&mutex->mutex);
     }
 
   return ret;
+}
+
+int pthread_mutex_breaklock(FAR struct pthread_mutex_s *mutex,
+                            FAR unsigned int *breakval)
+{
+  int ret = EINVAL;
+
+  /* Verify input parameters */
+
+  DEBUGASSERT(mutex != NULL);
+  if (mutex != NULL)
+    {
+      /* Remove the mutex from the list of mutexes held by this task */
+
+      pthread_mutex_remove(mutex);
+
+      /* Now release the underlying mutex */
+
+      ret = -mutex_breaklock(&mutex->mutex, breakval);
+    }
+
+  return ret;
+}
+
+int pthread_mutex_restorelock(FAR struct pthread_mutex_s *mutex,
+                              unsigned int breakval)
+{
+  int ret = EINVAL;
+
+  /* Verify input parameters */
+
+  DEBUGASSERT(mutex != NULL);
+  if (mutex != NULL)
+    {
+      ret = -mutex_restorelock(&mutex->mutex, breakval);
+      if (ret == OK)
+        {
+          /* Add the mutex to the list of mutexes held by this task */
+
+          pthread_mutex_add(mutex);
+        }
+    }
+
+  return ret;
+}
+
+/****************************************************************************
+ * Name: pthread_mutex_inconsistent
+ *
+ * Description:
+ *   This function is called when a pthread is terminated via either
+ *   pthread_exit() or pthread_cancel().  It will check for any mutexes
+ *   held by exiting thread.  It will mark them as inconsistent and
+ *   then wake up the highest priority waiter for the mutex.  That
+ *   instance of pthread_mutex_lock() will then return EOWNERDEAD.
+ *
+ * Input Parameters:
+ *   tcb -- a reference to the TCB of the exiting pthread.
+ *
+ * Returned Value:
+ *   None.
+ *
+ ****************************************************************************/
+
+void pthread_mutex_inconsistent(FAR struct tcb_s *tcb)
+{
+  FAR struct pthread_mutex_s *mutex;
+  irqstate_t flags;
+
+  DEBUGASSERT(tcb != NULL);
+
+  flags = spin_lock_irqsave(&tcb->mutex_lock);
+
+  /* Remove and process each mutex held by this task */
+
+  while (tcb->mhead != NULL)
+    {
+      /* Remove the mutex from the TCB list */
+
+      mutex        = tcb->mhead;
+      tcb->mhead   = mutex->flink;
+      mutex->flink = NULL;
+
+      /* Mark the mutex as INCONSISTENT and wake up any waiting thread */
+
+      mutex->flags |= _PTHREAD_MFLAGS_INCONSISTENT;
+      mutex_unlock(&mutex->mutex);
+    }
+
+  spin_unlock_irqrestore(&tcb->mutex_lock, flags);
 }

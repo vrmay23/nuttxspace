@@ -1,35 +1,22 @@
 /****************************************************************************
- * apps/popen/popen/popen.c
+ * apps/system/popen/popen.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,6 +27,7 @@
 #include <nuttx/config.h>
 
 #include <sys/wait.h>
+#include <sys/ioctl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -48,6 +36,8 @@
 #include <spawn.h>
 #include <assert.h>
 #include <debug.h>
+#include <fcntl.h>
+#include <errno.h>
 
 #include "nshlib/nshlib.h"
 
@@ -83,7 +73,7 @@ struct popen_file_s
  *   were created within the popen() call using the fork() function, and the
  *   child invoked the sh utility using the call:
  *
- *     execl(shell path, "sh", "-c", command, (char *)0);
+ *     execl(shell path, "sh", "-c", command, NULL);
  *
  *   where shell path is an unspecified pathname for the sh utility.
  *
@@ -128,13 +118,14 @@ FILE *popen(FAR const char *command, FAR const char *mode)
   struct sched_param param;
   posix_spawnattr_t attr;
   posix_spawn_file_actions_t file_actions;
-  FAR char *argv[2];
+  FAR char *argv[4];
   int fd[2];
-  int oldfd;
-  int newfd;
+  int oldfd[2];
+  int newfd[2];
   int retfd;
   int errcode;
-  int result;
+  int result = 0;
+  bool rw = false;
 
   /* Allocate a container for returned FILE stream */
 
@@ -145,34 +136,54 @@ FILE *popen(FAR const char *command, FAR const char *mode)
       goto errout;
     }
 
+  oldfd[1] = 0;
+  newfd[1] = 0;
+
   /* Create a pipe.  fd[0] refers to the read end of the pipe; fd[1] refers
    * to the write end of the pipe.
+   * Is the pipe the input to the shell?  Or the output?
    */
 
-  result = pipe(fd);
-  if (result < 0)
-    {
-      errcode = errno;
-      goto errout_with_container;
-    }
-
-  /* Is the pipe the input to the shell?  Or the output? */
-
-  if (strcmp(mode, "r") == 0)
+  if (strcmp(mode, "r") == 0 &&
+      (result = pipe2(fd, O_CLOEXEC)) >= 0)
     {
       /* Pipe is the output from the shell */
 
-      oldfd = 1;     /* Replace stdout with the write side of the pipe */
-      newfd = fd[1];
-      retfd = fd[0]; /* Use read side of the pipe to create the return stream */
+      oldfd[0] = 1;     /* Replace stdout with the write side of the pipe */
+      newfd[0] = fd[1];
+      retfd    = fd[0]; /* Use read side of the pipe to create the return stream */
     }
-  else if (strcmp(mode, "w") == 0)
+  else if (strcmp(mode, "w") == 0 &&
+           (result = pipe2(fd, O_CLOEXEC)) >= 0)
     {
       /* Pipe is the input to the shell */
 
-      oldfd = 0;     /* Replace stdin with the read side of the pipe */
-      newfd = fd[0];
-      retfd = fd[1]; /* Use write side of the pipe to create the return stream */
+      oldfd[0] = 0;     /* Replace stdin with the read side of the pipe */
+      newfd[0] = fd[0];
+      retfd    = fd[1]; /* Use write side of the pipe to create the return stream */
+    }
+
+  /* Create a socketpair. Using fd[0] as the input and output to the shell */
+
+#if defined(CONFIG_NET_LOCAL) && defined(CONFIG_NET_LOCAL_STREAM)
+  else if ((strcmp(mode, "r+") == 0 || strcmp(mode, "w+") == 0) &&
+           (result = socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC,
+                                0, fd)) >= 0)
+    {
+      /* Socketpair is the input/output to the shell */
+
+      rw = true;
+      oldfd[0] = 0;     /* Replace stdin with the one side of a socket pair */
+      newfd[0] = fd[0];
+      oldfd[1] = 1;     /* Replace stdout with the one side of a socket pair */
+      newfd[1] = fd[0];
+      retfd    = fd[1]; /* Use other side of the socket pair to create the return stream */
+    }
+#endif
+  else if (result < 0)
+    {
+      errcode = errno;
+      goto errout_with_container;
     }
   else
     {
@@ -212,15 +223,18 @@ FILE *popen(FAR const char *command, FAR const char *mode)
       goto errout_with_actions;
     }
 
-  errcode = task_spawnattr_setstacksize(&attr, CONFIG_SYSTEM_POPEN_STACKSIZE);
+#ifndef CONFIG_SYSTEM_POPEN_SHPATH
+  errcode = posix_spawnattr_setstacksize(&attr,
+                                         CONFIG_SYSTEM_POPEN_STACKSIZE);
   if (errcode != 0)
     {
       goto errout_with_actions;
     }
+#endif
 
-   /* If robin robin scheduling is enabled, then set the scheduling policy
-    * of the new task to SCHED_RR before it has a chance to run.
-    */
+  /* If robin robin scheduling is enabled, then set the scheduling policy
+   * of the new task to SCHED_RR before it has a chance to run.
+   */
 
 #if CONFIG_RR_INTERVAL > 0
   errcode = posix_spawnattr_setschedpolicy(&attr, SCHED_RR);
@@ -248,31 +262,47 @@ FILE *popen(FAR const char *command, FAR const char *mode)
 
   /* Redirect input or output as determined by the mode parameter */
 
-  errcode = posix_spawn_file_actions_adddup2(&file_actions, newfd, oldfd);
+  errcode = posix_spawn_file_actions_adddup2(&file_actions,
+                                             newfd[0], oldfd[0]);
   if (errcode != 0)
     {
       goto errout_with_actions;
+    }
+
+  if (rw)
+    {
+      errcode = posix_spawn_file_actions_adddup2(&file_actions,
+                                                 newfd[1], oldfd[1]);
+      if (errcode != 0)
+        {
+          goto errout_with_actions;
+        }
     }
 
   /* Call task_spawn() (or posix_spawn), re-directing stdin or stdout
    * appropriately.
    */
 
-  argv[0] = (FAR char *)command;
-  argv[1] = NULL;
+  argv[1] = "-c";
+  argv[2] = (FAR char *)command;
+  argv[3] = NULL;
 
 #ifdef CONFIG_SYSTEM_POPEN_SHPATH
-  errcode = posix_spawn(&container->shell, CONFIG_SYSTEM_POPEN_SHPATH,
-                        &file_actions, &attr, argv,
-                        (FAR char * const *)NULL);
+  argv[0] = CONFIG_SYSTEM_POPEN_SHPATH;
+  errcode = posix_spawn(&container->shell, argv[0], &file_actions,
+                        &attr, argv, NULL);
 #else
-  errcode = task_spawn(&container->shell, "popen", nsh_system, &file_actions,
-                       &attr, argv, (FAR char * const *)NULL);
+  container->shell = task_spawn("popen", nsh_system, &file_actions,
+                                &attr, argv + 1, NULL);
+  if (container->shell < 0)
+    {
+      errcode = -container->shell;
+    }
 #endif
 
   if (errcode != 0)
     {
-      serr("ERROR: Spawn failed: %d\n", result);
+      serr("ERROR: Spawn failed: %d\n", errcode);
       goto errout_with_actions;
     }
 
@@ -280,7 +310,12 @@ FILE *popen(FAR const char *command, FAR const char *mode)
    * the interface.
    */
 
-  close(newfd);
+  close(newfd[0]);
+
+  if (rw)
+    {
+      close(newfd[1]);
+    }
 
   /* Free attributes and file actions.  Ignoring return values in the case
    * of an error.
@@ -288,6 +323,11 @@ FILE *popen(FAR const char *command, FAR const char *mode)
 
   posix_spawn_file_actions_destroy(&file_actions);
   posix_spawnattr_destroy(&attr);
+
+  if (strchr(mode, 'e') == NULL)
+    {
+      ioctl(retfd, FIOCLEX, 0);
+    }
 
   /* Finale and return input input/output stream */
 
@@ -311,7 +351,7 @@ errout_with_container:
   free(container);
 
 errout:
-  set_errno(errcode);
+  errno = errcode;
   return NULL;
 }
 
@@ -331,22 +371,22 @@ errout:
  *     waitpid() with a pid argument less than or equal to 0 or equal to the
  *               process ID of the command line interpreter
  *
- *   Any other function not defined in this volume of IEEE Std 1003.1-2001 that
- *   could do one of the above
+ *   Any other function not defined in this volume of IEEE Std 1003.1-2001
+ *   that could do one of the above
  *
- *   In any case, pclose() will not return before the child process created by
- *   popen() has terminated.
+ *   In any case, pclose() will not return before the child process created
+ *   by popen() has terminated.
  *
- *   If the command language interpreter cannot be executed, the child termination
- *   status returned by pclose() will be as if the command language interpreter
- *   terminated using exit(127) or _exit(127).
+ *   If the command language interpreter cannot be executed, the child
+ *   termination status returned by pclose() will be as if the command
+ *   language interpreter terminated using exit(127) or _exit(127).
  *
- *   The pclose() function will not affect the termination status of any child of
- *   the calling process other than the one created by popen() for the associated
- *   stream.
+ *   The pclose() function will not affect the termination status of any
+ *   child of the calling process other than the one created by popen() for
+ *   the associated stream.
  *
- *   If the argument stream to pclose() is not a pointer to a stream created by
- *   popen(), the result of pclose() is undefined.
+ *   If the argument stream to pclose() is not a pointer to a stream created
+ *   by popen(), the result of pclose() is undefined.
  *
  * Description:
  *   stream - The stream reference returned by a previous call to popen()
@@ -376,8 +416,8 @@ int pclose(FILE *stream)
 
   memcpy(original, &container->copy, sizeof(FILE));
 
-  /* Then close the original and free the container (saving the PID of the shell
-   * process)
+  /* Then close the original and free the container (saving the PID of the
+   * shell process)
    */
 
   fclose(original);
@@ -388,13 +428,13 @@ int pclose(FILE *stream)
 #ifdef CONFIG_SCHED_WAITPID
   /* Wait for the shell to exit, retrieving the return value if available. */
 
- result = waitpid(shell, &status, 0);
- if (result < 0)
-   {
-     /* The errno has already been set */
+  result = waitpid(shell, &status, 0);
+  if (result < 0)
+    {
+      /* The errno has already been set */
 
-     return ERROR;
-   }
+      return ERROR;
+    }
 
   return status;
 #else

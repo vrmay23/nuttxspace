@@ -1,10 +1,9 @@
 /****************************************************************************
- * httpd_cgi.c
- * Web server script interface
- * Author: Adam Dunkels <adam@sics.se>
+ * apps/netutils/webserver/httpd_cgi.c
  *
- * Copyright (c) 2001-2006, Adam Dunkels.
- * All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2001-2006 Adam Dunkels. All rights reserved.
+ * SPDX-FileContributor: Adam Dunkels <adam@dunkels.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -58,6 +57,10 @@ struct httpd_cgi_call *cgi_calls = NULL;
  * Public Functions
  ****************************************************************************/
 
+/****************************************************************************
+ * Name: httpd_cgi_register
+ ****************************************************************************/
+
 void httpd_cgi_register(struct httpd_cgi_call *cgi_call)
 {
   if (cgi_calls == NULL)
@@ -70,6 +73,10 @@ void httpd_cgi_register(struct httpd_cgi_call *cgi_call)
       cgi_calls = cgi_call;
     }
 }
+
+/****************************************************************************
+ * Name: httpd_cgi
+ ****************************************************************************/
 
 httpd_cgifunction httpd_cgi(char *name)
 {

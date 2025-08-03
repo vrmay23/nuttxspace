@@ -1,6 +1,8 @@
 /****************************************************************************
  * sched/wdog/wd_start.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -26,15 +28,17 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <stdarg.h>
+#include <sys/param.h>
 #include <unistd.h>
 #include <sched.h>
 #include <assert.h>
+#include <debug.h>
 #include <errno.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/wdog.h>
+#include <nuttx/sched_note.h>
 
 #include "sched/sched.h"
 #include "wdog/wdog.h"
@@ -43,12 +47,50 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifndef MIN
-#  define MIN(a,b) (((a) < (b)) ? (a) : (b))
+#ifndef CONFIG_SCHED_CRITMONITOR_MAXTIME_WDOG
+#  define CONFIG_SCHED_CRITMONITOR_MAXTIME_WDOG 0
 #endif
 
-#ifndef MAX
-#  define MAX(a,b) (((a) > (b)) ? (a) : (b))
+#if CONFIG_SCHED_CRITMONITOR_MAXTIME_WDOG > 0
+#  define CALL_FUNC(func, arg) \
+     do \
+       { \
+         clock_t start; \
+         clock_t elapsed; \
+         sched_note_wdog(NOTE_WDOG_ENTER, func, (FAR void *)arg); \
+         start = perf_gettime(); \
+         func(arg); \
+         elapsed = perf_gettime() - start; \
+         sched_note_wdog(NOTE_WDOG_LEAVE, func, (FAR void *)arg); \
+         if (elapsed > CONFIG_SCHED_CRITMONITOR_MAXTIME_WDOG) \
+           { \
+             CRITMONITOR_PANIC("WDOG %p, %s IRQ, execute too long %ju\n", \
+                               func, up_interrupt_context() ? \
+                               "IN" : "NOT", (uintmax_t)elapsed); \
+           } \
+       } \
+     while (0)
+#else
+#  define CALL_FUNC(func, arg) \
+      do \
+        { \
+          sched_note_wdog(NOTE_WDOG_ENTER, func, (FAR void *)arg); \
+          func(arg); \
+          sched_note_wdog(NOTE_WDOG_LEAVE, func, (FAR void *)arg); \
+        } \
+      while (0)
+
+#endif
+
+#define wdparm_to_ptr(type, arg) ((type)(uintptr_t)arg)
+#define ptr_to_wdparm(ptr)       wdparm_to_ptr(wdparm_t, ptr)
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+#ifdef CONFIG_SCHED_TICKLESS
+static unsigned int g_wdtimernested;
 #endif
 
 /****************************************************************************
@@ -60,77 +102,241 @@
  *
  * Description:
  *   Check if the timer for the watchdog at the head of list is ready to
- *   run.  If so, remove the watchdog from the list and execute it.
+ *   run. If so, remove the watchdog from the list and execute it.
  *
  * Input Parameters:
- *   None
+ *   ticks - current time in ticks
  *
  * Returned Value:
  *   None
  *
  ****************************************************************************/
 
-static inline void wd_expiration(void)
+static inline_function void wd_expiration(clock_t ticks)
 {
   FAR struct wdog_s *wdog;
+  irqstate_t         flags;
+  wdentry_t          func;
+  wdparm_t           arg;
 
-  /* Check if the watchdog at the head of the list is ready to run */
+  flags = spin_lock_irqsave(&g_wdspinlock);
 
-  if (((FAR struct wdog_s *)g_wdactivelist.head)->lag <= 0)
-    {
-      /* Process the watchdog at the head of the list as well as any
-       * other watchdogs that became ready to run at this time
-       */
+#ifdef CONFIG_SCHED_TICKLESS
+  /* Increment the nested watchdog timer count to handle cases where wd_start
+   * is called in the watchdog callback functions.
+   */
 
-      while (g_wdactivelist.head &&
-             ((FAR struct wdog_s *)g_wdactivelist.head)->lag <= 0)
-        {
-          /* Remove the watchdog from the head of the list */
-
-          wdog = (FAR struct wdog_s *)sq_remfirst(&g_wdactivelist);
-
-          /* If there is another watchdog behind this one, update its
-           * its lag (this shouldn't be necessary).
-           */
-
-          if (g_wdactivelist.head)
-            {
-              ((FAR struct wdog_s *)g_wdactivelist.head)->lag += wdog->lag;
-            }
-
-          /* Indicate that the watchdog is no longer active. */
-
-          WDOG_CLRACTIVE(wdog);
-
-          /* Execute the watchdog function */
-
-          up_setpicbase(wdog->picbase);
-
-#if CONFIG_MAX_WDOGPARMS == 0
-          wdog->func(0);
-#elif CONFIG_MAX_WDOGPARMS == 1
-          wdog->func((int)wdog->argc,
-                     wdog->parm[0]);
-#elif CONFIG_MAX_WDOGPARMS == 2
-          wdog->func((int)wdog->argc,
-                     wdog->parm[0], wdog->parm[1]);
-#elif CONFIG_MAX_WDOGPARMS == 3
-          wdog->func((int)wdog->argc,
-                     wdog->parm[0], wdog->parm[1], wdog->parm[2]);
-#elif CONFIG_MAX_WDOGPARMS == 4
-          wdog->func((int)wdog->argc,
-                     wdog->parm[0], wdog->parm[1], wdog->parm[2],
-                     wdog->parm[3]);
-#else
-#  error Missing support
+  g_wdtimernested++;
 #endif
+
+  /* Process the watchdog at the head of the list as well as any
+   * other watchdogs that became ready to run at this time
+   */
+
+  while (!list_is_empty(&g_wdactivelist))
+    {
+      wdog = list_first_entry(&g_wdactivelist, struct wdog_s, node);
+
+      /* Check if expected time is expired */
+
+      if (!clock_compare(wdog->expired, ticks))
+        {
+          break;
+        }
+
+      /* Remove the watchdog from the head of the list */
+
+      list_delete(&wdog->node);
+
+      /* Indicate that the watchdog is no longer active. */
+
+      func = wdog->func;
+      arg  = wdog->arg;
+      wdog->func = NULL;
+
+      /* Execute the watchdog function */
+
+      up_setpicbase(wdog->picbase);
+      spin_unlock_irqrestore(&g_wdspinlock, flags);
+
+      CALL_FUNC(func, arg);
+
+      flags = spin_lock_irqsave(&g_wdspinlock);
+    }
+
+#ifdef CONFIG_SCHED_TICKLESS
+  /* Decrement the nested watchdog timer count */
+
+  g_wdtimernested--;
+#endif
+
+  spin_unlock_irqrestore(&g_wdspinlock, flags);
+}
+
+/****************************************************************************
+ * Name: wd_insert
+ *
+ * Description:
+ *   Insert the timer into the global list to ensure that
+ *   the list is sorted in increasing order of expiration absolute time.
+ *
+ * Input Parameters:
+ *   wdog     - Watchdog ID
+ *   expired  - expired absolute time in clock ticks
+ *   wdentry  - Function to call on timeout
+ *   arg      - Parameter to pass to wdentry
+ *
+ * Assumptions:
+ *   wdog and wdentry is not NULL.
+ *
+ * Returned Value:
+ *   Whether the head of the watchdog list has changed.
+ *
+ ****************************************************************************/
+
+static inline_function
+bool wd_insert(FAR struct wdog_s *wdog, clock_t expired,
+               wdentry_t wdentry, wdparm_t arg)
+{
+  FAR struct wdog_s *curr;
+  FAR struct wdog_s *head;
+
+  /* Traverse the watchdog list */
+
+  head = list_first_entry(&g_wdactivelist, struct wdog_s, node);
+
+  list_for_every_entry(&g_wdactivelist, curr, struct wdog_s, node)
+    {
+      /* Until curr->expired has not timed out relative to expired */
+
+      if (!clock_compare(curr->expired, expired))
+        {
+          break;
         }
     }
+
+  /* There are two cases:
+   * - Traverse to the end, where curr == &g_wdactivelist.
+   * - Find a curr such that curr->expected has not timed out
+   * relative to expired.
+   * In either case 1 or 2, we just insert the wdog before curr.
+   */
+
+  list_add_before(&curr->node, &wdog->node);
+
+  wdog->func = wdentry;
+  up_getpicbase(&wdog->picbase);
+  wdog->arg = arg;
+  wdog->expired = expired;
+
+  /* Return whether the head of the watchdog list has changed. */
+
+  return head == curr;
 }
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: wd_start_abstick
+ *
+ * Description:
+ *   This function adds a watchdog timer to the active timer queue.  The
+ *   specified watchdog function at 'wdentry' will be called from the
+ *   interrupt level after the specified number of ticks has reached.
+ *   Watchdog timers may be started from the interrupt level.
+ *
+ *   Watchdog timers execute in the address environment that was in effect
+ *   when wd_start() is called.
+ *
+ *   Watchdog timers execute only once.
+ *
+ *   To replace either the timeout delay or the function to be executed,
+ *   call wd_start again with the same wdog; only the most recent wdStart()
+ *   on a given watchdog ID has any effect.
+ *
+ * Input Parameters:
+ *   wdog     - Watchdog ID
+ *   ticks    - Absolute time in clock ticks
+ *   wdentry  - Function to call on timeout
+ *   arg      - Parameter to pass to wdentry.
+ *
+ *   NOTE:  The parameter must be of type wdparm_t.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is return to
+ *   indicate the nature of any failure.
+ *
+ * Assumptions:
+ *   The watchdog routine runs in the context of the timer interrupt handler
+ *   and is subject to all ISR restrictions.
+ *
+ ****************************************************************************/
+
+int wd_start_abstick(FAR struct wdog_s *wdog, clock_t ticks,
+                     wdentry_t wdentry, wdparm_t arg)
+{
+  irqstate_t flags;
+  bool reassess = false;
+
+  /* Verify the wdog and setup parameters */
+
+  if (wdog == NULL || wdentry == NULL)
+    {
+      return -EINVAL;
+    }
+
+  /* NOTE:  There is a race condition here... the caller may receive
+   * the watchdog between the time that wd_start_abstick is called and
+   * the critical section is established.
+   */
+
+  flags = spin_lock_irqsave(&g_wdspinlock);
+#ifdef CONFIG_SCHED_TICKLESS
+  /* We need to reassess timer if the watchdog list head has changed. */
+
+  if (WDOG_ISACTIVE(wdog))
+    {
+      reassess |= list_is_head(&g_wdactivelist, &wdog->node);
+      list_delete(&wdog->node);
+      wdog->func = NULL;
+    }
+
+  reassess |= wd_insert(wdog, ticks, wdentry, arg);
+
+  if (!g_wdtimernested && reassess)
+    {
+      /* Resume the interval timer that will generate the next
+       * interval event. If the timer at the head of the list changed,
+       * then this will pick that new delay.
+       */
+
+      spin_unlock_irqrestore(&g_wdspinlock, flags);
+      nxsched_reassess_timer();
+    }
+  else
+    {
+      spin_unlock_irqrestore(&g_wdspinlock, flags);
+    }
+#else
+  UNUSED(reassess);
+
+  /* Check if the watchdog has been started. If so, delete it. */
+
+  if (WDOG_ISACTIVE(wdog))
+    {
+      list_delete(&wdog->node);
+      wdog->func = NULL;
+    }
+
+  wd_insert(wdog, ticks, wdentry, arg);
+  spin_unlock_irqrestore(&g_wdspinlock, flags);
+#endif
+
+  sched_note_wdog(NOTE_WDOG_START, wdentry, (FAR void *)(uintptr_t)ticks);
+  return OK;
+}
 
 /****************************************************************************
  * Name: wd_start
@@ -154,9 +360,9 @@ static inline void wd_expiration(void)
  *   wdog     - Watchdog ID
  *   delay    - Delay count in clock ticks
  *   wdentry  - Function to call on timeout
- *   parm1..4 - Parameters to pass to wdentry
+ *   arg      - Parameter to pass to wdentry
  *
- *   NOTE:  All parameters must be of type wdparm_t.
+ *   NOTE:  The parameter must be of type wdparm_t.
  *
  * Returned Value:
  *   Zero (OK) is returned on success; a negated errno value is return to
@@ -168,183 +374,17 @@ static inline void wd_expiration(void)
  *
  ****************************************************************************/
 
-int wd_start(WDOG_ID wdog, int32_t delay, wdentry_t wdentry,  int argc, ...)
+int wd_start(FAR struct wdog_s *wdog, clock_t delay,
+             wdentry_t wdentry, wdparm_t arg)
 {
-  va_list ap;
-  FAR struct wdog_s *curr;
-  FAR struct wdog_s *prev;
-  FAR struct wdog_s *next;
-  int32_t now;
-  irqstate_t flags;
-  int i;
+  /* Ensure delay is within the range the wdog can handle. */
 
-  /* Verify the wdog and setup parameters */
-
-  if (wdog == NULL || argc > CONFIG_MAX_WDOGPARMS || delay < 0)
+  if (delay > WDOG_MAX_DELAY)
     {
       return -EINVAL;
     }
 
-  /* Check if the watchdog has been started. If so, stop it.
-   * NOTE:  There is a race condition here... the caller may receive
-   * the watchdog between the time that wd_start is called and
-   * the critical section is established.
-   */
-
-  flags = enter_critical_section();
-  if (WDOG_ISACTIVE(wdog))
-    {
-      wd_cancel(wdog);
-    }
-
-  /* Save the data in the watchdog structure */
-
-  wdog->func = wdentry;         /* Function to execute when delay expires */
-  up_getpicbase(&wdog->picbase);
-  wdog->argc = argc;
-
-  va_start(ap, argc);
-  for (i = 0; i < argc; i++)
-    {
-      wdog->parm[i] = va_arg(ap, wdparm_t);
-    }
-
-#ifdef CONFIG_DEBUG_FEATURES
-  for (; i < CONFIG_MAX_WDOGPARMS; i++)
-    {
-      wdog->parm[i] = 0;
-    }
-#endif
-
-  va_end(ap);
-
-  /* Calculate delay+1, forcing the delay into a range that we can handle */
-
-  if (delay <= 0)
-    {
-      delay = 1;
-    }
-  else if (++delay <= 0)
-    {
-      delay--;
-    }
-
-#ifdef CONFIG_SCHED_TICKLESS
-  /* Cancel the interval timer that drives the timing events.  This will
-   * cause wd_timer to be called which update the delay value for the first
-   * time at the head of the timer list (there is a possibility that it
-   * could even remove it).
-   */
-
-  sched_timer_cancel();
-#endif
-
-  /* Do the easy case first -- when the watchdog timer queue is empty. */
-
-  if (g_wdactivelist.head == NULL)
-    {
-#ifdef CONFIG_SCHED_TICKLESS
-      /* Update clock tickbase */
-
-      g_wdtickbase = clock_systimer();
-#endif
-
-      /* Add the watchdog to the head == tail of the queue. */
-
-      sq_addlast((FAR sq_entry_t *)wdog, &g_wdactivelist);
-    }
-
-  /* There are other active watchdogs in the timer queue */
-
-  else
-    {
-      now = 0;
-      prev = curr = (FAR struct wdog_s *)g_wdactivelist.head;
-
-      /* Advance to positive time */
-
-      while ((now += curr->lag) < 0 && curr->next)
-        {
-          prev = curr;
-          curr = curr->next;
-        }
-
-      /* Advance past shorter delays */
-
-      while (now <= delay && curr->next)
-        {
-          prev = curr;
-          curr = curr->next;
-          now += curr->lag;
-        }
-
-      /* Check if the new wdog must be inserted before the curr. */
-
-      if (delay < now)
-        {
-          /* The relative delay time is smaller or equal to the current delay
-           * time, so decrement the current delay time by the new relative
-           * delay time.
-           */
-
-          delay -= (now - curr->lag);
-          curr->lag -= delay;
-
-          /* Insert the new watchdog in the list */
-
-          if (curr == (FAR struct wdog_s *)g_wdactivelist.head)
-            {
-              /* Insert the watchdog at the head of the list */
-
-              sq_addfirst((FAR sq_entry_t *)wdog, &g_wdactivelist);
-            }
-          else
-            {
-              /* Insert the watchdog in mid- or end-of-queue */
-
-              sq_addafter((FAR sq_entry_t *)prev, (FAR sq_entry_t *)wdog,
-                          &g_wdactivelist);
-            }
-        }
-
-      /* The new watchdog delay time is greater than the curr delay time,
-       * so the new wdog must be inserted after the curr. This only occurs
-       * if the wdog is to be added to the end of the list.
-       */
-
-      else
-        {
-          delay -= now;
-          if (!curr->next)
-            {
-              sq_addlast((FAR sq_entry_t *)wdog, &g_wdactivelist);
-            }
-          else
-            {
-              next = curr->next;
-              next->lag -= delay;
-              sq_addafter((FAR sq_entry_t *)curr, (FAR sq_entry_t *)wdog,
-                          &g_wdactivelist);
-            }
-        }
-    }
-
-  /* Put the lag into the watchdog structure and mark it as active. */
-
-  wdog->lag = delay;
-  WDOG_SETACTIVE(wdog);
-
-#ifdef CONFIG_SCHED_TICKLESS
-  /* Resume the interval timer that will generate the next interval event.
-   * If the timer at the head of the list changed, then this will pick that
-   * new delay.
-   */
-
-  sched_timer_resume();
-#endif
-
-  leave_critical_section(flags);
-  return OK;
+  return wd_start_abstick(wdog, clock_delay2abstick(delay), wdentry, arg);
 }
 
 /****************************************************************************
@@ -361,6 +401,7 @@ int wd_start(WDOG_ID wdog, int32_t delay, wdentry_t wdentry,  int argc, ...)
  *     in the interval that just expired is provided.  Otherwise,
  *     this function is called on each timer interrupt and a value of one
  *     is implicit.
+ *   noswitches - True: Can't do context switches now.
  *
  * Returned Value:
  *   If CONFIG_SCHED_TICKLESS is defined then the number of ticks for the
@@ -373,110 +414,48 @@ int wd_start(WDOG_ID wdog, int32_t delay, wdentry_t wdentry,  int argc, ...)
  ****************************************************************************/
 
 #ifdef CONFIG_SCHED_TICKLESS
-unsigned int wd_timer(int ticks)
+clock_t wd_timer(clock_t ticks, bool noswitches)
 {
   FAR struct wdog_s *wdog;
-#ifdef CONFIG_SMP
   irqstate_t flags;
-#endif
-  unsigned int ret;
-  int decr;
+  sclock_t ret;
 
-#ifdef CONFIG_SMP
-  /* We are in an interrupt handler as, as a consequence, interrupts are
-   * disabled.  But in the SMP case, interrupts MAY be disabled only on
-   * the local CPU since most architectures do not permit disabling
-   * interrupts on other CPUS.
-   *
-   * Hence, we must follow rules for critical sections even here in the
-   * SMP case.
-   */
+  /* Check if the watchdog at the head of the list is ready to run */
 
-  flags = enter_critical_section();
-#endif
-
-  /* Check if there are any active watchdogs to process */
-
-  while (g_wdactivelist.head != NULL && ticks > 0)
+  if (!noswitches)
     {
-      /* Get the watchdog at the head of the list */
-
-      wdog = (FAR struct wdog_s *)g_wdactivelist.head;
-
-#ifndef CONFIG_SCHED_TICKLESS_ALARM
-      /* There is logic to handle the case where ticks is greater than
-       * the watchdog lag, but if the scheduling is working properly
-       * that should never happen.
-       */
-
-      DEBUGASSERT(ticks <= wdog->lag);
-#endif
-      /* Decrement the lag for this watchdog. */
-
-      decr = MIN(wdog->lag, ticks);
-
-      /* There are.  Decrement the lag counter */
-
-      wdog->lag    -= decr;
-      ticks        -= decr;
-      g_wdtickbase += decr;
-
-      /* Check if the watchdog at the head of the list is ready to run */
-
-      wd_expiration();
+      wd_expiration(ticks);
     }
 
-  /* Update clock tickbase */
-
-  g_wdtickbase += ticks;
+  flags = spin_lock_irqsave(&g_wdspinlock);
 
   /* Return the delay for the next watchdog to expire */
 
-  ret = g_wdactivelist.head ?
-          ((FAR struct wdog_s *)g_wdactivelist.head)->lag : 0;
+  if (list_is_empty(&g_wdactivelist))
+    {
+      spin_unlock_irqrestore(&g_wdspinlock, flags);
+      return 0;
+    }
 
-#ifdef CONFIG_SMP
-  leave_critical_section(flags);
-#endif
+  /* Notice that if noswitches, expired - g_wdtickbase
+   * may get negative value.
+   */
+
+  wdog = list_first_entry(&g_wdactivelist, struct wdog_s, node);
+  ret = wdog->expired - ticks;
+
+  spin_unlock_irqrestore(&g_wdspinlock, flags);
 
   /* Return the delay for the next watchdog to expire */
 
-  return ret;
+  return MAX(ret, 1);
 }
 
 #else
-void wd_timer(void)
+void wd_timer(clock_t ticks)
 {
-#ifdef CONFIG_SMP
-  irqstate_t flags;
-
-  /* We are in an interrupt handler as, as a consequence, interrupts are
-   * disabled.  But in the SMP case, interrupts MAY be disabled only on
-   * the local CPU since most architectures do not permit disabling
-   * interrupts on other CPUS.
-   *
-   * Hence, we must follow rules for critical sections even here in the
-   * SMP case.
-   */
-
-  flags = enter_critical_section();
-#endif
-
   /* Check if there are any active watchdogs to process */
 
-  if (g_wdactivelist.head)
-    {
-      /* There are.  Decrement the lag counter */
-
-      --(((FAR struct wdog_s *)g_wdactivelist.head)->lag);
-
-      /* Check if the watchdog at the head of the list is ready to run */
-
-      wd_expiration();
-    }
-
-#ifdef CONFIG_SMP
-  leave_critical_section(flags);
-#endif
+  wd_expiration(ticks);
 }
 #endif /* CONFIG_SCHED_TICKLESS */

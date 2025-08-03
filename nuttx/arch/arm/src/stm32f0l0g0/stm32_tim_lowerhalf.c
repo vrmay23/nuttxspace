@@ -1,14 +1,13 @@
 /****************************************************************************
  * arch/arm/src/stm32f0l0g0/stm32_tim_lowerhalf.c
  *
- *   Copyright (C) 2019 Fundação CERTI. All rights reserved.
- *   Author: Daniel Pereira Volpato <dpo@certi.org.br>
- *
- *   Based on: arch/arm/src/stm32l4/stm32l4_tim_lowerhalf.c
- *   Authors: Wail Khemir <khemirwail@gmail.com>
- *            Paul Alexander Patience <paul-a.patience@polymtl.ca>
- *            dev@ziggurat29.com
- *            Sebastien Lorquet <sebastien@lorquet.fr>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2019 Fundação CERTI. All rights reserved.
+ * SPDX-FileContributor: Daniel Pereira Volpato <dpo@certi.org.br>
+ * SPDX-FileContributor: Wail Khemir <khemirwail@gmail.com>
+ * SPDX-FileContributor: Paul Alexander Patience <paul-a.patience@polymtl.ca>
+ * SPDX-FileContributor: dev@ziggurat29.com
+ * SPDX-FileContributor: Sebastien Lorquet <sebastien@lorquet.fr>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -47,8 +46,10 @@
 
 #include <sys/types.h>
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -101,12 +102,12 @@
 
 struct stm32_lowerhalf_s
 {
-  FAR const struct timer_ops_s *ops;        /* Lower half operations */
-  FAR struct stm32_tim_dev_s   *tim;        /* stm32 timer driver */
-  tccb_t                        callback;   /* Current user interrupt callback */
-  FAR void                     *arg;        /* Argument passed to upper half callback */
-  bool                          started;    /* True: Timer has been started */
-  const uint8_t                 resolution; /* Number of bits in the timer (16 or 32 bits) */
+  const struct timer_ops_s *ops;        /* Lower half operations */
+  struct stm32_tim_dev_s   *tim;        /* stm32 timer driver */
+  tccb_t                    callback;   /* Current user interrupt callback */
+  void                     *arg;        /* Argument passed to upper half callback */
+  bool                      started;    /* True: Timer has been started */
+  const uint8_t             resolution; /* Number of bits in the timer (16 or 32 bits) */
 };
 
 /****************************************************************************
@@ -117,14 +118,14 @@ static int stm32_timer_handler(int irq, void * context, void * arg);
 
 /* "Lower half" driver methods **********************************************/
 
-static int stm32_start(FAR struct timer_lowerhalf_s *lower);
-static int stm32_stop(FAR struct timer_lowerhalf_s *lower);
-static int stm32_getstatus(FAR struct timer_lowerhalf_s *lower,
-                             FAR struct timer_status_s *status);
-static int stm32_settimeout(FAR struct timer_lowerhalf_s *lower,
+static int stm32_start(struct timer_lowerhalf_s *lower);
+static int stm32_stop(struct timer_lowerhalf_s *lower);
+static int stm32_getstatus(struct timer_lowerhalf_s *lower,
+                           struct timer_status_s *status);
+static int stm32_settimeout(struct timer_lowerhalf_s *lower,
                             uint32_t timeout);
-static void stm32_setcallback(FAR struct timer_lowerhalf_s *lower,
-                              tccb_t callback, FAR void *arg);
+static void stm32_setcallback(struct timer_lowerhalf_s *lower,
+                              tccb_t callback, void *arg);
 
 /****************************************************************************
  * Private Data
@@ -206,7 +207,6 @@ static struct stm32_lowerhalf_s g_tim8_lowerhalf =
 };
 #endif
 
-
 #ifdef CONFIG_STM32F0L0G0_TIM12
 static struct stm32_lowerhalf_s g_tim12_lowerhalf =
 {
@@ -273,7 +273,7 @@ static struct stm32_lowerhalf_s g_tim17_lowerhalf =
 
 static int stm32_timer_handler(int irq, void * context, void * arg)
 {
-  FAR struct stm32_lowerhalf_s *lower = (struct stm32_lowerhalf_s *) arg;
+  struct stm32_lowerhalf_s *lower = (struct stm32_lowerhalf_s *) arg;
   uint32_t next_interval_us = 0;
 
   STM32_TIM_ACKINT(lower->tim, ATIM_DIER_UIE);
@@ -300,17 +300,17 @@ static int stm32_timer_handler(int irq, void * context, void * arg)
  *   Start the timer, resetting the time to the current timeout,
  *
  * Input Parameters:
- *   lower - A pointer the publicly visible representation of the "lower-half"
- *           driver state structure.
+ *   lower - A pointer the publicly visible representation of the
+ *           "lower-half" driver state structure.
  *
  * Returned Value:
  *   Zero on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-static int stm32_start(FAR struct timer_lowerhalf_s *lower)
+static int stm32_start(struct timer_lowerhalf_s *lower)
 {
-  FAR struct stm32_lowerhalf_s *priv = (FAR struct stm32_lowerhalf_s *)lower;
+  struct stm32_lowerhalf_s *priv = (struct stm32_lowerhalf_s *)lower;
 
   tmrinfo("Start\n");
 
@@ -340,8 +340,8 @@ static int stm32_start(FAR struct timer_lowerhalf_s *lower)
  *   Stop the timer
  *
  * Input Parameters:
- *   lower - A pointer the publicly visible representation of the "lower-half"
- *           driver state structure.
+ *   lower - A pointer the publicly visible representation of the
+ *           "lower-half" driver state structure.
  *
  * Returned Value:
  *   Zero on success; a negated errno value on failure.
@@ -382,10 +382,10 @@ static int stm32_stop(struct timer_lowerhalf_s *lower)
  *
  ****************************************************************************/
 
-static int stm32_getstatus(FAR struct timer_lowerhalf_s *lower,
-                           FAR struct timer_status_s *status)
+static int stm32_getstatus(struct timer_lowerhalf_s *lower,
+                           struct timer_status_s *status)
 {
-  FAR struct stm32_lowerhalf_s *priv = (FAR struct stm32_lowerhalf_s *)lower;
+  struct stm32_lowerhalf_s *priv = (struct stm32_lowerhalf_s *)lower;
   uint32_t timeout;
   uint32_t clock;
   uint32_t period;
@@ -407,6 +407,7 @@ static int stm32_getstatus(FAR struct timer_lowerhalf_s *lower,
     }
 
   /* Get timeout */
+
   clock      = STM32_TIM_GETCLOCK(priv->tim);
   period     = STM32_TIM_GETPERIOD(priv->tim);
 
@@ -422,10 +423,11 @@ static int stm32_getstatus(FAR struct timer_lowerhalf_s *lower,
   status->timeout = timeout;
 
   /* Get the time remaining until the timer expires (in microseconds) */
+
   counter    = STM32_TIM_GETCOUNTER(priv->tim);
   status->timeleft = ((uint64_t) (timeout - counter) * clock) / 1000000;
-  tmrinfo("timeout=%u counter=%u\n", timeout, counter);
-  tmrinfo("timeleft=%u\n", status->timeleft);
+  tmrinfo("timeout=%" PRIu32 " counter=%" PRIu32 "\n", timeout, counter);
+  tmrinfo("timeleft=%" PRIu32 "\n", status->timeleft);
   return OK;
 }
 
@@ -445,10 +447,10 @@ static int stm32_getstatus(FAR struct timer_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static int stm32_settimeout(FAR struct timer_lowerhalf_s *lower,
+static int stm32_settimeout(struct timer_lowerhalf_s *lower,
                             uint32_t timeout)
 {
-  FAR struct stm32_lowerhalf_s *priv = (FAR struct stm32_lowerhalf_s *)lower;
+  struct stm32_lowerhalf_s *priv = (struct stm32_lowerhalf_s *)lower;
   uint64_t maxtimeout;
   uint32_t clock;
   uint32_t period;
@@ -458,7 +460,7 @@ static int stm32_settimeout(FAR struct timer_lowerhalf_s *lower,
       return -EPERM;
     }
 
-  tmrinfo("Set timeout=%d\n", timeout);
+  tmrinfo("Set timeout=%" PRId32 "\n", timeout);
 
   maxtimeout = ((uint64_t)1 << priv->resolution) - 1;
   if (timeout > maxtimeout)
@@ -473,7 +475,8 @@ static int stm32_settimeout(FAR struct timer_lowerhalf_s *lower,
       period = (uint32_t) timeout;
     }
 
-  tmrinfo("  clock=%lu period=%lu maxtimeout=%lu\n", clock, period, (uint32_t) maxtimeout);
+  tmrinfo("  clock=%" PRIu32 " period=%" PRIu32 " maxtimeout=%" PRIu32 "\n",
+          clock, period, (uint32_t)maxtimeout);
   STM32_TIM_SETCLOCK(priv->tim, clock);
   STM32_TIM_SETPERIOD(priv->tim, period);
 
@@ -487,8 +490,8 @@ static int stm32_settimeout(FAR struct timer_lowerhalf_s *lower,
  *   Call this user provided timeout callback.
  *
  * Input Parameters:
- *   lower      - A pointer the publicly visible representation of the "lower-
- *                half" driver state structure.
+ *   lower      - A pointer the publicly visible representation of the
+ *                "lower-half" driver state structure.
  *   callback - The new timer expiration function pointer.  If this
  *                function pointer is NULL, then the reset-on-expiration
  *                behavior is restored,
@@ -500,10 +503,10 @@ static int stm32_settimeout(FAR struct timer_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-static void stm32_setcallback(FAR struct timer_lowerhalf_s *lower,
-                              tccb_t callback, FAR void *arg)
+static void stm32_setcallback(struct timer_lowerhalf_s *lower,
+                              tccb_t callback, void *arg)
 {
-  FAR struct stm32_lowerhalf_s *priv = (FAR struct stm32_lowerhalf_s *)lower;
+  struct stm32_lowerhalf_s *priv = (struct stm32_lowerhalf_s *)lower;
 
   irqstate_t flags = enter_critical_section();
 
@@ -548,9 +551,9 @@ static void stm32_setcallback(FAR struct timer_lowerhalf_s *lower,
  *
  ****************************************************************************/
 
-int stm32_timer_initialize(FAR const char *devpath, int timer)
+int stm32_timer_initialize(const char *devpath, int timer)
 {
-  FAR struct stm32_lowerhalf_s *lower;
+  struct stm32_lowerhalf_s *lower;
 
   tmrinfo("Init TIM%d\n", timer);
 
@@ -627,7 +630,7 @@ int stm32_timer_initialize(FAR const char *devpath, int timer)
         break;
 #endif
       default:
-        return -ENODEV;;
+        return -ENODEV;
     }
 
   /* Initialize the elements of lower half state structure */
@@ -646,8 +649,8 @@ int stm32_timer_initialize(FAR const char *devpath, int timer)
    * REVISIT: The returned handle is discard here.
    */
 
-  FAR void *drvr = timer_register(devpath,
-                                  (FAR struct timer_lowerhalf_s *)lower);
+  void *drvr = timer_register(devpath,
+                              (struct timer_lowerhalf_s *)lower);
   if (drvr == NULL)
     {
       /* The actual cause of the failure may have been a failure to allocate

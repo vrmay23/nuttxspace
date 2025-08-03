@@ -1,40 +1,27 @@
 /****************************************************************************
  * net/bluetooth/bluetooth.h
  *
- *   Copyright (C) 2018-2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
-#ifndef _NET_BLUETOOTH_BLUETOOTH_H
-#define _NET_BLUETOOTH_BLUETOOTH_H
+#ifndef __NET_BLUETOOTH_BLUETOOTH_H
+#define __NET_BLUETOOTH_BLUETOOTH_H
 
 /****************************************************************************
  * Included Files
@@ -43,7 +30,9 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <queue.h>
+#include <sys/socket.h>
+
+#include <nuttx/net/net.h>
 
 #include <nuttx/wireless/bluetooth/bt_hci.h>
 
@@ -56,9 +45,9 @@
 /* Allocate a new Bluetooth socket data callback */
 
 #define bluetooth_callback_alloc(dev,conn) \
-  devif_callback_alloc(dev, &conn->bc_list)
+  devif_callback_alloc(dev, &conn->bc_conn.list, &conn->bc_conn.list_tail)
 #define bluetooth_callback_free(dev,conn,cb) \
-  devif_conn_callback_free(dev, cb, &conn->bc_list)
+  devif_conn_callback_free(dev, cb, &conn->bc_conn.list, &conn->bc_conn.list_tail)
 
 /* Memory Pools */
 
@@ -92,13 +81,7 @@ struct bluetooth_conn_s
 {
   /* Common prologue of all connection structures. */
 
-  dq_entry_t bc_node;                         /* Supports a doubly linked list */
-
-  /* This is a list of Bluetooth callbacks.  Each callback represents
-   * a thread that is stalled, waiting for a device-specific event.
-   */
-
-  FAR struct devif_callback_s *bc_list;       /* Bluetooth callbacks */
+  struct socket_conn_s bc_conn;
 
   /* Bluetooth-specific content follows. */
 
@@ -106,11 +89,13 @@ struct bluetooth_conn_s
                                                * Necessary only to support multiple
                                                * Bluetooth devices */
   bt_addr_t bc_raddr;                         /* Connected remote address */
+  uint8_t bc_ldev;                            /* Locally bound device */
   uint8_t bc_channel;                         /* Connection channel */
   uint8_t bc_crefs;                           /* Reference counts on this instance */
 #if CONFIG_NET_BLUETOOTH_BACKLOG > 0
   uint8_t bc_backlog;                         /* Number of frames in RX queue */
 #endif
+  uint8_t bc_proto;                           /* Protocol */
 
   /* Queue of incoming packets */
 
@@ -139,10 +124,10 @@ EXTERN const struct sock_intf_s g_bluetooth_sockif;
  ****************************************************************************/
 
 struct bluetooth_frame_meta_s;  /* Forward reference */
-struct radio_driver_s;        /* Forward reference */
-struct net_driver_s;          /* Forward reference */
-struct socket;                /* Forward reference */
-struct sockaddr;              /* Forward reference */
+struct radio_driver_s;          /* Forward reference */
+struct net_driver_s;            /* Forward reference */
+struct socket;                  /* Forward reference */
+struct sockaddr;                /* Forward reference */
 
 /****************************************************************************
  * Name: bluetooth_initialize()
@@ -157,20 +142,6 @@ struct sockaddr;              /* Forward reference */
  ****************************************************************************/
 
 void bluetooth_initialize(void);
-
-/****************************************************************************
- * Name: bluetooth_conn_initialize
- *
- * Description:
- *   Initialize the Bluetooth connection structure allocator.  Called
- *   once and only from bluetooth_initialize().
- *
- * Assumptions:
- *   Called early in the initialization sequence
- *
- ****************************************************************************/
-
-void bluetooth_conn_initialize(void);
 
 /****************************************************************************
  * Name: bluetooth_conn_alloc()
@@ -272,7 +243,8 @@ FAR struct bluetooth_conn_s *
  * Name: bluetooth_callback
  *
  * Description:
- *   Inform the application holding the Bluetooth socket of a change in state.
+ *   Inform the application holding the Bluetooth socket of a change in
+ *   state.
  *
  * Returned Value:
  *   OK if Bluetooth has been processed, otherwise ERROR.
@@ -287,39 +259,35 @@ uint16_t bluetooth_callback(FAR struct radio_driver_s *radio,
                              uint16_t flags);
 
 /****************************************************************************
- * Name: bluetooth_recvfrom
+ * Name: bluetooth_recvmsg
  *
  * Description:
  *   Implements the socket recvfrom interface for the case of the AF_INET
- *   and AF_INET6 address families.  bluetooth_recvfrom() receives messages from
- *   a socket, and may be used to receive data on a socket whether or not it
- *   is connection-oriented.
+ *   and AF_INET6 address families.  bluetooth_recvmsg() receives messages
+ *   from a socket, and may be used to receive data on a socket whether or
+ *   not it is connection-oriented.
  *
- *   If 'from' is not NULL, and the underlying protocol provides the source
- *   address, this source address is filled in.  The argument 'fromlen' is
- *   initialized to the size of the buffer associated with from, and
+ *   If msg_name is not NULL, and the underlying protocol provides the source
+ *   address, this source address is filled in. The argument 'msg_namelen' is
+ *   initialized to the size of the buffer associated with msg_name, and
  *   modified on return to indicate the actual size of the address stored
  *   there.
  *
  * Input Parameters:
  *   psock    A pointer to a NuttX-specific, internal socket structure
- *   buf      Buffer to receive data
- *   len      Length of buffer
+ *   msg      Buffer to receive data
  *   flags    Receive flags
- *   from     Address of source (may be NULL)
- *   fromlen  The length of the address structure
  *
  * Returned Value:
- *   On success, returns the number of characters received.  If no data is
+ *   On success, returns the number of characters received. If no data is
  *   available to be received and the peer has performed an orderly shutdown,
- *   recv() will return 0.  Otherwise, on errors, a negated errno value is
- *   returned (see recvfrom() for the list of appropriate error values).
+ *   recvmsg() will return 0. Otherwise, on errors, a negated errno value is
+ *   returned (see recvmsg() for the list of appropriate error values).
  *
  ****************************************************************************/
 
-ssize_t bluetooth_recvfrom(FAR struct socket *psock, FAR void *buf,
-                           size_t len, int flags, FAR struct sockaddr *from,
-                           FAR socklen_t *fromlen);
+ssize_t bluetooth_recvmsg(FAR struct socket *psock, FAR struct msghdr *msg,
+                          int flags);
 
 /****************************************************************************
  * Name: bluetooth_find_device
@@ -364,33 +332,28 @@ void bluetooth_poll(FAR struct net_driver_s *dev,
                      FAR struct bluetooth_conn_s *conn);
 
 /****************************************************************************
- * Name: psock_bluetooth_sendto
+ * Name: bluetooth_sendmsg
  *
  * Description:
- *   If sendto() is used on a connection-mode (SOCK_STREAM, SOCK_SEQPACKET)
- *   socket, the parameters to and 'tolen' are ignored (and the error EISCONN
- *   may be returned when they are not NULL and 0), and the error ENOTCONN is
- *   returned when the socket was not actually connected.
+ *   If sendmsg() is used on a connection-mode (SOCK_STREAM, SOCK_SEQPACKET)
+ *   socket, the parameters msg_name and msg_namelen are ignored (and the
+ *   error EISCONN may be returned when they are not NULL and 0), and the
+ *   error ENOTCONN is returned when the socket was not actually connected.
  *
  * Input Parameters:
  *   psock    A pointer to a NuttX-specific, internal socket structure
- *   buf      Data to send
- *   len      Length of data to send
+ *   msg      data to send
  *   flags    Send flags
- *   to       Address of recipient
- *   tolen    The length of the address structure
  *
  * Returned Value:
- *   On success, returns the number of characters sent.  On  error,
- *   a negated errno value is retruend.  See sendto() for the complete list
+ *   On success, returns the number of characters sent.  On error,
+ *   a negated errno value is returned.  See sendmsg() for the complete list
  *   of return values.
  *
  ****************************************************************************/
 
-ssize_t psock_bluetooth_sendto(FAR struct socket *psock,
-                                FAR const void *buf,
-                                size_t len, int flags,
-                                FAR const struct sockaddr *to, socklen_t tolen);
+ssize_t bluetooth_sendmsg(FAR struct socket *psock, FAR struct msghdr *msg,
+                          int flags);
 
 /****************************************************************************
  * Name: bluetooth_container_initialize
@@ -428,8 +391,8 @@ void bluetooth_container_initialize(void);
  *   None
  *
  * Returned Value:
- *   A reference to the allocated container structure.  All user fields in this
- *   structure have been zeroed.  On a failure to allocate, NULL is
+ *   A reference to the allocated container structure.  All user fields in
+ *   this structure have been zeroed.  On a failure to allocate, NULL is
  *   returned.
  *
  * Assumptions:
@@ -467,4 +430,4 @@ void bluetooth_container_free(FAR struct bluetooth_container_s *container);
 #endif
 
 #endif /* CONFIG_NET_BLUETOOTH */
-#endif /* _NET_BLUETOOTH_BLUETOOTH_H */
+#endif /* __NET_BLUETOOTH_BLUETOOTH_H */

@@ -1,37 +1,22 @@
 /****************************************************************************
- * examples/usrsocktest/usrsocktest_noblock_connect.c
- * Socket connect tests in non-blocking mode
+ * apps/examples/usrsocktest/usrsocktest_noblock_connect.c
  *
- *   Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
- *   Authors: Roman Saveljev <roman.saveljev@haltian.com>
- *            Jussi Kivilinna <jussi.kivilinna@haltian.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -45,9 +30,9 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
 
 #include "defines.h"
 
@@ -68,7 +53,8 @@
  ****************************************************************************/
 
 static bool started;
-static int sd, sd2;
+static int sd;
+static int sd2;
 
 /****************************************************************************
  * Public Data
@@ -78,35 +64,37 @@ static int sd, sd2;
  * Private Functions
  ****************************************************************************/
 
-TEST_SETUP(NoBlockConnect)
+TEST_SETUP(no_block_connect)
 {
   sd = -1;
   sd2 = -1;
   started = false;
 }
 
-TEST_TEAR_DOWN(NoBlockConnect)
+TEST_TEAR_DOWN(no_block_connect)
 {
-  int ret;
+  int unused_data ret;
 
   if (sd >= 0)
     {
       ret = close(sd);
-      assert(ret == 0);
+      TEST_ASSERT_EQUAL(ret, 0);
     }
+
   if (sd2 >= 0)
     {
       ret = close(sd2);
-      assert(ret == 0);
+      TEST_ASSERT_EQUAL(ret, 0);
     }
+
   if (started)
     {
       ret = usrsocktest_daemon_stop();
-      assert(ret == OK);
+      TEST_ASSERT_EQUAL(ret, OK);
     }
 }
 
-TEST(NoBlockConnect, InstantConnect)
+TEST(no_block_connect, instant_connect)
 {
   int flags;
   int ret;
@@ -115,7 +103,8 @@ TEST(NoBlockConnect, InstantConnect)
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.endpoint_addr = "127.0.0.1";
   usrsocktest_daemon_config.endpoint_port = 255;
-  TEST_ASSERT_EQUAL(OK, usrsocktest_daemon_start(&usrsocktest_daemon_config));
+  TEST_ASSERT_EQUAL(OK,
+                    usrsocktest_daemon_start(&usrsocktest_daemon_config));
   started = true;
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_active_sockets());
 
@@ -168,9 +157,11 @@ TEST(NoBlockConnect, InstantConnect)
   TEST_ASSERT_EQUAL(0, usrsocktest_dcmd_malloc_cnt);
 }
 
-TEST(NoBlockConnect, DelayedConnect)
+TEST(no_block_connect, delayed_connect)
 {
-  int flags, ret, count;
+  int flags;
+  int ret;
+  int count;
   struct sockaddr_in addr;
 
   /* Start test daemon. */
@@ -180,7 +171,8 @@ TEST(NoBlockConnect, DelayedConnect)
   usrsocktest_daemon_config.endpoint_addr = "127.0.0.1";
   usrsocktest_daemon_config.endpoint_port = 255;
   usrsocktest_daemon_config.delay_all_responses = true;
-  TEST_ASSERT_EQUAL(OK, usrsocktest_daemon_start(&usrsocktest_daemon_config));
+  TEST_ASSERT_EQUAL(OK,
+                    usrsocktest_daemon_start(&usrsocktest_daemon_config));
   started = true;
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_active_sockets());
 
@@ -205,7 +197,9 @@ TEST(NoBlockConnect, DelayedConnect)
   TEST_ASSERT_EQUAL(O_RDWR, flags & O_RDWR);
   TEST_ASSERT_EQUAL(O_NONBLOCK, flags & O_NONBLOCK);
 
-  /* Launch connect attempt, daemon delays actual connection until triggered. */
+  /* Launch connect attempt, daemon delays actual connection until
+   * triggered.
+   */
 
   inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr.s_addr);
   addr.sin_family = AF_INET;
@@ -229,11 +223,13 @@ TEST(NoBlockConnect, DelayedConnect)
   /* Release delayed connect. */
 
   TEST_ASSERT_TRUE(usrsocktest_daemon_establish_waiting_connections());
-  for (count = 0; usrsocktest_daemon_get_num_waiting_connect_sockets() > 0; count++)
+  for (count = 0;
+       usrsocktest_daemon_get_num_waiting_connect_sockets() > 0; count++)
     {
       TEST_ASSERT_TRUE(count <= 5);
       usleep(10 * 1000);
     }
+
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
@@ -258,14 +254,16 @@ TEST(NoBlockConnect, DelayedConnect)
   started = false;
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_connected_sockets());
-  TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_waiting_connect_sockets());
+  TEST_ASSERT_EQUAL(-ENODEV,
+                    usrsocktest_daemon_get_num_waiting_connect_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_endp_malloc_cnt);
   TEST_ASSERT_EQUAL(0, usrsocktest_dcmd_malloc_cnt);
 }
 
-TEST(NoBlockConnect, CloseNotConnected)
+TEST(no_block_connect, close_not_connected)
 {
-  int flags, ret;
+  int flags;
+  int ret;
   struct sockaddr_in addr;
 
   /* Start test daemon. */
@@ -275,7 +273,8 @@ TEST(NoBlockConnect, CloseNotConnected)
   usrsocktest_daemon_config.endpoint_addr = "127.0.0.1";
   usrsocktest_daemon_config.endpoint_port = 255;
   usrsocktest_daemon_config.delay_all_responses = true;
-  TEST_ASSERT_EQUAL(OK, usrsocktest_daemon_start(&usrsocktest_daemon_config));
+  TEST_ASSERT_EQUAL(OK,
+                    usrsocktest_daemon_start(&usrsocktest_daemon_config));
   started = true;
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_active_sockets());
 
@@ -300,7 +299,9 @@ TEST(NoBlockConnect, CloseNotConnected)
   TEST_ASSERT_EQUAL(O_RDWR, flags & O_RDWR);
   TEST_ASSERT_EQUAL(O_NONBLOCK, flags & O_NONBLOCK);
 
-  /* Launch connect attempt, daemon delays actual connection until triggered. */
+  /* Launch connect attempt, daemon delays actual connection until
+   * triggered.
+   */
 
   inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr.s_addr);
   addr.sin_family = AF_INET;
@@ -326,14 +327,16 @@ TEST(NoBlockConnect, CloseNotConnected)
   started = false;
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_connected_sockets());
-  TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_waiting_connect_sockets());
+  TEST_ASSERT_EQUAL(-ENODEV,
+                    usrsocktest_daemon_get_num_waiting_connect_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_endp_malloc_cnt);
   TEST_ASSERT_EQUAL(0, usrsocktest_dcmd_malloc_cnt);
 }
 
-TEST(NoBlockConnect, EarlyDrop)
+TEST(no_block_connect, early_drop)
 {
-  int flags, ret;
+  int flags;
+  int ret;
   struct sockaddr_in addr;
 
   /* Start test daemon. */
@@ -343,7 +346,8 @@ TEST(NoBlockConnect, EarlyDrop)
   usrsocktest_daemon_config.endpoint_addr = "127.0.0.1";
   usrsocktest_daemon_config.endpoint_port = 255;
   usrsocktest_daemon_config.delay_all_responses = false;
-  TEST_ASSERT_EQUAL(OK, usrsocktest_daemon_start(&usrsocktest_daemon_config));
+  TEST_ASSERT_EQUAL(OK,
+                    usrsocktest_daemon_start(&usrsocktest_daemon_config));
   started = true;
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_active_sockets());
 
@@ -368,7 +372,9 @@ TEST(NoBlockConnect, EarlyDrop)
   TEST_ASSERT_EQUAL(O_RDWR, flags & O_RDWR);
   TEST_ASSERT_EQUAL(O_NONBLOCK, flags & O_NONBLOCK);
 
-  /* Launch connect attempt, daemon delays actual connection until triggered. */
+  /* Launch connect attempt, daemon delays actual connection until
+   * triggered.
+   */
 
   inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr.s_addr);
   addr.sin_family = AF_INET;
@@ -386,7 +392,8 @@ TEST(NoBlockConnect, EarlyDrop)
   started = false;
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_connected_sockets());
-  TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_waiting_connect_sockets());
+  TEST_ASSERT_EQUAL(-ENODEV,
+                    usrsocktest_daemon_get_num_waiting_connect_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_endp_malloc_cnt);
   TEST_ASSERT_EQUAL(0, usrsocktest_dcmd_malloc_cnt);
 
@@ -396,12 +403,15 @@ TEST(NoBlockConnect, EarlyDrop)
   sd = -1;
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_connected_sockets());
-  TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_waiting_connect_sockets());
+  TEST_ASSERT_EQUAL(-ENODEV,
+                    usrsocktest_daemon_get_num_waiting_connect_sockets());
 }
 
-TEST(NoBlockConnect, Multiple)
+TEST(no_block_connect, multiple)
 {
-  int flags, ret, count;
+  int flags;
+  int ret;
+  int count;
   struct sockaddr_in addr;
 
   /* Start test daemon. */
@@ -411,7 +421,8 @@ TEST(NoBlockConnect, Multiple)
   usrsocktest_daemon_config.endpoint_addr = "127.0.0.1";
   usrsocktest_daemon_config.endpoint_port = 255;
   usrsocktest_daemon_config.delay_all_responses = false;
-  TEST_ASSERT_EQUAL(OK, usrsocktest_daemon_start(&usrsocktest_daemon_config));
+  TEST_ASSERT_EQUAL(OK,
+                    usrsocktest_daemon_start(&usrsocktest_daemon_config));
   started = true;
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_active_sockets());
 
@@ -452,7 +463,9 @@ TEST(NoBlockConnect, Multiple)
   TEST_ASSERT_EQUAL(O_RDWR, flags & O_RDWR);
   TEST_ASSERT_EQUAL(O_NONBLOCK, flags & O_NONBLOCK);
 
-  /* Launch connect attempts, daemon delays actual connection until triggered. */
+  /* Launch connect attempts, daemon delays actual connection until
+   * triggered.
+   */
 
   inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr.s_addr);
   addr.sin_family = AF_INET;
@@ -467,11 +480,13 @@ TEST(NoBlockConnect, Multiple)
   /* Release delayed connections. */
 
   TEST_ASSERT_TRUE(usrsocktest_daemon_establish_waiting_connections());
-  for (count = 0; usrsocktest_daemon_get_num_waiting_connect_sockets() > 0; count++)
+  for (count = 0;
+       usrsocktest_daemon_get_num_waiting_connect_sockets() > 0; count++)
     {
       TEST_ASSERT_TRUE(count <= 5);
       usleep(10 * 1000);
     }
+
   TEST_ASSERT_EQUAL(2, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
@@ -502,6 +517,7 @@ TEST(NoBlockConnect, Multiple)
       TEST_ASSERT_TRUE(count <= 5);
       usleep(10 * 1000);
     }
+
   TEST_ASSERT_EQUAL(2, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(2, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
@@ -556,7 +572,9 @@ TEST(NoBlockConnect, Multiple)
   TEST_ASSERT_EQUAL(O_RDWR, flags & O_RDWR);
   TEST_ASSERT_EQUAL(O_NONBLOCK, flags & O_NONBLOCK);
 
-  /* Launch connect attempts, daemon delays actual connection until triggered. */
+  /* Launch connect attempts, daemon delays actual connection until
+   * triggered.
+   */
 
   inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr.s_addr);
   addr.sin_family = AF_INET;
@@ -578,11 +596,13 @@ TEST(NoBlockConnect, Multiple)
   /* Release delayed connections. */
 
   TEST_ASSERT_TRUE(usrsocktest_daemon_establish_waiting_connections());
-  for (count = 0; usrsocktest_daemon_get_num_waiting_connect_sockets() > 0; count++)
+  for (count = 0;
+       usrsocktest_daemon_get_num_waiting_connect_sockets() > 0; count++)
     {
       TEST_ASSERT_TRUE(count <= 5);
       usleep(10 * 1000);
     }
+
   TEST_ASSERT_EQUAL(2, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(2, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
@@ -637,7 +657,9 @@ TEST(NoBlockConnect, Multiple)
   TEST_ASSERT_EQUAL(O_RDWR, flags & O_RDWR);
   TEST_ASSERT_EQUAL(O_NONBLOCK, flags & O_NONBLOCK);
 
-  /* Launch connect attempt, daemon delays actual connection until triggered. */
+  /* Launch connect attempt, daemon delays actual connection until
+   * triggered.
+   */
 
   inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr.s_addr);
   addr.sin_family = AF_INET;
@@ -652,16 +674,20 @@ TEST(NoBlockConnect, Multiple)
   /* Release delayed connections. */
 
   TEST_ASSERT_TRUE(usrsocktest_daemon_establish_waiting_connections());
-  for (count = 0; usrsocktest_daemon_get_num_waiting_connect_sockets() > 0; count++)
+  for (count = 0;
+       usrsocktest_daemon_get_num_waiting_connect_sockets() > 0; count++)
     {
       TEST_ASSERT_TRUE(count <= 5);
       usleep(10 * 1000);
     }
+
   TEST_ASSERT_EQUAL(2, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
 
-  /* Launch another connect attempt, daemon delays actual connection until triggered. */
+  /* Launch another connect attempt, daemon delays actual connection until
+   * triggered.
+   */
 
   ret = connect(sd2, (FAR const struct sockaddr *)&addr, sizeof(addr));
   TEST_ASSERT_EQUAL(-1, ret);
@@ -689,14 +715,17 @@ TEST(NoBlockConnect, Multiple)
   started = false;
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_connected_sockets());
-  TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_waiting_connect_sockets());
+  TEST_ASSERT_EQUAL(-ENODEV,
+                    usrsocktest_daemon_get_num_waiting_connect_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_endp_malloc_cnt);
   TEST_ASSERT_EQUAL(0, usrsocktest_dcmd_malloc_cnt);
 }
 
-TEST(NoBlockConnect, Dup2)
+TEST(no_block_connect, basic_daemon_dup2)
 {
-  int flags, ret, count;
+  int flags;
+  int ret;
+  int count;
   struct sockaddr_in addr;
 
   /* Start test daemon. */
@@ -706,7 +735,8 @@ TEST(NoBlockConnect, Dup2)
   usrsocktest_daemon_config.endpoint_addr = "127.0.0.1";
   usrsocktest_daemon_config.endpoint_port = 255;
   usrsocktest_daemon_config.delay_all_responses = true;
-  TEST_ASSERT_EQUAL(OK, usrsocktest_daemon_start(&usrsocktest_daemon_config));
+  TEST_ASSERT_EQUAL(OK,
+                    usrsocktest_daemon_start(&usrsocktest_daemon_config));
   started = true;
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_active_sockets());
 
@@ -737,7 +767,9 @@ TEST(NoBlockConnect, Dup2)
   TEST_ASSERT_EQUAL(O_RDWR, flags & O_RDWR);
   TEST_ASSERT_EQUAL(O_NONBLOCK, flags & O_NONBLOCK);
 
-  /* Launch connect attempt, daemon delays actual connection until triggered. */
+  /* Launch connect attempt, daemon delays actual connection until
+   * triggered.
+   */
 
   inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr.s_addr);
   addr.sin_family = AF_INET;
@@ -761,11 +793,13 @@ TEST(NoBlockConnect, Dup2)
   /* Release delayed connect. */
 
   TEST_ASSERT_TRUE(usrsocktest_daemon_establish_waiting_connections());
-  for (count = 0; usrsocktest_daemon_get_num_waiting_connect_sockets() > 0; count++)
+  for (count = 0;
+       usrsocktest_daemon_get_num_waiting_connect_sockets() > 0; count++)
     {
       TEST_ASSERT_TRUE(count <= 5);
       usleep(10 * 1000);
     }
+
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
@@ -796,7 +830,8 @@ TEST(NoBlockConnect, Dup2)
   started = false;
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_connected_sockets());
-  TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_waiting_connect_sockets());
+  TEST_ASSERT_EQUAL(-ENODEV,
+                    usrsocktest_daemon_get_num_waiting_connect_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_endp_malloc_cnt);
   TEST_ASSERT_EQUAL(0, usrsocktest_dcmd_malloc_cnt);
 }
@@ -805,12 +840,12 @@ TEST(NoBlockConnect, Dup2)
  * Public Functions
  ****************************************************************************/
 
-TEST_GROUP(NoBlockConnect)
+TEST_GROUP(no_block_connect)
 {
-  RUN_TEST_CASE(NoBlockConnect, InstantConnect);
-  RUN_TEST_CASE(NoBlockConnect, DelayedConnect);
-  RUN_TEST_CASE(NoBlockConnect, CloseNotConnected);
-  RUN_TEST_CASE(NoBlockConnect, EarlyDrop);
-  RUN_TEST_CASE(NoBlockConnect, Multiple);
-  RUN_TEST_CASE(NoBlockConnect, Dup2);
+  RUN_TEST_CASE(no_block_connect, instant_connect);
+  RUN_TEST_CASE(no_block_connect, delayed_connect);
+  RUN_TEST_CASE(no_block_connect, close_not_connected);
+  RUN_TEST_CASE(no_block_connect, early_drop);
+  RUN_TEST_CASE(no_block_connect, multiple);
+  RUN_TEST_CASE(no_block_connect, basic_daemon_dup2);
 }

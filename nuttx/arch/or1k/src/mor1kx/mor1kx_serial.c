@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/or1k/src/mor1kx/mor1kx_serial.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Matt Thompson <matt@extent3d.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -53,8 +40,7 @@
 
 #include <arch/board/board.h>
 
-#include "up_arch.h"
-#include "up_internal.h"
+#include "or1k_internal.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -67,34 +53,42 @@
 #define OR1K_DIVISOR (OR1K_SYS_CLK / (16*OR1K_BAUD))
 
 /****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+#ifdef HAVE_SERIAL_CONSOLE
+static spinlock_t g_serial_lock = SP_UNLOCKED;
+#endif
+
+/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: up_earlyserialinit
+ * Name: or1k_earlyserialinit
  *
  * Description:
  *   Performs the low level USART initialization early in debug so that the
- *   serial console will be available during bootup.  This must be called
+ *   serial console will be available during boot up.  This must be called
  *   before sam_serialinit.
  *
  ****************************************************************************/
 
 #ifdef USE_EARLYSERIALINIT
-void up_earlyserialinit(void)
+void or1k_earlyserialinit(void)
 {
   /* Disable all USARTS */
 
 #ifdef HAVE_SERIAL_CONSOLE
   /* Mark the serial console (if any) */
 
-  //CONSOLE_DEV.isconsole = true;
+  /* CONSOLE_DEV.isconsole = true; */
 #endif
 }
 #endif
 
 /****************************************************************************
- * Name: up_serialinit
+ * Name: or1k_serialinit
  *
  * Description:
  *   Register serial console and serial ports.
@@ -102,7 +96,7 @@ void up_earlyserialinit(void)
  ****************************************************************************/
 
 #ifdef USE_SERIALDRIVER
-void up_serialinit(void)
+void or1k_serialinit(void)
 {
   /* Register the console */
 
@@ -122,7 +116,7 @@ void up_serialinit(void)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
   irqstate_t flags;
@@ -131,19 +125,10 @@ int up_putc(int ch)
    * interrupts from firing in the serial driver code.
    */
 
-  flags = enter_critical_section();
+  flags = spin_lock_irqsave(&g_serial_lock);
 
-  /* Check for LF */
+  /* or1k_lowputc(ch); */
 
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      //or1k_lowputc('\r');
-    }
-
-  //or1k_lowputc(ch);
-  leave_critical_section(flags);
+  spin_unlock_irqrestore(&g_serial_lock, flags);
 #endif
-  return ch;
 }

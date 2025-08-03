@@ -1,20 +1,13 @@
 /****************************************************************************
  * include/nuttx/net/tcp.h
- * Header file for the NuttX TCP/IP stack.
  *
- * This TCP/IP stack header file contains definitions for a number of C
- * macros that are used by internal network structures, TCP/IP header
- * structures and function declarations.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2007, 2009-2010, 2012-2014 Gregory Nutt.
+ * SPDX-FileCopyrightText: 2001-2003, Adam Dunkels.
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-FileContributor: Adam Dunkels <adam@dunkels.com>
  *
- *   Copyright (C) 2007, 2009-2010, 2012-2014 Gregory Nutt. All rights
- *      reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * This logic was leveraged from uIP which also has a BSD-style license:
- *
- *   Author Adam Dunkels <adam@dunkels.com>
- *   Copyright (c) 2001-2003, Adam Dunkels.
- *   All rights reserved.
+ *  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -76,8 +69,14 @@
 #define TCP_OPT_END       0   /* End of TCP options list */
 #define TCP_OPT_NOOP      1   /* "No-operation" TCP option */
 #define TCP_OPT_MSS       2   /* Maximum segment size TCP option */
+#define TCP_OPT_WS        3   /* Window size scaling factor */
+#define TCP_OPT_SACK_PERM 4   /* Selective-ACK Permitted option */
+#define TCP_OPT_SACK      5   /* Selective-ACK Block option */
 
-#define TCP_OPT_MSS_LEN   4   /* Length of TCP MSS option. */
+#define TCP_OPT_NOOP_LEN       1   /* Length of TCP NOOP option. */
+#define TCP_OPT_MSS_LEN        4   /* Length of TCP MSS option. */
+#define TCP_OPT_WS_LEN         3   /* Length of TCP WS option. */
+#define TCP_OPT_SACK_PERM_LEN  2   /* Length of TCP SACK option. */
 
 /* The TCP states used in the struct tcp_conn_s tcpstateflags field */
 
@@ -131,6 +130,12 @@
 #define TCP_DEFAULT_IPv4_MSS  536
 #define TCP_DEFAULT_IPv6_MSS  1220
 
+/* Minimal accepted MSS. It is (60+60+8) - (20+20).
+ * (MAX_IP_HDR + MAX_TCP_HDR + MIN_IP_FRAG) - (MIN_IP_HDR + MIN_TCP_HDR)
+ */
+
+#define TCP_MIN_MSS           88
+
 /* However, we do need to make allowance for certain links such as SLIP that
  * have unusually small MTUs.
  */
@@ -171,7 +176,7 @@ struct tcp_hdr_s
   uint8_t  wnd[2];
   uint16_t tcpchksum;
   uint8_t  urgp[2];
-  uint8_t  optdata[4];
+  uint8_t  optdata[0];
 };
 
 /* The structure holding the TCP/IP statistics that are gathered if
@@ -189,7 +194,7 @@ struct tcp_stats_s
   net_stats_t rst;        /* Number of received TCP RST (reset) segments */
   net_stats_t rexmit;     /* Number of retransmitted TCP segments */
   net_stats_t syndrop;    /* Number of dropped SYNs due to too few
-                             available connections */
+                           * available connections */
   net_stats_t synrst;     /* Number of SYNs for closed ports triggering a RST */
 };
 #endif

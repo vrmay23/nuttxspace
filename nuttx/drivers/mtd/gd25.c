@@ -1,36 +1,22 @@
-/****************************************************************************
+/***************************************************************************
  * drivers/mtd/gd25.c
- * Driver for SPI-based GigaDevice FLASH
  *
- *   Copyright (C) 2017 Pinecone Inc. All rights reserved.
- *   Author: Wang Yanjiong <wangyanjiong@pinecone.net>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ***************************************************************************/
 
@@ -42,7 +28,7 @@
 
 #include <sys/types.h>
 
-#include <stdint.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -51,15 +37,16 @@
 #include <errno.h>
 #include <debug.h>
 
+#include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/signal.h>
 #include <nuttx/fs/ioctl.h>
 #include <nuttx/spi/spi.h>
 #include <nuttx/mtd/mtd.h>
 
-/**************************************************************************
+/***************************************************************************
  * Configuration
- **************************************************************************/
+ ***************************************************************************/
 
 #ifndef CONFIG_GD25_SPIMODE
 #  define CONFIG_GD25_SPIMODE SPIDEV_MODE0
@@ -69,12 +56,11 @@
 #  define CONFIG_GD25_SPIFREQUENCY 20000000
 #endif
 
-/**************************************************************************
+/***************************************************************************
  * GD25 Instructions
- **************************************************************************/
+ ***************************************************************************/
 
 /*      Command                    Value      Description                 */
-/*                                                                        */
 
 #define GD25_WREN                   0x06    /* Write enable               */
 #define GD25_WRDI                   0x04    /* Write Disable              */
@@ -94,9 +80,9 @@
 #define GD25_JEDEC_ID               0x9f    /* JEDEC ID read              */
 #define GD25_4BEN                   0xb7    /* Enable 4-byte Mode         */
 
-/**************************************************************************
+/***************************************************************************
  * GD25 Registers
- **************************************************************************/
+ ***************************************************************************/
 
 /* JEDEC Read ID register values */
 
@@ -124,14 +110,15 @@
 #define GD25_SR_WIP                 (1 << 0)  /* Bit 0: Write in Progress */
 #define GD25_SR_WEL                 (1 << 1)  /* Bit 1: Write Enable Latch */
 #define GD25_SR1_EN4B               (1 << 3)  /* Bit 3: Enable 4byte address */
+#define GD25Q_SR1_EN4B              (1 << 0)  /* Bit 0: Enable 4byte address GD25Q memories */
 
 #define GD25_DUMMY                  0x00
 
-/**************************************************************************
+/***************************************************************************
  * Chip Geometries
- **************************************************************************/
+ ***************************************************************************/
 
-/* All members of the family support uniform 4K-byte sectors and 256 byte pages */
+/* All members of the family support uniform 4KB sectors and 256B pages */
 
 #define GD25_SECTOR_SHIFT           12        /* Sector size 1 << 12 = 4Kb */
 #define GD25_SECTOR_SIZE            (1 << 12) /* Sector size 1 << 12 = 4Kb */
@@ -140,13 +127,13 @@
 
 #define GD25_ERASED_STATE           0xff      /* State of FLASH when erased */
 
-/**************************************************************************
+/***************************************************************************
  * Private Types
- **************************************************************************/
+ ***************************************************************************/
 
-/* This type represents the state of the MTD device. The struct mtd_dev_s must
- * appear at the beginning of the definition so that you can freely cast
- * between pointers to struct mtd_dev_s and struct gd25_dev_s.
+/* This type represents the state of the MTD device. The struct mtd_dev_s
+ * must appear at the beginning of the definition so that you can freely
+ * cast between pointers to struct mtd_dev_s and struct gd25_dev_s.
  */
 
 struct gd25_dev_s
@@ -157,11 +144,12 @@ struct gd25_dev_s
   uint16_t              nsectors;    /* Number of erase sectors */
   uint8_t               prev_instr;  /* Previous instruction given to GD25 device */
   bool                  addr_4byte;  /* True: Use Four-byte address */
+  uint8_t               memory;      /* memory type read from device */
 };
 
-/**************************************************************************
+/***************************************************************************
  * Private Function Prototypes
- **************************************************************************/
+ ***************************************************************************/
 
 /* Helpers */
 
@@ -187,7 +175,7 @@ static void gd25_pagewrite(FAR struct gd25_dev_s *priv,
     FAR const uint8_t *buffer, off_t address, size_t nbytes);
 #endif
 static inline uint8_t gd25_rdsr(FAR struct gd25_dev_s *priv, uint32_t id);
-static inline void gd25_4ben(FAR struct gd25_dev_s *priv);
+static inline bool gd25_4ben(FAR struct gd25_dev_s *priv);
 
 /* MTD driver methods */
 
@@ -206,13 +194,13 @@ static ssize_t gd25_write(FAR struct mtd_dev_s *dev, off_t offset,
     size_t nbytes, FAR const uint8_t *buffer);
 #endif
 
-/**************************************************************************
+/***************************************************************************
  * Private Functions
- **************************************************************************/
+ ***************************************************************************/
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_purdid
- **************************************************************************/
+ ***************************************************************************/
 
 static inline void gd25_purdid(FAR struct gd25_dev_s *priv)
 {
@@ -222,9 +210,9 @@ static inline void gd25_purdid(FAR struct gd25_dev_s *priv)
   up_udelay(20);
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_pd
- **************************************************************************/
+ ***************************************************************************/
 
 static inline void gd25_pd(FAR struct gd25_dev_s *priv)
 {
@@ -233,9 +221,9 @@ static inline void gd25_pd(FAR struct gd25_dev_s *priv)
   SPI_SELECT(priv->spi, SPIDEV_FLASH(priv->spi_devid), false);
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_lock
- **************************************************************************/
+ ***************************************************************************/
 
 static void gd25_lock(FAR struct spi_dev_s *spi)
 {
@@ -245,20 +233,24 @@ static void gd25_lock(FAR struct spi_dev_s *spi)
   SPI_SETBITS(spi, 8);
   SPI_HWFEATURES(spi, 0);
   SPI_SETFREQUENCY(spi, CONFIG_GD25_SPIFREQUENCY);
+#ifdef CONFIG_SPI_DELAY_CONTROL
+  SPI_SETDELAY(spi, CONFIG_GD25_START_DELAY, CONFIG_GD25_STOP_DELAY,
+                    CONFIG_GD25_CS_DELAY, CONFIG_GD25_IFDELAY);
+#endif
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_unlock
- **************************************************************************/
+ ***************************************************************************/
 
 static inline void gd25_unlock(FAR struct spi_dev_s *spi)
 {
   SPI_LOCK(spi, false);
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_readid
- **************************************************************************/
+ ***************************************************************************/
 
 static inline int gd25_readid(FAR struct gd25_dev_s *priv)
 {
@@ -326,13 +318,13 @@ static inline int gd25_readid(FAR struct gd25_dev_s *priv)
           goto out;
         }
 
+      priv->memory = memory;
+
       /* Capacity greater than 16MB, Enable four-byte address */
 
       if (priv->nsectors > GD25_NSECTORS_128MBIT)
         {
-          gd25_4ben(priv);
-
-          if ((gd25_rdsr(priv, 1) & GD25_SR1_EN4B) != GD25_SR1_EN4B)
+          if (!gd25_4ben(priv))
             {
               ferr("ERROR: capacity %02x: Can't enable 4-byte mode!\n",
                    capacity);
@@ -357,9 +349,9 @@ out:
   return ret;
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_unprotect
- **************************************************************************/
+ ***************************************************************************/
 
 #ifndef CONFIG_GD25_READONLY
 static void gd25_unprotect(FAR struct gd25_dev_s *priv)
@@ -397,9 +389,9 @@ static void gd25_unprotect(FAR struct gd25_dev_s *priv)
 }
 #endif
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_waitwritecomplete
- **************************************************************************/
+ ***************************************************************************/
 
 static uint8_t gd25_waitwritecomplete(FAR struct gd25_dev_s *priv)
 {
@@ -420,9 +412,9 @@ static uint8_t gd25_waitwritecomplete(FAR struct gd25_dev_s *priv)
   return status;
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name:  gd25_rdsr
- **************************************************************************/
+ ***************************************************************************/
 
 static inline uint8_t gd25_rdsr(FAR struct gd25_dev_s *priv, uint32_t id)
 {
@@ -440,20 +432,32 @@ static inline uint8_t gd25_rdsr(FAR struct gd25_dev_s *priv, uint32_t id)
   return status;
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name:  gd25_4ben
- **************************************************************************/
+ *
+ * Enable 4 byte memory addressing mode
+ * Return success or not
+ *
+ ***************************************************************************/
 
-static inline void gd25_4ben(FAR struct gd25_dev_s *priv)
+static inline bool gd25_4ben(FAR struct gd25_dev_s *priv)
 {
   SPI_SELECT(priv->spi, SPIDEV_FLASH(priv->spi_devid), true);
   SPI_SEND(priv->spi, GD25_4BEN);
   SPI_SELECT(priv->spi, SPIDEV_FLASH(priv->spi_devid), false);
+  if (priv->memory == GD25Q_JEDEC_MEMORY_TYPE)
+    {
+      return ((gd25_rdsr(priv, 1) & GD25Q_SR1_EN4B) == GD25Q_SR1_EN4B);
+    }
+  else
+    {
+      return ((gd25_rdsr(priv, 1) & GD25_SR1_EN4B) == GD25_SR1_EN4B);
+    }
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name:  gd25_wren
- **************************************************************************/
+ ***************************************************************************/
 
 static inline void gd25_wren(FAR struct gd25_dev_s *priv)
 {
@@ -462,9 +466,9 @@ static inline void gd25_wren(FAR struct gd25_dev_s *priv)
   SPI_SELECT(priv->spi, SPIDEV_FLASH(priv->spi_devid), false);
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name:  gd25_wrdi
- **************************************************************************/
+ ***************************************************************************/
 
 static inline void gd25_wrdi(FAR struct gd25_dev_s *priv)
 {
@@ -473,9 +477,9 @@ static inline void gd25_wrdi(FAR struct gd25_dev_s *priv)
   SPI_SELECT(priv->spi, SPIDEV_FLASH(priv->spi_devid), false);
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name:  gd25_is_erased
- **************************************************************************/
+ ***************************************************************************/
 
 static bool gd25_is_erased(FAR struct gd25_dev_s *priv, off_t address,
                            off_t size)
@@ -496,7 +500,7 @@ static bool gd25_is_erased(FAR struct gd25_dev_s *priv, off_t address,
     {
       /* Check if all bytes of page is in erased state. */
 
-      gd25_byteread(priv, (uint8_t *)buf, address, GD25_PAGE_SIZE);
+      gd25_byteread(priv, (FAR uint8_t *)buf, address, GD25_PAGE_SIZE);
 
       for (i = 0; i < GD25_PAGE_SIZE / sizeof(uint32_t); i++)
         {
@@ -515,9 +519,9 @@ static bool gd25_is_erased(FAR struct gd25_dev_s *priv, off_t address,
   return true;
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name:  gd25_sectorerase
- **************************************************************************/
+ ***************************************************************************/
 
 static void gd25_sectorerase(FAR struct gd25_dev_s *priv, off_t sector)
 {
@@ -565,9 +569,9 @@ static void gd25_sectorerase(FAR struct gd25_dev_s *priv, off_t sector)
   SPI_SELECT(priv->spi, SPIDEV_FLASH(priv->spi_devid), false);
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name:  gd25_chiperase
- **************************************************************************/
+ ***************************************************************************/
 
 static inline int gd25_chiperase(FAR struct gd25_dev_s *priv)
 {
@@ -590,9 +594,9 @@ static inline int gd25_chiperase(FAR struct gd25_dev_s *priv)
   return OK;
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_byteread
- **************************************************************************/
+ ***************************************************************************/
 
 static void gd25_byteread(FAR struct gd25_dev_s *priv, FAR uint8_t *buffer,
                           off_t address, size_t nbytes)
@@ -643,9 +647,9 @@ static void gd25_byteread(FAR struct gd25_dev_s *priv, FAR uint8_t *buffer,
   SPI_SELECT(priv->spi, SPIDEV_FLASH(priv->spi_devid), false);
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name:  gd25_pagewrite
- **************************************************************************/
+ ***************************************************************************/
 
 #ifndef CONFIG_GD25_READONLY
 static void gd25_pagewrite(FAR struct gd25_dev_s *priv,
@@ -698,9 +702,9 @@ static void gd25_pagewrite(FAR struct gd25_dev_s *priv,
 }
 #endif
 
-/**************************************************************************
+/***************************************************************************
  * Name:  gd25_bytewrite
- **************************************************************************/
+ ***************************************************************************/
 
 #if defined(CONFIG_MTD_BYTE_WRITE) && !defined(CONFIG_GD25_READONLY)
 static inline void gd25_bytewrite(FAR struct gd25_dev_s *priv,
@@ -748,15 +752,15 @@ static inline void gd25_bytewrite(FAR struct gd25_dev_s *priv,
 }
 #endif /* defined(CONFIG_MTD_BYTE_WRITE) && !defined(CONFIG_GD25_READONLY) */
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_erase
- **************************************************************************/
+ ***************************************************************************/
 
 static int gd25_erase(FAR struct mtd_dev_s *dev, off_t startblock,
                       size_t nblocks)
 {
 #ifdef CONFIG_GD25_READONLY
-  return -EACESS
+  return -EACCES;
 #else
   FAR struct gd25_dev_s *priv = (FAR struct gd25_dev_s *)dev;
   size_t blocksleft = nblocks;
@@ -782,9 +786,9 @@ static int gd25_erase(FAR struct mtd_dev_s *dev, off_t startblock,
 #endif
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_bread
- **************************************************************************/
+ ***************************************************************************/
 
 static ssize_t gd25_bread(FAR struct mtd_dev_s *dev, off_t startblock,
                           size_t nblocks, FAR uint8_t *buffer)
@@ -803,9 +807,9 @@ static ssize_t gd25_bread(FAR struct mtd_dev_s *dev, off_t startblock,
   return nbytes;
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_bwrite
- **************************************************************************/
+ ***************************************************************************/
 
 static ssize_t gd25_bwrite(FAR struct mtd_dev_s *dev, off_t startblock,
                            size_t nblocks, FAR const uint8_t *buffer)
@@ -830,9 +834,9 @@ static ssize_t gd25_bwrite(FAR struct mtd_dev_s *dev, off_t startblock,
 #endif
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_read
- **************************************************************************/
+ ***************************************************************************/
 
 static ssize_t gd25_read(FAR struct mtd_dev_s *dev, off_t offset,
                          size_t nbytes, FAR uint8_t *buffer)
@@ -853,9 +857,9 @@ static ssize_t gd25_read(FAR struct mtd_dev_s *dev, off_t offset,
   return nbytes;
 }
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_write
- **************************************************************************/
+ ***************************************************************************/
 
 #ifdef CONFIG_MTD_BYTE_WRITE
 static ssize_t gd25_write(FAR struct mtd_dev_s *dev, off_t offset,
@@ -931,16 +935,16 @@ static ssize_t gd25_write(FAR struct mtd_dev_s *dev, off_t offset,
 }
 #endif
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_ioctl
- **************************************************************************/
+ ***************************************************************************/
 
 static int gd25_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg)
 {
   FAR struct gd25_dev_s *priv = (FAR struct gd25_dev_s *)dev;
   int ret = -EINVAL;
 
-  finfo("cmd: %d \n", cmd);
+  finfo("cmd: %d\n", cmd);
 
   switch (cmd)
     {
@@ -950,13 +954,32 @@ static int gd25_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg)
             (FAR struct mtd_geometry_s *)((uintptr_t)arg);
           if (geo)
             {
+              memset(geo, 0, sizeof(*geo));
+
               geo->blocksize    = GD25_PAGE_SIZE;
               geo->erasesize    = GD25_SECTOR_SIZE;
               geo->neraseblocks = priv->nsectors;
               ret               = OK;
 
-              finfo("blocksize: %d erasesize: %d neraseblocks: %d\n",
+              finfo("blocksize: %" PRIu32 " erasesize: %" PRIu32
+                    " neraseblocks: %" PRIu32 "\n",
                     geo->blocksize, geo->erasesize, geo->neraseblocks);
+            }
+        }
+        break;
+
+      case BIOC_PARTINFO:
+        {
+          FAR struct partition_info_s *info =
+            (FAR struct partition_info_s *)arg;
+          if (info != NULL)
+            {
+              info->numsectors  = priv->nsectors *
+                                  GD25_SECTOR_SIZE / GD25_PAGE_SIZE;
+              info->sectorsize  = GD25_PAGE_SIZE;
+              info->startsector = 0;
+              info->parent[0]   = '\0';
+              ret               = OK;
             }
         }
         break;
@@ -973,7 +996,15 @@ static int gd25_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg)
         }
         break;
 
-      case MTDIOC_XIPBASE:
+      case MTDIOC_ERASESTATE:
+        {
+          FAR uint8_t *result = (FAR uint8_t *)arg;
+          *result = GD25_ERASED_STATE;
+
+          ret = OK;
+        }
+        break;
+
       default:
         ret = -ENOTTY;
         break;
@@ -983,19 +1014,19 @@ static int gd25_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg)
   return ret;
 }
 
-/**************************************************************************
+/***************************************************************************
  * Public Functions
- **************************************************************************/
+ ***************************************************************************/
 
-/**************************************************************************
+/***************************************************************************
  * Name: gd25_initialize
  *
  * Description:
- *   Create an initialize MTD device instance.  MTD devices are not registered
+ *   Create an initialize MTD device instance. MTD devices aren't registered
  *   in the file system, but are created as instances that can be bound to
  *   other functions (such as a block or character driver front end).
  *
- **************************************************************************/
+ ***************************************************************************/
 
 FAR struct mtd_dev_s *gd25_initialize(FAR struct spi_dev_s *spi,
                                       uint32_t spi_devid)
@@ -1003,7 +1034,7 @@ FAR struct mtd_dev_s *gd25_initialize(FAR struct spi_dev_s *spi,
   FAR struct gd25_dev_s *priv;
   int ret;
 
-  priv = (FAR struct gd25_dev_s *)kmm_zalloc(sizeof(struct gd25_dev_s));
+  priv = kmm_zalloc(sizeof(struct gd25_dev_s));
   if (priv)
     {
       /* Initialize the allocated structure (unsupported methods were

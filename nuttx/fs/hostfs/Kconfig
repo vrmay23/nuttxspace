@@ -19,19 +19,20 @@ config FS_HOSTFS
 		be passed to the 'mount()' routine using the optional 'void *data'
 		parameter.
 
-config FS_HOSTFS_RPMSG
-	bool "Host File System Rpmsg"
-	default n
-	depends on FS_HOSTFS
-	depends on OPENAMP
-	---help---
-		Use Host file system to mount directories through rpmsg.
-		This is the driver that sending the message.
+		The backend implementation is arch-dependent.
+		As of writing this, it's implemented for sim, arm and xtensa.
 
-config FS_HOSTFS_RPMSG_SERVER
-	bool "Host File System Rpmsg Server"
-	default n
-	depends on OPENAMP
-	---help---
-		Use Host file system to mount directories through rpmsg.
-		This is the driver that receiving the message.
+		Note: depending on the backend implementations, hostfs might
+		only provide very restricted subset of filesystem operations.
+
+		Sim: It's implemented with direct calls to the host OS API.
+		It likely consumes a lot of stack than ordinary NuttX codebase.
+		You likely need to make task stack sizes huge (e.g. 64KB) to
+		avoid stack overrun.
+
+		Arm, xtensa: It's implemented using a special CPU instruction
+		to trigger a trap for a hypervisor.
+		If you are using qemu, it has the `-semihosting` command line
+		option to enable the handling of the trap.
+		Theoretically, it can work for other environments as well.
+		E.g. a real hardware + JTAG + OpenOCD.

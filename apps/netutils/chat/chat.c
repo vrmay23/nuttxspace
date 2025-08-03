@@ -1,9 +1,10 @@
 /****************************************************************************
  * apps/netutils/chat/chat.c
  *
- *   Copyright (C) 2016 Vladimir Komendantskiy. All rights reserved.
- *   Author: Vladimir Komendantskiy <vladimir@moixaenergy.com>
- *   Partly based on code by Max Nekludov <macscomp@gmail.com>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2016 Vladimir Komendantskiy. All rights reserved.
+ * SPDX-FileContributor: Vladimir Komendantskiy <vladimir@moixaenergy.com>
+ * SPDX-FileContributor: Max Nekludov <macscomp@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,6 +44,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#include <assert.h>
+#include <debug.h>
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
@@ -59,16 +62,16 @@
 #define CHAT_TOKEN_SIZE    128
 
 /****************************************************************************
- * Pivate types
+ * Private types
  ****************************************************************************/
 
 /* Type of singly-linked list of tokens */
 
 struct chat_token
 {
-  FAR char* string;
+  FAR char *string;
   bool no_termin;
-  FAR struct chat_token* next;
+  FAR struct chat_token *next;
 };
 
 /****************************************************************************
@@ -107,11 +110,11 @@ static int chat_tokenise(FAR struct chat *priv,
   {
     if (!tok_pos && !quoted && !no_termin)
       {
-        /* a) the first character in the script is a delimiter or
-         * b) the previous character was a delimiter,
-         * and in both cases it is not the empty string token,
-         * hence skipping.
-         */
+          /* a) the first character in the script is a delimiter or
+           * b) the previous character was a delimiter,
+           * and in both cases it is not the empty string token,
+           * hence skipping.
+           */
 
         return 0;
       }
@@ -155,14 +158,14 @@ static int chat_tokenise(FAR struct chat *priv,
 
     tok_pos = 0;
 
-    _info("%s (%d)\n", tok->string, tok->no_termin);
+    ninfo("%s (%d)\n", tok->string, tok->no_termin);
     return 0;
   }
 
   /* Tokenizer start */
 
   DEBUGASSERT(script != NULL);
-  _info("%s\n", script);
+  ninfo("%s\n", script);
 
   while (!ret && *cursor != '\0')
     {
@@ -245,6 +248,7 @@ static int chat_tokenise(FAR struct chat *priv,
                   break;
 
                 case 'c':
+
                   /* Deassert line terminator */
 
                   no_termin = true;
@@ -279,7 +283,7 @@ static int chat_tokenise(FAR struct chat *priv,
       ret = tok_on_delimiter();
     }
 
-  _info("result %d\n", ret);
+  ninfo("result %d\n", ret);
   return ret;
 }
 
@@ -297,7 +301,7 @@ static int chat_internalise(FAR struct chat *priv,
   while (tok && !ret)
     {
       DEBUGASSERT(tok->string);
-      _info("(%c) %s\n", rhs ? 'R' : 'L', tok->string);
+      ninfo("(%c) %s\n", rhs ? 'R' : 'L', tok->string);
 
       if (!rhs)
         {
@@ -329,7 +333,7 @@ static int chat_internalise(FAR struct chat *priv,
 
       if (rhs)
         {
-          len = strlen(tok->string);
+          len = strlen(tok->string) + 1;
           if (!tok->no_termin)
             {
               /* Add space for the line terminator */
@@ -337,12 +341,13 @@ static int chat_internalise(FAR struct chat *priv,
               len += 2;
             }
 
-          line->rhs = malloc(len + 1);
+          line->rhs = malloc(len);
           if (line->rhs)
             {
               /* Copy the token and add the line terminator as appropriate */
 
-              sprintf(line->rhs, tok->no_termin ? "%s" : "%s\r\n", tok->string);
+              snprintf(line->rhs, len,
+                       tok->no_termin ? "%s" : "%s\r\n", tok->string);
             }
           else
             {
@@ -406,7 +411,7 @@ static int chat_internalise(FAR struct chat *priv,
       ret = -ENODATA;
     }
 
-  _info("result %d, rhs %d\n", ret, rhs);
+  ninfo("result %d, rhs %d\n", ret, rhs);
   return ret;
 }
 
@@ -414,7 +419,7 @@ static int chat_internalise(FAR struct chat *priv,
 
 static void chat_tokens_free(FAR struct chat_token *first_tok)
 {
-  FAR struct chat_token* next_tok;
+  FAR struct chat_token *next_tok;
 
   while (first_tok)
     {
@@ -426,7 +431,7 @@ static void chat_tokens_free(FAR struct chat_token *first_tok)
       first_tok = next_tok;
     }
 
-  _info("tokens freed\n");
+  ninfo("tokens freed\n");
 }
 
 /* Main parsing function. */
@@ -437,10 +442,10 @@ static int chat_script_parse(FAR struct chat *priv, FAR const char *script)
   int ret;
 
   ret = chat_tokenise(priv, script, &first_tok);
-   if (!ret)
-     {
-       ret = chat_internalise(priv, first_tok);
-     }
+  if (!ret)
+    {
+      ret = chat_internalise(priv, first_tok);
+    }
 
   chat_tokens_free(first_tok);
   return ret;
@@ -463,14 +468,14 @@ static int chat_readb(FAR struct chat *priv, FAR char *c, int timeout_ms)
   ret = poll(&fds, 1, timeout_ms);
   if (ret <= 0)
     {
-      _info("poll timed out\n");
+      ninfo("poll timed out\n");
       return -ETIMEDOUT;
     }
 
   ret = read(priv->ctl.fd, c, 1);
   if (ret != 1)
     {
-      _info("read failed\n");
+      ninfo("read failed\n");
       return -EPERM;
     }
 
@@ -479,7 +484,7 @@ static int chat_readb(FAR struct chat *priv, FAR char *c, int timeout_ms)
       fputc(*c, stderr);
     }
 
-  _info("read \'%c\' (0x%02X)\n", *c, *c);
+  ninfo("read \'%c\' (0x%02X)\n", *c, *c);
   return 0;
 }
 
@@ -487,9 +492,9 @@ static void chat_flush(FAR struct chat *priv)
 {
   char c;
 
-  _info("starting\n");
-  while (chat_readb(priv, (FAR char *) &c, 0) == 0);
-  _info("done\n");
+  ninfo("starting\n");
+  while (chat_readb(priv, &c, 0) == 0);
+  ninfo("done\n");
 }
 
 static int chat_expect(FAR struct chat *priv, FAR const char *s)
@@ -504,7 +509,7 @@ static int chat_expect(FAR struct chat *priv, FAR const char *s)
 
   /* Get initial time and set the end time */
 
-  clock_gettime(CLOCK_REALTIME, (FAR struct timespec*) &abstime);
+  clock_gettime(CLOCK_REALTIME, (FAR struct timespec *)&abstime);
   endtime.tv_sec  = abstime.tv_sec + priv->ctl.timeout;
   endtime.tv_nsec = abstime.tv_nsec;
 
@@ -537,11 +542,11 @@ static int chat_expect(FAR struct chat *priv, FAR const char *s)
 
           /* Update current time */
 
-          clock_gettime(CLOCK_REALTIME, (FAR struct timespec*) &abstime);
+          clock_gettime(CLOCK_REALTIME, (FAR struct timespec *)&abstime);
         }
     }
 
-  _info("result %d\n", ret);
+  ninfo("result %d\n", ret);
   return ret;
 }
 
@@ -553,7 +558,7 @@ static int chat_send(FAR struct chat *priv, FAR const char *s)
   /* 'write' returns the number of successfully written characters */
 
   ret = write(priv->ctl.fd, s, len);
-  _info("wrote %d out of %d bytes of \'%s\'\n", ret, len, s);
+  ninfo("wrote %d out of %d bytes of \'%s\'\n", ret, len, s);
   if (ret > 0)
     {
       /* Just SUCCESS */
@@ -564,13 +569,13 @@ static int chat_send(FAR struct chat *priv, FAR const char *s)
   return ret;
 }
 
-static int chat_line_run(FAR struct chat* priv,
-                         FAR const struct chat_line* line)
+static int chat_line_run(FAR struct chat *priv,
+                         FAR const struct chat_line *line)
 {
   int ret = 0;
   int numarg;
 
-  _info("type %d, rhs %s\n", line->type, line->rhs);
+  ninfo("type %d, rhs %s\n", line->type, line->rhs);
 
   switch (line->type)
     {
@@ -584,7 +589,9 @@ static int chat_line_run(FAR struct chat* priv,
       switch (line->lhs.command)
         {
         case CHAT_COMMAND_ABORT:
+
           /* TODO */
+
           break;
 
         case CHAT_COMMAND_ECHO:
@@ -617,11 +624,11 @@ static int chat_line_run(FAR struct chat* priv,
           numarg = atoi(line->rhs);
           if (numarg < 0)
             {
-              _info("invalid timeout string %s\n", line->rhs);
+              ninfo("invalid timeout string %s\n", line->rhs);
             }
           else
             {
-              _info("timeout is %d s\n", numarg);
+              ninfo("timeout is %d s\n", numarg);
               priv->ctl.timeout = numarg;
             }
 
@@ -678,14 +685,16 @@ static int chat_script_run(FAR struct chat *priv)
         }
     }
 
-  _info("Script result %d, exited on line %d\n", ret, line_num);
+#ifdef CONFIG_DEBUG_INFO
+  ninfo("Script result %d, exited on line %d\n", ret, line_num);
+#endif
   return ret;
 }
 
 static int chat_script_free(FAR struct chat *priv)
 {
-  FAR struct chat_line* line = priv->script;
-  FAR struct chat_line* next_line;
+  FAR struct chat_line *line = priv->script;
+  FAR struct chat_line *next_line;
   int ret = 0;
 
   while (line)

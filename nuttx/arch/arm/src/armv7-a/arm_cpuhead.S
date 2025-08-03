@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/armv7-a/arm_cpuhead.S
  *
- *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,32 +26,22 @@
 
 #include <nuttx/config.h>
 
-#include <arch/board/board.h>
+#include <arch/irq.h>
 
 #include "arm.h"
-#include "cp15.h"
 #include "sctlr.h"
 #include "mmu.h"
 #include "smp.h"
-
 #include "chip.h"
-#include "up_internal.h"
+#include "arm_internal.h"
 
 #ifdef CONFIG_SMP
 
 	.file	"arm_cpuhead.S"
 
-/**********************************************************************************
+/****************************************************************************
  * Configuration
- **********************************************************************************/
-
-/* Hard-coded options */
-
-#undef CPU_ALIGNMENT_TRAP
-#undef CPU_CACHE_ROUND_ROBIN
-#undef CPU_DCACHE_DISABLE
-#undef CPU_ICACHE_DISABLE
-#undef CPU_AFE_ENABLE
+ ****************************************************************************/
 
 /* Check for the identity mapping:  For this configuration, this would be
  * the case where the virtual beginning of RAM is the same as the physical
@@ -84,6 +61,8 @@
  ****************************************************************************/
 
 	.text
+	.syntax	unified
+	.arm
 
 /****************************************************************************
  * Name: __cpu[n]_start
@@ -108,9 +87,14 @@
 	.type	__cpu1_start, #function
 
 __cpu1_start:
+	/* Make sure that we are in SYS mode with IRQs and FIQs disabled */
+
+	cpsid		if, #PSR_MODE_SYS
+
 	/* Set up the stack pointer and the CPU index */
 
 	ldr		sp, .Lcpu1_stackpointer
+	sub		sp, sp, #XCPTCONTEXT_SIZE
 	mov		r5, #1
 
 	/* Then branch to the common startup logic (PC-relative) */
@@ -126,9 +110,14 @@ __cpu1_start:
 	.type	__cpu2_start, #function
 
 __cpu2_start:
+	/* Make sure that we are in SYS mode with IRQs and FIQs disabled */
+
+	cpsid		if, #PSR_MODE_SYS
+
 	/* Set up the stack pointer and the CPU index */
 
 	ldr		sp, .Lcpu2_stackpointer
+	sub		sp, sp, #XCPTCONTEXT_SIZE
 	mov		r5, #2
 
 	/* Then branch to the common startup logic (PC-relative) */
@@ -144,9 +133,14 @@ __cpu2_start:
 	.type	__cpu3_start, #function
 
 __cpu3_start:
+	/* Make sure that we are in SYS mode with IRQs and FIQs disabled */
+
+	cpsid		if, #PSR_MODE_SYS
+
 	/* Set up the stack pointer and the CPU index */
 
 	ldr		sp, .Lcpu3_stackpointer
+	sub		sp, sp, #XCPTCONTEXT_SIZE
 	mov		r5, #3
 
 	/* Then branch to the common startup logic (PC-relative) */
@@ -180,11 +174,6 @@ __cpu3_start:
 	.type	.Lcpu_start, #function
 
 .Lcpu_start:
-	/* Make sure that we are in SVC mode with IRQs and FIQs disabled */
-
-	mov		r0, #(PSR_MODE_SVC | PSR_I_BIT | PSR_F_BIT)
-	msr		cpsr_c, r0
-
 	/* The MMU and caches should be disabled */
 
 	mrc		CP15_SCTLR(r0)
@@ -206,11 +195,19 @@ __cpu3_start:
 	 */
 
 	mov		r0, #0
+	mcr		CP15_TPIDRPRW(r0)	/* Initialize percpu reg TPIDRPRW */
+#ifdef CONFIG_ARM_HAVE_MPCORE
+	mcr		CP15_TLBIALLIS(r0)	/* Invalidate the entire unified TLB */
+	mcr		CP15_BPIALLIS(r0)	/* Invalidate entire branch prediction array */
+	mcr		CP15_ICIALLUIS(r0)	/* Invalidate I-cache */
+#else
 	mcr		CP15_TLBIALL(r0,c7)	/* Invalidate the entire unified TLB */
 	mcr		CP15_TLBIALL(r0,c6)
 	mcr		CP15_TLBIALL(r0,c5)
 	mcr		CP15_BPIALL(r0)		/* Invalidate entire branch prediction array */
 	mcr		CP15_ICIALLU(r0)	/* Invalidate I-cache */
+#endif
+	isb
 
 	/* Load the page table address.
 	 *
@@ -223,6 +220,10 @@ __cpu3_start:
 	 */
 
 	ldr		r1, .LCppgtable		/* r1=phys. page table */
+#ifdef CONFIG_ARCH_ADDRENV
+	mov		r2, #PGTABLE_SIZE
+	mla		r1, r2, r5, r1		/* page table of cpu1,2,3 */
+#endif
 	orr		r1, r1, #(TTBR0_RGN_WBWA | TTBR0_IRGN0)	/* Select cache properties */
 	mcr		CP15_TTBR0(r1)
 	mcr		CP15_TTBR1(r1)
@@ -300,7 +301,7 @@ __cpu3_start:
 	orr		r0, r0, #(SCTLR_V)
 #endif
 
-#if defined(CPU_CACHE_ROUND_ROBIN) && !defined(CONFIG_ARCH_CORTEXA5)
+#if defined(CONFIG_ARMV7A_CACHE_ROUND_ROBIN) && !defined(CONFIG_ARCH_CORTEXA5)
 	/* Round Robin cache replacement
 	 *
 	 *   SCTLR_RR   Bit 14: The Cortex-A5 processor only supports a fixed random
@@ -314,7 +315,7 @@ __cpu3_start:
 	 * after SMP cache coherency has been setup.
 	 */
 
-#if 0 /* !defined(CPU_DCACHE_DISABLE) && !defined(CONFIG_SMP) */
+#if !defined(CONFIG_ARMV7A_DCACHE_DISABLE) && !defined(CONFIG_SMP)
 	/* Dcache enable
 	 *
 	 *   SCTLR_C    Bit 2:  DCache enable
@@ -323,7 +324,7 @@ __cpu3_start:
 	orr		r0, r0, #(SCTLR_C)
 #endif
 
-#ifndef CPU_ICACHE_DISABLE
+#if !defined(CONFIG_ARMV7A_ICACHE_DISABLE) && !defined(CONFIG_SMP)
 	/* Icache enable
 	 *
 	 *   SCTLR_I    Bit 12: ICache enable
@@ -332,7 +333,7 @@ __cpu3_start:
 	orr		r0, r0, #(SCTLR_I)
 #endif
 
-#ifdef CPU_ALIGNMENT_TRAP
+#ifdef CONFIG_ARMV7A_ALIGNMENT_TRAP
 	/* Alignment abort enable
 	 *
 	 *   SCTLR_A    Bit 1:  Strict alignment enabled
@@ -350,7 +351,7 @@ __cpu3_start:
 	orr		r0, r0, #(SCTLR_EE)
 #endif
 
-#ifdef CPU_AFE_ENABLE
+#ifdef CONFIG_ARMV7A_AFE_ENABLE
 	/* AP[0:2] Permissions model
 	 *
 	 *   SCTLR_AFE  Bit 29: Full, legacy access permissions behavior (reset value).
@@ -365,7 +366,8 @@ __cpu3_start:
 	/* Then write the configured control register */
 
 	mcr		CP15_SCTLR(r0)			/* Write control reg */
-	.rept	12						/* Cortex A8 wants lots of NOPs here */
+	isb
+	.rept		12				/* Cortex A8 wants lots of NOPs here */
 	nop
 	.endr
 
@@ -420,13 +422,14 @@ __cpu3_start:
 	 */
 
 	adr		r3, .Lstkinit
-	ldmia	r3, {r0, r1, r2}	/* R0 = start of IDLE stack; R1 = Size of stack; R2 = coloration */
+	mov		r0, sp		/* R0 = end of IDLE stack */
+	ldmia		r3, {r1, r2}	/* R1 = Size of stack; R2 = coloration */
 
-1:								/* Top of the loop */
+1:							/* Top of the loop */
 	sub		r1, r1, #1			/* R1 = Number of words remaining */
 	cmp		r1, #0				/* Check (nwords == 0) */
-	str		r2, [r0], #4		/* Save stack color word, increment stack address */
-	bne		1b					/* Bottom of the loop */
+	str		r2, [r0, #-4]!			/* Save stack color word, increment stack address */
+	bne		1b				/* Bottom of the loop */
 #endif
 
 	/* Branch to continue C level CPU initialization */
@@ -434,7 +437,7 @@ __cpu3_start:
 	mov		fp, #0				/* Clear framepointer */
 	mov		lr, #0				/* LR = return address (none) */
 	mov		r0, r5				/* Input parameter = CPU index */
-	b		arm_cpu_boot		/* Branch to C level CPU initialization */
+	b		arm_cpu_boot			/* Branch to C level CPU initialization */
 	.size	.Lcpu_vstart, .-.Lcpu_vstart
 
 /***************************************************************************
@@ -446,7 +449,7 @@ __cpu3_start:
 #ifdef CONFIG_STACK_COLORATION
 	.type	.Lstkinit, %object
 .Lstkinit:
-	.long	SMP_STACK_WORDS
+	.long	SMP_STACK_WORDS - (XCPTCONTEXT_SIZE / 4)
 	.long	STACK_COLOR				/* Stack coloration word */
 	.size	.Lstkinit, . -.Lstkinit
 #endif
@@ -494,14 +497,5 @@ g_cpu3_idlestack:
 #endif /* CONFIG_SMP_NCPUS > 3 */
 #endif /* CONFIG_SMP_NCPUS > 2 */
 #endif /* CONFIG_SMP_NCPUS > 1 */
-
-	.align	8
-	.globl	g_idle_topstack
-	.type	g_idle_topstack, object
-
-g_idle_topstack:
-	.long	_enoinit
-	.size	g_idle_topstack, .-g_idle_topstack
-
 #endif /* CONFIG_SMP */
 	.end

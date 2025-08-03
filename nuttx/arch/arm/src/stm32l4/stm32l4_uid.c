@@ -1,9 +1,10 @@
-/************************************************************************************
+/****************************************************************************
  * arch/arm/src/stm32l4/stm32l4_uid.c
  *
- *   Copyright (C) 2015 Marawan Ragab. All rights reserved.
- *   Author: Marawan Ragab <marawan31@gmail.com>
- *           dev@ziggurat9.com
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2015 Marawan Ragab. All rights reserved.
+ * SPDX-FileContributor: Marawan Ragab <marawan31@gmail.com>
+ * SPDX-FileContributor: dev@ziggurat9.com
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,11 +33,11 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************
+/****************************************************************************
  * Included Files
- ************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 
@@ -45,9 +46,9 @@
 
 #ifdef STM32L4_SYSMEM_UID
 
-/************************************************************************************
+/****************************************************************************
  * Public Functions
- ************************************************************************************/
+ ****************************************************************************/
 
 void stm32l4_get_uniqueid(uint8_t uniqueid[12])
 {
@@ -55,7 +56,7 @@ void stm32l4_get_uniqueid(uint8_t uniqueid[12])
 
   for (i = 0; i < 12; i++)
     {
-      uniqueid[i] = *((uint8_t*)(STM32L4_SYSMEM_UID)+i);
+      uniqueid[i] = *((uint8_t *)(STM32L4_SYSMEM_UID)+i);
     }
 }
 

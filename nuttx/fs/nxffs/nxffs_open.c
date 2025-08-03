@@ -1,37 +1,22 @@
 /****************************************************************************
  * fs/nxffs/nxffs_open.c
  *
- *   Copyright (C) 2011, 2013, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * References: Linux/Documentation/filesystems/romfs.txt
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,19 +26,21 @@
 
 #include <nuttx/config.h>
 
+#include <stdint.h>
 #include <string.h>
 #include <fcntl.h>
 #include <time.h>
-#include <crc32.h>
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
-#include <nuttx/kmalloc.h>
+#include <nuttx/crc32.h>
+#include <nuttx/lib/lib.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/mtd/mtd.h>
 
 #include "nxffs.h"
+#include "fs_heap.h"
 
 /****************************************************************************
  * Private Data
@@ -99,7 +86,8 @@ static struct nxffs_wrfile_s g_wrfile;
  *
  *   On successful return the following are also valid:
  *
- *     wrfile->ofile.entry.hoffset - FLASH offset to candidate header position
+ *     wrfile->ofile.entry.hoffset - FLASH offset to candidate header
+ *       position
  *     volume->ioblock - Read/write block number of the block containing the
  *       header position
  *     volume->iooffset - The offset in the block to the candidate header
@@ -217,7 +205,8 @@ static inline int nxffs_nampos(FAR struct nxffs_volume_s *volume,
  *
  *   On successful return the following are also valid:
  *
- *     wrfile->ofile.entry.hoffset - FLASH offset to candidate header position
+ *     wrfile->ofile.entry.hoffset - FLASH offset to candidate header
+ *       position
  *     volume->ioblock - Read/write block number of the block containing the
  *       header position
  *     volume->iooffset - The offset in the block to the candidate header
@@ -346,8 +335,8 @@ static inline int nxffs_wrname(FAR struct nxffs_volume_s *volume,
   ret = nxffs_rdcache(volume, volume->ioblock);
   if (ret < 0)
     {
-      ferr("ERROR: Failed to read inode name block %d: %d\n",
-           volume->ioblock, -ret);
+      ferr("ERROR: Failed to read inode name block %jd: %d\n",
+           (intmax_t)volume->ioblock, -ret);
       return ret;
     }
 
@@ -357,8 +346,8 @@ static inline int nxffs_wrname(FAR struct nxffs_volume_s *volume,
   ret = nxffs_wrcache(volume);
   if (ret < 0)
     {
-      ferr("ERROR: Failed to write inode header block %d: %d\n",
-           volume->ioblock, -ret);
+      ferr("ERROR: Failed to write inode header block %jd: %d\n",
+           (intmax_t)volume->ioblock, -ret);
     }
 
   return ret;
@@ -396,15 +385,15 @@ static inline int nxffs_wropen(FAR struct nxffs_volume_s *volume,
       goto errout;
     }
 
-  /* Get exclusive access to the volume.  Note that the volume exclsem
-   * protects the open file list.  Note that exclsem is ALWAYS taken
+  /* Get exclusive access to the volume.  Note that the volume lock
+   * protects the open file list.  Note that lock is ALWAYS taken
    * after wrsem to avoid deadlocks.
    */
 
-  ret = nxsem_wait(&volume->exclsem);
+  ret = nxmutex_lock(&volume->lock);
   if (ret < 0)
     {
-      ferr("ERROR: nxsem_wait failed: %d\n", ret);
+      ferr("ERROR: nxmutex_lock failed: %d\n", ret);
       goto errout_with_wrsem;
     }
 
@@ -430,7 +419,7 @@ static inline int nxffs_wropen(FAR struct nxffs_volume_s *volume,
 
           ferr("ERROR: File is open for reading\n");
           ret = -ENOSYS;
-          goto errout_with_exclsem;
+          goto errout_with_lock;
         }
 
       /* It would be an error if we are asked to create the file
@@ -441,7 +430,7 @@ static inline int nxffs_wropen(FAR struct nxffs_volume_s *volume,
         {
           ferr("ERROR: File exists, can't create O_EXCL\n");
           ret = -EEXIST;
-          goto errout_with_exclsem;
+          goto errout_with_lock;
         }
 
       /* Were we asked to truncate the file?  NOTE: Don't truncate the
@@ -451,9 +440,10 @@ static inline int nxffs_wropen(FAR struct nxffs_volume_s *volume,
 
       else if ((oflags & (O_CREAT | O_TRUNC)) == (O_CREAT | O_TRUNC))
         {
-          /* Just schedule the removal the file and fall through to re-create it.
-           * Note that the old file of the same name will not actually be removed
-           * until the new file is successfully written.
+          /* Just schedule the removal the file and fall through to re-create
+           * it.
+           * Note that the old file of the same name will not actually be
+           * removed until the new file is successfully written.
            */
 
           truncate = true;
@@ -465,9 +455,10 @@ static inline int nxffs_wropen(FAR struct nxffs_volume_s *volume,
 
       else
         {
-          ferr("ERROR: File %s exists and we were not asked to truncate it\n");
+          ferr("ERROR: File %s exists and we were not asked to "
+               "truncate it\n", name);
           ret = -ENOSYS;
-          goto errout_with_exclsem;
+          goto errout_with_lock;
         }
     }
 
@@ -479,7 +470,7 @@ static inline int nxffs_wropen(FAR struct nxffs_volume_s *volume,
     {
       ferr("ERROR: Not asked to create the file\n");
       ret = -ENOENT;
-      goto errout_with_exclsem;
+      goto errout_with_lock;
     }
 
   /* Make sure that the length of the file name will fit in a uint8_t */
@@ -489,7 +480,7 @@ static inline int nxffs_wropen(FAR struct nxffs_volume_s *volume,
     {
       ferr("ERROR: Name is too long: %d\n", namlen);
       ret = -EINVAL;
-      goto errout_with_exclsem;
+      goto errout_with_lock;
     }
 
   /* Yes.. Create a new structure that will describe the state of this open
@@ -501,11 +492,12 @@ static inline int nxffs_wropen(FAR struct nxffs_volume_s *volume,
   wrfile = &g_wrfile;
   memset(wrfile, 0, sizeof(struct nxffs_wrfile_s));
 #else
-  wrfile = (FAR struct nxffs_wrfile_s *)kmm_zalloc(sizeof(struct nxffs_wrfile_s));
+  wrfile = (FAR struct nxffs_wrfile_s *)
+           fs_heap_zalloc(sizeof(struct nxffs_wrfile_s));
   if (!wrfile)
     {
       ret = -ENOMEM;
-      goto errout_with_exclsem;
+      goto errout_with_lock;
     }
 #endif
 
@@ -518,7 +510,7 @@ static inline int nxffs_wropen(FAR struct nxffs_volume_s *volume,
 
   /* Save a copy of the inode name. */
 
-  wrfile->ofile.entry.name = strdup(name);
+  wrfile->ofile.entry.name = fs_heap_strdup(name);
   if (!wrfile->ofile.entry.name)
     {
       ret = -ENOMEM;
@@ -613,7 +605,7 @@ static inline int nxffs_wropen(FAR struct nxffs_volume_s *volume,
                 }
 
               /* Then just break out of the loop reporting success.  Note
-               * that the alllocated inode name string is retained; it
+               * that the allocated inode name string is retained; it
                * will be needed later to calculate the inode CRC.
                */
 
@@ -655,24 +647,24 @@ static inline int nxffs_wropen(FAR struct nxffs_volume_s *volume,
   volume->ofiles      = &wrfile->ofile;
 
   /* Indicate that the volume is open for writing and return the open file
-   * instance.  Releasing exclsem allows other readers while the write is
+   * instance.  Releasing lock allows other readers while the write is
    * in progress.  But wrsem is still held for this open file, preventing
    * any further writers until this inode is closed.s
    */
 
   *ppofile = &wrfile->ofile;
-  nxsem_post(&volume->exclsem);
+  nxmutex_unlock(&volume->lock);
   return OK;
 
 errout_with_name:
-  kmm_free(wrfile->ofile.entry.name);
+  fs_heap_free(wrfile->ofile.entry.name);
 errout_with_ofile:
 #ifndef CONFIG_NXFFS_PREALLOCATED
-  kmm_free(wrfile);
+  fs_heap_free(wrfile);
 #endif
 
-errout_with_exclsem:
-  nxsem_post(&volume->exclsem);
+errout_with_lock:
+  nxmutex_unlock(&volume->lock);
 errout_with_wrsem:
   nxsem_post(&volume->wrsem);
 errout:
@@ -694,14 +686,14 @@ static inline int nxffs_rdopen(FAR struct nxffs_volume_s *volume,
   FAR struct nxffs_ofile_s *ofile;
   int ret;
 
-  /* Get exclusive access to the volume.  Note that the volume exclsem
+  /* Get exclusive access to the volume.  Note that the volume lock
    * protects the open file list.
    */
 
-  ret = nxsem_wait(&volume->exclsem);
+  ret = nxmutex_lock(&volume->lock);
   if (ret != OK)
     {
-      ferr("ERROR: nxsem_wait failed: %d\n", ret);
+      ferr("ERROR: nxmutex_lock failed: %d\n", ret);
       goto errout;
     }
 
@@ -718,7 +710,7 @@ static inline int nxffs_rdopen(FAR struct nxffs_volume_s *volume,
         {
           ferr("ERROR: File is open for writing\n");
           ret = -ENOSYS;
-          goto errout_with_exclsem;
+          goto errout_with_lock;
         }
 
       /* Just increment the reference count on the ofile */
@@ -736,12 +728,13 @@ static inline int nxffs_rdopen(FAR struct nxffs_volume_s *volume,
     {
       /* Not already open.. create a new open structure */
 
-      ofile = (FAR struct nxffs_ofile_s *)kmm_zalloc(sizeof(struct nxffs_ofile_s));
+      ofile = (FAR struct nxffs_ofile_s *)
+              fs_heap_zalloc(sizeof(struct nxffs_ofile_s));
       if (!ofile)
         {
           ferr("ERROR: ofile allocation failed\n");
           ret = -ENOMEM;
-          goto errout_with_exclsem;
+          goto errout_with_lock;
         }
 
       /* Initialize the open file state structure */
@@ -767,13 +760,13 @@ static inline int nxffs_rdopen(FAR struct nxffs_volume_s *volume,
   /* Return the open file state structure */
 
   *ppofile = ofile;
-  nxsem_post(&volume->exclsem);
+  nxmutex_unlock(&volume->lock);
   return OK;
 
 errout_with_ofile:
-  kmm_free(ofile);
-errout_with_exclsem:
-  nxsem_post(&volume->exclsem);
+  fs_heap_free(ofile);
+errout_with_lock:
+  nxmutex_unlock(&volume->lock);
 errout:
   return ret;
 }
@@ -842,7 +835,7 @@ static inline void nxffs_freeofile(FAR struct nxffs_volume_s *volume,
   if ((FAR struct nxffs_wrfile_s *)ofile != &g_wrfile)
 #endif
     {
-      kmm_free(ofile);
+      fs_heap_free(ofile);
     }
 }
 
@@ -876,7 +869,8 @@ static inline int nxffs_wrclose(FAR struct nxffs_volume_s *volume,
       ret = nxffs_wrblkhdr(volume, wrfile);
       if (ret < 0)
         {
-          ferr("ERROR: Failed to write the final block of the file: %d\n", -ret);
+          ferr("ERROR: Failed to write the final block of the file: %d\n",
+               -ret);
           goto errout;
         }
     }
@@ -937,7 +931,7 @@ FAR struct nxffs_ofile_s *nxffs_findofile(FAR struct nxffs_volume_s *volume,
 {
   FAR struct nxffs_ofile_s *ofile;
 
-  /* Check every open file.  Note that the volume exclsem protects the
+  /* Check every open file.  Note that the volume lock protects the
    * list of open files.
    */
 
@@ -970,7 +964,8 @@ FAR struct nxffs_ofile_s *nxffs_findofile(FAR struct nxffs_volume_s *volume,
  *
  ****************************************************************************/
 
-FAR struct nxffs_wrfile_s *nxffs_findwriter(FAR struct nxffs_volume_s *volume)
+FAR struct nxffs_wrfile_s *nxffs_findwriter(
+                           FAR struct nxffs_volume_s *volume)
 {
   /* We can tell if the write is in-use because it will have an allocated
    * name attached.
@@ -1002,18 +997,14 @@ int nxffs_open(FAR struct file *filep, FAR const char *relpath,
 
   /* Sanity checks */
 
-  DEBUGASSERT(filep->f_priv == NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv == NULL);
 
   /* Get the mountpoint private data from the NuttX inode reference in the
    * file structure
    */
 
-  volume = (FAR struct nxffs_volume_s *)filep->f_inode->i_private;
+  volume = filep->f_inode->i_private;
   DEBUGASSERT(volume != NULL);
-
-#ifdef CONFIG_FILE_MODE
-#  warning "Missing check for privileges based on inode->i_mode"
-#endif
 
   /* Limitation:  A file must be opened for reading or writing, but not both.
    * There is no general way of extending the size of a file.  Extending the
@@ -1078,7 +1069,7 @@ int nxffs_dup(FAR const struct file *oldp, FAR struct file *newp)
    * file structure
    */
 
-  volume = (FAR struct nxffs_volume_s *)oldp->f_inode->i_private;
+  volume = oldp->f_inode->i_private;
   DEBUGASSERT(volume != NULL);
 #endif
 
@@ -1087,7 +1078,7 @@ int nxffs_dup(FAR const struct file *oldp, FAR struct file *newp)
   ofile = (FAR struct nxffs_ofile_s *)oldp->f_priv;
 
   /* I do not think we need exclusive access to the volume to do this.
-   * The volume exclsem protects the open file list and, hence, would
+   * The volume lock protects the open file list and, hence, would
    * assure that the ofile is stable.  However, it is assumed that the
    * caller holds a value file descriptor associated with this ofile,
    * so it should be stable throughout the life of this function.
@@ -1106,7 +1097,7 @@ int nxffs_dup(FAR const struct file *oldp, FAR struct file *newp)
   /* Just increment the reference count on the ofile */
 
   ofile->crefs++;
-  newp->f_priv = (FAR void *)ofile;
+  newp->f_priv = ofile;
   return OK;
 }
 
@@ -1128,7 +1119,7 @@ int nxffs_close(FAR struct file *filep)
 
   /* Sanity checks */
 
-  DEBUGASSERT(filep->f_priv != NULL && filep->f_inode != NULL);
+  DEBUGASSERT(filep->f_priv != NULL);
 
   /* Recover the open file state from the struct file instance */
 
@@ -1136,17 +1127,17 @@ int nxffs_close(FAR struct file *filep)
 
   /* Recover the volume state from the open file */
 
-  volume = (FAR struct nxffs_volume_s *)filep->f_inode->i_private;
+  volume = filep->f_inode->i_private;
   DEBUGASSERT(volume != NULL);
 
-  /* Get exclusive access to the volume.  Note that the volume exclsem
+  /* Get exclusive access to the volume.  Note that the volume lock
    * protects the open file list.
    */
 
-  ret = nxsem_wait(&volume->exclsem);
+  ret = nxmutex_lock(&volume->lock);
   if (ret != OK)
     {
-      ferr("ERROR: nxsem_wait failed: %d\n", ret);
+      ferr("ERROR: nxmutex_lock failed: %d\n", ret);
       goto errout;
     }
 
@@ -1182,7 +1173,7 @@ int nxffs_close(FAR struct file *filep)
     }
 
   filep->f_priv = NULL;
-  nxsem_post(&volume->exclsem);
+  nxmutex_unlock(&volume->lock);
 
 errout:
   return ret;
@@ -1205,8 +1196,8 @@ errout:
  *   entry  - Describes the inode header to write
  *
  * Returned Value:
- *   Zero is returned on success; Otherwise, a negated errno value is returned
- *   indicating the nature of the failure.
+ *   Zero is returned on success; Otherwise, a negated errno value is
+ *   returned indicating the nature of the failure.
  *
  ****************************************************************************/
 
@@ -1226,8 +1217,8 @@ int nxffs_wrinode(FAR struct nxffs_volume_s *volume,
   ret = nxffs_rdcache(volume, volume->ioblock);
   if (ret < 0)
     {
-      ferr("ERROR: Failed to read inode header block %d: %d\n",
-           volume->ioblock, -ret);
+      ferr("ERROR: Failed to read inode header block %jd: %d\n",
+           (intmax_t)volume->ioblock, -ret);
       goto errout;
     }
 
@@ -1265,8 +1256,8 @@ int nxffs_wrinode(FAR struct nxffs_volume_s *volume,
   ret = nxffs_wrcache(volume);
   if (ret < 0)
     {
-      ferr("ERROR: Failed to write inode header block %d: %d\n",
-           volume->ioblock, -ret);
+      ferr("ERROR: Failed to write inode header block %jd: %d\n",
+           (intmax_t)volume->ioblock, -ret);
     }
 
   /* The volume is now available for other writers */
@@ -1288,8 +1279,8 @@ errout:
  *   entry  - Describes the new inode entry
  *
  * Returned Value:
- *   Zero is returned on success; Otherwise, a negated errno value is returned
- *   indicating the nature of the failure.
+ *   Zero is returned on success; Otherwise, a negated errno value is
+ *   returned indicating the nature of the failure.
  *
  ****************************************************************************/
 

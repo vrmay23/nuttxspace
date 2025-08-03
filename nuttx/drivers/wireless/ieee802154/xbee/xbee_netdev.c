@@ -1,42 +1,22 @@
 /****************************************************************************
- * drivers/wireless/xbee/drivers/xbee_netdev.c
+ * drivers/wireless/ieee802154/xbee/xbee_netdev.c
  *
- *   Copyright (C) 2017 Verge Inc. All rights reserved.
- *   Author:  Anthony Merlino <anthony@vergeaero.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * References:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * wireless/ieee802154/xbee_netdev.c
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author:  Gregory Nutt <gnutt@nuttx.org>
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -59,11 +39,10 @@
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/wdog.h>
+#include <nuttx/mutex.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/signal.h>
 #include <nuttx/mm/iob.h>
-#include <nuttx/net/arp.h>
 #include <nuttx/net/netdev.h>
 #include <nuttx/net/radiodev.h>
 #include <nuttx/net/ieee802154.h>
@@ -114,10 +93,6 @@
 #  define XBEENET_FRAMELEN IEEE802154_MAX_PHY_PACKET_SIZE
 #endif
 
-/* TX poll delay = 1 seconds. CLK_TCK is the number of clock ticks per second */
-
-#define TXPOLL_WDDELAY   (1*CLK_TCK)
-
 /****************************************************************************
  * Private Types
  ****************************************************************************/
@@ -128,7 +103,8 @@ struct xbeenet_callback_s
 {
   /* This holds the information visible to the MAC layer */
 
-  struct xbee_maccb_s mc_cb;       /* Interface understood by the MAC layer */
+  struct xbee_maccb_s mc_cb;            /* Interface understood by the MAC
+                                         * layer */
   FAR struct xbeenet_driver_s *mc_priv; /* Our priv data */
 };
 
@@ -145,11 +121,10 @@ struct xbeenet_driver_s
 
   /* For internal use by this driver */
 
-  sem_t xd_exclsem;                 /* Exclusive access to struct */
+  mutex_t xd_lock;                  /* Exclusive access to struct */
   struct xbeenet_callback_s xd_cb;  /* Callback information */
   XBEEHANDLE xd_mac;                /* Contained XBee MAC interface */
   bool xd_bifup;                    /* true:ifup false:ifdown */
-  WDOG_ID xd_txpoll;                /* TX poll timer */
   struct work_s xd_pollwork;        /* Defer poll work to the work queue */
 
   /* Hold a list of events */
@@ -188,8 +163,6 @@ static int  xbeenet_rxframe(FAR struct xbeenet_driver_s *maccb,
 /* Common TX logic */
 
 static int  xbeenet_txpoll_callback(FAR struct net_driver_s *dev);
-static void xbeenet_txpoll_work(FAR void *arg);
-static void xbeenet_txpoll_expiry(int argc, wdparm_t arg, ...);
 
 /* IOCTL support */
 
@@ -251,8 +224,10 @@ static struct sixlowpan_reassbuf_s g_iobuffer;
  *
  *    128  112  96   80    64   48   32   16
  *    ---- ---- ---- ----  ---- ---- ---- ----
- *    fe80 0000 0000 0000  0000 00ff fe00 xxxx 2-byte short address IEEE 48-bit MAC
- *    fe80 0000 0000 0000  xxxx xxxx xxxx xxxx 8-byte extended address IEEE EUI-64
+ *    fe80 0000 0000 0000  0000 00ff fe00 xxxx 2-byte short address IEEE
+ *                                             48-bit MAC
+ *    fe80 0000 0000 0000  xxxx xxxx xxxx xxxx 8-byte extended address IEEE
+ *                                             EUI-64
  *
  ****************************************************************************/
 
@@ -285,15 +260,20 @@ static int xbeenet_set_ipaddress(FAR struct net_driver_s *dev)
     }
   else
     {
-      IEEE802154_EADDRCOPY(dev->d_mac.radio.nv_addr, arg.getreq.attrval.mac.eaddr);
+      IEEE802154_EADDRCOPY(dev->d_mac.radio.nv_addr,
+                           arg.getreq.attrval.mac.eaddr);
       dev->d_mac.radio.nv_addrlen = IEEE802154_EADDRSIZE;
 
       /* Set the IP address based on the eaddr */
 
-      dev->d_ipv6addr[4]  = HTONS((uint16_t)eaddr[0] << 8 | (uint16_t)eaddr[1]);
-      dev->d_ipv6addr[5]  = HTONS((uint16_t)eaddr[2] << 8 | (uint16_t)eaddr[3]);
-      dev->d_ipv6addr[6]  = HTONS((uint16_t)eaddr[4] << 8 | (uint16_t)eaddr[5]);
-      dev->d_ipv6addr[7]  = HTONS((uint16_t)eaddr[6] << 8 | (uint16_t)eaddr[7]);
+      dev->d_ipv6addr[4]  = HTONS((uint16_t)eaddr[0] << 8 |
+                                  (uint16_t)eaddr[1]);
+      dev->d_ipv6addr[5]  = HTONS((uint16_t)eaddr[2] << 8 |
+                                  (uint16_t)eaddr[3]);
+      dev->d_ipv6addr[6]  = HTONS((uint16_t)eaddr[4] << 8 |
+                                  (uint16_t)eaddr[5]);
+      dev->d_ipv6addr[7]  = HTONS((uint16_t)eaddr[6] << 8 |
+                                  (uint16_t)eaddr[7]);
 
       /* Invert the U/L bit */
 
@@ -337,7 +317,8 @@ static int xbeenet_set_ipaddress(FAR struct net_driver_s *dev)
       dev->d_ipv6addr[4]  = 0;
       dev->d_ipv6addr[5]  = HTONS(0x00ff);
       dev->d_ipv6addr[6]  = HTONS(0xfe00);
-      dev->d_ipv6addr[7]  = HTONS((uint16_t)saddr[0] << 8 |  (uint16_t)saddr[1]);
+      dev->d_ipv6addr[7]  = HTONS((uint16_t)saddr[0] << 8 |
+                                  (uint16_t)saddr[1]);
       return OK;
     }
 #endif
@@ -352,8 +333,10 @@ static int xbeenet_set_ipaddress(FAR struct net_driver_s *dev)
  *
  *    128  112  96   80    64   48   32   16
  *    ---- ---- ---- ----  ---- ---- ---- ----
- *    fe80 0000 0000 0000  0000 00ff fe00 xxxx 2-byte short address IEEE 48-bit MAC
- *    fe80 0000 0000 0000  xxxx xxxx xxxx xxxx 8-byte extended address IEEE EUI-64
+ *    fe80 0000 0000 0000  0000 00ff fe00 xxxx 2-byte short address IEEE
+ *                                             48-bit MAC
+ *    fe80 0000 0000 0000  xxxx xxxx xxxx xxxx 8-byte extended address IEEE
+ *                                             EUI-64
  *
  ****************************************************************************/
 
@@ -401,18 +384,19 @@ static int xbeenet_notify(FAR struct xbee_maccb_s *maccb,
     }
 
   /* If there is a registered primitive receiver, queue the event and signal
-   * the receiver. Events should be popped from the queue from the application
-   * at a reasonable rate in order for the MAC layer to be able to allocate new
-   * primitives.
+   * the receiver. Events should be popped from the queue from the
+   * application at a reasonable rate in order for the MAC layer to be able
+   * to allocate new primitives.
    */
 
   if (priv->xd_enableevents)
     {
-      /* Get exclusive access to the driver structure.  We don't care about any
-       * signals so if we see one, just go back to trying to get access again
+      /* Get exclusive access to the driver structure.  We don't care about
+       * any signals so if we see one, just go back to trying to get access
+       * again.
        */
 
-      while (nxsem_wait(&priv->xd_exclsem) < 0);
+      while (nxmutex_lock(&priv->xd_lock) < 0);
 
       sq_addlast((FAR sq_entry_t *)primitive, &priv->primitive_queue);
 
@@ -433,12 +417,12 @@ static int xbeenet_notify(FAR struct xbee_maccb_s *maccb,
                              SI_QUEUE, &priv->xd_notify_work);
         }
 
-      nxsem_post(&priv->xd_exclsem);
+      nxmutex_unlock(&priv->xd_lock);
       return OK;
     }
 
-  /* By returning a negative value, we let the MAC know that we don't want the
-   * primitive and it will free it for us
+  /* By returning a negative value, we let the MAC know that we don't want
+   * the primitive and it will free it for us
    */
 
   return -1;
@@ -567,84 +551,11 @@ static int xbeenet_rxframe(FAR struct xbeenet_driver_s *priv,
 
 static int xbeenet_txpoll_callback(FAR struct net_driver_s *dev)
 {
-  /* If zero is returned, the polling will continue until all connections have
-   * been examined.
+  /* If zero is returned, the polling will continue until all connections
+   * have been examined.
    */
 
   return 0;
-}
-
-/****************************************************************************
- * Name: xbeenet_txpoll_work
- *
- * Description:
- *   Perform periodic polling from the worker thread
- *
- * Input Parameters:
- *   arg - The argument passed when work_queue() as called.
- *
- * Returned Value:
- *   OK on success
- *
- * Assumptions:
- *   The network is locked.
- *
- ****************************************************************************/
-
-static void xbeenet_txpoll_work(FAR void *arg)
-{
-  FAR struct xbeenet_driver_s *priv = (FAR struct xbeenet_driver_s *)arg;
-
-  /* Lock the network and serialize driver operations if necessary.
-   * NOTE: Serialization is only required in the case where the driver work
-   * is performed on an LP worker thread and where more than one LP worker
-   * thread has been configured.
-   */
-
-  net_lock();
-
-#ifdef CONFIG_NET_6LOWPAN
-  /* Make sure the our single packet buffer is attached */
-
-  priv->xd_dev.r_dev.d_buf = g_iobuffer.rb_buf;
-#endif
-
-  /* Then perform the poll */
-
-  devif_timer(&priv->xd_dev.r_dev, TXPOLL_WDDELAY, xbeenet_txpoll_callback);
-
-  /* Setup the watchdog poll timer again */
-
-  wd_start(priv->xd_txpoll, TXPOLL_WDDELAY, xbeenet_txpoll_expiry, 1,
-           (wdparm_t)priv);
-  net_unlock();
-}
-
-/****************************************************************************
- * Name: xbeenet_txpoll_expiry
- *
- * Description:
- *   Periodic timer handler.  Called from the timer interrupt handler.
- *
- * Input Parameters:
- *   argc - The number of available arguments
- *   arg  - The first argument
- *
- * Returned Value:
- *   None
- *
- * Assumptions:
- *   Global interrupts are disabled by the watchdog logic.
- *
- ****************************************************************************/
-
-static void xbeenet_txpoll_expiry(int argc, wdparm_t arg, ...)
-{
-  FAR struct xbeenet_driver_s *priv = (FAR struct xbeenet_driver_s *)arg;
-
-  /* Schedule to perform the interrupt processing on the worker thread. */
-
-  work_queue(XBEENET_WORK, &priv->xd_pollwork, xbeenet_txpoll_work, priv, 0);
 }
 
 /****************************************************************************
@@ -764,10 +675,6 @@ static int xbeenet_ifup(FAR struct net_driver_s *dev)
       wlinfo("             Node: %02x:%02x\n",
              dev->d_mac.radio.nv_addr[0], dev->d_mac.radio.nv_addr[1]);
 #endif
-      /* Set and activate a timer process */
-
-      wd_start(priv->xd_txpoll, TXPOLL_WDDELAY, xbeenet_txpoll_expiry,
-               1, (wdparm_t)priv);
 
       /* The interface is now up */
 
@@ -796,20 +703,17 @@ static int xbeenet_ifup(FAR struct net_driver_s *dev)
 
 static int xbeenet_ifdown(FAR struct net_driver_s *dev)
 {
-  FAR struct xbeenet_driver_s *priv = (FAR struct xbeenet_driver_s *)dev->d_private;
+  FAR struct xbeenet_driver_s *priv =
+    (FAR struct xbeenet_driver_s *)dev->d_private;
   irqstate_t flags;
 
   /* Disable interruption */
 
   flags = enter_critical_section();
 
-  /* Cancel the TX poll timer and TX timeout timers */
-
-  wd_cancel(priv->xd_txpoll);
-
-  /* TODO: Put the xbee driver in its reset, non-operational state.  This should be
-   * a known configuration that will guarantee the xbeenet_ifup() always
-   * successfully brings the interface back up.
+  /* TODO: Put the xbee driver in its reset, non-operational state.  This
+   * should be a known configuration that will guarantee the xbeenet_ifup()
+   * always successfully brings the interface back up.
    */
 
   /* Mark the device "down" */
@@ -889,7 +793,8 @@ static void xbeenet_txavail_work(FAR void *arg)
 
 static int xbeenet_txavail(FAR struct net_driver_s *dev)
 {
-  FAR struct xbeenet_driver_s *priv = (FAR struct xbeenet_driver_s *)dev->d_private;
+  FAR struct xbeenet_driver_s *priv =
+    (FAR struct xbeenet_driver_s *)dev->d_private;
 
   wlinfo("Available=%u\n", work_available(&priv->xd_pollwork));
 
@@ -902,7 +807,8 @@ static int xbeenet_txavail(FAR struct net_driver_s *dev)
     {
       /* Schedule to serialize the poll on the worker thread. */
 
-      work_queue(XBEENET_WORK, &priv->xd_pollwork, xbeenet_txavail_work, priv, 0);
+      work_queue(XBEENET_WORK, &priv->xd_pollwork, xbeenet_txavail_work,
+                 priv, 0);
     }
 
   return OK;
@@ -927,9 +833,11 @@ static int xbeenet_txavail(FAR struct net_driver_s *dev)
  ****************************************************************************/
 
 #ifdef CONFIG_NET_MCASTGROUP
-static int xbeenet_addmac(FAR struct net_driver_s *dev, FAR const uint8_t *mac)
+static int xbeenet_addmac(FAR struct net_driver_s *dev,
+                          FAR const uint8_t *mac)
 {
-  FAR struct xbeenet_driver_s *priv = (FAR struct xbeenet_driver_s *)dev->d_private;
+  FAR struct xbeenet_driver_s *priv =
+    (FAR struct xbeenet_driver_s *)dev->d_private;
 
   /* Add the MAC address to the hardware multicast routing table.  Not used
    * with IEEE 802.15.4 radios.
@@ -943,8 +851,8 @@ static int xbeenet_addmac(FAR struct net_driver_s *dev, FAR const uint8_t *mac)
  * Name: xbeenet_rmmac
  *
  * Description:
- *   NuttX Callback: Remove the specified MAC address from the hardware multicast
- *   address filtering
+ *   NuttX Callback: Remove the specified MAC address from the hardware
+ *   multicast address filtering
  *
  * Input Parameters:
  *   dev  - Reference to the NuttX driver state structure
@@ -958,12 +866,14 @@ static int xbeenet_addmac(FAR struct net_driver_s *dev, FAR const uint8_t *mac)
  ****************************************************************************/
 
 #ifdef CONFIG_NET_MCASTGROUP
-static int xbeenet_rmmac(FAR struct net_driver_s *dev, FAR const uint8_t *mac)
+static int xbeenet_rmmac(FAR struct net_driver_s *dev,
+                         FAR const uint8_t *mac)
 {
-  FAR struct xbeenet_driver_s *priv = (FAR struct xbeenet_driver_s *)dev->d_private;
+  FAR struct xbeenet_driver_s *priv =
+    (FAR struct xbeenet_driver_s *)dev->d_private;
 
-  /* Remove the MAC address from the hardware multicast routing table  Not used
-   * with IEEE 802.15.4 radios.
+  /* Remove the MAC address from the hardware multicast routing table.  Not
+   * used with IEEE 802.15.4 radios.
    */
 
   return -ENOSYS;
@@ -992,10 +902,11 @@ static int xbeenet_rmmac(FAR struct net_driver_s *dev, FAR const uint8_t *mac)
 static int xbeenet_ioctl(FAR struct net_driver_s *dev, int cmd,
                         unsigned long arg)
 {
-  FAR struct xbeenet_driver_s *priv = (FAR struct xbeenet_driver_s *)dev->d_private;
+  FAR struct xbeenet_driver_s *priv =
+    (FAR struct xbeenet_driver_s *)dev->d_private;
   int ret = -EINVAL;
 
-  ret = nxsem_wait(&priv->xd_exclsem);
+  ret = nxmutex_lock(&priv->xd_lock);
   if (ret < 0)
     {
       wlerr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -1016,12 +927,13 @@ static int xbeenet_ioctl(FAR struct net_driver_s *dev, int cmd,
           switch (cmd)
             {
               /* Command:     MAC802154IOC_NOTIFY_REGISTER
-               * Description: Register to receive a signal whenever there is a
-               *              event primitive sent from the MAC layer.
+               * Description: Register to receive a signal whenever there is
+               *              an event primitive sent from the MAC layer.
                * Argument:    A read-only pointer to an instance of struct
                *              xbeenet_notify_s
-               * Return:      Zero (OK) on success.  Minus one will be returned on
-               *              failure with the errno value set appropriately.
+               * Return:      Zero (OK) on success.  Minus one will be
+               *              returned on failure with the errno value set
+               *              appropriately.
                */
 
               case MAC802154IOC_NOTIFY_REGISTER:
@@ -1029,7 +941,7 @@ static int xbeenet_ioctl(FAR struct net_driver_s *dev, int cmd,
                   /* Save the notification events */
 
                   priv->xd_notify_event       = netmac->u.event;
-                  priv->xd_notify_pid         = getpid();
+                  priv->xd_notify_pid         = nxsched_getpid();
                   priv->xd_notify_registered  = true;
                   ret = OK;
                 }
@@ -1046,8 +958,8 @@ static int xbeenet_ioctl(FAR struct net_driver_s *dev, int cmd,
                       primitive = (FAR struct ieee802154_primitive_s *)
                                       sq_remfirst(&priv->primitive_queue);
 
-                      /* If there was an event to pop off, copy it into the user
-                       * data and free it from the MAC layer's memory.
+                      /* If there was an event to pop off, copy it into the
+                       * user data and free it from the MAC layer's memory.
                        */
 
                       if (primitive != NULL)
@@ -1071,7 +983,7 @@ static int xbeenet_ioctl(FAR struct net_driver_s *dev, int cmd,
                         }
 
                       priv->xd_eventpending = true;
-                      nxsem_post(&priv->xd_exclsem);
+                      nxmutex_unlock(&priv->xd_lock);
 
                       /* Wait to be signaled when an event is queued */
 
@@ -1082,11 +994,11 @@ static int xbeenet_ioctl(FAR struct net_driver_s *dev, int cmd,
                           return ret;
                         }
 
-                      /* Get exclusive access again, then loop back around and try and
-                       * pop an event off the queue
+                      /* Get exclusive access again, then loop back around
+                       * and try and pop an event off the queue
                        */
 
-                      ret = nxsem_wait(&priv->xd_exclsem);
+                      ret = nxmutex_lock(&priv->xd_lock);
                       if (ret < 0)
                         {
                           wlerr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -1119,7 +1031,7 @@ static int xbeenet_ioctl(FAR struct net_driver_s *dev, int cmd,
      ret = xbee_ioctl(priv->xd_mac, cmd, arg);
    }
 
-  nxsem_post(&priv->xd_exclsem);
+  nxmutex_unlock(&priv->xd_lock);
   return ret;
 }
 #endif
@@ -1206,13 +1118,13 @@ static int xbeenet_req_data(FAR struct radio_driver_s *netdev,
         {
           wlerr("ERROR: xbeemac_req_data failed: %d\n", ret);
 
-          iob_free(iob, IOBUSER_WIRELESS_RAD802154);
+          iob_free(iob);
           for (iob = framelist; iob != NULL; iob = framelist)
             {
               /* Remove the IOB from the queue and free */
 
               framelist = iob->io_flink;
-              iob_free(iob, IOBUSER_WIRELESS_RAD802154);
+              iob_free(iob);
             }
 
           NETDEV_TXERRORS(&priv->xd_dev.r_dev);
@@ -1352,18 +1264,12 @@ int xbee_netdev_register(XBEEHANDLE xbee)
  #ifdef CONFIG_NETDEV_IOCTL
   dev->d_ioctl        = xbeenet_ioctl;      /* Handle network IOCTL commands */
 #endif
-  dev->d_private      = (FAR void *)priv;  /* Used to recover private state from dev */
-
-  /* Create a watchdog for timing polling for and timing of transmissions */
-
+  dev->d_private      = priv;               /* Used to recover private state from dev */
   priv->xd_mac        = xbee;               /* Save the MAC interface instance */
-  priv->xd_txpoll     = wd_create();       /* Create periodic poll timer */
 
-  /* Setup a locking semaphore for exclusive device driver access */
+  /* Setup a locking mutex for exclusive device driver access */
 
-  nxsem_init(&priv->xd_exclsem, 0, 1);
-
-  DEBUGASSERT(priv->xd_txpoll != NULL);
+  nxmutex_init(&priv->xd_lock);
 
   /* Set the network mask. */
 
@@ -1379,7 +1285,6 @@ int xbee_netdev_register(XBEEHANDLE xbee)
 
   priv->xd_eventpending = false;
   nxsem_init(&priv->xd_eventsem, 0, 0);
-  nxsem_setprotocol(&priv->xd_eventsem, SEM_PRIO_NONE);
 
   sq_init(&priv->primitive_queue);
 
@@ -1402,10 +1307,6 @@ int xbee_netdev_register(XBEEHANDLE xbee)
     {
       nerr("ERROR: Failed to bind the XBee MAC callbacks: %d\n", ret);
 
-      /* Release wdog timers */
-
-      wd_delete(priv->xd_txpoll);
-
       /* Free memory and return the error */
 
       kmm_free(priv);
@@ -1417,9 +1318,9 @@ int xbee_netdev_register(XBEEHANDLE xbee)
   xbeenet_ifdown(dev);
 
 #ifdef CONFIG_NET_6LOWPAN
-  /* Make sure the our single packet buffer is attached. We must do this before
-   * registering the device since, once the device is registered, a packet may
-   * be attempted to be forwarded and require the buffer.
+  /* Make sure the our single packet buffer is attached. We must do this
+   * before registering the device since, once the device is registered, a
+   * packet may be attempted to be forwarded and require the buffer.
    */
 
   priv->xd_dev.r_dev.d_buf = g_iobuffer.rb_buf;

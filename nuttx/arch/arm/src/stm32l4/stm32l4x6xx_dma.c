@@ -1,37 +1,22 @@
 /****************************************************************************
  * arch/arm/src/stm32l4/stm32l4x6xx_dma.c
  *
- *   Copyright (C) 2009, 2011-2013, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *           Sebastien Lorquet <sebastien@lorquet.fr>
- *           dev@ziggurat29.com
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,6 +28,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
@@ -51,8 +37,7 @@
 #include <arch/irq.h>
 #include <nuttx/semaphore.h>
 
-#include "up_arch.h"
-#include "up_internal.h"
+#include "arm_internal.h"
 #include "sched/sched.h"
 #include "chip.h"
 #include "stm32l4_dma.h"
@@ -102,72 +87,86 @@ static struct stm32l4_dma_s g_dma[DMA_NCHANNELS] =
   {
     .chan     = 0,
     .irq      = STM32L4_IRQ_DMA1CH1,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA1_BASE + STM32L4_DMACHAN_OFFSET(0),
   },
   {
     .chan     = 1,
     .irq      = STM32L4_IRQ_DMA1CH2,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA1_BASE + STM32L4_DMACHAN_OFFSET(1),
   },
   {
     .chan     = 2,
     .irq      = STM32L4_IRQ_DMA1CH3,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA1_BASE + STM32L4_DMACHAN_OFFSET(2),
   },
   {
     .chan     = 3,
     .irq      = STM32L4_IRQ_DMA1CH4,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA1_BASE + STM32L4_DMACHAN_OFFSET(3),
   },
   {
     .chan     = 4,
     .irq      = STM32L4_IRQ_DMA1CH5,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA1_BASE + STM32L4_DMACHAN_OFFSET(4),
   },
   {
     .chan     = 5,
     .irq      = STM32L4_IRQ_DMA1CH6,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA1_BASE + STM32L4_DMACHAN_OFFSET(5),
   },
   {
     .chan     = 6,
     .irq      = STM32L4_IRQ_DMA1CH7,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA1_BASE + STM32L4_DMACHAN_OFFSET(6),
   },
 #if STM32L4_NDMA > 1
   {
     .chan     = 0,
     .irq      = STM32L4_IRQ_DMA2CH1,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA2_BASE + STM32L4_DMACHAN_OFFSET(0),
   },
   {
     .chan     = 1,
     .irq      = STM32L4_IRQ_DMA2CH2,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA2_BASE + STM32L4_DMACHAN_OFFSET(1),
   },
   {
     .chan     = 2,
     .irq      = STM32L4_IRQ_DMA2CH3,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA2_BASE + STM32L4_DMACHAN_OFFSET(2),
   },
   {
     .chan     = 3,
     .irq      = STM32L4_IRQ_DMA2CH4,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA2_BASE + STM32L4_DMACHAN_OFFSET(3),
   },
   {
     .chan     = 4,
     .irq      = STM32L4_IRQ_DMA2CH5,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA2_BASE + STM32L4_DMACHAN_OFFSET(4),
   },
   {
     .chan     = 5,
     .irq      = STM32L4_IRQ_DMA2CH6,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA2_BASE + STM32L4_DMACHAN_OFFSET(5),
   },
   {
     .chan     = 6,
     .irq      = STM32L4_IRQ_DMA2CH7,
+    .sem      = SEM_INITIALIZER(1),
     .base     = STM32L4_DMA2_BASE + STM32L4_DMACHAN_OFFSET(6),
   },
 #endif
@@ -214,24 +213,6 @@ static inline void dmachan_putreg(struct stm32l4_dma_s *dmach,
 }
 
 /****************************************************************************
- * Name: stm32l4_dmatake() and stm32l4_dmagive()
- *
- * Description:
- *   Used to get exclusive access to a DMA channel.
- *
- ****************************************************************************/
-
-static int stm32l4_dmatake(FAR struct stm32l4_dma_s *dmach)
-{
-  return nxsem_wait_uninterruptible(&dmach->sem);
-}
-
-static inline void stm32l4_dmagive(FAR struct stm32l4_dma_s *dmach)
-{
-  nxsem_post(&dmach->sem);
-}
-
-/****************************************************************************
  * Name: stm32l4_dmachandisable
  *
  * Description:
@@ -267,7 +248,7 @@ static void stm32l4_dmachandisable(struct stm32l4_dma_s *dmach)
  *
  ****************************************************************************/
 
-static int stm32l4_dmainterrupt(int irq, void *context, FAR void *arg)
+static int stm32l4_dmainterrupt(int irq, void *context, void *arg)
 {
   struct stm32l4_dma_s *dmach;
   uint32_t isr;
@@ -332,7 +313,7 @@ static int stm32l4_dmainterrupt(int irq, void *context, FAR void *arg)
  *
  ****************************************************************************/
 
-void weak_function up_dma_initialize(void)
+void weak_function arm_dma_initialize(void)
 {
   struct stm32l4_dma_s *dmach;
   int chndx;
@@ -342,7 +323,6 @@ void weak_function up_dma_initialize(void)
   for (chndx = 0; chndx < DMA_NCHANNELS; chndx++)
     {
       dmach = &g_dma[chndx];
-      nxsem_init(&dmach->sem, 0, 1);
 
       /* Attach DMA interrupt vectors */
 
@@ -408,7 +388,7 @@ DMA_HANDLE stm32l4_dmachannel(unsigned int chndef)
    * is available if it is currently being used by another driver
    */
 
-  ret = stm32l4_dmatake(dmach);
+  ret = nxsem_wait_uninterruptible(&dmach->sem);
   if (ret < 0)
     {
       return NULL;
@@ -453,7 +433,7 @@ void stm32l4_dmafree(DMA_HANDLE handle)
 
   /* Release the channel */
 
-  stm32l4_dmagive(dmach);
+  nxsem_post(&dmach->sem);
 }
 
 /****************************************************************************

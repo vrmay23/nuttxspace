@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/net/lan91c111.c
  *
- *   Copyright (C) 2018 Pinecone Inc. All rights reserved.
- *   Author: Xiang Xiao <xiaoxiang@pinecone.net>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,13 +33,15 @@
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
-#include <nuttx/wdog.h>
 #include <nuttx/wqueue.h>
 
-#include <nuttx/net/arp.h>
-#include <nuttx/net/lan91c111.h>
+#include <nuttx/net/ip.h>
 #include <nuttx/net/netdev.h>
-#include <nuttx/net/pkt.h>
+#include <nuttx/net/lan91c111.h>
+
+#ifdef CONFIG_NET_PKT
+#  include <nuttx/net/pkt.h>
+#endif
 
 #include "lan91c111.h"
 
@@ -83,10 +72,6 @@
 #  define lan91c111_dumppacket(m, b, l)
 #endif
 
-/* TX poll delay = 1 seconds. CLK_TCK is the number of clock ticks per second */
-
-#define LAN91C111_WDDELAY       (1*CLK_TCK)
-
 /* MII busy delay = 1 microsecond */
 
 #define LAN91C111_MIIDELAY      1
@@ -101,13 +86,12 @@
 
 struct lan91c111_driver_s
 {
-  uintptr_t base;           /* Base address */
-  int       irq;            /* IRQ number */
-  uint16_t  bank;           /* Current bank */
-  WDOG_ID txpoll;           /* TX poll timer */
-  struct work_s irqwork;    /* For deferring interrupt work to the work queue */
-  struct work_s pollwork;   /* For deferring poll work to the work queue */
-  uint8_t pktbuf[MAX_NETDEV_PKTSIZE + 4]; /* +4 due to getregs32/putregs32 */
+  uintptr_t base;                                     /* Base address */
+  int       irq;                                      /* IRQ number */
+  struct work_s irqwork;                              /* For deferring interrupt work to the work queue */
+  struct work_s pollwork;                             /* For deferring poll work to the work queue */
+  uint16_t  bank;                                     /* Current bank */
+  uint16_t  pktbuf[(MAX_NETDEV_PKTSIZE + 4 + 1) / 2]; /* +4 due to getregs32/putregs32 */
 
   /* This holds the information visible to the NuttX network */
 
@@ -132,11 +116,6 @@ static void lan91c111_txdone(FAR struct net_driver_s *dev);
 static void lan91c111_interrupt_work(FAR void *arg);
 static int  lan91c111_interrupt(int irq, FAR void *context, FAR void *arg);
 
-/* Watchdog timer expirations */
-
-static void lan91c111_poll_work(FAR void *arg);
-static void lan91c111_poll_expiry(int argc, wdparm_t arg, ...);
-
 /* NuttX callback functions */
 
 static int  lan91c111_ifup(FAR struct net_driver_s *dev);
@@ -151,9 +130,6 @@ static int  lan91c111_addmac(FAR struct net_driver_s *dev,
 #ifdef CONFIG_NET_MCASTGROUP
 static int  lan91c111_rmmac(FAR struct net_driver_s *dev,
               FAR const uint8_t *mac);
-#endif
-#ifdef CONFIG_NET_ICMPv6
-static void lan91c111_ipv6multicast(FAR struct net_driver_s *dev);
 #endif
 #endif
 #ifdef CONFIG_NETDEV_IOCTL
@@ -187,7 +163,8 @@ static uint8_t getreg8(FAR struct lan91c111_driver_s *priv, uint16_t offset)
   return *(FAR volatile uint8_t *)(priv->base + offset);
 }
 
-static uint16_t getreg16(FAR struct lan91c111_driver_s *priv, uint16_t offset)
+static uint16_t getreg16(FAR struct lan91c111_driver_s *priv,
+                         uint16_t offset)
 {
   offset = updatebank(priv, offset);
   return *(FAR volatile uint16_t *)(priv->base + offset);
@@ -521,49 +498,15 @@ static int lan91c111_txpoll(FAR struct net_driver_s *dev)
 {
   FAR struct lan91c111_driver_s *priv = dev->d_private;
 
-  /* If the polling resulted in data that should be sent out on the network,
-   * the field d_len is set to a value > 0.
+  /* Send the packet */
+
+  lan91c111_transmit(dev);
+
+  /* Check if there is room in the device to hold another packet.  If
+   * not, return a non-zero value to terminate the poll.
    */
 
-  if (dev->d_len > 0)
-    {
-      /* Look up the destination MAC address and add it to the Ethernet
-       * header.
-       */
-
-#ifdef CONFIG_NET_IPv4
-      if (IFF_IS_IPv4(dev->d_flags))
-        {
-          arp_out(dev);
-        }
-#endif /* CONFIG_NET_IPv4 */
-
-#ifdef CONFIG_NET_IPv6
-      if (IFF_IS_IPv6(dev->d_flags))
-        {
-          neighbor_out(dev);
-        }
-#endif /* CONFIG_NET_IPv6 */
-
-      if (!devif_loopback(dev))
-        {
-          /* Send the packet */
-
-          lan91c111_transmit(dev);
-
-          /* Check if there is room in the device to hold another packet.  If
-           * not, return a non-zero value to terminate the poll.
-           */
-
-          return !(getreg16(priv, MIR_REG) & MIR_FREE_MASK);
-        }
-    }
-
-  /* If zero is returned, the polling will continue until all connections have
-   * been examined.
-   */
-
-  return 0;
+  return !(getreg16(priv, MIR_REG) & MIR_FREE_MASK);
 }
 
 /****************************************************************************
@@ -593,22 +536,6 @@ static void lan91c111_reply(FAR struct net_driver_s *dev)
 
   if (dev->d_len > 0)
     {
-      /* Update the Ethernet header with the correct MAC address */
-
-#ifdef CONFIG_NET_IPv4
-      if (IFF_IS_IPv4(dev->d_flags))
-        {
-          arp_out(dev);
-        }
-#endif
-
-#ifdef CONFIG_NET_IPv6
-      if (IFF_IS_IPv6(dev->d_flags))
-        {
-          neighbor_out(dev);
-        }
-#endif
-
       /* And send the packet */
 
       lan91c111_transmit(dev);
@@ -691,7 +618,7 @@ static void lan91c111_receive(FAR struct net_driver_s *dev)
   NETDEV_RXPACKETS(dev);
 
 #ifdef CONFIG_NET_PKT
-  /* When packet sockets are enabled, feed the frame into the packet tap */
+  /* When packet sockets are enabled, feed the frame into the tap */
 
   pkt_input(dev);
 #endif
@@ -704,11 +631,8 @@ static void lan91c111_receive(FAR struct net_driver_s *dev)
       ninfo("IPv4 frame\n");
       NETDEV_RXIPV4(dev);
 
-      /* Handle ARP on input, then dispatch IPv4 packet to the network
-       * layer.
-       */
+      /* Receive an IPv4 packet from the network device */
 
-      arp_ipin(dev);
       ipv4_input(dev);
 
       /* Check for a reply to the IPv4 packet */
@@ -734,14 +658,14 @@ static void lan91c111_receive(FAR struct net_driver_s *dev)
   else
 #endif
 #ifdef CONFIG_NET_ARP
-  if (eth->type == htons(ETHTYPE_ARP))
+  if (eth->type == HTONS(ETHTYPE_ARP))
     {
       ninfo("ARP frame\n");
       NETDEV_RXARP(dev);
 
       /* Dispatch ARP packet to the network layer */
 
-      arp_arpin(dev);
+      arp_input(dev);
 
       /* Check for a reply to the ARP packet */
 
@@ -810,7 +734,7 @@ static void lan91c111_txdone(FAR struct net_driver_s *dev)
     }
   else
     {
-      DEBUGASSERT(0);
+      DEBUGPANIC();
     }
 }
 
@@ -904,7 +828,9 @@ static void lan91c111_interrupt_work(FAR void *arg)
 
       /* Handle interrupts according to status bit settings */
 
-      /* Check if we received an incoming packet, if so, call lan91c111_receive() */
+      /* Check if we received an incoming packet,
+       * if so, call lan91c111_receive()
+       */
 
       if (status & IM_RCV_INT)
         {
@@ -916,14 +842,18 @@ static void lan91c111_interrupt_work(FAR void *arg)
           NETDEV_RXERRORS(dev);
         }
 
-      /* Check if a packet transmission just completed.  If so, call lan91c111_txdone. */
+      /* Check if a packet transmission just completed.
+       * If so, call lan91c111_txdone.
+       */
 
       if (status & IM_TX_INT)
         {
           lan91c111_txdone(dev);
         }
 
-      /* Check if we have the phy interrupt, if so, call lan91c111_phy_notify() */
+      /* Check if we have the phy interrupt,
+       * if so, call lan91c111_phy_notify()
+       */
 
       if (status & IM_MDINT)
         {
@@ -985,88 +915,6 @@ static int lan91c111_interrupt(int irq, FAR void *context, FAR void *arg)
 }
 
 /****************************************************************************
- * Name: lan91c111_poll_work
- *
- * Description:
- *   Perform periodic polling from the worker thread
- *
- * Parameters:
- *   arg - The argument passed when work_queue() as called.
- *
- * Returned Value:
- *   OK on success
- *
- * Assumptions:
- *   Run on a work queue thread.
- *
- ****************************************************************************/
-
-static void lan91c111_poll_work(FAR void *arg)
-{
-  FAR struct net_driver_s *dev = arg;
-  FAR struct lan91c111_driver_s *priv = dev->d_private;
-
-  /* Lock the network and serialize driver operations if necessary.
-   * NOTE: Serialization is only required in the case where the driver work
-   * is performed on an LP worker thread and where more than one LP worker
-   * thread has been configured.
-   */
-
-  net_lock();
-
-  /* Perform the poll */
-
-  /* Check if there is room in the send another TX packet.  We cannot perform
-   * the TX poll if he are unable to accept another packet for transmission.
-   */
-
-  if (getreg16(priv, MIR_REG) & MIR_FREE_MASK)
-    {
-      /* If so, update TCP timing states and poll the network for new XMIT
-       * data.  Hmmm.. might be bug here.  Does this mean if there is a
-       * transmit in progress, we will missing TCP time state updates?
-       */
-
-      devif_timer(dev, LAN91C111_WDDELAY, lan91c111_txpoll);
-    }
-
-  /* Setup the watchdog poll timer again */
-
-  wd_start(priv->txpoll, LAN91C111_WDDELAY, lan91c111_poll_expiry, 1,
-           (wdparm_t)dev);
-  net_unlock();
-}
-
-/****************************************************************************
- * Name: lan91c111_poll_expiry
- *
- * Description:
- *   Periodic timer handler.  Called from the timer interrupt handler.
- *
- * Parameters:
- *   argc - The number of available arguments
- *   arg  - The first argument
- *
- * Returned Value:
- *   None
- *
- * Assumptions:
- *   Runs in the context of a the timer interrupt handler.  Local
- *   interrupts are disabled by the interrupt logic.
- *
- ****************************************************************************/
-
-static void lan91c111_poll_expiry(int argc, wdparm_t arg, ...)
-{
-  FAR struct net_driver_s *dev = (FAR struct net_driver_s *)arg;
-  FAR struct lan91c111_driver_s *priv = dev->d_private;
-
-  /* Schedule to perform the interrupt processing on the worker thread. */
-
-  work_queue(LAN91C111_WORK, &priv->pollwork, lan91c111_poll_work, dev, 0);
-}
-
-/****************************************************************************
  * Name: lan91c111_ifup
  *
  * Description:
@@ -1089,9 +937,9 @@ static int lan91c111_ifup(FAR struct net_driver_s *dev)
   FAR struct lan91c111_driver_s *priv = dev->d_private;
 
 #ifdef CONFIG_NET_IPv4
-  ninfo("Bringing up: %d.%d.%d.%d\n",
-        dev->d_ipaddr & 0xff, (dev->d_ipaddr >> 8) & 0xff,
-        (dev->d_ipaddr >> 16) & 0xff, dev->d_ipaddr >> 24);
+  ninfo("Bringing up: %u.%u.%u.%u\n",
+        ip4_addr1(dev->d_ipaddr), ip4_addr2(dev->d_ipaddr),
+        ip4_addr3(dev->d_ipaddr), ip4_addr4(dev->d_ipaddr));
 #endif
 #ifdef CONFIG_NET_IPv6
   ninfo("Bringing up: %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
@@ -1102,7 +950,7 @@ static int lan91c111_ifup(FAR struct net_driver_s *dev)
 
   net_lock();
 
-  /* Initialize PHYs, the Ethernet interface, and setup up Ethernet interrupts */
+  /* Initialize PHYs, Ethernet interface, and setup up Ethernet interrupts */
 
   putreg16(priv, CONFIG_REG, CONFIG_DEFAULT);
   putreg16(priv, CTL_REG, CTL_DEFAULT);
@@ -1125,16 +973,6 @@ static int lan91c111_ifup(FAR struct net_driver_s *dev)
 
   copyto16(priv, ADDR0_REG, &dev->d_mac.ether, sizeof(dev->d_mac.ether));
 
-#ifdef CONFIG_NET_ICMPv6
-  /* Set up IPv6 multicast address filtering */
-
-  lan91c111_ipv6multicast(dev);
-#endif
-
-  /* Set and activate a timer process */
-
-  wd_start(priv->txpoll, LAN91C111_WDDELAY, lan91c111_poll_expiry, 1,
-           (wdparm_t)dev);
   net_unlock();
 
   /* Enable the Ethernet interrupt */
@@ -1169,10 +1007,6 @@ static int lan91c111_ifdown(FAR struct net_driver_s *dev)
 
   flags = enter_critical_section();
   up_disable_irq(priv->irq);
-
-  /* Cancel the TX poll timer and work */
-
-  wd_cancel(priv->txpoll);
 
   work_cancel(LAN91C111_WORK, &priv->irqwork);
   work_cancel(LAN91C111_WORK, &priv->pollwork);
@@ -1408,76 +1242,6 @@ static int lan91c111_rmmac(FAR struct net_driver_s *dev,
 #endif
 
 /****************************************************************************
- * Name: lan91c111_ipv6multicast
- *
- * Description:
- *   Configure the IPv6 multicast MAC address.
- *
- * Parameters:
- *   dev  - Reference to the NuttX driver state structure
- *
- * Returned Value:
- *   Zero (OK) on success; a negated errno value on failure.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_NET_ICMPv6
-static void lan91c111_ipv6multicast(FAR struct net_driver_s *dev)
-{
-  uint16_t tmp16;
-  uint8_t mac[6];
-
-  /* For ICMPv6, we need to add the IPv6 multicast address
-   *
-   * For IPv6 multicast addresses, the Ethernet MAC is derived by
-   * the four low-order octets OR'ed with the MAC 33:33:00:00:00:00,
-   * so for example the IPv6 address FF02:DEAD:BEEF::1:3 would map
-   * to the Ethernet MAC address 33:33:00:01:00:03.
-   *
-   * NOTES:  This appears correct for the ICMPv6 Router Solicitation
-   * Message, but the ICMPv6 Neighbor Solicitation message seems to
-   * use 33:33:ff:01:00:03.
-   */
-
-  mac[0] = 0x33;
-  mac[1] = 0x33;
-
-  tmp16  = dev->d_ipv6addr[6];
-  mac[2] = 0xff;
-  mac[3] = tmp16 >> 8;
-
-  tmp16  = dev->d_ipv6addr[7];
-  mac[4] = tmp16 & 0xff;
-  mac[5] = tmp16 >> 8;
-
-  ninfo("IPv6 Multicast: %02x:%02x:%02x:%02x:%02x:%02x\n",
-        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-
-  lan91c111_addmac(dev, mac);
-
-#ifdef CONFIG_NET_ICMPv6_AUTOCONF
-  /* Add the IPv6 all link-local nodes Ethernet address.  This is the
-   * address that we expect to receive ICMPv6 Router Advertisement
-   * packets.
-   */
-
-  lan91c111_addmac(dev, g_ipv6_ethallnodes.ether_addr_octet);
-
-#endif /* CONFIG_NET_ICMPv6_AUTOCONF */
-
-#ifdef CONFIG_NET_ICMPv6_ROUTER
-  /* Add the IPv6 all link-local routers Ethernet address.  This is the
-   * address that we expect to receive ICMPv6 Router Solicitation
-   * packets.
-   */
-
-  lan91c111_addmac(dev, g_ipv6_ethallrouters.ether_addr_octet);
-
-#endif /* CONFIG_NET_ICMPv6_ROUTER */
-}
-#endif /* CONFIG_NET_ICMPv6 */
-
-/****************************************************************************
  * Name: lan91c111_ioctl
  *
  * Description:
@@ -1501,7 +1265,7 @@ static int lan91c111_ioctl(FAR struct net_driver_s *dev, int cmd,
                            unsigned long arg)
 {
   FAR struct lan91c111_driver_s *priv = dev->d_private;
-  struct mii_ioctl_data_s *req = (void *)arg;
+  FAR struct mii_ioctl_data_s *req = (FAR void *)arg;
   int ret = OK;
 
   net_lock();
@@ -1580,7 +1344,8 @@ int lan91c111_initialize(uintptr_t base, int irq)
   macrev = getreg16(priv, REV_REG);
   phyid  = getphy(priv, MII_PHYID1) << 16;
   phyid |= getphy(priv, MII_PHYID2);
-  ninfo("base: %08x irq: %d rev: %04x phy: %08x\n", base, irq, macrev, phyid);
+  ninfo("base: %08x irq: %d rev: %04x phy: %08x\n",
+        base, irq, macrev, phyid);
 
   if ((macrev >> 4 & 0x0f) != CHIP_91111FD || phyid != PHY_LAN83C183)
     {
@@ -1601,23 +1366,18 @@ int lan91c111_initialize(uintptr_t base, int irq)
 
   /* Initialize the driver structure */
 
-  dev->d_buf     = priv->pktbuf;      /* Single packet buffer */
-  dev->d_ifup    = lan91c111_ifup;    /* I/F up (new IP address) callback */
-  dev->d_ifdown  = lan91c111_ifdown;  /* I/F down callback */
-  dev->d_txavail = lan91c111_txavail; /* New TX data callback */
+  dev->d_buf     = (FAR uint8_t *)priv->pktbuf; /* Single packet buffer */
+  dev->d_ifup    = lan91c111_ifup;              /* I/F up (new IP address) callback */
+  dev->d_ifdown  = lan91c111_ifdown;            /* I/F down callback */
+  dev->d_txavail = lan91c111_txavail;           /* New TX data callback */
 #ifdef CONFIG_NET_MCASTGROUP
-  dev->d_addmac  = lan91c111_addmac;  /* Add multicast MAC address */
-  dev->d_rmmac   = lan91c111_rmmac;   /* Remove multicast MAC address */
+  dev->d_addmac  = lan91c111_addmac;            /* Add multicast MAC address */
+  dev->d_rmmac   = lan91c111_rmmac;             /* Remove multicast MAC address */
 #endif
 #ifdef CONFIG_NETDEV_IOCTL
-  dev->d_ioctl   = lan91c111_ioctl;   /* Handle network IOCTL commands */
+  dev->d_ioctl   = lan91c111_ioctl;             /* Handle network IOCTL commands */
 #endif
-  dev->d_private = priv;              /* Used to recover private state from dev */
-
-  /* Create a watchdog for timing polling for transmissions */
-
-  priv->txpoll   = wd_create();       /* Create periodic poll timer */
-  DEBUGASSERT(priv->txpoll != NULL);
+  dev->d_private = priv;                        /* Used to recover private state from dev */
 
   /* Put the interface in the down state. This usually amounts to resetting
    * the device and/or calling lan91c111_ifdown().
@@ -1636,7 +1396,7 @@ int lan91c111_initialize(uintptr_t base, int irq)
       /* Loop, reset don't finish yet */
     }
 
-  /* Read the MAC address from the hardware into dev->d_mac.ether.ether_addr_octet */
+  /* Read MAC address from the hardware into dev->d_mac.ether */
 
   copyfrom16(priv, ADDR0_REG, &dev->d_mac.ether, sizeof(dev->d_mac.ether));
 

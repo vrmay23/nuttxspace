@@ -1,17 +1,10 @@
 /****************************************************************************
  * arch/arm/src/sam34/sam_twi.c
  *
- *   Copyright (C) 2013, 2015-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * References:
- *   SAMA34 Series Data Sheet
- *   Atmel NoOS sample code.
- *
- * The Atmel sample code has a BSD compatible license that requires this
- * copyright notice:
- *
- *    Copyright (c) 2011, Atmel Corporation
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2013, 2015-2017 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2011, Atmel Corporation
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -42,6 +35,11 @@
  *
  ****************************************************************************/
 
+/* References:
+ *   SAMA34 Series Data Sheet
+ *   Atmel NoOS sample code.
+ */
+
 /****************************************************************************
  * Included Files
  ****************************************************************************/
@@ -51,19 +49,20 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/wdog.h>
 #include <nuttx/arch.h>
+#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/i2c/i2c_master.h>
 
 #include <nuttx/irq.h>
 #include <arch/board/board.h>
 
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "hardware/sam_pmc.h"
 #include "hardware/sam_pinmap.h"
 
@@ -119,9 +118,9 @@ struct twi_dev_s
   uint8_t             twi;        /* TWI peripheral number (for debug output) */
   uint8_t             pid;        /* TWI peripheral ID */
 
-  sem_t               exclsem;    /* Only one thread can access at a time */
+  mutex_t             lock;       /* Only one thread can access at a time */
   sem_t               waitsem;    /* Wait for TWI transfer completion */
-  WDOG_ID             timeout;    /* Watchdog to recover from bus hangs */
+  struct wdog_s       timeout;    /* Watchdog to recover from bus hangs */
   volatile int        result;     /* The result of the transfer */
   volatile int        xfrd;       /* Number of bytes transfers */
 
@@ -139,11 +138,6 @@ struct twi_dev_s
  * Private Function Prototypes
  ****************************************************************************/
 
-/* Low-level helper functions */
-
-static void twi_takesem(sem_t *sem);
-#define     twi_givesem(sem) (nxsem_post(sem))
-
 #ifdef CONFIG_SAM34_TWI_REGDEBUG
 static bool twi_checkreg(struct twi_dev_s *priv, bool wr,
               uint32_t value, uintptr_t address);
@@ -151,9 +145,9 @@ static uint32_t twi_getabs(struct twi_dev_s *priv, uintptr_t address);
 static void twi_putabs(struct twi_dev_s *priv, uintptr_t address,
               uint32_t value);
 #else
-# define    twi_checkreg(priv,wr,value,address) (false)
-# define    twi_putabs(p,a,v) putreg32(v,a)
-# define    twi_getabs(p,a) getreg32(a)
+#  define   twi_checkreg(priv,wr,value,address) (false)
+#  define   twi_putabs(p,a,v) putreg32(v,a)
+#  define   twi_getabs(p,a) getreg32(a)
 #endif
 
 static inline uint32_t twi_getrel(struct twi_dev_s *priv,
@@ -165,8 +159,8 @@ static inline void twi_putrel(struct twi_dev_s *priv, unsigned int offset,
 
 static int  twi_wait(struct twi_dev_s *priv);
 static void twi_wakeup(struct twi_dev_s *priv, int result);
-static int  twi_interrupt(int irq, FAR void *context, FAR void *arg);
-static void twi_timeout(int argc, uint32_t arg, ...);
+static int  twi_interrupt(int irq, void *context, void *arg);
+static void twi_timeout(wdparm_t arg);
 
 static void twi_startread(struct twi_dev_s *priv, struct i2c_msg_s *msg);
 static void twi_startwrite(struct twi_dev_s *priv, struct i2c_msg_s *msg);
@@ -174,60 +168,63 @@ static void twi_startmessage(struct twi_dev_s *priv, struct i2c_msg_s *msg);
 
 /* I2C device operations */
 
-static int twi_transfer(FAR struct i2c_master_s *dev,
-          FAR struct i2c_msg_s *msgs, int count);
+static int twi_transfer(struct i2c_master_s *dev,
+                        struct i2c_msg_s *msgs, int count);
 #ifdef CONFIG_I2C_RESET
-static int  twi_reset(FAR struct i2c_master_s * dev);
+static int twi_reset(struct i2c_master_s *dev);
 #endif
 
 /* Initialization */
 
 static void twi_setfrequency(struct twi_dev_s *priv, uint32_t frequency);
 static void twi_hw_initialize(struct twi_dev_s *priv, unsigned int pid,
-          uint32_t frequency);
+                              uint32_t frequency);
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
+static const struct i2c_ops_s g_twiops =
+{
+  .transfer = twi_transfer,
+#ifdef CONFIG_I2C_RESET
+  .reset  = twi_reset
+#endif
+};
+
 #ifdef CONFIG_SAM34_TWIM0
-static struct twi_dev_s g_twi0;
+static struct twi_dev_s g_twi0 =
+{
+  .dev =
+  {
+    .ops = g_twiops,
+  },
+  .base = SAM_TWI0_BASE,
+  .irq = SAM_IRQ_TWI0,
+  .twi = 0,
+  .lock = NXMUTEX_INITIALIZER,
+  .waitsem = SEM_INITIALIZER(0),
+};
 #endif
 
 #ifdef CONFIG_SAM34_TWIM1
-static struct twi_dev_s g_twi1;
-#endif
-
-static const struct i2c_ops_s g_twiops =
+static struct twi_dev_s g_twi1 =
 {
-  .transfer = twi_transfer
-#ifdef CONFIG_I2C_RESET
-  , .reset  = twi_reset
-#endif
+  .dev =
+  {
+    .ops = g_twiops,
+  },
+  .base = SAM_TWI1_BASE,
+  .irq = SAM_IRQ_TWI1,
+  .twi = 1,
+  .lock = NXMUTEX_INITIALIZER,
+  .waitsem = SEM_INITIALIZER(0),
 };
+#endif
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: twi_takesem
- *
- * Description:
- *   Take the wait semaphore.  May be interrupted by a signal.
- *
- * Input Parameters:
- *   dev - Instance of the SDIO device driver state structure.
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-static int twi_takesem(sem_t *sem)
-{
-  return nxsem_wait(sem);
-}
 
 /****************************************************************************
  * Name: twi_checkreg
@@ -376,19 +373,19 @@ static int twi_wait(struct twi_dev_s *priv)
 
   /* Start a timeout to avoid hangs */
 
-  wd_start(priv->timeout, TWI_TIMEOUT, twi_timeout, 1, (uint32_t)priv);
+  wd_start(&priv->timeout, TWI_TIMEOUT, twi_timeout, (wdparm_t)priv);
 
   /* Wait for either the TWI transfer or the timeout to complete */
 
   do
     {
       i2cinfo("TWI%d Waiting...\n", priv->twi);
-      ret = twi_takesem(&priv->waitsem);
+      ret = nxsem_wait(&priv->waitsem);
       i2cinfo("TWI%d Awakened with result: %d\n", priv->twi, priv->result);
 
       if (ret < 0)
         {
-          wd_cancel(priv->timeout);
+          wd_cancel(&priv->timeout);
           return ret;
         }
     }
@@ -413,7 +410,7 @@ static void twi_wakeup(struct twi_dev_s *priv, int result)
 {
   /* Cancel any pending timeout */
 
-  wd_cancel(priv->timeout);
+  wd_cancel(&priv->timeout);
 
   /* Disable any further TWI interrupts */
 
@@ -422,7 +419,7 @@ static void twi_wakeup(struct twi_dev_s *priv, int result)
   /* Wake up the waiting thread with the result of the transfer */
 
   priv->result = result;
-  twi_givesem(&priv->waitsem);
+  nxsem_post(&priv->waitsem);
 }
 
 /****************************************************************************
@@ -433,7 +430,7 @@ static void twi_wakeup(struct twi_dev_s *priv, int result)
  *
  ****************************************************************************/
 
-static int twi_interrupt(int irq, FAR void *context, FAR void *arg)
+static int twi_interrupt(int irq, void *context, void *arg)
 {
   struct twi_dev_s *priv = (struct twi_dev_s *)arg;
   struct i2c_msg_s *msg;
@@ -475,21 +472,53 @@ static int twi_interrupt(int irq, FAR void *context, FAR void *arg)
 
       if (priv->xfrd >= msg->length)
         {
-          /* The transfer is complete.  Disable the RXRDY interrupt and
-           * enable the TXCOMP interrupt
+          struct i2c_msg_s *next = (msg + 1);
+
+          /* Is there another message to after this one?  Does it require a
+           * restart?
            */
 
-          twi_putrel(priv, SAM_TWI_IDR_OFFSET, TWI_INT_RXRDY);
-          twi_putrel(priv, SAM_TWI_IER_OFFSET, TWI_INT_TXCOMP);
+          if (priv->msgc <= 1 || (next->flags & I2C_M_NOSTART) == 0)
+            {
+              /* The transfer is complete.  Disable the RXRDY interrupt and
+               * enable the TXCOMP interrupt
+               */
+
+               twi_putrel(priv, SAM_TWI_IDR_OFFSET, TWI_INT_RXRDY);
+               twi_putrel(priv, SAM_TWI_IER_OFFSET, TWI_INT_TXCOMP);
+            }
+          else
+            {
+              /* No.. just switch to the next message and continue
+               * receiving.  On the next RXRDY, we will continue with the
+               * first byte of the next message.
+               */
+
+              DEBUGASSERT((next->flags & I2C_M_READ) != 0);
+              priv->msg = next;
+              priv->msgc--;
+              priv->xfrd = 0;
+            }
         }
 
       /* Not yet complete, but will the next be the last byte? */
 
       else if (priv->xfrd == (msg->length - 1))
         {
-          /* Yes, set the stop signal */
+          struct i2c_msg_s *next = (msg + 1);
 
-          twi_putrel(priv, SAM_TWI_CR_OFFSET, TWI_CR_STOP);
+          /* Is there another message to after this one?  Does it require a
+           * restart?
+           */
+
+          if (priv->msgc <= 1 || (next->flags & I2C_M_NOSTART) == 0)
+            {
+              /* This is the last message OR a restart is required before
+               * the next message.  Send the stop signal.
+               */
+
+              twi_putrel(priv, SAM_TWI_CR_OFFSET, TWI_CR_STOP);
+            }
         }
     }
 
@@ -501,18 +530,40 @@ static int twi_interrupt(int irq, FAR void *context, FAR void *arg)
 
       if (priv->xfrd >= msg->length)
         {
-          /* The transfer is complete.  Disable the TXRDY interrupt and
-           * enable the TXCOMP interrupt
+          struct i2c_msg_s *next = (msg + 1);
+
+          /* Is there another message to after this one?  Does it require a
+           * restart?
            */
 
-          twi_putrel(priv, SAM_TWI_IDR_OFFSET, TWI_INT_TXRDY);
-          twi_putrel(priv, SAM_TWI_IER_OFFSET, TWI_INT_TXCOMP);
+          if (priv->msgc <= 1 || (next->flags & I2C_M_NOSTART) == 0)
+            {
+              /* The transfer is complete.  Disable the TXRDY interrupt and
+               * enable the TXCOMP interrupt
+               */
 
-          /* Send the STOP condition */
+              twi_putrel(priv, SAM_TWI_IDR_OFFSET, TWI_INT_TXRDY);
+              twi_putrel(priv, SAM_TWI_IER_OFFSET, TWI_INT_TXCOMP);
 
-          regval  = twi_getrel(priv, SAM_TWI_CR_OFFSET);
-          regval |= TWI_CR_STOP;
-          twi_putrel(priv, SAM_TWI_CR_OFFSET, regval);
+              /* Send the STOP condition */
+
+              regval  = twi_getrel(priv, SAM_TWI_CR_OFFSET);
+              regval |= TWI_CR_STOP;
+              twi_putrel(priv, SAM_TWI_CR_OFFSET, regval);
+            }
+          else
+            {
+              /* No.. just switch to the next message and continue
+               * sending.
+               */
+
+              DEBUGASSERT((next->flags & I2C_M_READ) == 0);
+              priv->msg = next;
+              priv->msgc--;
+
+              twi_putrel(priv, SAM_TWI_THR_OFFSET, next->buffer[0]);
+              priv->xfrd = 1;
+            }
         }
 
       /* No, there are more bytes remaining to be sent */
@@ -565,7 +616,7 @@ static int twi_interrupt(int irq, FAR void *context, FAR void *arg)
  *
  ****************************************************************************/
 
-static void twi_timeout(int argc, uint32_t arg, ...)
+static void twi_timeout(wdparm_t arg)
 {
   struct twi_dev_s *priv = (struct twi_dev_s *)arg;
 
@@ -678,8 +729,8 @@ static void twi_startmessage(struct twi_dev_s *priv, struct i2c_msg_s *msg)
  *
  ****************************************************************************/
 
-static int twi_transfer(FAR struct i2c_master_s *dev,
-                        FAR struct i2c_msg_s *msgs, int count)
+static int twi_transfer(struct i2c_master_s *dev,
+                        struct i2c_msg_s *msgs, int count)
 {
   struct twi_dev_s *priv = (struct twi_dev_s *)dev;
   irqstate_t flags;
@@ -690,7 +741,7 @@ static int twi_transfer(FAR struct i2c_master_s *dev,
 
   /* Get exclusive access to the device */
 
-  ret = twi_takesem(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -728,7 +779,7 @@ static int twi_transfer(FAR struct i2c_master_s *dev,
     }
 
   leave_critical_section(flags);
-  twi_givesem(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -747,7 +798,7 @@ static int twi_transfer(FAR struct i2c_master_s *dev,
  ****************************************************************************/
 
 #ifdef CONFIG_I2C_RESET
-static int twi_reset(FAR struct i2c_master_s * dev)
+static int twi_reset(struct i2c_master_s *dev)
 {
   return OK;
 }
@@ -913,12 +964,7 @@ struct i2c_master_s *sam_i2cbus_initialize(int bus)
 #ifdef CONFIG_SAM34_TWIM0
   if (bus == 0)
     {
-      /* Set up TWI0 register base address and IRQ number */
-
-      priv       = &g_twi0;
-      priv->base = SAM_TWI0_BASE;
-      priv->irq  = SAM_IRQ_TWI0;
-      priv->twi  = 0;
+      priv = &g_twi0;
 
       /* Enable peripheral clocking */
 
@@ -939,12 +985,7 @@ struct i2c_master_s *sam_i2cbus_initialize(int bus)
 #ifdef CONFIG_SAM34_TWIM1
   if (bus == 1)
     {
-      /* Set up TWI1 register base address and IRQ number */
-
-      priv       = &g_twi1;
-      priv->base = SAM_TWI1_BASE;
-      priv->irq  = SAM_IRQ_TWI1;
-      priv->twi  = 1;
+      priv = &g_twi1;
 
       /* Enable peripheral clocking */
 
@@ -967,26 +1008,6 @@ struct i2c_master_s *sam_i2cbus_initialize(int bus)
       i2cerr("ERROR: Unsupported bus: TWI%d\n", bus);
       return NULL;
     }
-
-  /* Initialize the device structure */
-
-  priv->dev.ops = &g_twiops;
-
-  /* Initialize semaphores */
-
-  nxsem_init(&priv->exclsem, 0, 1);
-  nxsem_init(&priv->waitsem, 0, 0);
-
-  /* The waitsem semaphore is used for signaling and, hence, should not have
-   * priority inheritance enabled.
-   */
-
-  nxsem_setprotocol(&priv->waitsem, SEM_PRIO_NONE);
-
-  /* Allocate a watchdog timer */
-
-  priv->timeout = wd_create();
-  DEBUGASSERT(priv->timeout != 0);
 
   /* Configure and enable the TWI hardware */
 
@@ -1012,9 +1033,9 @@ struct i2c_master_s *sam_i2cbus_initialize(int bus)
  *
  ****************************************************************************/
 
-int sam_i2cbus_uninitialize(FAR struct i2c_master_s * dev)
+int sam_i2cbus_uninitialize(struct i2c_master_s *dev)
 {
-  struct twi_dev_s *priv = (struct twi_dev_s *) dev;
+  struct twi_dev_s *priv = (struct twi_dev_s *)dev;
 
   i2cinfo("TWI%d Un-initializing\n", priv->twi);
 
@@ -1022,15 +1043,9 @@ int sam_i2cbus_uninitialize(FAR struct i2c_master_s * dev)
 
   up_disable_irq(priv->irq);
 
-  /* Reset data structures */
+  /* Cancel the watchdog timer */
 
-  nxsem_destroy(&priv->exclsem);
-  nxsem_destroy(&priv->waitsem);
-
-  /* Free the watchdog timer */
-
-  wd_delete(priv->timeout);
-  priv->timeout = NULL;
+  wd_cancel(&priv->timeout);
 
   /* Detach Interrupt Handler */
 

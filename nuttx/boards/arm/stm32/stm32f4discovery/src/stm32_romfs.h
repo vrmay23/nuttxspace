@@ -1,8 +1,9 @@
 /****************************************************************************
  * boards/arm/stm32/stm32f4discovery/src/stm32_romfs.h
  *
- *   Copyright (C) 2017 Tomasz Wozniak. All rights reserved.
- *   Author: Tomasz Wozniak <t.wozniak@samsung.com>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2017 Tomasz Wozniak. All rights reserved.
+ * SPDX-FileContributor: Tomasz Wozniak <t.wozniak@samsung.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -64,7 +65,7 @@
  *   Zero (OK) on success, a negated errno value on error.
  *
  * Assumptions/Limitations:
- *   Memory addresses [&romfs_data_begin .. &romfs_data_begin) should contain
+ *   Memory addresses [romfs_data_begin .. romfs_data_end) should contain
  *   ROMFS volume data, as included in the assembly snippet above (l. 84).
  *
  ****************************************************************************/

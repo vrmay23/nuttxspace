@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/udp/udp.h
  *
- *   Copyright (C) 2014-2015, 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,22 +31,23 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <queue.h>
 
+#include <nuttx/queue.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/net/ip.h>
+#include <nuttx/net/net.h>
+#include <nuttx/net/udp.h>
 #include <nuttx/mm/iob.h>
 
 #ifdef CONFIG_NET_UDP_NOTIFIER
 #  include <nuttx/wqueue.h>
 #endif
 
-#if defined(CONFIG_NET_UDP) && !defined(CONFIG_NET_UDP_NO_STACK)
+#ifdef NET_UDP_HAVE_STACK
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-#define NET_UDP_HAVE_STACK 1
 
 #ifdef CONFIG_NET_UDP_WRITE_BUFFERS
 /* UDP write buffer dump macros */
@@ -75,15 +63,20 @@
 /* Allocate a new UDP data callback */
 
 #define udp_callback_alloc(dev,conn) \
-  devif_callback_alloc((dev), &(conn)->list)
+  devif_callback_alloc((dev), &(conn)->sconn.list, &(conn)->sconn.list_tail)
 #define udp_callback_free(dev,conn,cb) \
-  devif_conn_callback_free((dev), (cb), &(conn)->list)
+  devif_conn_callback_free((dev), (cb), &(conn)->sconn.list, &(conn)->sconn.list_tail)
 
 /* Definitions for the UDP connection struct flag field */
 
 #define _UDP_FLAG_CONNECTMODE (1 << 0) /* Bit 0:  UDP connection-mode */
 
 #define _UDP_ISCONNECTMODE(f) (((f) & _UDP_FLAG_CONNECTMODE) != 0)
+
+/* This is a helper pointer for accessing the contents of the udp header */
+
+#define UDPIPv4BUF ((FAR struct udp_hdr_s *)IPBUF(IPv4_HDRLEN))
+#define UDPIPv6BUF ((FAR struct udp_hdr_s *)IPBUF(IPv6_HDRLEN))
 
 /****************************************************************************
  * Public Type Definitions
@@ -103,26 +96,17 @@ struct udp_hdr_s;         /* Forward reference */
 
 struct udp_poll_s
 {
-  FAR struct socket *psock;        /* Needed to handle loss of connection */
+  FAR struct udp_conn_s *conn;     /* Needed to handle loss of connection */
   FAR struct net_driver_s *dev;    /* Needed to free the callback structure */
-  struct pollfd *fds;              /* Needed to handle poll events */
+  FAR struct pollfd *fds;          /* Needed to handle poll events */
   FAR struct devif_callback_s *cb; /* Needed to teardown the poll */
-#if defined(CONFIG_NET_UDP_WRITE_BUFFERS) && defined(CONFIG_IOB_NOTIFIER)
-  int16_t key;                     /* Needed to cancel pending notification */
-#endif
 };
 
 struct udp_conn_s
 {
   /* Common prologue of all connection structures. */
 
-  dq_entry_t node;        /* Supports a doubly linked list */
-
-  /* This is a list of UDP connection callbacks.  Each callback represents
-   * a thread that is stalled, waiting for a device-specific event.
-   */
-
-  FAR struct devif_callback_s *list;
+  struct socket_conn_s sconn;
 
   /* UDP-specific content follows */
 
@@ -131,21 +115,24 @@ struct udp_conn_s
   uint16_t rport;         /* Remote port number (network byte order) */
   uint8_t  flags;         /* See _UDP_FLAG_* definitions */
   uint8_t  domain;        /* IP domain: PF_INET or PF_INET6 */
-  uint8_t  ttl;           /* Default time-to-live */
   uint8_t  crefs;         /* Reference counts on this instance */
 
-#ifdef CONFIG_NET_UDP_BINDTODEVICE
-  uint8_t  boundto;       /* Index of the interface we are bound to.
-                           * Unbound: 0, Bound: 1-MAX_IFINDEX */
+#if CONFIG_NET_RECV_BUFSIZE > 0
+  int32_t  rcvbufs;       /* Maximum amount of bytes queued in recv */
 #endif
-
+#if CONFIG_NET_SEND_BUFSIZE > 0
+  int32_t  sndbufs;       /* Maximum amount of bytes queued in send */
+  sem_t    sndsem;        /* Semaphore signals send completion */
+#endif
+#ifdef CONFIG_NETDEV_RSS
+  int      rcvcpu;        /* Last recvfrom cpuid */
+#endif
   /* Read-ahead buffering.
    *
-   *   readahead - A singly linked list of type struct iob_qentry_s
-   *               where the UDP/IP read-ahead data is retained.
+   *   readahead - An IOB chain where the UDP/IP read-ahead data is retained.
    */
 
-  struct iob_queue_s readahead;   /* Read-ahead buffering */
+  FAR struct iob_s *readahead;   /* Read-ahead buffering */
 
 #ifdef CONFIG_NET_UDP_WRITE_BUFFERS
   /* Write buffering
@@ -156,6 +143,14 @@ struct udp_conn_s
 
   sq_queue_t write_q;             /* Write buffering for UDP packets */
   FAR struct net_driver_s *dev;   /* Last device */
+
+  /* Callback instance for UDP sendto() */
+
+  FAR struct devif_callback_s *sndcb;
+#endif
+
+#if defined(CONFIG_NET_IGMP) || defined(CONFIG_NET_MLD)
+  struct ip_mreqn mreq;
 #endif
 
   /* The following is a list of poll structures of threads waiting for
@@ -163,6 +158,10 @@ struct udp_conn_s
    */
 
   struct udp_poll_s pollinfo[CONFIG_NET_UDP_NPOLLWAITERS];
+
+#ifdef CONFIG_NET_TIMESTAMP
+  int timestamp; /* Nonzero when SO_TIMESTAMP is enabled */
+#endif
 };
 
 /* This structure supports UDP write buffering.  It is simply a container
@@ -174,9 +173,17 @@ struct udp_wrbuffer_s
 {
   sq_entry_t wb_node;              /* Supports a singly linked list */
   struct sockaddr_storage wb_dest; /* Destination address */
-  struct iob_s *wb_iob;            /* Head of the I/O buffer chain */
+  FAR struct iob_s *wb_iob;        /* Head of the I/O buffer chain */
 };
 #endif
+
+struct udp_callback_s
+{
+  FAR struct net_driver_s *dev;
+  FAR struct udp_conn_s *conn;
+  FAR struct devif_callback_s *udp_cb;
+  FAR sem_t *sem;
+};
 
 /****************************************************************************
  * Public Data
@@ -240,6 +247,7 @@ void udp_free(FAR struct udp_conn_s *conn);
  ****************************************************************************/
 
 FAR struct udp_conn_s *udp_active(FAR struct net_driver_s *dev,
+                                  FAR struct udp_conn_s *conn,
                                   FAR struct udp_hdr_s *udp);
 
 /****************************************************************************
@@ -254,6 +262,25 @@ FAR struct udp_conn_s *udp_active(FAR struct net_driver_s *dev,
  ****************************************************************************/
 
 FAR struct udp_conn_s *udp_nextconn(FAR struct udp_conn_s *conn);
+
+/****************************************************************************
+ * Name: udp_select_port
+ *
+ * Description:
+ *   Select an unused port number.
+ *
+ *   NOTE that in principle this function could fail if there is no available
+ *   port number.  There is no check for that case and it would actually
+ *   in an infinite loop if that were the case.  In this simple, small UDP
+ *   implementation, it is reasonable to assume that that error cannot happen
+ *   and that a port number will always be available.
+ *
+ * Returned Value:
+ *   Next available port number in host byte order, 0 for failure.
+ *
+ ****************************************************************************/
+
+uint16_t udp_select_port(uint8_t domain, FAR union ip_binding_u *u);
 
 /****************************************************************************
  * Name: udp_bind
@@ -298,7 +325,30 @@ int udp_bind(FAR struct udp_conn_s *conn, FAR const struct sockaddr *addr);
  *
  ****************************************************************************/
 
-int udp_connect(FAR struct udp_conn_s *conn, FAR const struct sockaddr *addr);
+int udp_connect(FAR struct udp_conn_s *conn,
+                FAR const struct sockaddr *addr);
+
+#if defined(CONFIG_NET_IGMP)
+/****************************************************************************
+ * Name: udp_leavegroup
+ *
+ * Description:
+ *   This function leaves the multicast group to which the conn belongs.
+ *
+ * Input Parameters:
+ *   conn - A reference to UDP connection structure.  A value of NULL will
+ *          disconnect from any previously connected address.
+ *
+ * Assumptions:
+ *   This function is called (indirectly) from user code.  Interrupts may
+ *   be enabled.
+ *
+ ****************************************************************************/
+
+void udp_leavegroup(FAR struct udp_conn_s *conn);
+#else
+#define udp_leavegroup(c)
+#endif
 
 /****************************************************************************
  * Name: udp_close
@@ -369,7 +419,7 @@ void udp_poll(FAR struct net_driver_s *dev, FAR struct udp_conn_s *conn);
  *   write occurs first.
  *
  * Input Parameters:
- *   psock    An instance of the internal socket structure.
+ *   conn     A reference to UDP connection structure.
  *
  * Returned Value:
  *   -ENOSYS (Function not implemented, always have to wait to send).
@@ -379,7 +429,7 @@ void udp_poll(FAR struct net_driver_s *dev, FAR struct udp_conn_s *conn);
  *
  ****************************************************************************/
 
-int psock_udp_cansend(FAR struct socket *psock);
+int psock_udp_cansend(FAR struct udp_conn_s *conn);
 
 /****************************************************************************
  * Name: udp_send
@@ -431,21 +481,6 @@ int udp_setsockopt(FAR struct socket *psock, int option,
 #endif
 
 /****************************************************************************
- * Name: udp_wrbuffer_initialize
- *
- * Description:
- *   Initialize the list of free write buffers
- *
- * Assumptions:
- *   Called once early initialization.
- *
- ****************************************************************************/
-
-#ifdef CONFIG_NET_UDP_WRITE_BUFFERS
-void udp_wrbuffer_initialize(void);
-#endif /* CONFIG_NET_UDP_WRITE_BUFFERS */
-
-/****************************************************************************
  * Name: udp_wrbuffer_alloc
  *
  * Description:
@@ -467,6 +502,28 @@ FAR struct udp_wrbuffer_s *udp_wrbuffer_alloc(void);
 #endif /* CONFIG_NET_UDP_WRITE_BUFFERS */
 
 /****************************************************************************
+ * Name: udp_wrbuffer_timedalloc
+ *
+ * Description:
+ *   Allocate a UDP write buffer by taking a pre-allocated buffer from
+ *   the free list.  This function is called from udp logic when a buffer
+ *   of udp data is about to sent
+ *   This function is wrapped version of udp_wrbuffer_alloc(),
+ *   this wait will be terminated when the specified timeout expires.
+ *
+ * Input Parameters:
+ *   timeout   - The relative time to wait until a timeout is declared.
+ *
+ * Assumptions:
+ *   Called from user logic with the network locked.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NET_UDP_WRITE_BUFFERS
+FAR struct udp_wrbuffer_s *udp_wrbuffer_timedalloc(unsigned int timeout);
+#endif /* CONFIG_NET_UDP_WRITE_BUFFERS */
+
+/****************************************************************************
  * Name: udp_wrbuffer_tryalloc
  *
  * Description:
@@ -484,7 +541,11 @@ FAR struct udp_wrbuffer_s *udp_wrbuffer_alloc(void);
  ****************************************************************************/
 
 #ifdef CONFIG_NET_UDP_WRITE_BUFFERS
+#ifdef CONFIG_NET_JUMBO_FRAME
+FAR struct udp_wrbuffer_s *udp_wrbuffer_tryalloc(int len);
+#else
 FAR struct udp_wrbuffer_s *udp_wrbuffer_tryalloc(void);
+#endif
 #endif /* CONFIG_NET_UDP_WRITE_BUFFERS */
 
 /****************************************************************************
@@ -503,6 +564,24 @@ FAR struct udp_wrbuffer_s *udp_wrbuffer_tryalloc(void);
 #ifdef CONFIG_NET_UDP_WRITE_BUFFERS
 void udp_wrbuffer_release(FAR struct udp_wrbuffer_s *wrb);
 #endif /* CONFIG_NET_UDP_WRITE_BUFFERS */
+
+/****************************************************************************
+ * Name: udp_wrbuffer_inqueue_size
+ *
+ * Description:
+ *   Get the in-queued write buffer size from connection
+ *
+ * Input Parameters:
+ *   conn - The UDP connection of interest
+ *
+ * Assumptions:
+ *   Called from user logic with the network locked.
+ *
+ ****************************************************************************/
+
+#if CONFIG_NET_SEND_BUFSIZE > 0
+uint32_t udp_wrbuffer_inqueue_size(FAR struct udp_conn_s *conn);
+#endif /* CONFIG_NET_SEND_BUFSIZE */
 
 /****************************************************************************
  * Name: udp_wrbuffer_test
@@ -618,7 +697,9 @@ FAR struct net_driver_s *udp_find_laddr_device(FAR struct udp_conn_s *conn);
  *
  ****************************************************************************/
 
-FAR struct net_driver_s *udp_find_raddr_device(FAR struct udp_conn_s *conn);
+FAR struct net_driver_s *
+udp_find_raddr_device(FAR struct udp_conn_s *conn,
+                      FAR struct sockaddr_storage *remote);
 
 /****************************************************************************
  * Name: udp_callback
@@ -638,6 +719,19 @@ uint16_t udp_callback(FAR struct net_driver_s *dev,
                       FAR struct udp_conn_s *conn, uint16_t flags);
 
 /****************************************************************************
+ * Name: udp_callback_cleanup
+ *
+ * Description:
+ *   Cleanup data and cb when thread is canceled.
+ *
+ * Input Parameters:
+ *   arg - A pointer with conn and callback struct.
+ *
+ ****************************************************************************/
+
+void udp_callback_cleanup(FAR void *arg);
+
+/****************************************************************************
  * Name: psock_udp_recvfrom
  *
  * Description:
@@ -645,11 +739,8 @@ uint16_t udp_callback(FAR struct net_driver_s *dev,
  *
  * Input Parameters:
  *   psock    Pointer to the socket structure for the SOCK_DRAM socket
- *   buf      Buffer to receive data
- *   len      Length of buffer
+ *   msg      Receive info and buffer for receive data
  *   flags    Receive flags
- *   from     INET address of source (may be NULL)
- *   fromlen  The length of the address structure
  *
  * Returned Value:
  *   On success, returns the number of characters received.  On  error,
@@ -659,9 +750,8 @@ uint16_t udp_callback(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-ssize_t psock_udp_recvfrom(FAR struct socket *psock, FAR void *buf,
-                           size_t len, int flags, FAR struct sockaddr *from,
-                           FAR socklen_t *fromlen);
+ssize_t psock_udp_recvfrom(FAR struct socket *psock, FAR struct msghdr *msg,
+                           int flags);
 
 /****************************************************************************
  * Name: psock_udp_sendto
@@ -688,9 +778,9 @@ ssize_t psock_udp_recvfrom(FAR struct socket *psock, FAR void *buf,
  *
  ****************************************************************************/
 
-ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
-                         size_t len, int flags, FAR const struct sockaddr *to,
-                         socklen_t tolen);
+ssize_t psock_udp_sendto(FAR struct socket *psock,
+                         FAR const void *buf, size_t len, int flags,
+                         FAR const struct sockaddr *to, socklen_t tolen);
 
 /****************************************************************************
  * Name: udp_pollsetup
@@ -797,8 +887,8 @@ int udp_writebuffer_notifier_setup(worker_t worker,
  *
  * Description:
  *   Eliminate a UDP read-ahead notification previously setup by
- *   udp_readahead_notifier_setup().  This function should only be called if the
- *   notification should be aborted prior to the notification.  The
+ *   udp_readahead_notifier_setup().  This function should only be called if
+ *   the notification should be aborted prior to the notification.  The
  *   notification will automatically be torn down after the notification.
  *
  * Input Parameters:
@@ -806,13 +896,12 @@ int udp_writebuffer_notifier_setup(worker_t worker,
  *         udp_readahead_notifier_setup().
  *
  * Returned Value:
- *   Zero (OK) is returned on success; a negated errno value is returned on
- *   any failure.
+ *   None.
  *
  ****************************************************************************/
 
 #ifdef CONFIG_NET_UDP_NOTIFIER
-int udp_notifier_teardown(int key);
+void udp_notifier_teardown(FAR void *key);
 #endif
 
 /****************************************************************************
@@ -825,7 +914,7 @@ int udp_notifier_teardown(int key);
  *   When read-ahead data becomes available, *all* of the workers waiting
  *   for read-ahead data will be executed.  If there are multiple workers
  *   waiting for read-ahead data then only the first to execute will get the
- *   data.  Others will need to call udp_readahead_notifier_setup() once again.
+ *   data. Others will need to call udp_readahead_notifier_setup once again.
  *
  * Input Parameters:
  *   conn  - The UDP connection where read-ahead data was just buffered.
@@ -849,7 +938,7 @@ void udp_readahead_signal(FAR struct udp_conn_s *conn);
  *   When write buffer becomes empty, *all* of the workers waiting
  *   for that event data will be executed.  If there are multiple workers
  *   waiting for read-ahead data then only the first to execute will get the
- *   data.  Others will need to call tcp_writebuffer_notifier_setup() once
+ *   data.  Others will need to call udp_writebuffer_notifier_setup() once
  *   again.
  *
  * Input Parameters:
@@ -886,10 +975,59 @@ int udp_txdrain(FAR struct socket *psock, unsigned int timeout);
 #  define udp_txdrain(conn, timeout) (0)
 #endif
 
+/****************************************************************************
+ * Name: udp_ioctl
+ *
+ * Description:
+ *   This function performs udp specific ioctl() operations.
+ *
+ * Parameters:
+ *   conn     The TCP connection of interest
+ *   cmd      The ioctl command
+ *   arg      The argument of the ioctl cmd
+ *
+ ****************************************************************************/
+
+int udp_ioctl(FAR struct udp_conn_s *conn, int cmd, unsigned long arg);
+
+/****************************************************************************
+ * Name: udp_sendbuffer_notify
+ *
+ * Description:
+ *   Notify the send buffer semaphore
+ *
+ * Input Parameters:
+ *   conn - The UDP connection of interest
+ *
+ * Assumptions:
+ *   Called from user logic with the network locked.
+ *
+ ****************************************************************************/
+
+#if CONFIG_NET_SEND_BUFSIZE > 0
+void udp_sendbuffer_notify(FAR struct udp_conn_s *conn);
+#endif /* CONFIG_NET_SEND_BUFSIZE */
+
+/****************************************************************************
+ * Name: udpip_hdrsize
+ *
+ * Description:
+ *   Get the total size of L3 and L4 UDP header
+ *
+ * Input Parameters:
+ *   conn     The connection structure associated with the socket
+ *
+ * Returned Value:
+ *   the total size of L3 and L4 TCP header
+ *
+ ****************************************************************************/
+
+uint16_t udpip_hdrsize(FAR struct udp_conn_s *conn);
+
 #undef EXTERN
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* CONFIG_NET_UDP && !CONFIG_NET_UDP_NO_STACK */
+#endif /* NET_UDP_HAVE_STACK */
 #endif /* __NET_UDP_UDP_H */

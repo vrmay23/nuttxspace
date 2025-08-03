@@ -1,35 +1,22 @@
 /****************************************************************************
  * apps/system/i2c/i2ctool.h
  *
- *   Copyright (C) 2011, 2014, 2016 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -127,11 +114,7 @@
 
 /* Output is via printf but can be changed using this macro */
 
-#ifdef CONFIG_CPP_HAVE_VARARGS
-# define i2c_output(v, ...) printf(v, ##__VA_ARGS__)
-#else
-# define i2c_output         printf
-#endif
+#  define i2c_output         printf
 
 /****************************************************************************
  * Public Types
@@ -146,15 +129,16 @@ struct i2ctool_s
   uint8_t  regaddr;    /* [-r regaddr] is the I2C device register address */
   uint8_t  width;      /* [-w width] is the data width (8 or 16) */
   bool     start;      /* [-s|n], send|don't send start between command and data */
-  bool     autoincr;   /* [-i|j], Auto increment|don't increment regaddr on repititions */
+  bool     zerowrite;  /* [-z] uses a zero byte write request to scan the I2C bus */
+  bool     autoincr;   /* [-i|j], Auto increment|don't increment regaddr on repetitions */
   bool     hasregindx; /* true with the use of -r */
   uint32_t freq;       /* [-f freq] I2C frequency */
 
   /* Output streams */
 
 #ifdef CONFIG_I2CTOOL_OUTDEV
-  int    ss_outfd;     /* Output file descriptor */
-  FILE  *ss_outstream; /* Output stream */
+  int   ss_outfd;     /* Output file descriptor */
+  FILE *ss_outstream; /* Output stream */
 #endif
 };
 
@@ -189,7 +173,8 @@ extern const char g_i2cxfrerror[];
 
 ssize_t i2ctool_write(FAR struct i2ctool_s *i2ctool, FAR const void *buffer,
                       size_t nbytes);
-int i2ctool_printf(FAR struct i2ctool_s *i2ctool, const char *fmt, ...);
+int i2ctool_printf(FAR struct i2ctool_s *i2ctool,
+                   FAR const char *fmt, ...) printf_like(2, 3);
 void i2ctool_flush(FAR struct i2ctool_s *i2ctool);
 void i2ctool_hexdump(FILE *outstream, void *addr, int len);
 
@@ -201,6 +186,10 @@ int i2ccmd_get(FAR struct i2ctool_s *i2ctool, int argc, FAR char **argv);
 int i2ccmd_dump(FAR struct i2ctool_s *i2ctool, int argc, FAR char **argv);
 int i2ccmd_set(FAR struct i2ctool_s *i2ctool, int argc, FAR char **argv);
 int i2ccmd_verf(FAR struct i2ctool_s *i2ctool, int argc, FAR char **argv);
+
+#ifdef CONFIG_I2C_RESET
+int i2ccmd_reset(FAR struct i2ctool_s *i2ctool, int argc, FAR char **argv);
+#endif
 
 /* I2C access functions */
 
@@ -219,5 +208,9 @@ FAR char *i2cdev_path(int bus);
 bool i2cdev_exists(int bus);
 int i2cdev_open(int bus);
 int i2cdev_transfer(int fd, FAR struct i2c_msg_s *msgv, int msgc);
+
+#ifdef CONFIG_I2C_RESET
+int i2cdev_reset(int fd);
+#endif
 
 #endif /* __APPS_SYSTEM_I2C_I2CTOOLS_H */

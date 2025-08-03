@@ -1,21 +1,12 @@
 /****************************************************************************
  * apps/include/wireless/wapi.h
  *
- *   Copyright (C) 2017, 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * Adapted for Nuttx from WAPI:
- *
- *   Copyright (c) 2010, Volkan YAZICI <volkan.yazici@gmail.com>
- *   All rights reserved.
- *
- * And includes WPA supplicant logic contributed by:
- *
- *   Author: Simon Piriou <spiriou31@gmail.com>
- *
- * Which was adapted to NuttX from driver_ext.h
- *
- *   Copyright (c) 2003-2005, Jouni Malinen <j@w1.fi>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2017,2019 Gregory Nutt
+ * SPDX-FileCopyrightText: 2010, Volkan YAZICI <volkan.yazici@gmail.com>
+ * SPDX-FileCopyrightText: 2003-2005, Jouni Malinen <j@w1.fi>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-FileContributor: Simon Piriou <spiriou31@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -53,6 +44,7 @@
  * Included Files
  ****************************************************************************/
 
+#include <stdbool.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <net/ethernet.h>
@@ -69,31 +61,6 @@
 /* Buffer size while reading lines from PROC_NET_ files. */
 
 #define WAPI_PROC_LINE_SIZE  1024
-
-/* Select options to successfully open a socket in this network
- * configuration.
- */
-
-/* The address family that we used to create the socket really does not
- * matter.  It should, however, be valid in the current configuration.
- */
-
-#if defined(CONFIG_NET_IPv4)
-#  define PF_INETX PF_INET
-#elif defined(CONFIG_NET_IPv6)
-#  define PF_INETX PF_INET6
-#endif
-
-/* SOCK_DGRAM is the preferred socket type to use when we just want a
- * socket for performing driver ioctls.  However, we can't use SOCK_DRAM
- * if UDP is disabled.
- */
-
-#ifdef CONFIG_NET_UDP
-#  define SOCK_WAPI SOCK_DGRAM
-#else
-#  define SOCK_WAPI SOCK_STREAM
-#endif
 
 #ifndef CONFIG_WIRELESS_WAPI_INITCONF
 #  define wapi_load_config(ifname, confname, conf) NULL
@@ -125,8 +92,37 @@ enum wapi_route_target_e
 
 enum wapi_essid_flag_e
 {
-  WAPI_ESSID_OFF,
-  WAPI_ESSID_ON
+  WAPI_ESSID_OFF = IW_ESSID_OFF,
+  WAPI_ESSID_ON  = IW_ESSID_ON,
+
+/* Extended flag "WAPI_ESSID_DELAY_ON" instructs the driver
+ * to delay the connection behavior of essid, so that which can accept
+ * more accurate information before generating a connection.
+ *
+ * About flow of wapi command, drivers that support WAPI_ESSID_DELAY_ON
+ * semantics will have the following behavior changes:
+ *
+ * 1. Station mode without bssid set:
+ *
+ * $ ifup wlan0
+ * $ wapi mode wlan0 2
+ * $ wapi psk wlan0 12345678 3
+ * $ wapi essid wlan0 archer 1
+ * $ renew wlan0
+ *
+ * 2. Station mode with bssid set:
+ *
+ * $ ifup wlan0
+ * $ wapi mode wlan0 2
+ * $ wapi psk wlan0 12345678 3
+ * $ wapi essid wlan0 archer 2  <-- WAPI_ESSID_DELAY_ON will indicate the
+ * $                                driver delay the connection event late
+ * $                                to bssid set (SIOCSIWAP).
+ * $ wapi ap wlan0 ec:41:18:e0:76:7e
+ * $ renew wlan0
+ */
+
+  WAPI_ESSID_DELAY_ON = IW_ESSID_DELAY_ON
 };
 
 /* Supported operation modes. */
@@ -141,6 +137,21 @@ enum wapi_mode_e
   WAPI_MODE_SECOND  = IW_MODE_SECOND,  /* Secondary master/repeater, backup. */
   WAPI_MODE_MONITOR = IW_MODE_MONITOR, /* Passive monitor, listen only. */
   WAPI_MODE_MESH    = IW_MODE_MESH     /* Mesh (IEEE 802.11s) network */
+};
+
+/* Flags for encoding */
+
+enum wapi_encode_e
+{
+  WAPI_ENCODE_INDEX      = IW_ENCODE_INDEX,       /* Token index (if needed) */
+  WAPI_ENCODE_FLAGS      = IW_ENCODE_FLAGS,       /* Flags defined below */
+  WAPI_ENCODE_MODE       = IW_ENCODE_MODE,        /* Modes defined below */
+  WAPI_ENCODE_DISABLED   = IW_ENCODE_DISABLED,    /* Encoding disabled */
+  WAPI_ENCODE_ENABLED    = IW_ENCODE_ENABLED,     /* Encoding enabled */
+  WAPI_ENCODE_RESTRICTED = IW_ENCODE_RESTRICTED,  /* Refuse non-encoded packets */
+  WAPI_ENCODE_OPEN       = IW_ENCODE_OPEN,        /* Accept non-encoded packets */
+  WAPI_ENCODE_NOKEY      = IW_ENCODE_NOKEY,       /* Key is write only, so not present */
+  WAPI_ENCODE_TEMP       = IW_ENCODE_TEMP         /* Temporary key */
 };
 
 /* Bitrate flags.
@@ -189,6 +200,8 @@ struct wapi_scan_info_s
   int bitrate;
   int has_rssi;
   int rssi;
+  int has_encode;
+  int encode;
 };
 
 /* Linked list container for routing table rows. */
@@ -244,32 +257,54 @@ enum wpa_alg_e
   WPA_ALG_BIP_CMAC_256
 };
 
+enum wpa_ver_e
+{
+  WPA_VER_NONE = 0,
+  WPA_VER_1,
+  WPA_VER_2,
+  WPA_VER_3
+};
+
 /* This structure provides the wireless configuration to
  * wpa_driver_wext_associate().
  */
 
 struct wpa_wconfig_s
 {
-  uint8_t sta_mode;              /* Mode of operation, e.g. IW_MODE_INFRA */
+  enum wapi_mode_e sta_mode;     /* Mode of operation, e.g. IW_MODE_INFRA */
   uint8_t auth_wpa;              /* IW_AUTH_WPA_VERSION values, e.g.
                                   * IW_AUTH_WPA_VERSION_WPA2 */
   uint8_t cipher_mode;           /* IW_AUTH_PAIRWISE_CIPHER and
                                   * IW_AUTH_GROUP_CIPHER values, e.g.,
                                   * IW_AUTH_CIPHER_CCMP */
-  uint8_t alg;                   /* See enum wpa_alg_e above, e.g.
+  enum wpa_alg_e alg;            /* See enum wpa_alg_e above, e.g.
                                   * WPA_ALG_CCMP */
+  double freq;                   /* Channel frequency */
+  enum wapi_freq_flag_e flag;    /* Channel frequency flag */
   uint8_t ssidlen;               /* Length of the SSID */
   uint8_t phraselen;             /* Length of the passphrase */
   FAR const char *ifname;        /* E.g., "wlan0" */
   FAR const char *ssid;          /* E.g., "myApSSID" */
+  FAR const char *bssid;         /* Options to associate with bssid */
   FAR const char *passphrase;    /* E.g., "mySSIDpassphrase" */
+};
+
+/* COEX *********************************************************************/
+
+enum wapi_pta_prio_e
+{
+  WAPI_PTA_PRIORITY_COEX_MAXIMIZED = IW_PTA_PRIORITY_COEX_MAXIMIZED,
+  WAPI_PTA_PRIORITY_COEX_HIGH      = IW_PTA_PRIORITY_COEX_HIGH,
+  WAPI_PTA_PRIORITY_BALANCED       = IW_PTA_PRIORITY_BALANCED,
+  WAPI_PTA_PRIORITY_WLAN_HIGHD     = IW_PTA_PRIORITY_WLAN_HIGH,
+  WAPI_PTA_PRIORITY_WLAN_MAXIMIZED = IW_PTA_PRIORITY_WLAN_MAXIMIZED
 };
 
 /****************************************************************************
  * Public Data
  ****************************************************************************/
 
- #ifdef __cplusplus
+#ifdef __cplusplus
 #define EXTERN extern "C"
 extern "C"
 {
@@ -289,6 +324,10 @@ EXTERN FAR const char *g_wapi_essid_flags[];
 
 EXTERN FAR const char *g_wapi_alg_flags[];
 
+/* Passphrase WPA Version flag names. */
+
+EXTERN FAR const char *g_wapi_wpa_ver_flags[];
+
 /* Supported operation mode names. */
 
 EXTERN FAR const char *g_wapi_modes[];
@@ -300,6 +339,10 @@ EXTERN FAR const char *g_wapi_bitrate_flags[];
 /* Transmit power flag names. */
 
 EXTERN FAR const char *g_wapi_txpower_flags[];
+
+/* PTA priority flag names. */
+
+EXTERN FAR const char *g_wapi_pta_prio_flags[];
 
 /****************************************************************************
  * Public Function Prototyppes
@@ -644,6 +687,44 @@ int wapi_make_socket(void);
 int wapi_scan_init(int sock, FAR const char *ifname, FAR const char *essid);
 
 /****************************************************************************
+ * Name: wapi_scan_channel_init
+ *
+ * Description:
+ *   Starts a scan on the given interface. Root privileges are required to
+ *   start a scan with specified channels.
+ *
+ ****************************************************************************/
+
+int wapi_scan_channel_init(int sock, FAR const char *ifname,
+                           FAR const char *essid,
+                           uint8_t *channels, int num_channels);
+
+/****************************************************************************
+ * Name: wapi_escan_init
+ *
+ * Description:
+ *   Starts a extended scan on the given interface, you can specify the scan
+ *   type. Root privileges are required to start a scan.
+ *
+ ****************************************************************************/
+
+int wapi_escan_init(int sock, FAR const char *ifname,
+                    uint8_t scan_type, FAR const char *essid);
+
+/****************************************************************************
+ * Name: wapi_escan_channel_init
+ *
+ * Description:
+ *   Starts a scan on the given interface. Root privileges are required to
+ *   start a scan with specified channels.
+ *
+ ****************************************************************************/
+
+int wapi_escan_channel_init(int sock, FAR const char *ifname,
+                            uint8_t scan_type, FAR const char *essid,
+                            uint8_t *channels, int num_channels);
+
+/****************************************************************************
  * Name: wapi_scan_stat
  *
  * Description:
@@ -682,6 +763,39 @@ int wapi_scan_coll(int sock, FAR const char *ifname,
  ****************************************************************************/
 
 void wapi_scan_coll_free(FAR struct wapi_list_s *aps);
+
+/****************************************************************************
+ * Name: wapi_set_country
+ *
+ * Description:
+ *    Set the country code
+ *
+ ****************************************************************************/
+
+int wapi_set_country(int sock, FAR const char *ifname,
+                     FAR const char *country);
+
+/****************************************************************************
+ * Name: wapi_get_country
+ *
+ * Description:
+ *    Get the country code
+ *
+ ****************************************************************************/
+
+int wapi_get_country(int sock, FAR const char *ifname,
+                     FAR char *country);
+
+/****************************************************************************
+ * Name: wapi_get_sensitivity
+ *
+ * Description:
+ *    Get the wlan Sensitivity
+ *
+ ****************************************************************************/
+
+int wapi_get_sensitivity(int sock, FAR const char *ifname,
+                         FAR int *sense);
 
 #ifdef CONFIG_WIRELESS_WAPI_INITCONF
 /****************************************************************************
@@ -818,6 +932,80 @@ int wpa_driver_wext_get_auth_param(int sockfd, FAR const char *ifname,
  ****************************************************************************/
 
 void wpa_driver_wext_disconnect(int sockfd, FAR const char *ifname);
+
+/****************************************************************************
+ * Name: wapi_set_pta_prio
+ *
+ * Description:
+ *   Sets the pta priority of the device.
+ *
+ ****************************************************************************/
+
+int wapi_set_pta_prio(int sock, FAR const char *ifname,
+                      enum wapi_pta_prio_e pta_prio);
+
+/****************************************************************************
+ * Name: wapi_get_pta_prio
+ *
+ * Description:
+ *   Gets the pta priority of the device.
+ *
+ ****************************************************************************/
+
+int wapi_get_pta_prio(int sock, FAR const char *ifname,
+                      enum wapi_pta_prio_e *pta_prio);
+
+/****************************************************************************
+ * Name: wapi_set_pmksa
+ *
+ * Description:
+ *   Set the wlan pmksa.
+ *
+ ****************************************************************************/
+
+int wapi_set_pmksa(int sock, FAR const char *ifname,
+                   FAR const uint8_t *pmk, int len);
+
+/****************************************************************************
+ * Name: wapi_get_pmksa
+ *
+ * Description:
+ *   Get the wlan pmksa.
+ *
+ ****************************************************************************/
+
+int wapi_get_pmksa(int sock, FAR const char *ifname,
+                   FAR uint8_t *pmk, int len);
+
+/****************************************************************************
+ * Name: wapi_extend_params
+ *
+ * Description:
+ *   wapi extension interface for privatization method.
+ *
+ ****************************************************************************/
+
+int wapi_extend_params(int sock, int cmd, FAR struct iwreq *wrq);
+
+/****************************************************************************
+ * Name: wapi_set_power_save
+ *
+ * Description:
+ *   Set power save status of wifi.
+ *
+ ****************************************************************************/
+
+int wapi_set_power_save(int sock, FAR const char *ifname, bool on);
+
+/****************************************************************************
+ * Name: wapi_get_power_save
+ *
+ * Description:
+ *   Get power save status of wifi.
+ *
+ ****************************************************************************/
+
+int wapi_get_power_save(int sock, FAR const char *ifname, bool *on);
 
 #undef EXTERN
 #ifdef __cplusplus

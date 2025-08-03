@@ -1,53 +1,50 @@
-/************************************************************************************
+/****************************************************************************
  * arch/arm/src/a1x/hardware/a10_memorymap.h
  *
- *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_A1X_HARDWARE_A10_MEMORYMAP_H
 #define __ARCH_ARM_SRC_A1X_HARDWARE_A10_MEMORYMAP_H
 
-/************************************************************************************
+/****************************************************************************
  * Included Files
- ************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 #include <arch/a1x/chip.h>
 
-/************************************************************************************
+/* A1X Virtual (mapped) Memory Map
+ *
+ * board_memorymap.h contains special mappings that are needed when a ROM
+ * memory map is used.  It is included in this odd location because it
+ * depends on some the virtual address definitions provided above.
+ */
+
+#include <arch/board/board_memorymap.h>
+
+/****************************************************************************
  * Pre-processor Definitions
- ************************************************************************************/
-/* Decimal configuration values may exceed 2Gb and, hence, overflow to negative
- * values unless we force them to unsigned long:
+ ****************************************************************************/
+
+/* Decimal configuration values may exceed 2Gb and, hence, overflow to
+ * negative values unless we force them to unsigned long:
  */
 
 #define __CONCAT(a,b) a ## b
@@ -60,7 +57,7 @@
 #define A1X_SRAMC_PSECTION   0x01d00000 /* SRAM C          0x01d0:0000-0x01df:ffff Module sram */
 #define A1X_DE_PSECTION      0x01e00000 /* DE, MP, AVG     0x01e0:0000-0x01eb:ffff  */
 #define A1X_DDR_PSECTION     0x40000000 /* DDR-II/DDR-III  0x4000:0000-0xbfff:ffff 2G */
-#define A1X_BROM_PSECTION    0xfff00000 /* BROM            0xffff:0000—0xffff:7fff 32K */
+#define A1X_BROM_PSECTION    0xfff00000 /* BROM            0xffff:0000-0xffff:7fff 32K */
 
 /* A1X Offsets from the internal memory section base address */
 
@@ -150,7 +147,7 @@
 
 /* A1X offsets from the BRROM section base address */
 
-#define A1X_BROM_OFFSET      0x000f0000 /* BROM            0xffff:0000—0xffff:7fff 32K */
+#define A1X_BROM_OFFSET      0x000f0000 /* BROM            0xffff:0000-0xffff:7fff 32K */
 
 /* A1X internal memory physical base addresses */
 
@@ -253,7 +250,7 @@
 #define A1X_PERIPH_SIZE      0x00050000 /* Peripherals     0x01c0:0000-0x01c4:ffff */
 #define A1X_SRAMC_SIZE       0x00100000 /* SRAM C          0x01d0:0000-0x01df:ffff Module sram */
 #define A1X_DE_SIZE          0x000c0000 /* DE, MP, AVG     0x01e0:0000-0x01eb:ffff  */
-#define A1X_BROM_SIZE        0x000f8000 /* BROM            0xfff0:0000—0xffff:7fff 32K */
+#define A1X_BROM_SIZE        0x000f8000 /* BROM            0xfff0:0000-0xffff:7fff 32K */
 
 /* Force configured sizes that might exceed 2GB to be unsigned long */
 
@@ -293,15 +290,6 @@
 #define A1X_DDR_MMUFLAGS     MMU_MEMFLAGS
 #define A1X_BROM_MMUFLAGS    MMU_ROMFLAGS
 
-/* A1X Virtual (mapped) Memory Map
- *
- * board_memorymap.h contains special mappings that are needed when a ROM
- * memory map is used.  It is included in this odd location because it depends
- * on some the virtual address definitions provided above.
- */
-
-#include <arch/board/board_memorymap.h>
-
 /* A1X Virtual (mapped) Memory Map.  These are the mappings that will
  * be created if the page table lies in RAM.  If the platform has another,
  * read-only, pre-initialized page table (perhaps in ROM), then the board.h
@@ -317,7 +305,7 @@
 #define A1X_SRAMC_VSECTION   0x01d00000 /* SRAM C          0x01d0:0000-0x01df:ffff Module sram */
 #define A1X_DE_VSECTION      0x01e00000 /* DE, MP, AVG     0x01e0:0000-0x01eb:ffff  */
 #define A1X_DDR_VSECTION     0x40000000 /* DDR-II/DDR-III  0x4000:0000-0xbfff:ffff 2G */
-#define A1X_BROM_VSECTION    0xfff00000 /* BROM            0xffff:0000—0xffff:7fff 32K */
+#define A1X_BROM_VSECTION    0xfff00000 /* BROM            0xffff:0000-0xffff:7fff 32K */
 
 #endif
 
@@ -444,9 +432,9 @@
 #    error "Only one of PGTABLE_BASE_PADDR or PGTABLE_BASE_VADDR is defined"
 #  endif
 
-  /* A sanity check, if the configuration says that the page table is read-only
-   * and pre-initialized (maybe ROM), then it should have also defined both of
-   * the page table base addresses.
+  /* A sanity check, if the configuration says that the page table is
+   * read-only and pre-initialized (maybe ROM), then it should have also
+   * defined both of the page table base addresses.
    */
 
 #  ifdef CONFIG_ARCH_ROMPGTABLE
@@ -455,12 +443,12 @@
 
 #else /* PGTABLE_BASE_PADDR || PGTABLE_BASE_VADDR */
 
-  /* If CONFIG_PAGING is selected, then parts of the 1-to-1 virtual memory
-   * map probably do not apply because paging logic will probably partition
-   * the SRAM section differently.  In particular, if the page table is located
-   * at the end of SRAM, then the virtual page table address defined below
-   * will probably be in error.  In that case PGTABLE_BASE_VADDR is defined
-   * in the file mmu.h
+  /* If CONFIG_LEGACY_PAGING is selected, then parts of the 1-to-1 virtual
+   * memory map probably do not apply because paging logic will probably
+   * partition the SRAM section differently.  In particular, if the page
+   * table is located at the end of SRAM, then the virtual page table address
+   * defined below will probably be in error.
+   * In that case PGTABLE_BASE_VADDR is defined in the file mmu.h
    *
    * We must declare the page table at the bottom or at the top of internal
    * SRAM.  We pick the bottom of internal SRAM *unless* there are vectors
@@ -484,9 +472,10 @@
 
 #  endif /* CONFIG_ARCH_LOWVECTORS */
 
-  /* Note that the page table does not lie in the same address space as does the
-   * mapped RAM in either case.  So we will need to create a special mapping for
-   * the page table at boot time.
+  /* Note that the page table does not lie in the same address space as does
+   * the mapped RAM in either case.
+   * So we will need to create a special mapping for the page table at boot
+   * time.
    */
 
 #  define ARMV7A_PGTABLE_MAPPING 1
@@ -495,10 +484,10 @@
 
 /* Level 2 Page table start addresses.
  *
- * 16Kb of memory is reserved hold the page table for the virtual mappings.  A
- * portion of this table is not accessible in the virtual address space (for
- * normal operation).   There are several large holes in the physical address
- * space for which there will never be level 1 mappings:
+ * 16Kb of memory is reserved hold the page table for the virtual mappings.
+ * A portion of this table is not accessible in the virtual address space
+ * (for normal operation).   There are several large holes in the physical
+ * address space for which there will never be level 1 mappings:
  *
  *                                    LI PAGE TABLE
  *   ADDRESS RANGE           SIZE     ENTRIES       SECTIONS
@@ -527,8 +516,8 @@
  *
  * 1) One mapping the vector table (only when CONFIG_ARCH_LOWVECTORS is not
  *    defined).
- * 2) If on-demand paging is supported (CONFIG_PAGING=y), than an additional
- *    L2 page table is needed.
+ * 2) If on-demand paging is supported (CONFIG_LEGACY_PAGING=y), than an
+ *    additional L2 page table is needed.
  */
 
 #ifndef CONFIG_ARCH_LOWVECTORS
@@ -559,7 +548,7 @@
 
 /* Paging L2 page table base addresses
  *
- * NOTE: If CONFIG_PAGING is defined, mmu.h will re-assign the virtual
+ * NOTE: If CONFIG_LEGACY_PAGING is defined, mmu.h will re-assign the virtual
  * address of the page table.
  */
 
@@ -575,7 +564,8 @@
  *
  *   A1X_VECTOR_PADDR - Unmapped, physical address of vector table in SRAM
  *   A1X_VECTOR_VSRAM - Virtual address of vector table in SRAM
- *   A1X_VECTOR_VADDR - Virtual address of vector table (0x00000000 or 0xffff0000)
+ *   A1X_VECTOR_VADDR - Virtual address of vector table
+ *                     (0x00000000 or 0xffff0000)
  *
  * NOTE: When using LOWVECTORS, the actual base of the vectors appears to be
  * offset to address 0x0000:0040
@@ -603,16 +593,16 @@
 
 #endif
 
-/************************************************************************************
+/****************************************************************************
  * Public Types
- ************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************
+/****************************************************************************
  * Public Data
- ************************************************************************************/
+ ****************************************************************************/
 
-/************************************************************************************
- * Public Functions
- ************************************************************************************/
+/****************************************************************************
+ * Public Functions Prototypes
+ ****************************************************************************/
 
 #endif /* __ARCH_ARM_SRC_A1X_HARDWARE_A10_MEMORYMAP_H */

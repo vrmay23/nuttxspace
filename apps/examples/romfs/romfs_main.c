@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/romfs/romfs_main.c
+ * apps/examples/romfs/romfs_main.c
  *
- *   Copyright (C) 2008-2009, 2011 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -60,7 +47,10 @@
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/boardctl.h>
+#include <inttypes.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -93,10 +83,6 @@
 
 #ifdef CONFIG_DISABLE_MOUNTPOINT
 #  error "Mountpoint support is disabled"
-#endif
-
-#if CONFIG_NFILE_DESCRIPTORS < 4
-#  error "Not enough file descriptors"
 #endif
 
 #ifndef CONFIG_FS_ROMFS
@@ -151,6 +137,7 @@ static const char g_subdirfilecontent[]  = "File in subdirectory\n";
 
 static struct node_s g_adir;
 static struct node_s g_afile;
+static struct node_s g_ldir;
 static struct node_s g_hfile;
 
 static struct node_s g_anotherfile;
@@ -181,13 +168,21 @@ static void connectem(void)
   g_adir.size                  = 0;
   g_adir.u.child               = &g_anotherfile;
 
-  g_afile.peer                 = &g_hfile;
+  g_afile.peer                 = &g_ldir;
   g_afile.directory            = false;
   g_afile.found                = false;
   g_afile.name                 = "afile.txt";
   g_afile.mode                 = FILE_MODE;
   g_afile.size                 = strlen(g_afilecontent);
   g_afile.u.filecontent        = g_afilecontent;
+
+  g_ldir.peer                  = &g_hfile;
+  g_ldir.directory             = true;
+  g_ldir.found                 = false;
+  g_ldir.name                  = "ldir";
+  g_ldir.mode                  = DIRECTORY_MODE;
+  g_ldir.size                  = 0;
+  g_ldir.u.child               = &g_subdirfile;
 
   g_hfile.peer                 = NULL;
   g_hfile.directory            = false; /* Actually a hard link */
@@ -244,6 +239,7 @@ static struct node_s *findindirectory(struct node_s *entry, const char *name)
           return entry;
         }
     }
+
   return NULL;
 }
 
@@ -266,13 +262,15 @@ static void checkattributes(const char *path, mode_t mode, size_t size)
 
   if (mode != buf.st_mode)
     {
-      printf("  -- ERROR: Expected mode %08x, got %08x\n", mode, buf.st_mode);
+      printf("  -- ERROR: Expected mode %08x, got %08x\n", mode,
+             buf.st_mode);
       g_nerrors++;
     }
 
   if (size != buf.st_size)
     {
-      printf("  -- ERROR: Expected size %d, got %d\n", mode, buf.st_size);
+      printf("  -- ERROR: Expected size %zu, got %ju\n", size,
+             (uintmax_t)buf.st_size);
       g_nerrors++;
     }
 }
@@ -322,8 +320,9 @@ static void checkfile(const char *path, struct node_s *node)
 
   /* Memory map and verify the file contents */
 
-  filedata = (char*)mmap(NULL, node->size, PROT_READ, MAP_SHARED|MAP_FILE, fd, 0);
-  if (!filedata || filedata == (char*)MAP_FAILED)
+  filedata = (char *)mmap(NULL, node->size, PROT_READ, MAP_SHARED | MAP_FILE,
+                          fd, 0);
+  if (!filedata || filedata == (char *)MAP_FAILED)
     {
       printf("  -- ERROR: mmap of %s failed: %d\n", path, errno);
       g_nerrors++;
@@ -334,11 +333,13 @@ static void checkfile(const char *path, struct node_s *node)
         {
           memcpy(g_scratchbuffer, filedata, node->size);
           g_scratchbuffer[node->size] = '\0';
-          printf("  -- ERROR: Mapped file content read does not match expectation:\n");
+          printf("  -- ERROR: Mapped file content read does not match "
+                 "expectation:\n");
           printf("  --        Memory:   [%s]\n", filedata);
           printf("  --        Expected: [%s]\n", node->u.filecontent);
           g_nerrors++;
         }
+
       munmap(filedata, node->size);
     }
 
@@ -373,7 +374,8 @@ static void readdirectories(const char *path, struct node_s *entry)
 
   for (direntry = readdir(dirp); direntry; direntry = readdir(dirp))
     {
-      if (strcmp(direntry->d_name, ".") == 0 || strcmp(direntry->d_name, "..") == 0)
+      if (strcmp(direntry->d_name, ".") == 0 ||
+          strcmp(direntry->d_name, "..") == 0)
         {
            printf("  Skipping %s\n", direntry->d_name);
            continue;
@@ -389,7 +391,8 @@ static void readdirectories(const char *path, struct node_s *entry)
 
       /* Get the full path to the entry */
 
-      sprintf(g_scratchbuffer, "%s/%s", path, direntry->d_name);
+      snprintf(g_scratchbuffer, sizeof(g_scratchbuffer),
+               "%s/%s", path, direntry->d_name);
       fullpath = strdup(g_scratchbuffer);
 
       if (DIRENT_ISDIRECTORY(direntry->d_type))
@@ -407,7 +410,7 @@ static void readdirectories(const char *path, struct node_s *entry)
               printf("Continuing directory: %s\n", path);
             }
         }
-      else
+      else if (!DIRENT_ISLINK(direntry->d_type))
         {
           printf("  FILE: %s/\n", fullpath);
           if (node->directory)
@@ -421,6 +424,7 @@ static void readdirectories(const char *path, struct node_s *entry)
               checkfile(fullpath, node);
             }
         }
+
       free(fullpath);
     }
 
@@ -435,7 +439,7 @@ static void checkdirectories(struct node_s *entry)
 {
   for (; entry; entry = entry->peer)
     {
-      if (!entry->found )
+      if (!entry->found)
         {
           printf("ERROR: %s never found\n", entry->name);
           g_nerrors++;
@@ -458,15 +462,21 @@ static void checkdirectories(struct node_s *entry)
 
 int main(int argc, FAR char *argv[])
 {
-   int  ret;
+  int ret;
+  struct boardioc_romdisk_s desc;
 
   /* Create a RAM disk for the test */
 
-  ret = romdisk_register(CONFIG_EXAMPLES_ROMFS_RAMDEVNO, testdir_img,
-                         NSECTORS(testdir_img_len), CONFIG_EXAMPLES_ROMFS_SECTORSIZE);
+  desc.minor    = CONFIG_EXAMPLES_ROMFS_RAMDEVNO;         /* Minor device number of the ROM disk. */
+  desc.nsectors = NSECTORS(testdir_img_len);              /* The number of sectors in the ROM disk */
+  desc.sectsize = CONFIG_EXAMPLES_ROMFS_SECTORSIZE;       /* The size of one sector in bytes */
+  desc.image    = (FAR uint8_t *)testdir_img;             /* File system image */
+
+  ret = boardctl(BOARDIOC_ROMDISK, (uintptr_t)&desc);
+
   if (ret < 0)
     {
-      printf("ERROR: Failed to create RAM disk\n");
+      printf("ERROR: Failed to create RAM disk: %s\n", strerror(errno));
       return 1;
     }
 
@@ -475,10 +485,11 @@ int main(int argc, FAR char *argv[])
   printf("Mounting ROMFS filesystem at target=%s with source=%s\n",
          CONFIG_EXAMPLES_ROMFS_MOUNTPOINT, MOUNT_DEVNAME);
 
-  ret = mount(MOUNT_DEVNAME, CONFIG_EXAMPLES_ROMFS_MOUNTPOINT, "romfs", MS_RDONLY, NULL);
+  ret = mount(MOUNT_DEVNAME, CONFIG_EXAMPLES_ROMFS_MOUNTPOINT, "romfs",
+              MS_RDONLY, NULL);
   if (ret < 0)
     {
-      printf("ERROR: Mount failed: %d\n", errno);
+      printf("ERROR: Mount failed: %s\n", strerror(errno));
       return 1;
     }
 

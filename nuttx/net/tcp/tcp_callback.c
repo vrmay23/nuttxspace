@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/tcp/tcp_callback.c
  *
- *   Copyright (C) 2007-2009, 2014, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,6 +29,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <debug.h>
+#include <assert.h>
 
 #include <nuttx/mm/iob.h>
 #include <nuttx/net/netconfig.h>
@@ -50,6 +38,7 @@
 
 #include "devif/devif.h"
 #include "tcp/tcp.h"
+#include "utils/utils.h"
 
 #ifdef NET_TCP_HAVE_STACK
 
@@ -75,13 +64,13 @@ static inline uint16_t
 tcp_data_event(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
                uint16_t flags)
 {
-  uint16_t ret;
+  uint16_t recvlen;
 
   /* Assume that we will ACK the data.  The data will be ACKed if it is
    * placed in the read-ahead buffer -OR- if it zero length
    */
 
-  ret = (flags & ~TCP_NEWDATA) | TCP_SNDACK;
+  flags = (flags & ~TCP_NEWDATA) | TCP_SNDACK;
 
   /* Is there new data?  With non-zero length?  (Certain connection events
    * can have zero-length with TCP_NEWDATA set just to cause an ACK).
@@ -89,43 +78,173 @@ tcp_data_event(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
 
   if (dev->d_len > 0)
     {
-      uint8_t *buffer = dev->d_appdata;
-      int      buflen = dev->d_len;
-      uint16_t recvlen;
-
       ninfo("No listener on connection\n");
 
       /* Save as the packet data as in the read-ahead buffer.  NOTE that
        * partial packets will not be buffered.
        */
 
-      recvlen = tcp_datahandler(conn, buffer, buflen);
-      if (recvlen < buflen)
-        {
-          /* There is no handler to receive new data and there are no free
-           * read-ahead buffers to retain the data -- drop the packet.
-           */
+      recvlen = tcp_datahandler(dev, conn,
+                                (dev->d_appdata - dev->d_iob->io_data) -
+                                dev->d_iob->io_offset);
 
-         ninfo("Dropped %d bytes\n", dev->d_len);
-
-#ifdef CONFIG_NET_STATISTICS
-          g_netstats.tcp.drop++;
-#endif
-          /* Clear the TCP_SNDACK bit so that no ACK will be sent */
-
-          ret &= ~TCP_SNDACK;
-        }
+      net_incr32(conn->rcvseq, recvlen);
     }
 
   /* In any event, the new data has now been handled */
 
   dev->d_len = 0;
-  return ret;
+  return flags;
 }
+
+/****************************************************************************
+ * Name: tcp_ofoseg_data_event
+ *
+ * Description:
+ *   Handle out-of-order segment to readahead poll.
+ *
+ * Assumptions:
+ * - This function must be called with the network locked.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NET_TCP_OUT_OF_ORDER
+static uint16_t tcp_ofoseg_data_event(FAR struct net_driver_s *dev,
+                                      FAR struct tcp_conn_s *conn,
+                                      uint16_t flags)
+{
+  FAR struct tcp_ofoseg_s *seg;
+  uint32_t rcvseq;
+  int i = 0;
+
+  /* Assume that we will ACK the data.  The data will be ACKed if it is
+   * placed in the read-ahead buffer -OR- if it zero length
+   */
+
+  flags |= TCP_SNDACK;
+
+  /* Get the receive sequence number */
+
+  rcvseq = tcp_getsequence(conn->rcvseq);
+
+  ninfo("TCP OFOSEG rcvseq [%" PRIu32 "]\n", rcvseq);
+
+  /* Foreach out-of-order segments */
+
+  while (i < conn->nofosegs)
+    {
+      seg = &conn->ofosegs[i];
+
+      /* rcvseq -->|
+       * ofoseg    |------|
+       */
+
+      if (rcvseq == seg->left)
+        {
+          ninfo("TCP OFOSEG input [%" PRIu32 " : %" PRIu32 " : %u]\n",
+                 seg->left, seg->right, seg->data->io_pktlen);
+          rcvseq = TCP_SEQ_ADD(rcvseq,
+                               seg->data->io_pktlen);
+          net_incr32(conn->rcvseq, seg->data->io_pktlen);
+          net_iob_concat(&conn->readahead, &seg->data);
+        }
+      else if (TCP_SEQ_GT(rcvseq, seg->left))
+        {
+          /* rcvseq       -->|
+           * ofoseg  |------|
+           */
+
+          if (TCP_SEQ_GTE(rcvseq, seg->right))
+            {
+              /* Remove stale segments */
+
+              iob_free_chain(seg->data);
+              seg->data = NULL;
+            }
+
+          /* rcvseq  -->|
+           * ofoseg   |------|
+           */
+
+          else
+            {
+              seg->data =
+                iob_trimhead(seg->data,
+                             TCP_SEQ_SUB(rcvseq, seg->left));
+              seg->left = rcvseq;
+              if (seg->data != NULL)
+                {
+                  ninfo("TCP OFOSEG input "
+                        "[%" PRIu32 " : %" PRIu32 " : %u]\n",
+                        seg->left, seg->right, seg->data->io_pktlen);
+                  rcvseq = TCP_SEQ_ADD(rcvseq,
+                                       seg->data->io_pktlen);
+                  net_incr32(conn->rcvseq, seg->data->io_pktlen);
+                  net_iob_concat(&conn->readahead, &seg->data);
+                }
+            }
+        }
+
+      /* Rebuild out-of-order pool if segment is consumed */
+
+      if (seg->data == NULL)
+        {
+          for (; i < conn->nofosegs - 1; i++)
+            {
+              conn->ofosegs[i] = conn->ofosegs[i + 1];
+            }
+
+          conn->nofosegs--;
+
+          /* Try segments again */
+
+          i = 0;
+        }
+      else
+        {
+          i++;
+        }
+    }
+
+  return flags;
+}
+#endif /* CONFIG_NET_TCP_OUT_OF_ORDER */
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: tcp_ofoseg_bufsize
+ *
+ * Description:
+ *   Calculate the pending size of out-of-order buffer
+ *
+ * Input Parameters:
+ *   conn   - The TCP connection of interest
+ *
+ * Returned Value:
+ *   Total size of out-of-order buffer
+ *
+ * Assumptions:
+ *   This function must be called with the network locked.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NET_TCP_OUT_OF_ORDER
+int tcp_ofoseg_bufsize(FAR struct tcp_conn_s *conn)
+{
+  int total = 0;
+  int i;
+
+  for (i = 0; i < conn->nofosegs; i++)
+    {
+      total += conn->ofosegs[i].data->io_pktlen;
+    }
+
+  return total;
+}
+#endif /* CONFIG_NET_TCP_OUT_OF_ORDER */
 
 /****************************************************************************
  * Name: tcp_callback
@@ -141,21 +260,28 @@ tcp_data_event(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
 uint16_t tcp_callback(FAR struct net_driver_s *dev,
                       FAR struct tcp_conn_s *conn, uint16_t flags)
 {
-#ifdef CONFIG_NET_TCP_NOTIFIER
+#if defined(CONFIG_NET_TCP_NOTIFIER) || defined(CONFIG_NET_TCP_OUT_OF_ORDER)
   uint16_t orig = flags;
 #endif
 
+  /* Prepare device buffer */
+
+  if (dev->d_iob == NULL && netdev_iob_prepare(dev, false, 0) != OK)
+    {
+      return 0;
+    }
+
   /* Preserve the TCP_ACKDATA, TCP_CLOSE, and TCP_ABORT in the response.
-   * These is needed by the network to handle responses and buffer state.  The
-   * TCP_NEWDATA indication will trigger the ACK response, but must be
+   * These is needed by the network to handle responses and buffer state.
+   * The TCP_NEWDATA indication will trigger the ACK response, but must be
    * explicitly set in the callback.
    */
 
   ninfo("flags: %04x\n", flags);
 
-  /* Perform the data callback.  When a data callback is executed from 'list',
-   * the input flags are normally returned, however, the implementation
-   * may set one of the following:
+  /* Perform the data callback.  When a data callback is executed from
+   * 'list', the input flags are normally returned, however, the
+   * implementation may set one of the following:
    *
    *   TCP_CLOSE   - Gracefully close the current connection
    *   TCP_ABORT   - Abort (reset) the current connection on an error that
@@ -172,13 +298,13 @@ uint16_t tcp_callback(FAR struct net_driver_s *dev,
    *                 not set, then dev->d_len should also be cleared).
    */
 
-  flags = devif_conn_event(dev, conn, flags, conn->list);
+  flags = devif_conn_event(dev, flags, conn->sconn.list);
 
   /* There may be no new data handler in place at them moment that the new
-   * incoming data is received.  If the new incoming data was not handled, then
-   * either (1) put the unhandled incoming data in the read-ahead buffer (if
-   * enabled) or (2) suppress the ACK to the data in the hope that it will
-   * be re-transmitted at a better time.
+   * incoming data is received.  If the new incoming data was not handled,
+   * then either (1) put the unhandled incoming data in the read-ahead
+   * buffer (if enabled) or (2) suppress the ACK to the data in the hope
+   * that it will be re-transmitted at a better time.
    */
 
   if ((flags & TCP_NEWDATA) != 0)
@@ -188,6 +314,15 @@ uint16_t tcp_callback(FAR struct net_driver_s *dev,
       flags = tcp_data_event(dev, conn, flags);
     }
 
+#ifdef CONFIG_NET_TCP_OUT_OF_ORDER
+  if ((orig & TCP_NEWDATA) != 0 && conn->nofosegs > 0)
+    {
+      /* Try out-of-order pool if new data is coming */
+
+      flags = tcp_ofoseg_data_event(dev, conn, flags);
+    }
+#endif
+
   /* Check if there is a connection-related event and a connection
    * callback.
    */
@@ -196,7 +331,7 @@ uint16_t tcp_callback(FAR struct net_driver_s *dev,
     {
       /* Perform the callback disconnect callbacks */
 
-      flags = devif_conn_event(dev, conn, flags, conn->connevents);
+      flags = devif_conn_event(dev, flags, conn->connevents);
     }
 
 #ifdef CONFIG_NET_TCP_NOTIFIER
@@ -207,6 +342,13 @@ uint16_t tcp_callback(FAR struct net_driver_s *dev,
       tcp_disconnect_signal(conn);
     }
 #endif
+
+  /* Re-prepare the device buffer if d_iob is consumed by the stack */
+
+  if (dev->d_iob == NULL)
+    {
+      netdev_iob_prepare(dev, false, 0);
+    }
 
   return flags;
 }
@@ -237,50 +379,36 @@ uint16_t tcp_callback(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-uint16_t tcp_datahandler(FAR struct tcp_conn_s *conn, FAR uint8_t *buffer,
-                         uint16_t buflen)
+uint16_t tcp_datahandler(FAR struct net_driver_s *dev,
+                         FAR struct tcp_conn_s *conn,
+                         uint16_t offset)
 {
-  FAR struct iob_s *iob;
-  int ret;
+  FAR struct iob_s *iob = dev->d_iob;
+  uint16_t buflen;
 
-  /* Try to allocate on I/O buffer to start the chain without waiting (and
-   * throttling as necessary).  If we would have to wait, then drop the
-   * packet.
-   */
-
-  iob = iob_tryalloc(true, IOBUSER_NET_TCP_READAHEAD);
-  if (iob == NULL)
+  if (offset > 0)
     {
-      nerr("ERROR: Failed to create new I/O buffer chain\n");
-      return 0;
+      /* Remove 'bufoff' bytes from the beginning of the input I/O chain */
+
+      iob = iob_trimhead(iob, offset);
     }
 
-  /* Copy the new appdata into the I/O buffer chain (without waiting) */
+  /* Trim tail if l3/l4 header has been removed */
 
-  ret = iob_trycopyin(iob, buffer, buflen, 0, true,
-                      IOBUSER_NET_TCP_READAHEAD);
-  if (ret < 0)
+  if (dev->d_len < iob->io_pktlen)
     {
-      /* On a failure, iob_copyin return a negated error value but does
-       * not free any I/O buffers.
-       */
-
-      nerr("ERROR: Failed to add data to the I/O buffer chain: %d\n", ret);
-      iob_free_chain(iob, IOBUSER_NET_TCP_READAHEAD);
-      return 0;
+      iob = iob_trimtail(iob, iob->io_pktlen - dev->d_len);
     }
 
-  /* Add the new I/O buffer chain to the tail of the read-ahead queue (again
-   * without waiting).
-   */
+  buflen = iob->io_pktlen;
 
-  ret = iob_tryadd_queue(iob, &conn->readahead);
-  if (ret < 0)
-    {
-      nerr("ERROR: Failed to queue the I/O buffer chain: %d\n", ret);
-      iob_free_chain(iob, IOBUSER_NET_TCP_READAHEAD);
-      return 0;
-    }
+  /* Concat the iob to readahead */
+
+  net_iob_concat(&conn->readahead, &iob);
+
+  /* Clear device buffer */
+
+  netdev_iob_clear(dev);
 
 #ifdef CONFIG_NET_TCP_NOTIFIER
   /* Provide notification(s) that additional TCP read-ahead data is
@@ -290,8 +418,27 @@ uint16_t tcp_datahandler(FAR struct tcp_conn_s *conn, FAR uint8_t *buffer,
   tcp_readahead_signal(conn);
 #endif
 
-  ninfo("Buffered %d bytes\n", buflen);
+  ninfo("Buffered %" PRIu16 " bytes\n", buflen);
   return buflen;
 }
 
+/****************************************************************************
+ * Name: tcp_callback_cleanup
+ *
+ * Description:
+ *   Cleanup data and cb when thread is canceled.
+ *
+ * Input Parameters:
+ *   arg - A pointer with conn and callback struct.
+ *
+ ****************************************************************************/
+
+void tcp_callback_cleanup(FAR void *arg)
+{
+  FAR struct tcp_callback_s *cb = (FAR struct tcp_callback_s *)arg;
+
+  nerr("ERROR: pthread is being canceled, need to cleanup cb\n");
+  tcp_callback_free(cb->tc_conn, cb->tc_cb);
+  nxsem_destroy(cb->tc_sem);
+}
 #endif /* NET_TCP_HAVE_STACK */

@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/renesas/src/rx65n/rx65n_serial.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -28,7 +30,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <semaphore.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <stdio.h>
@@ -36,13 +40,12 @@
 #include <nuttx/arch.h>
 #include <nuttx/serial/serial.h>
 #include "rx65n_macrodriver.h"
-#include "rx65n/iodefine.h"
+#include "arch/rx65n/iodefine.h"
 #include "chip.h"
-#include "up_arch.h"
-#include "up_internal.h"
+#include "renesas_internal.h"
 #include "rx65n_definitions.h"
 #include "rx65n_sci.h"
-#include "rx65n/irq.h"
+#include "arch/rx65n/irq.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -255,19 +258,19 @@
 
 struct up_dev_s
 {
-  uint32_t scibase;   /* Base address of SCI registers */
-  uint32_t baud;      /* Configured baud */
-  volatile  uint8_t scr;       /* Saved SCR value */
-  volatile  uint8_t ssr;       /* Saved SR value */
-  uint8_t xmitirq;   /* Base IRQ associated with xmit IRQ */
-  uint8_t recvirq;   /* Base IRQ associated with receive IRQ */
+  uint32_t scibase;      /* Base address of SCI registers */
+  uint32_t baud;         /* Configured baud */
+  volatile  uint8_t scr; /* Saved SCR value */
+  volatile  uint8_t ssr; /* Saved SR value */
+  uint8_t xmitirq;       /* Base IRQ associated with xmit IRQ */
+  uint8_t recvirq;       /* Base IRQ associated with receive IRQ */
   uint8_t eriirq;
   uint8_t teiirq;
   uint32_t grpibase;
   uint32_t erimask;
   uint32_t teimask;
-  uint8_t parity;    /* 0=none, 1=odd, 2=even */
-  uint8_t bits;      /* Number of bits (7 or 8) */
+  uint8_t parity; /* 0=none, 1=odd, 2=even */
+  uint8_t bits;   /* Number of bits (7 or 8) */
   bool stopbits2; /* true: Configure with 2 stop bits instead of 1 */
 };
 
@@ -279,11 +282,12 @@ static int  up_setup(struct uart_dev_s *dev);
 static void up_shutdown(struct uart_dev_s *dev);
 static int  up_attach(struct uart_dev_s *dev);
 static void up_detach(struct uart_dev_s *dev);
-static int  up_xmtinterrupt(int irq, void *context, FAR void *arg);
-static int  up_rcvinterrupt(int irq, void *context, FAR void *arg);
-static int  up_eriinterrupt(int irq, void *context, FAR void *arg);
-static int  up_teiinterrupt(int irq, void *context, FAR void *arg);
-static int  up_receive(struct uart_dev_s *dev, uint32_t *status);
+static int  up_ioctl(struct file *filep, int cmd, unsigned long arg);
+static int  up_xmtinterrupt(int irq, void *context, void *arg);
+static int  up_rcvinterrupt(int irq, void *context, void *arg);
+static int  up_eriinterrupt(int irq, void *context, void *arg);
+static int  up_teiinterrupt(int irq, void *context, void *arg);
+static int  up_receive(struct uart_dev_s *dev, unsigned int *status);
 static void up_rxint(struct uart_dev_s *dev, bool enable);
 static bool up_rxavailable(struct uart_dev_s *dev);
 static void up_send(struct uart_dev_s *dev, int ch);
@@ -363,6 +367,7 @@ struct uart_ops_s g_sci_ops =
   .attach      =  up_attach,
   .detach      =  up_detach,
   .receive     =  up_receive,
+  .ioctl       =  up_ioctl,
   .rxint       =  up_rxint,
   .rxavailable =  up_rxavailable,
 #ifdef CONFIG_SERIAL_IFLOWCONTROL
@@ -1198,7 +1203,9 @@ static int up_eriinterrupt(int irq, void *context, void *arg)
 
       priv->ssr = up_serialin(priv, RX_SCI_SSR_OFFSET);
 
-      /* Clear all read related events (probably already done in up_receive)) */
+      /* Clear all read related events (probably already done in
+       * up_receive))
+       */
 
       priv->ssr &= ~(RX_SCISSR_ORER | RX_SCISSR_FER | RX_SCISSR_PER);
       up_serialout(priv, RX_SCI_SSR_OFFSET, priv->ssr);
@@ -1223,7 +1230,9 @@ static int up_teiinterrupt(int irq, void *context, void *arg)
 
     priv->ssr = up_serialin(priv, RX_SCI_SSR_OFFSET);
 
-      /* Clear all read related events (probably already done in up_receive)) */
+      /* Clear all read related events (probably already done in
+       * up_receive))
+       */
 
      priv->ssr &= ~(RX_SCISSR_TEND);
      up_serialout(priv, RX_SCI_SSR_OFFSET, priv->ssr);
@@ -1252,28 +1261,52 @@ static int up_rcvinterrupt(int irq, void *context, void *arg)
  * Name: up_xmtinterrupt
  *
  * Description:
- *   This is the SCI interrupt handler.  It will be invoked
- *   when an interrupt received on the 'irq'  It should call
- *   uart_transmitchars or uart_receivechar to perform the
- *   appropriate data transfers.  The interrupt handling logic\
- *   must be able to map the 'irq' number into the appropriate
- *   up_dev_s structure in order to call these functions.
+ *   This is the SCI interrupt handler.  It will be invoked when an
+ *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
+ *   uart_recvchars to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'arg' to the
+ *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
 
-static int  up_xmtinterrupt(int irq, void *context, FAR void *arg)
+static int  up_xmtinterrupt(int irq, void *context, void *arg)
 {
   struct uart_dev_s *dev;
   dev = (struct uart_dev_s *)arg;
   DEBUGASSERT((NULL != dev));
 
   /* Handle outgoing, transmit bytes (TDRE: Transmit Data Register Empty)
-   * when TIE is enabled.  TIE is only enabled when the driver is waiting with
-   * buffered data.  Since TDRE is usually true,
+   * when TIE is enabled.  TIE is only enabled when the driver is waiting
+   * with buffered data.  Since TDRE is usually true,
    */
 
   uart_xmitchars(dev);
   return OK;
+}
+
+/****************************************************************************
+ * Name: up_ioctl
+ *
+ * Description:
+ *   All ioctl calls will be routed through this method
+ *
+ ****************************************************************************/
+
+static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
+{
+    int                ret    = OK;
+
+    switch (cmd)
+    {
+#ifdef CONFIG_SERIAL_TERMIOS
+#error CONFIG_SERIAL_TERMIOS NOT IMPLEMENTED
+#endif /* CONFIG_SERIAL_TERMIOS */
+       default:
+            ret = -ENOTTY;
+            break;
+    }
+
+    return ret;
 }
 
 /****************************************************************************
@@ -1297,8 +1330,8 @@ static int up_receive(struct uart_dev_s *dev, unsigned int *status)
 
   rdr  = up_serialin(priv, RX_SCI_RDR_OFFSET);
 
-  /* Clear all read related status in  real ssr (so that when when rxavailable
-   * is called again, it will return false.
+  /* Clear all read related status in  real ssr (so that when when
+   * rx available is called again, it will return false.
    */
 
   ssr = up_serialin(priv, RX_SCI_SSR_OFFSET);
@@ -1306,7 +1339,7 @@ static int up_receive(struct uart_dev_s *dev, unsigned int *status)
            RX_SCISSR_FER  | RX_SCISSR_PER) ;
   up_serialout(priv, RX_SCI_SSR_OFFSET, ssr);
 
-  /* For status, return the SSR at the time that the interrupt was received */
+  /* For status, return SSR at the time that the interrupt was received */
 
   *status = (uint32_t)priv->ssr << 8 | rdr;
 
@@ -1477,16 +1510,16 @@ static bool up_txready(struct uart_dev_s *dev)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: up_earlyconsoleinit
+ * Name: renesas_earlyconsoleinit
  *
  * Description:
  *   Performs the low level SCI initialization early in
  *   debug so that the serial console will be available
- *   during bootup.  This must be called before up_consoleinit.
+ *   during boot up.  This must be called before renesas_consoleinit.
  *
  ****************************************************************************/
 
-void    up_earlyconsoleinit(void)
+void    renesas_earlyconsoleinit(void)
 {
   /* NOTE:  All GPIO configuration for the SCIs was performed in
    * up_lowsetup
@@ -1543,15 +1576,15 @@ void    up_earlyconsoleinit(void)
 }
 
 /****************************************************************************
- * Name: up_serialinit
+ * Name: renesas_serialinit
  *
  * Description:
  *   Register serial console and serial ports.  This assumes
- *   that up_earlyconsoleinit was called previously.
+ *   that renesas_earlyconsoleinit was called previously.
  *
  ****************************************************************************/
 
-void up_serialinit(void)
+void renesas_serialinit(void)
 {
   /* Register all SCIs */
 
@@ -1661,7 +1694,7 @@ void up_serialinit(void)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_CONSOLE
   struct up_dev_s *priv;
@@ -1669,22 +1702,11 @@ int up_putc(int ch)
   priv = (struct up_dev_s *)CONSOLE_DEV.priv;
   up_disablesciint(priv, &scr);
 
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      up_waittxready(priv);
-      up_serialout(priv, RX_SCI_TDR_OFFSET, '\r');
-    }
-
   up_waittxready(priv);
   up_serialout(priv, RX_SCI_TDR_OFFSET, (uint8_t)ch);
   up_waittxready(priv);
   up_restoresciint(priv, scr);
 #endif
-  return ch;
 }
 #else /* USE_SERIALDRIVER */
 
@@ -1696,22 +1718,11 @@ int up_putc(int ch)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_CONSOLE
-
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      up_lowputc('\r');
-    }
-
-  up_lowputc(ch);
+  renesas_lowputc(ch);
 #endif
-  return ch;
 }
 
 #endif /* USE_SERIALDRIVER */

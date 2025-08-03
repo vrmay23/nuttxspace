@@ -1,37 +1,22 @@
 /****************************************************************************
  * drivers/wireless/ieee802154/mrf24j40/mrf24j40_interrupt.c
  *
- *   Copyright (C) 2015-2016 Sebastien Lorquet. All rights reserved.
- *   Copyright (C) 2017 Verge Inc. All rights reserved.
- *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
- *   Author: Anthony Merlino <anthony@vergeaero.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -97,10 +82,10 @@ static void mrf24j40_irqwork_txnorm(FAR struct mrf24j40_radio_s *dev)
 
   if (reg & MRF24J40_TXSTAT_TXNSTAT)
     {
-      /* The number of retries of the most recent transmission is contained in the
-       * TXNRETRY (TXSTAT 0x24<7:6>) bits. The CCAFAIL (TXSTAT 0x24<5>) bit = 1
-       * indicates if the failed transmission was due to the channel busy
-       * (CSMA-CA timed out).
+      /* The number of retries of the most recent transmission is contained
+       * in the TXNRETRY (TXSTAT 0x24<7:6>) bits.
+       * The CCAFAIL (TXSTAT 0x24<5>) bit = 1 indicates if the failed
+       * transmission was due to the channel busy (CSMA-CA timed out).
        */
 
       if (reg & MRF24J40_TXSTAT_CCAFAIL)
@@ -151,9 +136,9 @@ static void mrf24j40_irqwork_txnorm(FAR struct mrf24j40_radio_s *dev)
 
       /* Must unlock the radio before calling poll */
 
-      nxsem_post(&dev->exclsem);
+      nxmutex_unlock(&dev->lock);
       mrf24j40_dopoll_csma(dev);
-      while (nxsem_wait(&dev->exclsem) < 0)
+      while (nxmutex_lock(&dev->lock) < 0)
         {
         }
     }
@@ -214,7 +199,6 @@ static void mrf24j40_irqwork_txgts(FAR struct mrf24j40_radio_s *dev,
  ****************************************************************************/
 
 static void mrf24j40_irqwork_rx(FAR struct mrf24j40_radio_s *dev)
-
 {
   FAR struct ieee802154_primitive_s *primitive;
   FAR struct ieee802154_data_ind_s *ind;
@@ -248,11 +232,8 @@ static void mrf24j40_irqwork_rx(FAR struct mrf24j40_radio_s *dev)
 
   /* Allocate an IOB to put the frame into */
 
-  ind->frame = iob_alloc(false, IOBUSER_WIRELESS_RAD802154);
-  ind->frame->io_flink = NULL;
-  ind->frame->io_len = 0;
-  ind->frame->io_pktlen = 0;
-  ind->frame->io_offset = 0;
+  ind->frame = iob_alloc(false);
+  DEBUGASSERT(ind->frame != NULL);
 
   /* Read packet */
 
@@ -279,7 +260,6 @@ static void mrf24j40_irqwork_rx(FAR struct mrf24j40_radio_s *dev)
   dev->radiocb->rxframe(dev->radiocb, ind);
 
 done:
-
   /* Enable reception of next packet by flushing the fifo.
    * This is an MRF24J40 errata (no. 1).
    */
@@ -332,7 +312,7 @@ void mrf24j40_irqworker(FAR void *arg)
 
   /* Get exclusive access to the driver */
 
-  while (nxsem_wait(&dev->exclsem) < 0)
+  while (nxmutex_lock(&dev->lock) < 0)
     {
     }
 
@@ -344,8 +324,8 @@ void mrf24j40_irqworker(FAR void *arg)
 
   if ((intstat & MRF24J40_INTSTAT_HSYMTMRIF))
     {
-      /* As of now the only use for the MAC timer is for delayed transactions.
-       * Therefore, all we do here is trigger the TX norm FIFO
+      /* As of now the only use for the MAC timer is for delayed
+       * transactions.  Therefore, all we do here is trigger the TX norm FIFO
        */
 
       mrf24j40_norm_trigger(dev);
@@ -366,21 +346,21 @@ void mrf24j40_irqworker(FAR void *arg)
 
   if ((intstat & MRF24J40_INTSTAT_TXNIF))
     {
-      /* A packet was transmitted or failed*/
+      /* A packet was transmitted or failed */
 
       mrf24j40_irqwork_txnorm(dev);
     }
 
   if ((intstat & MRF24J40_INTSTAT_TXG1IF))
     {
-      /* A packet was transmitted or failed*/
+      /* A packet was transmitted or failed */
 
       mrf24j40_irqwork_txgts(dev, 0);
     }
 
   if ((intstat & MRF24J40_INTSTAT_TXG1IF))
     {
-      /* A packet was transmitted or failed*/
+      /* A packet was transmitted or failed */
 
       mrf24j40_irqwork_txgts(dev, 1);
     }
@@ -404,10 +384,10 @@ void mrf24j40_irqworker(FAR void *arg)
 
       if (dev->devmode != IEEE802154_DEVMODE_ENDPOINT)
         {
-          /* This is right before the beacon, we set the bsn here, since the MAC
-           * uses the SLPIF (end of active portion of superframe). to make any
-           * changes to the beacon.  This assumes that any changes to the beacon
-           * be in by the time that this interrupt fires.
+          /* This is right before the beacon, we set the bsn here, since the
+           * MAC uses the SLPIF (end of active portion of superframe). to
+           * make any changes to the beacon.  This assumes that any changes
+           * to the beacon be in by the time that this interrupt fires.
            */
 
           mrf24j40_setreg(dev->spi, MRF24J40_BEACON_FIFO + 4, dev->bsn++);
@@ -418,7 +398,7 @@ void mrf24j40_irqworker(FAR void *arg)
 
   /* Unlock the radio device */
 
-  nxsem_post(&dev->exclsem);
+  nxmutex_unlock(&dev->lock);
 
   /* Re-enable GPIO interrupts */
 
@@ -463,5 +443,6 @@ int mrf24j40_interrupt(int irq, FAR void *context, FAR void *arg)
    */
 
   dev->lower->enable(dev->lower, false);
-  return work_queue(HPWORK, &dev->irqwork, mrf24j40_irqworker, (FAR void *)dev, 0);
+  return work_queue(HPWORK, &dev->irqwork,
+                    mrf24j40_irqworker, (FAR void *)dev, 0);
 }

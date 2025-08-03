@@ -1,35 +1,22 @@
 /****************************************************************************
  * sched/pthread/pthread_mutexunlock.c
  *
- *   Copyright (C) 2007-2009, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -47,39 +34,6 @@
 #include <debug.h>
 
 #include "pthread/pthread.h"
-
-/****************************************************************************
- * Private Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: pthread_mutex_islocked
- *
- * Description:
- *   Return true is the mutex is locked.
- *
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   Returns true if the mutex is locked
- *
- ****************************************************************************/
-
-static inline bool pthread_mutex_islocked(FAR struct pthread_mutex_s *mutex)
-{
-  int semcount = mutex->sem.semcount;
-
-  /* The underlying semaphore should have a count less than 2:
-   *
-   *  1 == mutex is unlocked.
-   *  0 == mutex is locked with no waiters
-   * -n == mutex is locked with 'n' waiters.
-   */
-
-  DEBUGASSERT(semcount < 2);
-  return semcount < 1;
-}
 
 /****************************************************************************
  * Public Functions
@@ -117,18 +71,12 @@ int pthread_mutex_unlock(FAR pthread_mutex_t *mutex)
 {
   int ret = EPERM;
 
-  sinfo("mutex=0x%p\n", mutex);
+  sinfo("mutex=%p\n", mutex);
   DEBUGASSERT(mutex != NULL);
   if (mutex == NULL)
     {
       return EINVAL;
     }
-
-  /* Make sure the semaphore is stable while we make the following checks.
-   * This all needs to be one atomic action.
-   */
-
-  sched_lock();
 
   /* The unlock operation is only performed if the mutex is actually locked.
    * EPERM *must* be returned if the mutex type is PTHREAD_MUTEX_ERRORCHECK
@@ -137,7 +85,7 @@ int pthread_mutex_unlock(FAR pthread_mutex_t *mutex)
    * remaining case.
    */
 
-  if (pthread_mutex_islocked(mutex))
+  if (mutex_is_locked(&mutex->mutex))
     {
 #if !defined(CONFIG_PTHREAD_MUTEX_UNSAFE) || defined(CONFIG_PTHREAD_MUTEX_TYPES)
       /* Does the calling thread own the semaphore?  If no, should we return
@@ -157,7 +105,7 @@ int pthread_mutex_unlock(FAR pthread_mutex_t *mutex)
        * thread owns the semaphore.
        */
 
-      if (mutex->pid != (int)getpid())
+      if (!mutex_is_hold(&mutex->mutex))
 
 #elif defined(CONFIG_PTHREAD_MUTEX_UNSAFE) && defined(CONFIG_PTHREAD_MUTEX_TYPES)
       /* If mutex types are not supported, then all mutexes are NORMAL (or
@@ -165,7 +113,8 @@ int pthread_mutex_unlock(FAR pthread_mutex_t *mutex)
        * non-robust NORMAL mutex type.
        */
 
-      if (mutex->type != PTHREAD_MUTEX_NORMAL && mutex->pid != (int)getpid())
+      if (mutex->type != PTHREAD_MUTEX_NORMAL &&
+          !mutex_is_hold(&mutex->mutex))
 
 #else /* CONFIG_PTHREAD_MUTEX_BOTH */
       /* Skip the error check if this is a non-robust NORMAL mutex */
@@ -179,7 +128,7 @@ int pthread_mutex_unlock(FAR pthread_mutex_t *mutex)
        * the EPERM error?
        */
 
-      if (errcheck && mutex->pid != (int)getpid())
+      if (errcheck && !mutex_is_hold(&mutex->mutex))
 #endif
         {
           /* No... return an EPERM error.
@@ -193,50 +142,28 @@ int pthread_mutex_unlock(FAR pthread_mutex_t *mutex)
            * the behavior is undefined.
            */
 
-          serr("ERROR: Holder=%d returning EPERM\n", mutex->pid);
+          serr("ERROR: Holder=%d returning EPERM\n",
+               mutex_get_holder(&mutex->mutex));
           ret = EPERM;
         }
       else
 #endif /* !CONFIG_PTHREAD_MUTEX_UNSAFE || CONFIG_PTHREAD_MUTEX_TYPES */
 
-#ifdef CONFIG_PTHREAD_MUTEX_TYPES
-      /* Yes, the caller owns the semaphore.. Is this a recursive mutex? */
-
-      if (mutex->type == PTHREAD_MUTEX_RECURSIVE && mutex->nlocks > 1)
-        {
-          /* This is a recursive mutex and we there are multiple locks held.
-           * Retain the mutex lock, just decrement the count of locks held,
-           * and return success.
-           */
-
-          mutex->nlocks--;
-          ret = OK;
-        }
-      else
-
-#endif /* CONFIG_PTHREAD_MUTEX_TYPES */
-
       /* This is either a non-recursive mutex or is the outermost unlock of
        * a recursive mutex.
        *
-       * In the case where the calling thread is NOT the holder of the thread,
-       * the behavior is undefined per POSIX.  Here we do the same as GLIBC:
+       * In the case where the calling thread is NOT the holder of the
+       * thread, the behavior is undefined per POSIX.
+       * Here we do the same as GLIBC:
        * We allow the other thread to release the mutex even though it does
        * not own it.
        */
 
         {
-          /* Nullify the pid and lock count then post the semaphore */
-
-          mutex->pid    = -1;
-#ifdef CONFIG_PTHREAD_MUTEX_TYPES
-          mutex->nlocks = 0;
-#endif
           ret = pthread_mutex_give(mutex);
         }
     }
 
-  sched_unlock();
   sinfo("Returning %d\n", ret);
   return ret;
 }

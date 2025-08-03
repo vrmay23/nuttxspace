@@ -1,35 +1,22 @@
 /****************************************************************************
  * sched/sched/sched_waitid.c
  *
- *   Copyright (C) 2013, 2015, 2017, 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,6 +28,7 @@
 
 #include <sys/wait.h>
 #include <signal.h>
+#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/sched.h>
@@ -74,17 +62,20 @@ static void exited_child(FAR struct tcb_s *rtcb,
    * information).
    */
 
-  info->si_signo           = SIGCHLD;
-  info->si_code            = CLD_EXITED;
-  info->si_errno           = OK;
-  info->si_value.sival_ptr = NULL;
-  info->si_pid             = child->ch_pid;
-  info->si_status          = child->ch_status;
+  if (info)
+    {
+      info->si_signo           = SIGCHLD;
+      info->si_code            = CLD_EXITED;
+      info->si_errno           = OK;
+      info->si_value.sival_ptr = NULL;
+      info->si_pid             = child->ch_pid;
+      info->si_status          = child->ch_status;
+    }
 
   /* Discard the child entry */
 
-  group_removechild(rtcb->group, child->ch_pid);
-  group_freechild(child);
+  group_remove_child(rtcb->group, child->ch_pid);
+  group_free_child(child);
 }
 #endif
 
@@ -163,6 +154,7 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
   FAR struct child_status_s *child;
   bool retains;
 #endif
+  irqstate_t flags;
   sigset_t set;
   int errcode;
   int ret;
@@ -184,11 +176,17 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
     }
 
   /* None of the options are supported except for WEXITED (which must be
-   * provided.  Currently SIGCHILD always reports CLD_EXITED so we cannot
+   * provided.  Currently SIGCHLD always reports CLD_EXITED so we cannot
    * distinguish any other events.
    */
 
-  if (options != WEXITED)
+  if ((options & WEXITED) == 0)
+    {
+      set_errno(ENOSYS);
+      return ERROR;
+    }
+
+  if ((options & ~(WEXITED | WNOHANG)) != 0)
     {
       set_errno(ENOSYS);
       return ERROR;
@@ -202,11 +200,8 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
   /* Create a signal set that contains only SIGCHLD */
 
   sigemptyset(&set);
-  sigaddset(&set, SIGCHLD);
-
-  /* Disable pre-emption so that nothing changes while the loop executes */
-
-  sched_lock();
+  nxsig_addset(&set, SIGCHLD);
+  flags = enter_critical_section();
 
   /* Verify that this task actually has children and that the requested
    * TCB is actually a child of this task.
@@ -222,7 +217,7 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
       /* There are no children */
 
       errcode = ECHILD;
-      goto errout_with_errno;
+      goto errout;
     }
   else if (idtype == P_PID)
     {
@@ -230,16 +225,16 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
        * thread it is our child.
        */
 
-      ctcb = sched_gettcb((pid_t)id);
-
-#ifdef HAVE_GROUP_MEMBERS
-      if (ctcb == NULL || ctcb->group->tg_pgrpid != rtcb->group->tg_grpid)
-#else
-      if (ctcb == NULL || ctcb->group->tg_ppid != rtcb->pid)
-#endif
+      ctcb = nxsched_get_tcb((pid_t)id);
+      if (ctcb && ctcb->group)
         {
-          errcode = ECHILD;
-          goto errout_with_errno;
+          /* Make sure that the thread it is our child. */
+
+          if (ctcb->group->tg_ppid != rtcb->pid)
+            {
+              errcode = ECHILD;
+              goto errout;
+            }
         }
 
       /* Does this task retain child status? */
@@ -248,12 +243,12 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
         {
           /* Check if this specific pid has allocated child status? */
 
-          if (group_findchild(rtcb->group, (pid_t)id) == NULL)
+          if (group_find_child(rtcb->group, (pid_t)id) == NULL)
             {
               /* This specific pid is not a child */
 
               errcode = ECHILD;
-              goto errout_with_errno;
+              goto errout;
             }
         }
     }
@@ -265,7 +260,7 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
       /* There are no children */
 
       errcode = ECHILD;
-      goto errout_with_errno;
+      goto errout;
     }
   else if (idtype == P_PID)
     {
@@ -273,16 +268,12 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
        * thread is our child.
        */
 
-      ctcb = sched_gettcb((pid_t)id);
+      ctcb = nxsched_get_tcb((pid_t)id);
 
-#ifdef HAVE_GROUP_MEMBERS
-      if (ctcb == NULL || ctcb->group->tg_pgrpid != rtcb->group->tg_grpid)
-#else
-      if (ctcb == NULL || ctcb->group->tg_ppid != rtcb->pid)
-#endif
+      if (!ctcb || !ctcb->group || ctcb->group->tg_ppid != rtcb->pid)
         {
           errcode = ECHILD;
-          goto errout_with_errno;
+          goto errout;
         }
     }
 #endif
@@ -303,7 +294,7 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
         {
           /* We are waiting for any child to exit */
 
-          if (retains && (child = group_exitchild(rtcb->group)) != NULL)
+          if (retains && (child = group_exit_child(rtcb->group)) != NULL)
             {
               /* A child has exited.  Apparently we missed the signal.
                * Return the exit status and break out of the loop.
@@ -314,13 +305,15 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
             }
         }
 
-      /* We are waiting for a specific PID.  Does this task retain child status? */
+      /* We are waiting for a specific PID.  Does this task retain child
+       * status?
+       */
 
       else if (retains)
         {
           /* Yes ... Get the current status of the child task. */
 
-          child = group_findchild(rtcb->group, (pid_t)id);
+          child = group_find_child(rtcb->group, (pid_t)id);
           DEBUGASSERT(child);
 
           /* Did the child exit? */
@@ -352,7 +345,7 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
                */
 
               errcode = ECHILD;
-              goto errout_with_errno;
+              goto errout;
             }
         }
 #else
@@ -371,9 +364,25 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
            */
 
           errcode = ECHILD;
-          goto errout_with_errno;
+          goto errout;
         }
 #endif
+
+      if ((options & WNOHANG) != 0)
+        {
+          /* SUSv4 says:
+           *
+           * "If waitid() returns because WNOHANG was specified and status
+           * is not available for any process specified by idtype and id,
+           * then the si_signo and si_pid members of the structure pointed
+           * to by infop shall be set to zero and the values of other
+           * members of the structure are unspecified."
+           */
+
+          info->si_signo = 0;
+          info->si_pid = 0;
+          break;
+        }
 
       /* Wait for any death-of-child signal */
 
@@ -381,7 +390,7 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
       if (ret < 0)
         {
           errcode = -ret;
-          goto errout_with_errno;
+          goto errout;
         }
 
       /* Make there this was SIGCHLD */
@@ -398,6 +407,19 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
                 {
                   /* Yes... return success */
 
+#ifdef CONFIG_SCHED_CHILD_STATUS
+                  if (retains)
+                    {
+                      child = group_find_child(rtcb->group, info->si_pid);
+                      DEBUGASSERT(child);
+
+                      if ((child->ch_flags & CHILD_FLAG_EXITED) != 0)
+                        {
+                          exited_child(rtcb, child, NULL);
+                        }
+                    }
+#endif
+
                   break;
                 }
             }
@@ -408,6 +430,19 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
             {
               /* Return success */
 
+#ifdef CONFIG_SCHED_CHILD_STATUS
+                  if (retains)
+                    {
+                      child = group_find_child(rtcb->group, info->si_pid);
+
+                      if (child &&
+                          (child->ch_flags & CHILD_FLAG_EXITED) != 0)
+                        {
+                          exited_child(rtcb, child, NULL);
+                        }
+                    }
+#endif
+
               break;
             }
 
@@ -416,20 +451,19 @@ int waitid(idtype_t idtype, id_t id, FAR siginfo_t *info, int options)
           else /* if (idtype == P_PGID) */
             {
               errcode = ENOSYS;
-              goto errout_with_errno;
+              goto errout;
             }
         }
     }
 
+  leave_critical_section(flags);
   leave_cancellation_point();
-  sched_unlock();
   return OK;
 
-errout_with_errno:
-  set_errno(errcode);
-
+errout:
+  leave_critical_section(flags);
   leave_cancellation_point();
-  sched_unlock();
+  set_errno(errcode);
   return ERROR;
 }
 

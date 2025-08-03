@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/xmc4/xmc4_lowputc.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -38,6 +25,7 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <nuttx/lib/math32.h>
 
 #include <stdint.h>
 #include <errno.h>
@@ -45,8 +33,9 @@
 #include <arch/irq.h>
 #include <arch/board/board.h>
 
-#include "up_internal.h"
-#include "up_arch.h"
+#include "arm_internal.h"
+
+#include <assert.h>
 #include <debug.h>
 
 #include "xmc4_config.h"
@@ -123,6 +112,129 @@
 
 #define UART_OVERSAMPLING    16
 
+#if defined(CONFIG_XMC4_USIC0_CHAN0_ISUART)
+#if CONFIG_XMC4_USIC0_CHAN0_TX_BUFFER_SIZE < 2 \
+    || CONFIG_XMC4_USIC0_CHAN0_TX_BUFFER_SIZE > 64 \
+    || !IS_POWER_OF_2(CONFIG_XMC4_USIC0_CHAN0_TX_BUFFER_SIZE)
+#  error Tx Buffer Size should be a power of 2 between 2 and 64
+#endif
+
+#if CONFIG_XMC4_USIC0_CHAN0_RX_BUFFER_SIZE < 2 \
+    || CONFIG_XMC4_USIC0_CHAN0_RX_BUFFER_SIZE > 64 \
+    || !IS_POWER_OF_2(CONFIG_XMC4_USIC0_CHAN0_RX_BUFFER_SIZE)
+#  error Rx Buffer Size should be a power of 2 between 2 and 64
+#endif
+
+#endif
+
+#if defined(CONFIG_XMC4_USIC0_CHAN1_ISUART)
+#if CONFIG_XMC4_USIC0_CHAN1_TX_BUFFER_SIZE < 2 \
+    || CONFIG_XMC4_USIC0_CHAN1_TX_BUFFER_SIZE > 64 \
+    || !IS_POWER_OF_2(CONFIG_XMC4_USIC0_CHAN1_TX_BUFFER_SIZE)
+#  error Tx Buffer Size should be a power of 2 between 2 and 64
+#endif
+
+#if CONFIG_XMC4_USIC0_CHAN1_RX_BUFFER_SIZE < 2 \
+    || CONFIG_XMC4_USIC0_CHAN1_RX_BUFFER_SIZE > 64 \
+    || !IS_POWER_OF_2(CONFIG_XMC4_USIC0_CHAN1_RX_BUFFER_SIZE)
+#  error Rx Buffer Size should be a power of 2 between 2 and 64
+#endif
+
+#endif
+
+#if defined(CONFIG_XMC4_USIC0_CHAN0_ISUART) && defined(CONFIG_XMC4_USIC0_CHAN1_ISUART)
+#if CONFIG_XMC4_USIC0_CHAN0_TX_BUFFER_SIZE + CONFIG_XMC4_USIC0_CHAN0_RX_BUFFER_SIZE + \
+    CONFIG_XMC4_USIC0_CHAN1_TX_BUFFER_SIZE + CONFIG_XMC4_USIC0_CHAN1_RX_BUFFER_SIZE > 64
+#  error The sum of Rx and Tx Buffers sizes should be inferior to 64
+#endif
+#endif
+
+#if defined(CONFIG_XMC4_USIC1_CHAN0_ISUART)
+#if CONFIG_XMC4_USIC1_CHAN0_TX_BUFFER_SIZE < 2 \
+    || CONFIG_XMC4_USIC1_CHAN0_TX_BUFFER_SIZE > 64 \
+    || !IS_POWER_OF_2(CONFIG_XMC4_USIC1_CHAN0_TX_BUFFER_SIZE)
+#  error Tx Buffer Size should be a power of 2 between 2 and 64
+#endif
+
+#if CONFIG_XMC4_USIC1_CHAN0_RX_BUFFER_SIZE < 2 \
+    || CONFIG_XMC4_USIC1_CHAN0_RX_BUFFER_SIZE > 64 \
+    || !IS_POWER_OF_2(CONFIG_XMC4_USIC1_CHAN0_RX_BUFFER_SIZE)
+#  error Rx Buffer Size should be a power of 2 between 2 and 64
+#endif
+
+#if CONFIG_XMC4_USIC1_CHAN0_TX_BUFFER_SIZE + CONFIG_XMC4_USIC1_CHAN0_RX_BUFFER_SIZE > 64
+#  error The sum of Rx and Tx Buffer sizes should be inferior to 64
+#endif
+#endif
+
+#if defined(CONFIG_XMC4_USIC1_CHAN1_ISUART)
+#if CONFIG_XMC4_USIC1_CHAN1_TX_BUFFER_SIZE < 2 \
+    || CONFIG_XMC4_USIC1_CHAN1_TX_BUFFER_SIZE > 64 \
+    || !IS_POWER_OF_2(CONFIG_XMC4_USIC1_CHAN1_TX_BUFFER_SIZE)
+#  error Tx Buffer Size should be a power of 2 between 2 and 64
+#endif
+
+#if CONFIG_XMC4_USIC1_CHAN1_RX_BUFFER_SIZE < 2 \
+    || CONFIG_XMC4_USIC1_CHAN1_RX_BUFFER_SIZE > 64 \
+    || !IS_POWER_OF_2(CONFIG_XMC4_USIC1_CHAN1_RX_BUFFER_SIZE)
+#  error Rx Buffer Size should be a power of 2 between 2 and 64
+#endif
+
+#if CONFIG_XMC4_USIC1_CHAN1_TX_BUFFER_SIZE + CONFIG_XMC4_USIC1_CHAN1_RX_BUFFER_SIZE > 64
+#  error The sum of Rx and Tx Buffer sizes should be inferior to 64
+#endif
+#endif
+
+#if defined(CONFIG_XMC4_USIC1_CHAN0_ISUART) && defined(CONFIG_XMC4_USIC1_CHAN1_ISUART)
+#if CONFIG_XMC4_USIC1_CHAN0_TX_BUFFER_SIZE + CONFIG_XMC4_USIC1_CHAN0_RX_BUFFER_SIZE + \
+    CONFIG_XMC4_USIC1_CHAN1_TX_BUFFER_SIZE + CONFIG_XMC4_USIC1_CHAN1_RX_BUFFER_SIZE > 64 
+#  error The sum of Rx and Tx Buffers sizes should be inferior to 64
+#endif
+#endif
+
+#if defined(CONFIG_XMC4_USIC2_CHAN0_ISUART)
+#if CONFIG_XMC4_USIC2_CHAN0_TX_BUFFER_SIZE < 2 \
+    || CONFIG_XMC4_USIC2_CHAN0_TX_BUFFER_SIZE > 64 \
+    || !IS_POWER_OF_2(CONFIG_XMC4_USIC2_CHAN0_TX_BUFFER_SIZE)
+#  error Tx Buffer Size should be a power of 2 between 2 and 64
+#endif
+
+#if CONFIG_XMC4_USIC2_CHAN0_RX_BUFFER_SIZE < 2 \
+    || CONFIG_XMC4_USIC2_CHAN0_RX_BUFFER_SIZE > 64 \
+    || !IS_POWER_OF_2(CONFIG_XMC4_USIC2_CHAN0_RX_BUFFER_SIZE)
+#  error Rx Buffer Size should be a power of 2 between 2 and 64
+#endif
+
+#if CONFIG_XMC4_USIC2_CHAN0_TX_BUFFER_SIZE + CONFIG_XMC4_USIC2_CHAN0_RX_BUFFER_SIZE > 64
+#  error The sum of Rx and Tx Buffer sizes should be inferior to 64
+#endif
+#endif
+
+#if defined(CONFIG_XMC4_USIC2_CHAN1_ISUART)
+#if CONFIG_XMC4_USIC2_CHAN1_TX_BUFFER_SIZE < 2 \
+    || CONFIG_XMC4_USIC2_CHAN1_TX_BUFFER_SIZE > 64 \
+    || !IS_POWER_OF_2(CONFIG_XMC4_USIC2_CHAN1_TX_BUFFER_SIZE)
+#  error Tx Buffer Size should be a power of 2 between 2 and 64
+#endif
+
+#if CONFIG_XMC4_USIC2_CHAN1_RX_BUFFER_SIZE < 2 \
+    || CONFIG_XMC4_USIC2_CHAN1_RX_BUFFER_SIZE > 64 \
+    || !IS_POWER_OF_2(CONFIG_XMC4_USIC2_CHAN1_RX_BUFFER_SIZE)
+#  error Rx Buffer Size should be a power of 2 between 2 and 64
+#endif
+
+#if CONFIG_XMC4_USIC2_CHAN1_TX_BUFFER_SIZE + CONFIG_XMC4_USIC2_CHAN1_RX_BUFFER_SIZE > 64
+#  error The sum of Rx and Tx Buffer sizes should be inferior to 64
+#endif
+#endif
+
+#if defined(CONFIG_XMC4_USIC2_CHAN0_ISUART) && defined(CONFIG_XMC4_USIC2_CHAN1_ISUART)
+#if CONFIG_XMC4_USIC2_CHAN0_TX_BUFFER_SIZE + CONFIG_XMC4_USIC2_CHAN0_RX_BUFFER_SIZE + \
+    CONFIG_XMC4_USIC2_CHAN1_TX_BUFFER_SIZE + CONFIG_XMC4_USIC2_CHAN1_RX_BUFFER_SIZE > 64 
+#  error The sum of Rx and Tx Buffers sizes should be inferior to 64
+#endif
+#endif
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
@@ -143,20 +255,22 @@ static const struct uart_config_s g_console_config =
  ****************************************************************************/
 
 /****************************************************************************
- * Name: up_lowputc
+ * Name: arm_lowputc
  *
  * Description:
  *   Output one byte on the serial console
  *
  ****************************************************************************/
 
-void up_lowputc(char ch)
+void arm_lowputc(char ch)
 {
 #ifdef HAVE_UART_CONSOLE
   uintptr_t base;
   uint32_t regval;
 
-  /* Get the base address of the USIC registers associated with this channel */
+  /* Get the base address of the USIC registers associated with this
+   * channel
+   */
 
   base = xmc4_channel_baseaddress(CONSOLE_CHAN);
   DEBUGASSERT(base != 0);
@@ -250,13 +364,15 @@ void xmc4_lowsetup(void)
 
 #ifdef HAVE_UART_DEVICE
 int xmc4_uart_configure(enum usic_channel_e channel,
-                        FAR const struct uart_config_s *config)
+                        const struct uart_config_s *config)
 {
   uintptr_t base;
   uint32_t regval;
   int ret;
 
-  /* Get the base address of the USIC registers associated with this channel */
+  /* Get the base address of the USIC registers associated with this
+   * channel
+   */
 
   base = xmc4_channel_baseaddress(channel);
   if (base == 0)
@@ -367,21 +483,21 @@ int xmc4_uart_configure(enum usic_channel_e channel,
 
   /* Configure transmit FIFO
    *
-   *   - DPTR = 16
    *   - LIMIT = 1
    *   - STBTEN = 0, the trigger of the standard transmit buffer event is
    *     based on the transition of the fill level from equal to below the
    *     limit, not the fact being below
-   *   - SIZE = 16
    *   - LOF = 0, A standard transmit buffer event occurs when the filling
    *     level equals the limit value and gets lower due to transmission of
    *     a data word
    */
 
   regval &= ~(USIC_TBCTR_DPTR_MASK | USIC_TBCTR_LIMIT_MASK |
-              USIC_TBCTR_STBTEN | USIC_TBCTR_SIZE_MASK | USIC_TBCTR_LOF);
-  regval |=  (USIC_TBCTR_DPTR(16) | USIC_TBCTR_LIMIT(1) |
-              USIC_TBCTR_SIZE_16);
+              USIC_TBCTR_STBTEN | USIC_TBCTR_SIZE_MASK |
+              USIC_TBCTR_LOF);
+  regval |=  (USIC_TBCTR_DPTR(config->startbufferptr)) |
+              USIC_TBCTR_LIMIT(1) |
+              USIC_TBCTR_SIZE(config->txbuffersize);
   putreg32(regval, base + XMC4_USIC_TBCTR_OFFSET);
 
   /* Disable the receive FIFO */
@@ -392,9 +508,6 @@ int xmc4_uart_configure(enum usic_channel_e channel,
 
   /* Configure receive FIFO.
    *
-   *   - DPTR = 0
-   *   - LIMIT = 16
-   *   - SIZE = 15
    *   - LOF = 1, A standard receive buffer event occurs when the filling
    *     level equals the limit value and gets bigger due to the reception
    *     of a new data word
@@ -402,7 +515,9 @@ int xmc4_uart_configure(enum usic_channel_e channel,
 
   regval &= ~(USIC_RBCTR_DPTR_MASK | USIC_RBCTR_LIMIT_MASK |
               USIC_RBCTR_SIZE_MASK);
-  regval |= (USIC_RBCTR_DPTR(0) | USIC_RBCTR_LIMIT(15) | USIC_RBCTR_SIZE_16 |
+  regval |= (USIC_RBCTR_DPTR(config->startbufferptr + config->txbuffersize) |
+              USIC_RBCTR_LIMIT(config->rxbuffersize) |
+              USIC_RBCTR_SIZE(config->rxbuffersize) |
              USIC_RBCTR_LOF);
   putreg32(regval, base + XMC4_USIC_RBCTR_OFFSET);
 

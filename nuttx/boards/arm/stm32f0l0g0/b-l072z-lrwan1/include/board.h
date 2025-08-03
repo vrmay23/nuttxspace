@@ -1,36 +1,22 @@
 /****************************************************************************
  * boards/arm/stm32f0l0g0/b-l072z-lrwan1/include/board.h
- * include/arch/board/board.h
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Mateusz Szafoni <raiden00@railab.me>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -67,7 +53,9 @@
 #define STM32_HSE_FREQUENCY     STM32_BOARD_XTAL
 #define STM32_LSE_FREQUENCY     32768            /* X2 on board */
 
-/* PLL source is HSI/1, PLL multipler is 4: PLL frequency is 16MHz (XTAL) x 4 = 64MHz */
+/* PLL source is HSI/1, PLL multiplier is 4:
+ *   PLL frequency is 16MHz (XTAL) x 4 = 64MHz
+ */
 
 #define STM32_CFGR_PLLSRC       0
 #define STM32_CFGR_PLLXTPRE     0
@@ -85,7 +73,6 @@
 
 #define STM32_RCC_CFGR_HPRE     RCC_CFGR_HPRE_SYSCLK
 #define STM32_HCLK_FREQUENCY    STM32_SYSCLK_FREQUENCY
-#define STM32_BOARD_HCLK        STM32_HCLK_FREQUENCY
 
 /* APB2 clock (PCLK2) is HCLK (32MHz) */
 
@@ -217,43 +204,62 @@
  *
  */
 
+/* ADC */
+
+#define GPIO_ADC1_IN0  (GPIO_ADC1_IN0_0)                    /* PA0 */
+#define GPIO_ADC1_IN1  (GPIO_ADC1_IN1_0)                    /* PA1 */
+#define GPIO_ADC1_IN2  (GPIO_ADC1_IN2_0)                    /* PA2 */
+#define GPIO_ADC1_IN3  (GPIO_ADC1_IN3_0)                    /* PA3 */
+#define GPIO_ADC1_IN4  (GPIO_ADC1_IN4_0)                    /* PA4 */
+#define GPIO_ADC1_IN5  (GPIO_ADC1_IN5_0)                    /* PA5 */
+#define GPIO_ADC1_IN6  (GPIO_ADC1_IN6_0)                    /* PA6 */
+#define GPIO_ADC1_IN7  (GPIO_ADC1_IN7_0)                    /* PA7 */
+#define GPIO_ADC1_IN8  (GPIO_ADC1_IN8_0)                    /* PB0 */
+#define GPIO_ADC1_IN9  (GPIO_ADC1_IN9_0)                    /* PB1 */
+#define GPIO_ADC1_IN10 (GPIO_ADC1_IN10_0)                   /* PC0 */
+#define GPIO_ADC1_IN11 (GPIO_ADC1_IN11_0)                   /* PC1 */
+#define GPIO_ADC1_IN12 (GPIO_ADC1_IN12_0)                   /* PC2 */
+#define GPIO_ADC1_IN13 (GPIO_ADC1_IN13_0)                   /* PC3 */
+#define GPIO_ADC1_IN14 (GPIO_ADC1_IN14_0)                   /* PC4 */
+#define GPIO_ADC1_IN15 (GPIO_ADC1_IN15_0)                   /* PC5 */
+
 /* USART */
 
 /* USART1 */
 
-#define GPIO_USART1_RX GPIO_USART1_RX_1 /* PA10 */
-#define GPIO_USART1_TX GPIO_USART1_TX_1 /* PA9 */
+#define GPIO_USART1_RX (GPIO_USART1_RX_1|GPIO_SPEED_HIGH)   /* PA10 */
+#define GPIO_USART1_TX (GPIO_USART1_TX_1|GPIO_SPEED_HIGH)   /* PA9 */
 
 /* By default the USART2 is connected to STLINK Virtual COM Port:
  * USART2_RX - PA3
  * USART2_TX - PA2
  */
 
-#define GPIO_USART2_RX GPIO_USART2_RX_1 /* PA3 */
-#define GPIO_USART2_TX GPIO_USART2_TX_1 /* PA2 */
+#define GPIO_USART2_RX (GPIO_USART2_RX_1|GPIO_SPEED_HIGH)   /* PA3 */
+#define GPIO_USART2_TX (GPIO_USART2_TX_1|GPIO_SPEED_HIGH)   /* PA2 */
 
 /* SPI */
 
 /* SPI1 is connected to SX1276 radio */
 
-#define GPIO_SPI1_MOSI GPIO_SPI1_MOSI_2 /* PA7 */
-#define GPIO_SPI1_MISO GPIO_SPI1_MISO_2 /* PA6 */
-#define GPIO_SPI1_SCK  GPIO_SPI1_SCK_2  /* PB3 */
-#define GPIO_SPI1_NSS  GPIO_SPI1_NSS_1  /* PA15 */
+#define GPIO_SPI1_MOSI (GPIO_SPI1_MOSI_2|GPIO_SPEED_MEDIUM) /* PA7 */
+#define GPIO_SPI1_MISO (GPIO_SPI1_MISO_2|GPIO_SPEED_MEDIUM) /* PA6 */
+#define GPIO_SPI1_SCK  (GPIO_SPI1_SCK_2|GPIO_SPEED_MEDIUM)  /* PB3 */
+#define GPIO_SPI1_NSS  (GPIO_SPI1_NSS_1|GPIO_SPEED_MEDIUM)  /* PA15 */
 
 /* SPI2  */
 
-#define GPIO_SPI2_MOSI GPIO_SPI2_MOSI_1 /* PB15 */
-#define GPIO_SPI2_MISO GPIO_SPI2_MISO_1 /* PB14 */
-#define GPIO_SPI2_SCK  GPIO_SPI2_SCK_3  /* PB13 */
-#define GPIO_SPI2_NSS  GPIO_SPI2_NSS_1  /* PB12 */
+#define GPIO_SPI2_MOSI (GPIO_SPI2_MOSI_1|GPIO_SPEED_MEDIUM) /* PB15 */
+#define GPIO_SPI2_MISO (GPIO_SPI2_MISO_1|GPIO_SPEED_MEDIUM) /* PB14 */
+#define GPIO_SPI2_SCK  (GPIO_SPI2_SCK_3|GPIO_SPEED_MEDIUM)  /* PB13 */
+#define GPIO_SPI2_NSS  (GPIO_SPI2_NSS_1|GPIO_SPEED_MEDIUM)  /* PB12 */
 
 /* I2C */
 
 /* I2C1 */
 
-#define GPIO_I2C1_SDA  GPIO_I2C1_SDA_2 /* PB9 */
-#define GPIO_I2C1_SCL  GPIO_I2C1_SCL_2 /* PB8 */
+#define GPIO_I2C1_SDA  (GPIO_I2C1_SDA_2|GPIO_SPEED_LOW)     /* PB9 */
+#define GPIO_I2C1_SCL  (GPIO_I2C1_SCL_2|GPIO_SPEED_LOW)     /* PB8 */
 
 /* DMA channels *************************************************************/
 

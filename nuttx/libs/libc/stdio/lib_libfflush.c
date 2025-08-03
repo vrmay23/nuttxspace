@@ -1,35 +1,22 @@
 /****************************************************************************
  * libs/libc/stdio/lib_libfflush.c
  *
- *   Copyright (C) 2007-2008, 2011-2014, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -57,13 +44,12 @@
  * Name: lib_fflush
  *
  * Description:
- *  The function lib_fflush() forces a write of all user-space buffered data for
- *  the given output or update stream via the stream's underlying write
+ *  The function lib_fflush() forces a write of all user-space buffered data
+ *  for the given output or update stream via the stream's underlying write
  *  function.  The open status of the stream is unaffected.
  *
  * Input Parameters:
  *  stream - the stream to flush
- *  bforce - flush must be complete.
  *
  * Returned Value:
  *  A negated errno value on failure, otherwise the number of bytes remaining
@@ -71,24 +57,19 @@
  *
  ****************************************************************************/
 
-ssize_t lib_fflush(FAR FILE *stream, bool bforce)
+ssize_t lib_fflush_unlocked(FAR FILE *stream)
 {
 #ifndef CONFIG_STDIO_DISABLE_BUFFERING
-  FAR const unsigned char *src;
+  FAR const char *src;
   ssize_t bytes_written;
   ssize_t nbuffer;
-  int ret;
 
   /* Return EBADF if the file is not opened for writing */
 
-  if (stream->fs_fd < 0 || (stream->fs_oflags & O_WROK) == 0)
+  if ((stream->fs_oflags & O_WROK) == 0)
     {
       return -EBADF;
     }
-
-  /* Make sure that we have exclusive access to the stream */
-
-  lib_take_semaphore(stream);
 
   /* Check if there is an allocated I/O buffer */
 
@@ -96,9 +77,8 @@ ssize_t lib_fflush(FAR FILE *stream, bool bforce)
     {
       /* No, then there can be nothing remaining in the buffer. */
 
-      ret = 0;
-      goto errout_with_sem;
-   }
+      return 0;
+    }
 
   /* Make sure that the buffer holds valid data */
 
@@ -114,8 +94,7 @@ ssize_t lib_fflush(FAR FILE *stream, bool bforce)
            * remaining in the buffer."
            */
 
-          ret = 0;
-          goto errout_with_sem;
+          return 0;
         }
 
       /* How many bytes of write data are used in the buffer now */
@@ -129,7 +108,18 @@ ssize_t lib_fflush(FAR FILE *stream, bool bforce)
         {
           /* Perform the write */
 
-          bytes_written = _NX_WRITE(stream->fs_fd, src, nbuffer);
+          if (stream->fs_iofunc.write != NULL)
+            {
+              bytes_written = stream->fs_iofunc.write(stream->fs_cookie,
+                                                      src,
+                                                      nbuffer);
+            }
+          else
+            {
+              bytes_written = _NX_WRITE((int)(intptr_t)stream->fs_cookie,
+                                        src, nbuffer);
+            }
+
           if (bytes_written < 0)
             {
               /* Write failed.  The cause of the failure is in 'errno'.
@@ -137,8 +127,7 @@ ssize_t lib_fflush(FAR FILE *stream, bool bforce)
                */
 
               stream->fs_flags |= __FS_FLAG_ERROR;
-              ret = _NX_GETERRVAL(bytes_written);
-              goto errout_with_sem;
+              return _NX_GETERRVAL(bytes_written);
             }
 
           /* Handle partial writes.  fflush() must either return with
@@ -149,7 +138,7 @@ ssize_t lib_fflush(FAR FILE *stream, bool bforce)
           src     += bytes_written;
           nbuffer -= bytes_written;
         }
-      while (bforce && nbuffer > 0);
+      while (nbuffer > 0);
 
       /* Reset the buffer position to the beginning of the buffer */
 
@@ -161,26 +150,33 @@ ssize_t lib_fflush(FAR FILE *stream, bool bforce)
        */
 
       while (nbuffer)
-       {
-         *stream->fs_bufpos++ = *src++;
-         --nbuffer;
-       }
+        {
+          *stream->fs_bufpos++ = *src++;
+          --nbuffer;
+        }
     }
 
   /* Restore normal access to the stream and return the number of bytes
    * remaining in the buffer.
    */
 
-  lib_give_semaphore(stream);
   return stream->fs_bufpos - stream->fs_bufstart;
-
-errout_with_sem:
-  lib_give_semaphore(stream);
-  return ret;
 
 #else
   /* Return no bytes remaining in the buffer */
 
   return 0;
 #endif
+}
+
+ssize_t lib_fflush(FAR FILE *stream)
+{
+  ssize_t ret;
+
+  /* Make sure that we have exclusive access to the stream */
+
+  flockfile(stream);
+  ret = lib_fflush_unlocked(stream);
+  funlockfile(stream);
+  return ret;
 }

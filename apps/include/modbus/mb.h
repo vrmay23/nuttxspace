@@ -1,9 +1,8 @@
 /****************************************************************************
  * apps/include/modbus/mb.h
  *
- * FreeModbus Library: A portable Modbus implementation for Modbus ASCII/RTU.
- * Copyright (c) 2006 Christian Walter <wolti@sil.at>
- * All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2006 Christian Walter <wolti@sil.at>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -252,7 +251,7 @@ eMBErrorCode eMBPoll(void);
  *     otherwise the Run Indicator Status is 0x00.
  *   pucAdditional Values which should be returned in the Additional
  *     bytes of the  Report Slave ID response.
- *   usAdditionalLen Length of the buffer <code>pucAdditonal</code>.
+ *   usAdditionalLen Length of the buffer <code>pucAdditional</code>.
  *
  * Returned Value:
  *   If the static buffer defined by CONFIG_MB_FUNC_OTHER_REP_SLAVEID_BUF

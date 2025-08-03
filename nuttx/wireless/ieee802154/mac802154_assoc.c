@@ -1,35 +1,22 @@
 /****************************************************************************
  * wireless/ieee802154/mac802154_assoc.c
  *
- *   Copyright (C) 2017 Verge Inc. All rights reserved.
- *   Author: Anthony Merlino <anthony@vergeaero.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -101,7 +88,7 @@ int mac802154_req_associate(MACHANDLE mac,
    * cmdtrans but needs access to the MAC in order to unlock it.
    */
 
-  ret = mac802154_takesem(&priv->opsem, true);
+  ret = nxsem_wait_uninterruptible(&priv->opsem);
   if (ret < 0)
     {
       return ret;
@@ -112,10 +99,10 @@ int mac802154_req_associate(MACHANDLE mac,
 
   /* Get exclusive access to the MAC */
 
-  ret = mac802154_lock(priv, true);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
-      mac802154_givesem(&priv->opsem);
+      nxsem_post(&priv->opsem);
       return ret;
     }
 
@@ -147,26 +134,23 @@ int mac802154_req_associate(MACHANDLE mac,
 
   /* Allocate an IOB to put the frame in */
 
-  iob = iob_alloc(false, IOBUSER_WIRELESS_MAC802154);
+  iob = iob_alloc(false);
   DEBUGASSERT(iob != NULL);
-
-  iob->io_flink  = NULL;
-  iob->io_len    = 0;
-  iob->io_offset = 0;
-  iob->io_pktlen = 0;
 
   /* Allocate the txdesc, waiting if necessary */
 
-  ret = mac802154_txdesc_alloc(priv, &txdesc, true);
+  ret = mac802154_txdesc_alloc(priv, &txdesc);
   if (ret < 0)
     {
-      iob_free(iob, IOBUSER_WIRELESS_MAC802154);
-      mac802154_unlock(priv)
-      mac802154_givesem(&priv->opsem);
+      iob_free(iob);
+      nxmutex_unlock(&priv->lock);
+      nxsem_post(&priv->opsem);
       return ret;
     }
 
-  /* Get a uin16_t reference to the first two bytes. ie frame control field */
+  /* Get a uint16_t reference to the first two bytes. ie frame control
+   * field
+   */
 
   iob->io_data[0] = 0;
   iob->io_data[1] = 0;
@@ -205,11 +189,15 @@ int mac802154_req_associate(MACHANDLE mac,
       mac802154_puteaddr(iob, priv->pandesc.coordaddr.eaddr);
     }
 
-  /* The Source PAN Identifier field shall contain the broadcast PAN identifier. */
+  /* The Source PAN Identifier field shall contain the broadcast PAN
+   * identifier.
+   */
 
   mac802154_putsaddr(iob, &IEEE802154_SADDR_BCAST);
 
-  /* The Source Address field shall contain the value of macExtendedAddress. */
+  /* The Source Address field shall contain the value of
+   * macExtendedAddress.
+   */
 
   mac802154_puteaddr(iob, priv->addr.eaddr);
 
@@ -259,7 +247,9 @@ int mac802154_req_associate(MACHANDLE mac,
 
   for (i = 0; i < priv->npandesc; i++)
     {
-      /* Check to make sure the beacon is from the same channel as the request */
+      /* Check to make sure the beacon is from the same channel as the
+       * request
+       */
 
       if (req->chan != priv->pandescs[i].chan)
         {
@@ -309,8 +299,7 @@ int mac802154_req_associate(MACHANDLE mac,
 
   /* We no longer need to have the MAC layer locked. */
 
-  mac802154_unlock(priv)
-
+  nxmutex_unlock(&priv->lock);
   return OK;
 }
 
@@ -334,13 +323,8 @@ int mac802154_resp_associate(MACHANDLE mac,
 
   /* Allocate an IOB to put the frame in */
 
-  iob = iob_alloc(false, IOBUSER_WIRELESS_MAC802154);
+  iob = iob_alloc(false);
   DEBUGASSERT(iob != NULL);
-
-  iob->io_flink  = NULL;
-  iob->io_len    = 0;
-  iob->io_offset = 0;
-  iob->io_pktlen = 0;
 
   /* The Destination Addressing Mode and Source Addressing Mode fields shall
    * each be set to indicate extended addressing.
@@ -380,11 +364,13 @@ int mac802154_resp_associate(MACHANDLE mac,
 
   mac802154_puteaddr(iob, resp->devaddr);
 
-  /* The Source Address field shall contain the value of macExtendedAddress. */
+  /* The Source Address field shall contain the value of
+   * macExtendedAddress.
+   */
 
   mac802154_puteaddr(iob, priv->addr.eaddr);
 
-   /* Copy in the Command Frame Identifier */
+  /* Copy in the Command Frame Identifier */
 
   iob->io_data[iob->io_len++] = IEEE802154_CMD_ASSOC_RESP;
 
@@ -405,20 +391,20 @@ int mac802154_resp_associate(MACHANDLE mac,
 
   /* Get exclusive access to the MAC */
 
-   ret = mac802154_lock(priv, true);
-   if (ret < 0)
-     {
-       iob_free(iob, IOBUSER_WIRELESS_MAC802154);
-       return ret;
-     }
+  ret = nxmutex_lock(&priv->lock);
+  if (ret < 0)
+    {
+      iob_free(iob);
+      return ret;
+    }
 
   /* Allocate the txdesc, waiting if necessary */
 
-  ret = mac802154_txdesc_alloc(priv, &txdesc, true);
+  ret = mac802154_txdesc_alloc(priv, &txdesc);
   if (ret < 0)
     {
-      iob_free(iob, IOBUSER_WIRELESS_MAC802154);
-      mac802154_unlock(priv)
+      iob_free(iob);
+      nxmutex_unlock(&priv->lock);
       return ret;
     }
 
@@ -432,8 +418,7 @@ int mac802154_resp_associate(MACHANDLE mac,
 
   mac802154_setupindirect(priv, txdesc);
 
-  mac802154_unlock(priv)
-
+  nxmutex_unlock(&priv->lock);
   return OK;
 }
 
@@ -491,7 +476,7 @@ void mac802154_txdone_assocreq(FAR struct ieee802154_privmac_s *priv,
 
       priv->curr_op = MAC802154_OP_NONE;
       priv->cmd_desc = NULL;
-      mac802154_givesem(&priv->opsem);
+      nxsem_post(&priv->opsem);
 
       /* Release the MAC, call the callback, get exclusive access again */
 
@@ -553,8 +538,8 @@ void mac802154_txdone_assocreq(FAR struct ieee802154_privmac_s *priv,
           DEBUGASSERT(priv->pandesc.coordaddr.mode !=
                       IEEE802154_ADDRMODE_NONE);
 
-          /* Off-load extracting the Association Response to the work queue to
-           * avoid locking up the calling thread.
+          /* Off-load extracting the Association Response to the work queue
+           * to avoid locking up the calling thread.
            */
 
           DEBUGASSERT(work_available(&priv->macop_work));
@@ -630,7 +615,7 @@ void mac802154_txdone_datareq_assoc(FAR struct ieee802154_privmac_s *priv,
 
       priv->curr_op = MAC802154_OP_NONE;
       priv->cmd_desc = NULL;
-      mac802154_givesem(&priv->opsem);
+      nxsem_post(&priv->opsem);
 
       mac802154_notify(priv, primitive);
     }
@@ -655,7 +640,6 @@ void mac802154_txdone_datareq_assoc(FAR struct ieee802154_privmac_s *priv,
 
       if (priv->sfspec.beaconorder == 15)
         {
-
           /* Start a timer, if we receive the data frame, we will cancel
            * the timer, otherwise it will expire and we will notify the
            * next highest layer of the failure.
@@ -664,7 +648,6 @@ void mac802154_txdone_datareq_assoc(FAR struct ieee802154_privmac_s *priv,
           wlinfo("Starting timeout timer\n");
           mac802154_timerstart(priv, priv->max_frame_waittime,
                                mac802154_assoctimeout);
-
         }
 
       /* Deallocate the data conf notification as it is no longer needed. */
@@ -728,12 +711,12 @@ void mac802154_rx_assocreq(FAR struct ieee802154_privmac_s *priv,
 
   /* Get exclusive access to the MAC */
 
-  mac802154_lock(priv, false);
+  nxmutex_lock(&priv->lock);
 
   /* Notify the next highest layer of the association status */
 
   mac802154_notify(priv, primitive);
-  mac802154_unlock(priv)
+  nxmutex_unlock(&priv->lock);
 }
 
 /****************************************************************************
@@ -784,7 +767,7 @@ void mac802154_rx_assocresp(FAR struct ieee802154_privmac_s *priv,
 
   /* Get exclusive access to the MAC */
 
-  mac802154_lock(priv, false);
+  nxmutex_lock(&priv->lock);
 
   /* Parse the short address from the response */
 
@@ -827,17 +810,17 @@ void mac802154_rx_assocresp(FAR struct ieee802154_privmac_s *priv,
 
   priv->curr_op = MAC802154_OP_NONE;
   priv->cmd_desc = NULL;
-  mac802154_givesem(&priv->opsem);
+  nxsem_post(&priv->opsem);
   mac802154_rxdisable(priv);
 
   /* Notify the next highest layer of the association status */
 
   mac802154_notify(priv, primitive);
-  mac802154_unlock(priv)
+  nxmutex_unlock(&priv->lock);
 }
 
 /****************************************************************************
- * Private Function
+ * Private Functions
  ****************************************************************************/
 
 /****************************************************************************
@@ -857,8 +840,8 @@ static void mac802154_assoctimeout(FAR void *arg)
   FAR struct ieee802154_primitive_s *primitive;
 
   /* If there is work scheduled for the rxframe_worker, we want to reschedule
-   * this work, so that we make sure if the frame we were waiting for was just
-   * received, we don't timeout
+   * this work, so that we make sure if the frame we were waiting for was
+   * just received, we don't timeout
    */
 
   if (!work_available(&priv->rx_work))
@@ -891,20 +874,20 @@ static void mac802154_assoctimeout(FAR void *arg)
 
   priv->curr_op = MAC802154_OP_NONE;
   priv->cmd_desc = NULL;
-  mac802154_givesem(&priv->opsem);
+  nxsem_post(&priv->opsem);
   mac802154_rxdisable(priv);
 
-  mac802154_lock(priv, false);
+  nxmutex_lock(&priv->lock);
   mac802154_notify(priv, primitive);
-  mac802154_unlock(priv)
+  nxmutex_unlock(&priv->lock);
 }
 
 /****************************************************************************
- * Name: mac802154_extract_assocrespj
+ * Name: mac802154_extract_assocresp
  *
  * Description:
- *   Create and send a Data request command to extract the Association response
- *   from the Coordinator.
+ *   Create and send a Data request command to extract the Association
+ *   response from the Coordinator.
  *
  * Assumptions:
  *   Called with the MAC unlocked.
@@ -917,14 +900,14 @@ static void mac802154_extract_assocresp(FAR void *arg)
     (FAR struct ieee802154_privmac_s *)arg;
   FAR struct ieee802154_txdesc_s *respdesc;
 
-  mac802154_lock(priv, false);
+  nxmutex_lock(&priv->lock);
 
-  mac802154_txdesc_alloc(priv, &respdesc, false);
+  mac802154_txdesc_alloc(priv, &respdesc);
 
   mac802154_createdatareq(priv, &priv->pandesc.coordaddr,
                           IEEE802154_ADDRMODE_EXTENDED, respdesc);
 
-  mac802154_unlock(priv)
+  nxmutex_unlock(&priv->lock);
 
   priv->curr_cmd = IEEE802154_CMD_DATA_REQ;
 

@@ -1,54 +1,40 @@
-/************************************************************************************************************
+/****************************************************************************
  * arch/arm/src/s32k1xx/hardware/s32k1xx_lpi2c.h
  *
- *    Copyright (C) 2019 Gregory Nutt. All rights reserved.
- *    Author: Ivan Ucherdzhiev <ivanucherdjiev@gmail.com>
- *            Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- ************************************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_S32K1XX_HARDWARE_S32K1XX_LPI2C_H
 #define __ARCH_ARM_SRC_S32K1XX_HARDWARE_S32K1XX_LPI2C_H
 
-/************************************************************************************************************
+/****************************************************************************
  * Included Files
- ************************************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 #include "hardware/s32k1xx_memorymap.h"
 
-/************************************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- ************************************************************************************************************/
+ ****************************************************************************/
 
-/* Register offsets *****************************************************************************************/
+/* Register offsets *********************************************************/
 
 #define S32K1XX_LPI2C_VERID_OFFSET          0x0000  /* Version ID Register offset */
 #define S32K1XX_LPI2C_PARAM_OFFSET          0x0004  /* Parameter Register offset */
@@ -79,7 +65,7 @@
 #define S32K1XX_LPI2C_STDR_OFFSET           0x0160  /* Slave Transmit Data Register offset */
 #define S32K1XX_LPI2C_SRDR_OFFSET           0x0170  /* Slave Receive Data Register offset */
 
-/* Register addresses ***************************************************************************************/
+/* Register addresses *******************************************************/
 
 /* LPI2C0 Registers */
 
@@ -143,7 +129,7 @@
 #define S32K1XX_LPI2C1_STDR                 (S32K1XX_LPI2C1_BASE + S32K1XX_LPI2C_STDR_OFFSET)    /* Slave Transmit Data Register  */
 #define S32K1XX_LPI2C1_SRDR                 (S32K1XX_LPI2C1_BASE + S32K1XX_LPI2C_SRDR_OFFSET)    /* Slave Receive Data Register  */
 
-/* Register bit definitions *********************************************************************************/
+/* Register bit definitions *************************************************/
 
 /* LPI2C Version ID Register */
 
@@ -255,7 +241,7 @@
 /* LPI2C Master Config Register 1  */
 
 #define LPI2C_MCFGR1_PRESCALE_MASK          (7 << 0)  /* Clock Prescaler Bit Mask */
-#  define LPI2C_MCFGR1_PRESCALE(n)          (n & LPI2C_MCFGR1_PRESCALE_MASK)
+#  define LPI2C_MCFGR1_PRESCALE(n)          ((n) & LPI2C_MCFGR1_PRESCALE_MASK)
 #  define LPI2C_MCFGR1_PRESCALE_1           (0)
 #  define LPI2C_MCFGR1_PRESCALE_2           (1)
 #  define LPI2C_MCFGR1_PRESCALE_4           (2)
@@ -267,10 +253,10 @@
 #define LPI2C_MCFGR1_AUTOSTOP               (1 << 8)  /* Automatic STOP Generation Bit */
 #define LPI2C_MCFGR1_IGNACK                 (1 << 9)  /* Ignore NACK Bit */
 #define LPI2C_MCFGR1_TIMECFG                (1 << 10) /* Timeout Configuration Bit */
-                                                     /* Bits 15-11 Reserved */
+                                                      /* Bits 15-11 Reserved */
 #define LPI2C_MCFGR1_MATCFG_SHIFT           (16)
 #define LPI2C_MCFGR1_MATCFG_MASK            (7 << LPI2C_MCFGR1_MATCFG_SHIFT)  /* Match Configuration Bit Mask */
-#  define LPI2C_MCFGR1_MATCFG(n)            ((n << LPI2C_MCFGR1_MATCFG_SHIFT) & LPI2C_MCFGR1_MATCFG_MASK)
+#  define LPI2C_MCFGR1_MATCFG(n)            (((n) << LPI2C_MCFGR1_MATCFG_SHIFT) & LPI2C_MCFGR1_MATCFG_MASK)
 #  define LPI2C_MCFGR1_MATCFG_DISABLE       (0 << LPI2C_MCFGR1_MATCFG_SHIFT)
                                                      /* LPI2C_MCFG1_MATCFG = 001b Reserved */
 #  define LPI2C_MCFGR1_MATCFG2              (2 << LPI2C_MCFGR1_MATCFG_SHIFT)
@@ -282,7 +268,7 @@
                                                     /* Bits 23-19 Reserved */
 #define LPI2C_MCFGR1_PINCFG_SHIFT           (24)
 #define LPI2C_MCFGR1_PINCFG_MASK            (7 << LPI2C_MCFGR1_PINCFG_SHIFT)  /* Pin Configuration Bit Mask */
-#  define LPI2C_MCFGR1_PINCFG(n)            ((n << LPI2C_MCFGR1_PINCFG_SHIFT) & LPI2C_MCFGR1_PINCFG_MASK)
+#  define LPI2C_MCFGR1_PINCFG(n)            (((n) << LPI2C_MCFGR1_PINCFG_SHIFT) & LPI2C_MCFGR1_PINCFG_MASK)
 #  define LPI2C_MCFGR1_PINCFG0              (0 << LPI2C_MCFGR1_PINCFG_SHIFT)
 #  define LPI2C_MCFGR1_PINCFG1              (1 << LPI2C_MCFGR1_PINCFG_SHIFT)
 #  define LPI2C_MCFGR1_PINCFG2              (2 << LPI2C_MCFGR1_PINCFG_SHIFT)
@@ -297,103 +283,110 @@
 
 #define LPI2C_MCFG2_BUSIDLE_MASK            (0xfff << 0)  /* Bus Idle Timeout Period in Clock Cycles */
 #define LPI2C_MCFG2_BUSIDLE_DISABLE         (0)
-#  define LPI2C_MCFG2_BUSIDLE(n)            (n & LPI2C_MCFG2_BUSIDLE_MASK)
+#  define LPI2C_MCFG2_BUSIDLE(n)            ((n) & LPI2C_MCFG2_BUSIDLE_MASK)
                                                      /* Bits 15-12 Reserved */
 #define LPI2C_MCFG2_FILTSCL_SHIFT           (16)
 #define LPI2C_MCFG2_FILTSCL_MASK            (15 << LPI2C_MCFG2_FILTSCL_SHIFT)  /* Glitch Filter SCL */
 #define LPI2C_MCFG2_FILTSCL_DISABLE         (0 << LPI2C_MCFG2_FILTSCL_SHIFT)
-#  define LPI2C_MCFG2_FILTSCL_CYCLES(n)     ((n << LPI2C_MCFG2_FILTSCL_SHIFT) & LPI2C_MCFG2_FILTSCL_MASK)
+#  define LPI2C_MCFG2_FILTSCL_CYCLES(n)     (((n) << LPI2C_MCFG2_FILTSCL_SHIFT) & LPI2C_MCFG2_FILTSCL_MASK)
                                                      /* Bits 23-20 Reserved */
 #define LPI2C_MCFG2_FILTSDA_SHIFT           (24)
 #define LPI2C_MCFG2_FILTSDA_MASK            (15 << LPI2C_MCFG2_FILTSDA_SHIFT)  /* Glitch Filter SDA */
 #define LPI2C_MCFG2_FILTSDA_DISABLE         (0 << LPI2C_MCFG2_FILTSDA_SHIFT)
-#  define LPI2C_MCFG2_FILTSDA_CYCLES(n)     ((n << LPI2C_MCFG2_FILTSDA_SHIFT) & LPI2C_MCFG2_FILTSDA_MASK)
+#  define LPI2C_MCFG2_FILTSDA_CYCLES(n)     (((n) << LPI2C_MCFG2_FILTSDA_SHIFT) & LPI2C_MCFG2_FILTSDA_MASK)
                                                      /* Bits 31-28 Reserved */
+
 /* LPI2C Master Config Register 3  */
 
                                                      /* Bits 7-0 Reserved */
 #define LPI2C_MCFG3_PINLOW_SHIFT            (8)
 #define LPI2C_MCFG3_PINLOW_MASK             (0xfff << LPI2C_MCFG3_PINLOW_SHIFT)  /* Configure The Pin Low Timeout in Clock Cycles */
-#  define LPI2C_MCFG3_PINLOW_CYCLES(n)      ((n << LPI2C_MCFG3_PINLOW_SHIFT) & LPI2C_MCFG3_PINLOW_MASK)
+#  define LPI2C_MCFG3_PINLOW_CYCLES(n)      (((n) << LPI2C_MCFG3_PINLOW_SHIFT) & LPI2C_MCFG3_PINLOW_MASK)
                                                      /* Bits 31-20 Reserved */
 
 /* LPI2C Master Data Match Register  */
 
 #define LPI2C_MDMR_MATCH0_SHIFT             (0)
 #define LPI2C_MDMR_MATCH0_MASK              (0xff << LPI2C_MDMR_MATCH0_SHIFT)  /* Match 0 Value */
-#  define LPI2C_MDMR_MATCH0(n)              ((n << LPI2C_MDMR_MATCH0_SHIFT) & LPI2C_MDMR_MATCH0_MASK)
+#  define LPI2C_MDMR_MATCH0(n)              (((n) << LPI2C_MDMR_MATCH0_SHIFT) & LPI2C_MDMR_MATCH0_MASK)
                                                      /* Bits 15-8 Reserved */
 #define LPI2C_MDMR_MATCH1_SHIFT             (16)
 #define LPI2C_MDMR_MATCH1_MASK              (0xff << LPI2C_MDMR_MATCH1_SHIFT)  /* Match 1 Value */
-#  define LPI2C_MDMR_MATCH1(n)              ((n << LPI2C_MDMR_MATCH1_SHIFT) & LPI2C_MDMR_MATCH1_MASK)
+#  define LPI2C_MDMR_MATCH1(n)              (((n) << LPI2C_MDMR_MATCH1_SHIFT) & LPI2C_MDMR_MATCH1_MASK)
                                                      /* Bits 31-24 Reserved */
 
 /* LPI2C Master Clock Configuration Register 0 */
 
 #define LPI2C_MCCR0_CLKLO_SHIFT             (0)
 #define LPI2C_MCCR0_CLKLO_MASK              (0x3f << LPI2C_MCCR0_CLKLO_SHIFT)  /* Clock Low Period */
-#  define LPI2C_MCCR0_CLKLO(n)              ((n << LPI2C_MCCR0_CLKLO_SHIFT) & LPI2C_MCCR0_CLKLO_MASK)
+#  define LPI2C_MCCR0_CLKLO(n)              (((n) << LPI2C_MCCR0_CLKLO_SHIFT) & LPI2C_MCCR0_CLKLO_MASK)
                                                      /* Bits 7-6 Reserved */
 #define LPI2C_MCCR0_CLKHI_SHIFT             (8)
 #define LPI2C_MCCR0_CLKHI_MASK              (0x3f << LPI2C_MCCR0_CLKHI_SHIFT)  /* Clock High Period */
-#  define LPI2C_MCCR0_CLKHI(n)              ((n << LPI2C_MCCR0_CLKHI_SHIFT) & LPI2C_MCCR0_CLKHI_MASK)
+#  define LPI2C_MCCR0_CLKHI(n)              (((n) << LPI2C_MCCR0_CLKHI_SHIFT) & LPI2C_MCCR0_CLKHI_MASK)
                                                      /* Bits 15-14 Reserved */
 #define LPI2C_MCCR0_SETHOLD_SHIFT           (16)
 #define LPI2C_MCCR0_SETHOLD_MASK            (0x3f << LPI2C_MCCR0_SETHOLD_SHIFT)  /* Setup Hold Delay */
-#  define LPI2C_MCCR0_SETHOLD(n)            ((n << LPI2C_MCCR0_SETHOLD_SHIFT) & LPI2C_MCCR0_SETHOLD_MASK)
+#  define LPI2C_MCCR0_SETHOLD(n)            (((n) << LPI2C_MCCR0_SETHOLD_SHIFT) & LPI2C_MCCR0_SETHOLD_MASK)
                                                      /* Bits 23-22 Reserved */
 #define LPI2C_MCCR0_DATAVD_SHIFT            (24)
 #define LPI2C_MCCR0_DATAVD_MASK             (0x3f << LPI2C_MCCR0_DATAVD_SHIFT)  /* Setup Hold Delay */
-#  define LPI2C_MCCR0_DATAVD(n)             ((n << LPI2C_MCCR0_DATAVD_SHIFT) & LPI2C_MCCR0_DATAVD_MASK)
+#  define LPI2C_MCCR0_DATAVD(n)             (((n) << LPI2C_MCCR0_DATAVD_SHIFT) & LPI2C_MCCR0_DATAVD_MASK)
                                                      /* Bits 31-30 Reserved */
 
 /* LPI2C Master Clock Configuration Register 1 */
 
 #define LPI2C_MCCR1_CLKLO_SHIFT             (0)
 #define LPI2C_MCCR1_CLKLO_MASK              (0x3f << LPI2C_MCCR1_CLKLO_SHIFT)  /* Clock Low Period */
-#  define LPI2C_MCCR1_CLKLO(n)              ((n << LPI2C_MCCR1_CLKLO_SHIFT) & LPI2C_MCCR1_CLKLO_MASK)
+#  define LPI2C_MCCR1_CLKLO(n)              (((n) << LPI2C_MCCR1_CLKLO_SHIFT) & LPI2C_MCCR1_CLKLO_MASK)
                                                      /* Bits 7-6 Reserved */
 #define LPI2C_MCCR1_CLKHI_SHIFT             (8)
 #define LPI2C_MCCR1_CLKHI_MASK              (0x3f << LPI2C_MCCR1_CLKHI_SHIFT)  /* Clock High Period */
-#  define LPI2C_MCCR1_CLKHI(n)              ((n << LPI2C_MCCR1_CLKHI_SHIFT) & LPI2C_MCCR1_CLKHI_MASK)
+#  define LPI2C_MCCR1_CLKHI(n)              (((n) << LPI2C_MCCR1_CLKHI_SHIFT) & LPI2C_MCCR1_CLKHI_MASK)
                                                      /* Bits 15-14 Reserved */
 #define LPI2C_MCCR1_SETHOLD_SHIFT           (16)
 #define LPI2C_MCCR1_SETHOLD_MASK            (0x3f << LPI2C_MCCR1_SETHOLD_SHIFT)  /* Setup Hold Delay */
-#  define LPI2C_MCCR1_SETHOLD(n)            ((n << LPI2C_MCCR1_SETHOLD_SHIFT) & LPI2C_MCCR1_SETHOLD_MASK)
+#  define LPI2C_MCCR1_SETHOLD(n)            (((n) << LPI2C_MCCR1_SETHOLD_SHIFT) & LPI2C_MCCR1_SETHOLD_MASK)
                                                      /* Bits 23-22 Reserved */
 #define LPI2C_MCCR1_DATAVD_SHIFT            (24)
 #define LPI2C_MCCR1_DATAVD_MASK             (0x3f << LPI2C_MCCR1_DATAVD_SHIFT)  /* Setup Hold Delay */
-#  define LPI2C_MCCR1_DATAVD(n)             ((n << LPI2C_MCCR1_DATAVD_SHIFT) & LPI2C_MCCR1_DATAVD_MASK)
+#  define LPI2C_MCCR1_DATAVD(n)             (((n) << LPI2C_MCCR1_DATAVD_SHIFT) & LPI2C_MCCR1_DATAVD_MASK)
                                                      /* Bits 31-30 Reserved */
 
 /* LPI2C Master FIFO Control Register */
 
 #define LPI2C_MFCR_TXWATER_SHIFT            (0)
 #define LPI2C_MFCR_TXWATER_MASK             (3 << LPI2C_MFCR_TXWATER_SHIFT)  /* Transmit FIFO Watermark*/
-#  define LPI2C_MFCR_TXWATER(n)             ((n << LPI2C_MFCR_TXWATER_SHIFT) &  LPI2C_MFCR_TXWATER_MASK)  /* Transmit FIFO Watermark*/
+
+#  define LPI2C_MFCR_TXWATER(n)             (((n) << LPI2C_MFCR_TXWATER_SHIFT) &  LPI2C_MFCR_TXWATER_MASK)  /* Transmit FIFO Watermark*/
+
                                                      /* Bits 15-2 Reserved */
 #define LPI2C_MFCR_RXWATER_SHIFT            (16)
 #define LPI2C_MFCR_RXWATER_MASK             (3 << LPI2C_MFCR_RXWATER_SHIFT)  /* Receive FIFO Watermark */
-#  define LPI2C_MFCR_RXWATER(n)             ((n << LPI2C_MFCR_RXWATER_SHIFT) &  LPI2C_MFCR_RXWATER_MASK)  /* Transmit FIFO Watermark*/
+
+#  define LPI2C_MFCR_RXWATER(n)             (((n) << LPI2C_MFCR_RXWATER_SHIFT) &  LPI2C_MFCR_RXWATER_MASK)  /* Transmit FIFO Watermark*/
+
                                                      /* Bits 31-18 Reserved */
 
 /* LPI2C Master FIFO Status Register */
 
 #define LPI2C_MFSR_TXCOUNT_SHIFT            (0)
 #define LPI2C_MFSR_TXCOUNT_MASK             (3 << LPI2C_MFSR_TXCOUNT_SHIFT)  /* Transmit FIFO Count */
+
                                                      /* Bits 15-2 Reserved */
 #define LPI2C_MFSR_RXCOUNT_SHIFT            (16)
 #define LPI2C_MFSR_RXCOUNT_MASK             (3 << LPI2C_MFSR_RXCOUNT_SHIFT)  /* Receive FIFO Count */
+
                                                      /* Bits 31-18 Reserved */
 
 /* LPI2C Master Transmit Data Register */
 
 #define LPI2C_MTDR_DATA_SHIFT               (0)
 #define LPI2C_MTDR_DATA_MASK                (0xff << LPI2C_MTDR_DATA_SHIFT)  /* Transmit Data */
-#  define LPI2C_MTDR_DATA(n)                (n & LPI2C_MTDR_DATA_MASK)
+#  define LPI2C_MTDR_DATA(n)                ((n) & LPI2C_MTDR_DATA_MASK)
 #define LPI2C_MTDR_CMD_SHIFT                (8)
 #define LPI2C_MTDR_CMD_MASK                 (7 << LPI2C_MTDR_CMD_SHIFT)  /* Command Data */
-#  define LPI2C_MTDR_CMD(n)                 ((n << LPI2C_MTDR_CMD_SHIFT) & LPI2C_MTDR_CMD_MASK)
+#  define LPI2C_MTDR_CMD(n)                 (((n) << LPI2C_MTDR_CMD_SHIFT) & LPI2C_MTDR_CMD_MASK)
 #  define LPI2C_MTDR_CMD_TXD                (0 << LPI2C_MTDR_CMD_SHIFT)
 #  define LPI2C_MTDR_CMD_RXD                (1 << LPI2C_MTDR_CMD_SHIFT)
 #  define LPI2C_MTDR_CMD_STOP               (2 << LPI2C_MTDR_CMD_SHIFT)
@@ -408,9 +401,11 @@
 
 #define LPI2C_MRDR_DATA_SHIFT               (0)
 #define LPI2C_MRDR_DATA_MASK                (0xff << LPI2C_MRDR_DATA_SHIFT)  /* Receive Data */
+
                                                      /* Bits 13-8 Reserved */
 #define LPI2C_MRDR_RXEMPTY_SHIFT            (14)
 #define LPI2C_MRDR_RXEMPTY_MASK             (1 << LPI2C_MRDR_RXEMPTY_SHIFT)  /* Rx Empty */
+
                                                      /* Bits 31-15 Reserved */
 
 /* LPI2C Slave Control Register */
@@ -485,7 +480,7 @@
                                                       /* Bits 15-14 Reserved */
 #define LPI2C_SCFG1_ADDRCFG_SHIFT           (16)
 #define LPI2C_SCFG1_ADDRCFG_MASK            (7 << LPI2C_SCFG1_ADDRCFG_SHIFT)  /* Address Configuration Bit Mask */
-#  define LPI2C_SCFG1_ADDRCFG(n)            ((n << LPI2C_SCFG1_ADDRCFG_SHIFT) & LPI2C_SCFG1_ADDRCFG_MASK)
+#  define LPI2C_SCFG1_ADDRCFG(n)            (((n) << LPI2C_SCFG1_ADDRCFG_SHIFT) & LPI2C_SCFG1_ADDRCFG_MASK)
 #  define LPI2C_SCFG1_ADDRCFG0              (0 << LPI2C_SCFG1_ADDRCFG_SHIFT)
 #  define LPI2C_SCFG1_ADDRCFG1              (2 << LPI2C_SCFG1_ADDRCFG_SHIFT)
 #  define LPI2C_SCFG1_ADDRCFG2              (2 << LPI2C_SCFG1_ADDRCFG_SHIFT)
@@ -499,21 +494,21 @@
 /* LPI2C Slave Configuration Register 2  */
 
 #define LPI2C_SCFG2_CLKHOLD_MASK            (15 << 0) /* Clock Hold Time */
-#  define LPI2C_SCFG2_CLKHOLD(n)            (n & LPI2C_SCFG2_CLKHOLD_MASK)
+#  define LPI2C_SCFG2_CLKHOLD(n)            ((n) & LPI2C_SCFG2_CLKHOLD_MASK)
                                                       /* Bits 7-4 Reserved */
 #define LPI2C_SCFG2_DATAVD_SHIFT            (8)
 #define LPI2C_SCFG2_DATAVD_MASK             (0x3f << LPI2C_SCFG2_DATAVD_SHIFT)  /* Data Valid Delay */
-#  define LPI2C_SCFG2_DATAVD(n)             ((n << LPI2C_SCFG2_DATAVD_SHIFT) & LPI2C_SCFG2_DATAVD_MASK)
+#  define LPI2C_SCFG2_DATAVD(n)             (((n) << LPI2C_SCFG2_DATAVD_SHIFT) & LPI2C_SCFG2_DATAVD_MASK)
                                                       /* Bits 15-14 Reserved */
 #define LPI2C_SCFG2_FILTSCL_SHIFT           (16)
 #define LPI2C_SCFG2_FILTSCL_MASK            (15 << LPI2C_SCFG2_FILTSCL_SHIFT)  /* Glitch Filter SCL */
 #define LPI2C_SCFG2_FILTSCL_DISABLE         (0 << LPI2C_SCFG2_FILTSCL_SHIFT)
-#  define LPI2C_SCFG2_FILTSCL_CYCLES(n)     ((n << LPI2C_SCFG2_FILTSCL_SHIFT) & LPI2C_SCFG2_FILTSCL_MASK)
+#  define LPI2C_SCFG2_FILTSCL_CYCLES(n)     (((n) << LPI2C_SCFG2_FILTSCL_SHIFT) & LPI2C_SCFG2_FILTSCL_MASK)
                                                       /* Bits 23-20 Reserved */
 #define LPI2C_SCFG2_FILTSDA_SHIFT           (24)
 #define LPI2C_SCFG2_FILTSDA_MASK            (15 << LPI2C_SCFG2_FILTSDA_SHIFT)  /* Glitch Filter SDA */
 #define LPI2C_SCFG2_FILTSDA_DISABLE         (0 << LPI2C_SCFG2_FILTSDA_SHIFT)
-#  define LPI2C_SCFG2_FILTSDA_CYCLES(n)     ((n << LPI2C_SCFG2_FILTSDA_SHIFT) & LPI2C_SCFG2_FILTSDA_MASK)
+#  define LPI2C_SCFG2_FILTSDA_CYCLES(n)     (((n) << LPI2C_SCFG2_FILTSDA_SHIFT) & LPI2C_SCFG2_FILTSDA_MASK)
                                                       /* Bits 31-28 Reserved */
 
 /* LPI2C Slave Address Match Register  */
@@ -521,17 +516,18 @@
                                                       /* Bit 0 Reserved */
 #define LPI2C_SAMR_ADDR0_SHIFT              (1)
 #define LPI2C_SAMR_ADDR0_MASK               (0x3ff << LPI2C_SAMR_ADDR0_SHIFT)  /* Address 0 Value */
-#  define LPI2C_SAMR_ADDR0(n)               ((n << LPI2C_SAMR_ADDR0_SHIFT) & LPI2C_SAMR_ADDR0_MASK)
+#  define LPI2C_SAMR_ADDR0(n)               (((n) << LPI2C_SAMR_ADDR0_SHIFT) & LPI2C_SAMR_ADDR0_MASK)
                                                       /* Bits 16-11 Reserved */
 #define LPI2C_SAMR_ADDR1_SHIFT              (17)
 #define LPI2C_SAMR_ADDR1_MASK               (0x3ff << LPI2C_SAMR_ADDR1_SHIFT)  /* Address 1 Value */
-#  define LPI2C_SAMR_ADDR1(n)               ((n << LPI2C_SAMR_ADDR1_SHIFT) & LPI2C_SAMR_ADDR1_MASK)
+#  define LPI2C_SAMR_ADDR1(n)               (((n) << LPI2C_SAMR_ADDR1_SHIFT) & LPI2C_SAMR_ADDR1_MASK)
                                                       /* Bits 31-27 Reserved */
 
 /* LPI2C Slave Address Status Register  */
 
 #define LPI2C_SASR_RADDR_MASK               (0x7ff << 0) /* Received Address */
-                                                      /* Bits 16-11 Reserved */
+
+                                                    /* Bits 16-11 Reserved */
 #define LPI2C_SASR_ANV                      (1 << 14) /* Address Not Valid */
                                                       /* Bits 31-15 Reserved */
 
@@ -544,14 +540,14 @@
 
 #define LPI2C_STDR_DATA_SHIFT               (0)
 #define LPI2C_STDR_DATA_MASK                (0xff << LPI2C_STDR_DATA_SHIFT)  /* Transmit Data */
-#  define LPI2C_STDR_DATA(n)                ((n << LPI2C_STDR_DATA_SHIFT) & LPI2C_STDR_DATA_MASK)
+#  define LPI2C_STDR_DATA(n)                (((n) << LPI2C_STDR_DATA_SHIFT) & LPI2C_STDR_DATA_MASK)
                                                       /* Bits 31-8 Reserved */
 
 /* LPI2C Slave Receive Data Register  */
 
 #define LPI2C_SRDR_DATA_SHIFT               (0)
 #define LPI2C_SRDR_DATA_MASK                (0xff << LPI2C_SRDR_DATA_SHIFT)  /* Receive Data */
-#  define LPI2C_SRDR_DATA(n)                ((n << LPI2C_SRDR_DATA_SHIFT) & LPI2C_SRDR_DATA_MASK)
+#  define LPI2C_SRDR_DATA(n)                (((n) << LPI2C_SRDR_DATA_SHIFT) & LPI2C_SRDR_DATA_MASK)
                                                       /* Bits 8-31 Reserved */
 
 #endif /* __ARCH_ARM_SRC_S32K1XX_HARDWARE_S32K1XX_LPI2C_H */

@@ -1,35 +1,22 @@
 /****************************************************************************
- * net/udp/udp_send_buffered.c
+ * net/udp/udp_sendto_buffered.c
  *
- *   Copyright (C) 2018-2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -56,15 +43,14 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
-#include <debug.h>
 #include <debug.h>
 
 #include <arch/irq.h>
 #include <nuttx/net/net.h>
 #include <nuttx/mm/iob.h>
 #include <nuttx/net/netdev.h>
-#include <nuttx/net/arp.h>
 #include <nuttx/net/udp.h>
 
 #include "netdev/netdev.h"
@@ -89,9 +75,6 @@
 #  define NEED_IPDOMAIN_SUPPORT 1
 #endif
 
-#define UDPIPv4BUF ((struct udp_hdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev) + IPv4_HDRLEN])
-#define UDPIPv6BUF ((struct udp_hdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev) + IPv6_HDRLEN])
-
 /* Debug */
 
 #ifdef CONFIG_NET_UDP_WRBUFFER_DUMP
@@ -110,11 +93,9 @@
 static inline void sendto_ipselect(FAR struct net_driver_s *dev,
                                    FAR struct udp_conn_s *conn);
 #endif
-static int sendto_next_transfer(FAR struct socket *psock,
-                                FAR struct udp_conn_s *conn);
+static int sendto_next_transfer(FAR struct udp_conn_s *conn);
 static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
-                                    FAR void *pvconn, FAR void *pvpriv,
-                                    uint16_t flags);
+                                    FAR void *pvpriv, uint16_t flags);
 
 /****************************************************************************
  * Private Functions
@@ -127,8 +108,7 @@ static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
  *   Release the write buffer at the head of the write buffer queue.
  *
  * Input Parameters:
- *   dev   - The structure of the network driver that caused the event
- *   psock - Socket state structure
+ *   conn  - The UDP connection of interest
  *
  * Returned Value:
  *   None
@@ -138,8 +118,7 @@ static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-static void sendto_writebuffer_release(FAR struct socket *psock,
-                                       FAR struct udp_conn_s *conn)
+static void sendto_writebuffer_release(FAR struct udp_conn_s *conn)
 {
   FAR struct udp_wrbuffer_s *wrb;
   int ret = OK;
@@ -154,9 +133,9 @@ static void sendto_writebuffer_release(FAR struct socket *psock,
            * enqueued.
            */
 
-          psock->s_sndcb->flags = 0;
-          psock->s_sndcb->priv  = NULL;
-          psock->s_sndcb->event = NULL;
+          conn->sndcb->flags = 0;
+          conn->sndcb->priv  = NULL;
+          conn->sndcb->event = NULL;
           wrb = NULL;
 
 #ifdef CONFIG_NET_UDP_NOTIFIER
@@ -181,10 +160,16 @@ static void sendto_writebuffer_release(FAR struct socket *psock,
            * the write buffer queue.
            */
 
-          ret = sendto_next_transfer(psock, conn);
+          ret = sendto_next_transfer(conn);
         }
     }
   while (wrb != NULL && ret < 0);
+
+#if CONFIG_NET_SEND_BUFSIZE > 0
+  /* Notify the send buffer available if wrbbuffer drained */
+
+  udp_sendbuffer_notify(conn);
+#endif /* CONFIG_NET_SEND_BUFSIZE */
 }
 
 /****************************************************************************
@@ -198,7 +183,7 @@ static void sendto_writebuffer_release(FAR struct socket *psock,
  *
  * Input Parameters:
  *   dev   - The structure of the network driver that caused the event
- *   psock - Socket state structure
+ *   conn  - The UDP connection of interest
  *
  * Returned Value:
  *   None
@@ -214,7 +199,9 @@ static inline void sendto_ipselect(FAR struct net_driver_s *dev,
 {
   /* Which domain the socket support */
 
-  if (conn->domain == PF_INET)
+  if (conn->domain == PF_INET ||
+      (conn->domain == PF_INET6 &&
+       ip6_is_ipv4addr((FAR struct in6_addr *)conn->u.ipv6.raddr)))
     {
       /* Select the IPv4 domain */
 
@@ -224,7 +211,6 @@ static inline void sendto_ipselect(FAR struct net_driver_s *dev,
     {
       /* Select the IPv6 domain */
 
-      DEBUGASSERT(conn->domain == PF_INET6);
       udp_ipv6_select(dev);
     }
 }
@@ -241,7 +227,6 @@ static inline void sendto_ipselect(FAR struct net_driver_s *dev,
  *   the head of the write queue.
  *
  * Input Parameters:
- *   psock - Socket state structure
  *   conn  - The UDP connection structure
  *
  * Returned Value:
@@ -249,12 +234,10 @@ static inline void sendto_ipselect(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-static int sendto_next_transfer(FAR struct socket *psock,
-                                FAR struct udp_conn_s *conn)
+static int sendto_next_transfer(FAR struct udp_conn_s *conn)
 {
   FAR struct udp_wrbuffer_s *wrb;
   FAR struct net_driver_s *dev;
-  int ret;
 
   /* Set the UDP "connection" to the destination address of the write buffer
    * at the head of the queue.
@@ -267,11 +250,20 @@ static int sendto_next_transfer(FAR struct socket *psock,
       return -ENOENT;
     }
 
-  ret = udp_connect(conn, (FAR const struct sockaddr *)&wrb->wb_dest);
-  if (ret < 0)
+  /* Has this address already been bound to a local port (lport)? */
+
+  if (!conn->lport)
     {
-      nerr("ERROR: udp_connect failed: %d\n", ret);
-      return ret;
+      /* No.. Find an unused local port number and bind it to the
+       * connection structure.
+       */
+
+      conn->lport = HTONS(udp_select_port(conn->domain, &conn->u));
+      if (!conn->lport)
+        {
+          nerr("ERROR: Failed to get a local port!\n");
+          return -EADDRINUSE;
+        }
     }
 
   /* Get the device that will handle the remote packet transfers.  This
@@ -283,7 +275,7 @@ static int sendto_next_transfer(FAR struct socket *psock,
    * transmission could harm performance.
    */
 
-  dev = udp_find_raddr_device(conn);
+  dev = udp_find_raddr_device(conn, &wrb->wb_dest);
   if (dev == NULL)
     {
       nerr("ERROR: udp_find_raddr_device failed\n");
@@ -298,29 +290,39 @@ static int sendto_next_transfer(FAR struct socket *psock,
       return -EHOSTUNREACH;
     }
 
+#ifndef CONFIG_NET_IPFRAG
+  /* Sanity check if the packet len (with IP hdr) is greater than the MTU */
+
+  if (wrb->wb_iob->io_pktlen > devif_get_mtu(dev))
+    {
+      nerr("ERROR: Packet too long to send!\n");
+      return -EMSGSIZE;
+    }
+#endif
+
   /* If this is not the same device that we used in the last call to
    * udp_callback_alloc(), then we need to release and reallocate the old
    * callback instance.
    */
 
-  if (psock->s_sndcb != NULL && conn->dev != dev)
+  if (conn->sndcb != NULL && conn->dev != dev)
     {
-      udp_callback_free(conn->dev, conn, psock->s_sndcb);
-      psock->s_sndcb = NULL;
+      udp_callback_free(conn->dev, conn, conn->sndcb);
+      conn->sndcb = NULL;
     }
 
   /* Allocate resources to receive a callback from this device if the
    * callback is not already in place.
    */
 
-  if (psock->s_sndcb == NULL)
+  if (conn->sndcb == NULL)
     {
-      psock->s_sndcb = udp_callback_alloc(dev, conn);
+      conn->sndcb = udp_callback_alloc(dev, conn);
     }
 
   /* Test if the callback has been allocated */
 
-  if (psock->s_sndcb == NULL)
+  if (conn->sndcb == NULL)
     {
       /* A buffer allocation error occurred */
 
@@ -332,9 +334,9 @@ static int sendto_next_transfer(FAR struct socket *psock,
 
   /* Set up the callback in the connection */
 
-  psock->s_sndcb->flags = (UDP_POLL | NETDEV_DOWN);
-  psock->s_sndcb->priv  = (FAR void *)psock;
-  psock->s_sndcb->event = sendto_eventhandler;
+  conn->sndcb->flags = (UDP_POLL | NETDEV_DOWN);
+  conn->sndcb->priv  = (FAR void *)conn;
+  conn->sndcb->event = sendto_eventhandler;
 
   /* Notify the device driver of the availability of TX data */
 
@@ -363,29 +365,11 @@ static int sendto_next_transfer(FAR struct socket *psock,
  ****************************************************************************/
 
 static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
-                                    FAR void *pvconn, FAR void *pvpriv,
-                                    uint16_t flags)
+                                    FAR void *pvpriv, uint16_t flags)
 {
-  FAR struct udp_conn_s *conn = (FAR struct udp_conn_s *)pvconn;
-  FAR struct socket *psock = (FAR struct socket *)pvpriv;
+  FAR struct udp_conn_s *conn = pvpriv;
 
-  DEBUGASSERT(dev != NULL && conn != NULL && psock != NULL);
-
-  /* The UDP socket should be bound to a device.  Make sure that the polling
-   * device is the one that we are bound to.
-   *
-   * REVISIT:  There is a logical error here for the case where there are
-   * multiple network devices.  In that case, the packets may need to be sent
-   * in a different order than they were queued.  The packet we may need to
-   * send on this device may not be at the head of the list.  Forcing FIFO
-   * packet transmission could degrade performance!
-   */
-
-  DEBUGASSERT(conn->dev != NULL);
-  if (dev != conn->dev)
-    {
-      return flags;
-    }
+  DEBUGASSERT(dev != NULL && conn != NULL);
 
   ninfo("flags: %04x\n", flags);
 
@@ -399,7 +383,24 @@ static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
        * the next transfer.
        */
 
-      sendto_writebuffer_release(psock, conn);
+      sendto_writebuffer_release(conn);
+      return flags;
+    }
+
+  /* The UDP socket should be bound to a device.  Make sure that the polling
+   * device is the one that we are bound to.
+   *
+   * REVISIT:  There is a logical error here for the case where there are
+   * multiple network devices.  In that case, the packets may need to be sent
+   * in a different order than they were queued.  The packet we may need to
+   * send on this device may not be at the head of the list.  Forcing FIFO
+   * packet transmission could degrade performance!
+   */
+
+  DEBUGASSERT(conn != NULL);
+  DEBUGASSERT(conn->dev != NULL);
+  if (dev != conn->dev)
+    {
       return flags;
     }
 
@@ -416,8 +417,8 @@ static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
   if (dev->d_sndlen <= 0 && (flags & UDP_NEWDATA) == 0 &&
       (flags & UDP_POLL) != 0 && !sq_empty(&conn->write_q))
     {
+      uint16_t udpiplen = udpip_hdrsize(conn);
       FAR struct udp_wrbuffer_s *wrb;
-      size_t sndlen;
 
       /* Peek at the head of the write queue (but don't remove anything
        * from the write queue yet).  We know from the above test that
@@ -427,14 +428,34 @@ static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
       wrb = (FAR struct udp_wrbuffer_s *)sq_peek(&conn->write_q);
       DEBUGASSERT(wrb != NULL);
 
+      /* If the udp socket not connected, it is possible to have
+       * multi-different destination address in each iob entry,
+       * update the remote address every time to avoid sent to the
+       * incorrect destination.
+       */
+
+      udp_connect(conn, (FAR const struct sockaddr *)&wrb->wb_dest);
+
+      /* Then set-up to send that amount of data with the offset
+       * corresponding to the size of the IP-dependent address structure.
+       */
+
+      netdev_iob_replace(dev, wrb->wb_iob);
+
       /* Get the amount of data that we can send in the next packet.
        * We will send either the remaining data in the buffer I/O
        * buffer chain, or as much as will fit given the MSS and current
        * window size.
        */
 
-      sndlen = wrb->wb_iob->io_pktlen;
-      ninfo("wrb=%p sndlen=%u\n", wrb, sndlen);
+      dev->d_sndlen = wrb->wb_iob->io_pktlen - udpiplen;
+      ninfo("wrb=%p sndlen=%d\n", wrb, dev->d_sndlen);
+
+      /* Do not need to release wb_iob, the life cycle of wb_iob is
+       * handed over to the network device
+       */
+
+      wrb->wb_iob = NULL;
 
 #ifdef NEED_IPDOMAIN_SUPPORT
       /* If both IPv4 and IPv6 support are enabled, then we will need to
@@ -445,17 +466,12 @@ static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
 
       sendto_ipselect(dev, conn);
 #endif
-      /* Then set-up to send that amount of data with the offset
-       * corresponding to the size of the IP-dependent address structure.
-       */
-
-      devif_iob_send(dev, wrb->wb_iob, sndlen, 0);
 
       /* Free the write buffer at the head of the queue and attempt to
        * setup the next transfer.
        */
 
-      sendto_writebuffer_release(psock, conn);
+      sendto_writebuffer_release(conn);
 
       /* Only one data can be sent by low level driver at once,
        * tell the caller stop polling the other connections.
@@ -467,6 +483,34 @@ static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
   /* Continue waiting */
 
   return flags;
+}
+
+/****************************************************************************
+ * Name: udp_send_gettimeout
+ *
+ * Description:
+ *   Calculate the send timeout
+ *
+ ****************************************************************************/
+
+static unsigned int udp_send_gettimeout(clock_t start, unsigned int timeout)
+{
+  unsigned int elapse;
+
+  if (timeout != UINT_MAX)
+    {
+      elapse = TICK2MSEC(clock_systime_ticks() - start);
+      if (elapse >= timeout)
+        {
+          timeout = 0;
+        }
+      else
+        {
+          timeout -= elapse;
+        }
+    }
+
+  return timeout;
 }
 
 /****************************************************************************
@@ -499,14 +543,28 @@ static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
  ****************************************************************************/
 
 ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
-                         size_t len, int flags, FAR const struct sockaddr *to,
-                         socklen_t tolen)
+                         size_t len, int flags,
+                         FAR const struct sockaddr *to, socklen_t tolen)
 {
-  FAR struct udp_conn_s *conn;
   FAR struct udp_wrbuffer_s *wrb;
+  FAR struct udp_conn_s *conn;
+  unsigned int timeout;
+  uint16_t udpiplen;
   bool nonblock;
   bool empty;
   int ret = OK;
+  clock_t start;
+
+  /* Get the underlying the UDP connection structure.  */
+
+  conn = psock->s_conn;
+
+  /* The length of a datagram to be up to 65,535 octets */
+
+  if (len > 65535)
+    {
+      return -EMSGSIZE;
+    }
 
   /* If the UDP socket was previously assigned a remote peer address via
    * connect(), then as with connection-mode socket, sendto() may not be
@@ -514,7 +572,7 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
    * used with such connected UDP sockets.
    */
 
-  if (to != NULL && _SS_ISCONNECTED(psock->s_flags))
+  if (to != NULL && _SS_ISCONNECTED(conn->sconn.s_flags))
     {
       /* EISCONN - A destination address was specified and the socket is
        * already connected.
@@ -527,7 +585,7 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
    * must be provided.
    */
 
-  else if (to == NULL && !_SS_ISCONNECTED(psock->s_flags))
+  else if (to == NULL && !_SS_ISCONNECTED(conn->sconn.s_flags))
     {
       /* EDESTADDRREQ - The socket is not connection-mode and no peer
        * address is set.
@@ -536,26 +594,19 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
       return -EDESTADDRREQ;
     }
 
-  /* Get the underlying the UDP connection structure.  */
-
-  conn = (FAR struct udp_conn_s *)psock->s_conn;
-  DEBUGASSERT(conn);
-
 #if defined(CONFIG_NET_ARP_SEND) || defined(CONFIG_NET_ICMPv6_NEIGHBOR)
 #ifdef CONFIG_NET_ARP_SEND
   /* Assure the the IPv4 destination address maps to a valid MAC address in
    * the ARP table.
    */
 
-#ifdef CONFIG_NET_ICMPv6_NEIGHBOR
   if (psock->s_domain == PF_INET)
-#endif
     {
       in_addr_t destipaddr;
 
       /* Check if the socket is connection mode */
 
-      if (_SS_ISCONNECTED(psock->s_flags))
+      if (_SS_ISCONNECTED(conn->sconn.s_flags))
         {
           /* Yes.. use the connected remote address (the 'to' address is
            * null).
@@ -586,15 +637,13 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
    * the neighbor table.
    */
 
-#ifdef CONFIG_NET_ARP_SEND
-  else
-#endif
+  if (psock->s_domain == PF_INET6)
     {
       FAR const uint16_t *destipaddr;
 
       /* Check if the socket is connection mode */
 
-      if (_SS_ISCONNECTED(psock->s_flags))
+      if (_SS_ISCONNECTED(conn->sconn.s_flags))
         {
           /* Yes.. use the connected remote address (the 'to' address is
            * null).
@@ -616,7 +665,7 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
 
       /* Make sure that the IP address mapping is in the Neighbor Table */
 
-      ret = icmpv6_neighbor(destipaddr);
+      ret = icmpv6_neighbor(NULL, destipaddr);
     }
 #endif /* CONFIG_NET_ICMPv6_NEIGHBOR */
 
@@ -629,7 +678,10 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
     }
 #endif /* CONFIG_NET_ARP_SEND || CONFIG_NET_ICMPv6_NEIGHBOR */
 
-  nonblock = _SS_ISNONBLOCK(psock->s_flags) || (flags & MSG_DONTWAIT) != 0;
+  nonblock = _SS_ISNONBLOCK(conn->sconn.s_flags) ||
+                            (flags & MSG_DONTWAIT) != 0;
+  start    = clock_systime_ticks();
+  timeout  = _SO_TIMEOUT(conn->sconn.s_sndtimeo);
 
   /* Dump the incoming buffer */
 
@@ -639,25 +691,70 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
     {
       net_lock();
 
+#if CONFIG_NET_SEND_BUFSIZE > 0
+      /* If the send buffer size exceeds the send limit,
+       * wait for the write buffer to be released
+       */
+
+      while (udp_wrbuffer_inqueue_size(conn) + len > conn->sndbufs)
+        {
+          if (nonblock)
+            {
+              ret = -EAGAIN;
+              goto errout_with_lock;
+            }
+
+          ret = net_sem_timedwait_uninterruptible(&conn->sndsem,
+            udp_send_gettimeout(start, timeout));
+          if (ret < 0)
+            {
+              if (ret == -ETIMEDOUT)
+                {
+                  ret = -EAGAIN;
+                }
+
+              goto errout_with_lock;
+            }
+        }
+#endif /* CONFIG_NET_SEND_BUFSIZE */
+
       /* Allocate a write buffer.  Careful, the network will be momentarily
        * unlocked here.
        */
 
+#ifdef CONFIG_NET_JUMBO_FRAME
+
+      /* alloc iob of gso pkt for udp data */
+
+      wrb = udp_wrbuffer_tryalloc(len + udpip_hdrsize(conn) +
+                                  CONFIG_NET_LL_GUARDSIZE);
+#else
       if (nonblock)
         {
           wrb = udp_wrbuffer_tryalloc();
         }
       else
         {
-          wrb = udp_wrbuffer_alloc();
+          wrb = udp_wrbuffer_timedalloc(udp_send_gettimeout(start,
+                                                            timeout));
         }
+#endif
 
       if (wrb == NULL)
         {
           /* A buffer allocation error occurred */
 
           nerr("ERROR: Failed to allocate write buffer\n");
-          ret = nonblock ? -EAGAIN : -ENOMEM;
+
+          if (nonblock || timeout != UINT_MAX)
+            {
+              ret = -EAGAIN;
+            }
+          else
+            {
+              ret = -ENOMEM;
+            }
+
           goto errout_with_lock;
         }
 
@@ -666,7 +763,7 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
        * Check if the socket is connected
        */
 
-      if (_SS_ISCONNECTED(psock->s_flags))
+      if (_SS_ISCONNECTED(conn->sconn.s_flags))
         {
           /* Yes.. get the connection address from the connection structure */
 
@@ -695,7 +792,8 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
 
               addr6->sin6_family = AF_INET6;
               addr6->sin6_port   = conn->rport;
-              net_ipv6addr_copy(addr6->sin6_addr.s6_addr, conn->u.ipv6.raddr);
+              net_ipv6addr_copy(addr6->sin6_addr.s6_addr,
+                                conn->u.ipv6.raddr);
             }
 #endif /* CONFIG_NET_IPv6 */
         }
@@ -705,7 +803,15 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
       else
         {
           memcpy(&wrb->wb_dest, to, tolen);
+          udp_connect(conn, to);
         }
+
+      /* Skip l2/l3/l4 offset before copy */
+
+      udpiplen = udpip_hdrsize(conn);
+
+      iob_reserve(wrb->wb_iob, CONFIG_NET_LL_GUARDSIZE);
+      iob_update_pktlen(wrb->wb_iob, udpiplen, false);
 
       /* Copy the user data into the write buffer.  We cannot wait for
        * buffer space if the socket was opened non-blocking.
@@ -713,8 +819,8 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
 
       if (nonblock)
         {
-          ret = iob_trycopyin(wrb->wb_iob, (FAR uint8_t *)buf, len, 0, false,
-                              IOBUSER_NET_SOCK_UDP);
+          ret = iob_trycopyin(wrb->wb_iob, (FAR uint8_t *)buf,
+                              len, udpiplen, false);
         }
       else
         {
@@ -727,8 +833,8 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
            */
 
           blresult = net_breaklock(&count);
-          ret = iob_copyin(wrb->wb_iob, (FAR uint8_t *)buf, len, 0, false,
-                           IOBUSER_NET_SOCK_UDP);
+          ret = iob_copyin(wrb->wb_iob, (FAR uint8_t *)buf,
+                           len, udpiplen, false);
           if (blresult >= 0)
             {
               net_restorelock(count);
@@ -770,7 +876,7 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
            * the write buffer queue.
            */
 
-          ret = sendto_next_transfer(psock, conn);
+          ret = sendto_next_transfer(conn);
           if (ret < 0)
             {
               sq_remlast(&conn->write_q);
@@ -803,7 +909,7 @@ errout_with_lock:
  *   another means.
  *
  * Input Parameters:
- *   psock    An instance of the internal socket structure.
+ *   conn     A reference to UDP connection structure.
  *
  * Returned Value:
  *   OK
@@ -815,11 +921,11 @@ errout_with_lock:
  *
  ****************************************************************************/
 
-int psock_udp_cansend(FAR struct socket *psock)
+int psock_udp_cansend(FAR struct udp_conn_s *conn)
 {
   /* Verify that we received a valid socket */
 
-  if (!psock || psock->s_crefs <= 0)
+  if (conn == NULL)
     {
       nerr("ERROR: Invalid socket\n");
       return -EBADF;
@@ -835,11 +941,43 @@ int psock_udp_cansend(FAR struct socket *psock)
    * many more.
    */
 
-  if (udp_wrbuffer_test() < 0 || iob_navail(false) <= 0)
+  if (udp_wrbuffer_test() < 0 || iob_navail(false) <= 0
+#if CONFIG_NET_SEND_BUFSIZE > 0
+      || udp_wrbuffer_inqueue_size(conn) >= conn->sndbufs
+#endif
+     )
     {
       return -EWOULDBLOCK;
     }
 
   return OK;
 }
+
+/****************************************************************************
+ * Name: udp_sendbuffer_notify
+ *
+ * Description:
+ *   Notify the send buffer semaphore
+ *
+ * Input Parameters:
+ *   conn - The UDP connection of interest
+ *
+ * Assumptions:
+ *   Called from user logic with the network locked.
+ *
+ ****************************************************************************/
+
+#if CONFIG_NET_SEND_BUFSIZE > 0
+void udp_sendbuffer_notify(FAR struct udp_conn_s *conn)
+{
+  int val = 0;
+
+  nxsem_get_value(&conn->sndsem, &val);
+  if (val < 0)
+    {
+      nxsem_post(&conn->sndsem);
+    }
+}
+#endif /* CONFIG_NET_SEND_BUFSIZE */
+
 #endif /* CONFIG_NET && CONFIG_NET_UDP && CONFIG_NET_UDP_WRITE_BUFFERS */

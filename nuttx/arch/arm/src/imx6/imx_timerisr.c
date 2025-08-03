@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/imx6/imx_timerisr.c
  *
- *   Copyright (C) 2016-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,11 +28,12 @@
 
 #include <stdint.h>
 #include <time.h>
+#include <assert.h>
 
 #include <nuttx/arch.h>
 #include <arch/irq.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "gic.h"
 #include "hardware/imx_ccm.h"
 #include "hardware/imx_gpt.h"
@@ -53,7 +41,9 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-/* The Peripheral Clock (ipg_clk) is selected as the GPT clock source.  NOTE
+
+/* The Peripheral Clock (ipg_clk) is selected as the GPT clock source.
+ * NOTE
  * that the ipg_clk may be turned off in low power modes, stopping the timer
  * which is probably what you want.
  *
@@ -130,7 +120,7 @@ static void imx_output_compare(uint32_t sr, uint32_t of)
  *
  ****************************************************************************/
 
-static int imx_timerisr(int irq, uint32_t *regs, FAR void *arg)
+static int imx_timerisr(int irq, uint32_t *regs, void *arg)
 {
   /* Sample the SR (once) */
 
@@ -191,7 +181,7 @@ void up_timer_initialize(void)
 
   putreg32(0, IMX_GPT_IR);
 
-  /* Configure Output Mode to unconnected/ disconnected—Write zeros in OM3,
+  /* Configure Output Mode to unconnected/ disconnected-Write zeros in OM3,
    * OM2, and OM1 in GPT_CR.
    */
 
@@ -199,7 +189,7 @@ void up_timer_initialize(void)
   cr |=  (GPT_CR_OM1_DISCON | GPT_CR_OM2_DISCON | GPT_CR_OM3_DISCON);
   putreg32(cr, IMX_GPT_CR);
 
-  /* Disable Input Capture Modes—Write zeros in IM1 and IM2 in GPT_CR */
+  /* Disable Input Capture Modes-Write zeros in IM1 and IM2 in GPT_CR */
 
   cr &= ~(GPT_CR_IM1_MASK     | GPT_CR_IM2_MASK);
   cr |=  (GPT_CR_IM1_DISABLED | GPT_CR_IM2_DISABLED);

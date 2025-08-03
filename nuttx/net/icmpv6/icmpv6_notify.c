@@ -1,6 +1,8 @@
 /****************************************************************************
  * net/icmpv6/icmpv6_notify.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -25,6 +27,7 @@
 #include <nuttx/config.h>
 
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -85,12 +88,7 @@ void icmpv6_wait_setup(const net_ipv6addr_t ipaddr,
   net_ipv6addr_copy(notify->nt_ipaddr, ipaddr);
   notify->nt_result = -ETIMEDOUT;
 
-  /* This semaphore is used for signaling and, hence, should not have
-   * priority inheritance enabled.
-   */
-
   nxsem_init(&notify->nt_sem, 0, 0);
-  nxsem_setprotocol(&notify->nt_sem, SEM_PRIO_NONE);
 
   /* Add the wait structure to the list with interrupts disabled */
 
@@ -172,7 +170,7 @@ int icmpv6_wait(FAR struct icmpv6_notify_s *notify, unsigned int timeout)
 
   /* And wait for the Neighbor Advertisement (or a timeout). */
 
-  ret = net_timedwait(&notify->nt_sem, timeout);
+  ret = net_sem_timedwait(&notify->nt_sem, timeout);
   if (ret >= 0)
     {
       ret = notify->nt_result;

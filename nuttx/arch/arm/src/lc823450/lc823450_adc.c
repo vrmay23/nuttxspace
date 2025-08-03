@@ -1,37 +1,22 @@
 /****************************************************************************
  * arch/arm/src/lc823450/lc823450_adc.c
  *
- *   Copyright 2014,2015,2017 Sony Video & Sound Products Inc.
- *   Author: Masayuki Ishikawa <Masayuki.Ishikawa@jp.sony.com>
- *   Author: Nobutaka Toyoshima <Nobutaka.Toyoshima@jp.sony.com>
- *   Author: Satoshi Mihara <Satoshi.Mihara@jp.sony.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,6 +28,7 @@
 
 #include <stdio.h>
 #include <sys/types.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <unistd.h>
@@ -50,7 +36,6 @@
 #include <errno.h>
 #include <assert.h>
 #include <debug.h>
-#include <unistd.h>
 
 #include <arch/board/board.h>
 
@@ -60,9 +45,10 @@
 #include <nuttx/fs/ioctl.h>
 #include <nuttx/analog/adc.h>
 #include <nuttx/analog/ioctl.h>
+#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "lc823450_adc.h"
 #include "lc823450_syscontrol.h"
 #include "lc823450_clockconfig.h"
@@ -74,8 +60,8 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define LC823450_ADCHST(c)    (((c) & 0xf) << rADCCTL_fADCHST_SHIFT)
-#define LC823450_ADC0DT(d)    (rADC0DT + ((d) << 2))
+#define LC823450_ADCHST(c)    (((c) & 0xf) << ADCCTL_ADCHST_SHIFT)
+#define LC823450_ADC0DT(d)    (ADC0DT + ((d) << 2))
 
 #define LC823450_MAX_ADCCLK   (5 * 1000 * 1000)   /* Hz */
 
@@ -93,10 +79,10 @@
 
 struct lc823450_adc_inst_s
 {
-  FAR const struct adc_callback_s *cb;
+  const struct adc_callback_s *cb;
   struct adc_dev_s dev;
 
-  sem_t sem_excl;           /* Mutual exclusion semaphore */
+  mutex_t lock;             /* Mutual exclusion mutex */
 #ifndef CONFIG_ADC_POLLED
   sem_t sem_isr;            /* Interrupt wait semaphore */
 #endif
@@ -109,18 +95,14 @@ struct lc823450_adc_inst_s
  ****************************************************************************/
 
 static inline void lc823450_adc_clearirq(void);
-static inline int  lc823450_adc_sem_wait(
-    FAR struct lc823450_adc_inst_s *inst);
-static inline void lc823450_adc_sem_post(
-    FAR struct lc823450_adc_inst_s *inst);
 
-static int  lc823450_adc_bind(FAR struct adc_dev_s *dev,
-                              FAR const struct adc_callback_s *callback);
-static void lc823450_adc_reset(FAR struct adc_dev_s *dev);
-static int  lc823450_adc_setup(FAR struct adc_dev_s *dev);
-static void lc823450_adc_shutdown(FAR struct adc_dev_s *dev);
-static void lc823450_adc_rxint(FAR struct adc_dev_s *dev, bool enable);
-static int  lc823450_adc_ioctl(FAR struct adc_dev_s *dev, int cmd,
+static int  lc823450_adc_bind(struct adc_dev_s *dev,
+                              const struct adc_callback_s *callback);
+static void lc823450_adc_reset(struct adc_dev_s *dev);
+static int  lc823450_adc_setup(struct adc_dev_s *dev);
+static void lc823450_adc_shutdown(struct adc_dev_s *dev);
+static void lc823450_adc_rxint(struct adc_dev_s *dev, bool enable);
+static int  lc823450_adc_ioctl(struct adc_dev_s *dev, int cmd,
                                unsigned long arg);
 
 /****************************************************************************
@@ -169,7 +151,7 @@ static const struct adc_ops_s lc823450_adc_ops =
 
 static inline void lc823450_adc_clearirq(void)
 {
-  putreg32(rADCSTS_fADCMPL, rADCSTS);
+  putreg32(ADCSTS_ADCMPL, ADCSTS);
 }
 
 /****************************************************************************
@@ -190,7 +172,7 @@ static void lc823450_adc_standby(int on)
 
       /* Enter standby mode */
 
-      modifyreg32(rADCSTBY, 0, rADCSTBY_STBY);
+      modifyreg32(ADCSTBY, 0, ADCSTBY_STBY);
 
       /* disable clock */
 
@@ -204,7 +186,7 @@ static void lc823450_adc_standby(int on)
 
       /* Exit standby mode */
 
-      modifyreg32(rADCSTBY, rADCSTBY_STBY, 0);
+      modifyreg32(ADCSTBY, ADCSTBY_STBY, 0);
 
       up_udelay(10);
 
@@ -222,12 +204,11 @@ static void lc823450_adc_standby(int on)
  *
  ****************************************************************************/
 
-static void lc823450_adc_start(FAR struct lc823450_adc_inst_s *inst)
+static void lc823450_adc_start(struct lc823450_adc_inst_s *inst)
 {
   uint32_t pclk;  /* APB clock in Hz */
   uint8_t i;
   uint32_t div;
-  int ret;
 
 #ifdef CONFIG_ADC_POLLED
   irqstate_t flags;
@@ -241,7 +222,7 @@ static void lc823450_adc_start(FAR struct lc823450_adc_inst_s *inst)
     {
       if (pclk / div <= LC823450_MAX_ADCCLK)
         {
-          ainfo("ADCCLK: %d[Hz]\n", pclk / div);
+          ainfo("ADCCLK: %" PRId32 "[Hz]\n", pclk / div);
           break;
         }
     }
@@ -250,58 +231,27 @@ static void lc823450_adc_start(FAR struct lc823450_adc_inst_s *inst)
 
   /* Setup ADC channels */
 
-  putreg32((i << rADCCTL_fADCNVCK_SHIFT) |
+  putreg32((i << ADCCTL_ADCNVCK_SHIFT) |
            LC823450_ADCHST(CONFIG_LC823450_ADC_NCHANNELS - 1) |
-           rADCCTL_fADCHSCN, rADCCTL);
+           ADCCTL_ADCHSCN, ADCCTL);
 
   /* Start A/D conversion */
 
-  modifyreg32(rADCCTL, rADCCTL_fADACT, rADCCTL_fADACT);
+  modifyreg32(ADCCTL, ADCCTL_ADACT, ADCCTL_ADACT);
 
   /* Wait for completion */
 
 #ifdef CONFIG_ADC_POLLED
-  while ((getreg32(rADCSTS) & rADCSTS_fADCMPL) == 0)
+  while ((getreg32(ADCSTS) & ADCSTS_ADCMPL) == 0)
     ;
 #else
-  ret = nxsem_wait_uninterruptible(&inst->sem_isr);
-  if (ret < 0)
-    {
-      return;
-    }
+  nxsem_wait_uninterruptible(&inst->sem_isr);
 
 #endif
 
 #ifdef CONFIG_ADC_POLLED
   leave_critical_section(flags);
 #endif
-}
-
-/****************************************************************************
- * Name: lc823450_adc_sem_wait
- *
- * Description:
- *   Take the exclusive access, waiting as necessary
- *
- ****************************************************************************/
-
-static inline int lc823450_adc_sem_wait(FAR struct lc823450_adc_inst_s *inst)
-{
-  return nxsem_wait_uninterruptible(&inst->sem_excl);
-}
-
-/****************************************************************************
- * Name: lc823450_adc_sem_post
- *
- * Description:
- *   Release the mutual exclusion semaphore
- *
- ****************************************************************************/
-
-static inline void lc823450_adc_sem_post(
-    FAR struct lc823450_adc_inst_s *inst)
-{
-  nxsem_post(&inst->sem_excl);
 }
 
 /****************************************************************************
@@ -313,7 +263,7 @@ static inline void lc823450_adc_sem_post(
  ****************************************************************************/
 
 #ifndef CONFIG_ADC_POLLED
-static int lc823450_adc_isr(int irq, void *context, FAR void *arg)
+static int lc823450_adc_isr(int irq, void *context, void *arg)
 {
   ainfo("interrupt\n");
 
@@ -332,11 +282,11 @@ static int lc823450_adc_isr(int irq, void *context, FAR void *arg)
  *
  ****************************************************************************/
 
-static int lc823450_adc_bind(FAR struct adc_dev_s *dev,
-                             FAR const struct adc_callback_s *callback)
+static int lc823450_adc_bind(struct adc_dev_s *dev,
+                             const struct adc_callback_s *callback)
 {
-  FAR struct lc823450_adc_inst_s *priv =
-    (FAR struct lc823450_adc_inst_s *)dev->ad_priv;
+  struct lc823450_adc_inst_s *priv =
+    (struct lc823450_adc_inst_s *)dev->ad_priv;
 
   DEBUGASSERT(priv != NULL);
   priv->cb = callback;
@@ -356,7 +306,7 @@ static int lc823450_adc_bind(FAR struct adc_dev_s *dev,
  *
  ****************************************************************************/
 
-static void lc823450_adc_reset(FAR struct adc_dev_s *dev)
+static void lc823450_adc_reset(struct adc_dev_s *dev)
 {
   ainfo("\n");
 }
@@ -376,7 +326,7 @@ static void lc823450_adc_reset(FAR struct adc_dev_s *dev)
  *
  ****************************************************************************/
 
-static int lc823450_adc_setup(FAR struct adc_dev_s *dev)
+static int lc823450_adc_setup(struct adc_dev_s *dev)
 {
   ainfo("\n");
   return OK;
@@ -395,7 +345,7 @@ static int lc823450_adc_setup(FAR struct adc_dev_s *dev)
  *
  ****************************************************************************/
 
-static void lc823450_adc_shutdown(FAR struct adc_dev_s *dev)
+static void lc823450_adc_shutdown(struct adc_dev_s *dev)
 {
   ainfo("\n");
 }
@@ -412,15 +362,15 @@ static void lc823450_adc_shutdown(FAR struct adc_dev_s *dev)
  *
  ****************************************************************************/
 
-static void lc823450_adc_rxint(FAR struct adc_dev_s *dev, bool enable)
+static void lc823450_adc_rxint(struct adc_dev_s *dev, bool enable)
 {
-  FAR struct lc823450_adc_inst_s *inst =
-    (FAR struct lc823450_adc_inst_s *)dev->ad_priv;
+  struct lc823450_adc_inst_s *inst =
+    (struct lc823450_adc_inst_s *)dev->ad_priv;
   int ret;
 
   ainfo("enable: %d\n", enable);
 
-  ret = lc823450_adc_sem_wait(inst);
+  ret = nxmutex_lock(&inst->lock);
   if (ret < 0)
     {
       return;
@@ -437,7 +387,7 @@ static void lc823450_adc_rxint(FAR struct adc_dev_s *dev, bool enable)
     }
 #endif
 
-  lc823450_adc_sem_post(inst);
+  nxmutex_unlock(&inst->lock);
 }
 
 /****************************************************************************
@@ -452,18 +402,18 @@ static void lc823450_adc_rxint(FAR struct adc_dev_s *dev, bool enable)
  *
  ****************************************************************************/
 
-static int lc823450_adc_ioctl(FAR struct adc_dev_s *dev, int cmd,
+static int lc823450_adc_ioctl(struct adc_dev_s *dev, int cmd,
                               unsigned long arg)
 {
   int ret = 0;
   uint32_t val;
   uint8_t ch;
-  FAR struct lc823450_adc_inst_s *priv =
-    (FAR struct lc823450_adc_inst_s *)dev->ad_priv;
+  struct lc823450_adc_inst_s *priv =
+    (struct lc823450_adc_inst_s *)dev->ad_priv;
 
   ainfo("cmd=%xh\n", cmd);
 
-  ret = lc823450_adc_sem_wait(priv);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -472,39 +422,49 @@ static int lc823450_adc_ioctl(FAR struct adc_dev_s *dev, int cmd,
   switch (cmd)
     {
       case ANIOC_TRIGGER: /* Software trigger */
+        {
+          lc823450_adc_standby(0);
 
-        lc823450_adc_standby(0);
+          lc823450_adc_start(priv);
 
-        lc823450_adc_start(priv);
+          /* Get ADC data */
 
-        /* Get ADC data */
+          for (ch = 0; ch < CONFIG_LC823450_ADC_NCHANNELS; ch++)
+            {
+              val = getreg32(LC823450_ADC0DT(ch));
 
-        for (ch = 0; ch < CONFIG_LC823450_ADC_NCHANNELS; ch++)
-          {
-            val = getreg32(LC823450_ADC0DT(ch));
+              /* Give the ADC data to the ADC driver framework.
+               * adc_receive accepts 3 parameters:
+               *
+               * 1) The first is the ADC device instance for this ADC block.
+               * 2) The second is the channel number for the data, and
+               * 3) The third is the converted data for the channel.
+               */
 
-            /* Give the ADC data to the ADC driver framework.
-             * adc_receive accepts 3 parameters:
-             *
-             * 1) The first is the ADC device instance for this ADC block.
-             * 2) The second is the channel number for the data, and
-             * 3) The third is the converted data for the channel.
-             */
+              priv->cb->au_receive(dev, priv->chanlist[ch], val);
+              DEBUGASSERT(ret == OK);
+            }
 
-            priv->cb->au_receive(dev, priv->chanlist[ch], val);
-            DEBUGASSERT(ret == OK);
-          }
-
-        lc823450_adc_standby(1);
+          lc823450_adc_standby(1);
+        }
         break;
 
-    default:
-      ret = -ENOTTY;
-      break;
+      case ANIOC_GET_NCHANNELS:
+        {
+          /* Return the number of configured channels */
+
+          ret = CONFIG_LC823450_ADC_NCHANNELS;
+        }
+        break;
+
+      default:
+        {
+          ret = -ENOTTY;
+        }
+        break;
     }
 
-  lc823450_adc_sem_post(priv);
-
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -525,7 +485,7 @@ static int lc823450_adc_ioctl(FAR struct adc_dev_s *dev, int cmd,
  *
  ****************************************************************************/
 
-FAR struct adc_dev_s *lc823450_adcinitialize(void)
+struct adc_dev_s *lc823450_adcinitialize(void)
 {
   int ret;
   struct lc823450_adc_inst_s *inst;
@@ -534,12 +494,10 @@ FAR struct adc_dev_s *lc823450_adcinitialize(void)
     {
       ainfo("Initializing ADC driver\n");
 
-      if ((inst = kmm_malloc(sizeof(struct lc823450_adc_inst_s))) == NULL)
+      if ((inst = kmm_zalloc(sizeof(struct lc823450_adc_inst_s))) == NULL)
         {
           return NULL;
         }
-
-      memset(inst, 0, sizeof(struct lc823450_adc_inst_s));
 
       /* Initialize driver instance */
 
@@ -548,20 +506,22 @@ FAR struct adc_dev_s *lc823450_adcinitialize(void)
       inst->nchannels = CONFIG_LC823450_ADC_NCHANNELS;
       inst->chanlist = lc823450_chanlist;
 
-      nxsem_init(&inst->sem_excl, 0, 1);
+      nxmutex_init(&inst->lock);
 #ifndef CONFIG_ADC_POLLED
       nxsem_init(&inst->sem_isr, 0, 0);
 #endif
 
-      ret = lc823450_adc_sem_wait(inst);
+      ret = nxmutex_lock(&inst->lock);
       if (ret < 0)
         {
           aerr("adc_register failed: %d\n", ret);
-          kmm_free(g_inst);
+          nxmutex_destroy(&inst->lock);
+          nxsem_destroy(&inst->sem_isr);
+          kmm_free(inst);
           return NULL;
         }
 
-      /* enable clock & unreset (include exitting standby mode) */
+      /* enable clock & unreset (include exiting standby mode) */
 
       modifyreg32(MCLKCNTAPB, 0, MCLKCNTAPB_ADC_CLKEN);
       modifyreg32(MRSTCNTAPB, MRSTCNTAPB_ADC_RSTB, 0);
@@ -572,7 +532,7 @@ FAR struct adc_dev_s *lc823450_adcinitialize(void)
        * all ADCCLK between 2MHz and 5MHz. [PDFW15IS-1847]
        */
 
-      putreg32(53, rADCSMPL);
+      putreg32(53, ADCSMPL);
 
       /* Setup ADC interrupt */
 
@@ -584,12 +544,13 @@ FAR struct adc_dev_s *lc823450_adcinitialize(void)
       /* Register the ADC driver at "/dev/adc0" */
 
       ret = adc_register("/dev/adc0", &inst->dev);
-
       if (ret < 0)
         {
           aerr("adc_register failed: %d\n", ret);
-          lc823450_adc_sem_post(inst);
-          kmm_free(g_inst);
+          nxmutex_unlock(&inst->lock);
+          nxmutex_destroy(&inst->lock);
+          nxsem_destroy(&inst->sem_isr);
+          kmm_free(inst);
           return NULL;
         }
 
@@ -600,8 +561,7 @@ FAR struct adc_dev_s *lc823450_adcinitialize(void)
       /* Now we are initialized */
 
       g_inst = inst;
-
-      lc823450_adc_sem_post(inst);
+      nxmutex_unlock(&inst->lock);
     }
 
   return &g_inst->dev;
@@ -611,13 +571,13 @@ FAR struct adc_dev_s *lc823450_adcinitialize(void)
  * Name: lc823450_adc_receive
  ****************************************************************************/
 
-int lc823450_adc_receive(FAR struct adc_dev_s *dev,
-                         FAR struct adc_msg_s *msg)
+int lc823450_adc_receive(struct adc_dev_s *dev,
+                         struct adc_msg_s *msg)
 {
   uint8_t ch;
   int ret;
-  FAR struct lc823450_adc_inst_s *inst =
-    (FAR struct lc823450_adc_inst_s *)dev->ad_priv;
+  struct lc823450_adc_inst_s *inst =
+    (struct lc823450_adc_inst_s *)dev->ad_priv;
 
   if (!g_inst)
     {
@@ -629,7 +589,7 @@ int lc823450_adc_receive(FAR struct adc_dev_s *dev,
       return -EINVAL;
     }
 
-  ret = lc823450_adc_sem_wait(inst);
+  ret = nxmutex_lock(&inst->lock);
   if (ret < 0)
     {
       return ret;
@@ -645,7 +605,7 @@ int lc823450_adc_receive(FAR struct adc_dev_s *dev,
     }
 
   lc823450_adc_standby(1);
-  lc823450_adc_sem_post(inst);
+  nxmutex_unlock(&inst->lock);
 
   return OK;
 }

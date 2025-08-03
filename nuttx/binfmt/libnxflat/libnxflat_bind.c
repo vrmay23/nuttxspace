@@ -1,6 +1,8 @@
 /****************************************************************************
  * binfmt/libnxflat/libnxflat_bind.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -25,6 +27,7 @@
 #include <nuttx/config.h>
 #include <nuttx/compiler.h>
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <string.h>
 #include <nxflat.h>
@@ -35,7 +38,7 @@
 #include <arpa/inet.h>
 
 #include <nuttx/binfmt/nxflat.h>
-#include <nuttx/binfmt/symtab.h>
+#include <nuttx/symtab.h>
 
 #include "libnxflat.h"
 
@@ -52,9 +55,9 @@
 #endif
 
 #ifdef CONFIG_NXFLAT_DUMPBUFFER
-# define nxflat_dumpbuffer(m,b,n) binfodumpbuffer(m,b,n)
+#  define nxflat_dumpbuffer(m,b,n) binfodumpbuffer(m,b,n)
 #else
-# define nxflat_dumpbuffer(m,b,n)
+#  define nxflat_dumpbuffer(m,b,n)
 #endif
 
 /****************************************************************************
@@ -82,20 +85,22 @@ static inline int nxflat_bindrel32i(FAR struct nxflat_loadinfo_s *loadinfo,
 {
   FAR uint32_t *addr;
 
-  binfo("NXFLAT_RELOC_TYPE_REL32I Offset: %08x I-Space: %p\n",
+  binfo("NXFLAT_RELOC_TYPE_REL32I Offset: %08" PRIx32
+        " I-Space: %" PRIxPTR "\n",
         offset, loadinfo->ispace + sizeof(struct nxflat_hdr_s));
 
   if (offset < loadinfo->dsize)
     {
       addr = (FAR uint32_t *)(offset + loadinfo->dspace->region);
-      binfo("  Before: %08x\n", *addr);
+      binfo("  Before: %08" PRIx32 "\n", *addr);
      *addr += (uint32_t)(loadinfo->ispace + sizeof(struct nxflat_hdr_s));
-      binfo("  After: %08x\n", *addr);
+      binfo("  After: %08" PRIx32 "\n", *addr);
       return OK;
     }
   else
     {
-      berr("Offset: %08 does not lie in D-Space size: %08x\n",
+      berr("Offset: %08" PRIx32 " does not lie in "
+           "D-Space size: %08" PRIx32 "\n",
            offset, loadinfo->dsize);
       return -EINVAL;
     }
@@ -122,20 +127,21 @@ static inline int nxflat_bindrel32d(FAR struct nxflat_loadinfo_s *loadinfo,
 {
   FAR uint32_t *addr;
 
-  binfo("NXFLAT_RELOC_TYPE_REL32D Offset: %08x D-Space: %p\n",
+  binfo("NXFLAT_RELOC_TYPE_REL32D Offset: %08" PRIx32 " D-Space: %p\n",
         offset, loadinfo->dspace->region);
 
   if (offset < loadinfo->dsize)
     {
       addr = (FAR uint32_t *)(offset + loadinfo->dspace->region);
-      binfo("  Before: %08x\n", *addr);
+      binfo("  Before: %08" PRIx32 "\n", *addr);
      *addr += (uint32_t)(loadinfo->dspace->region);
-      binfo("  After: %08x\n", *addr);
+      binfo("  After: %08" PRIx32 "\n", *addr);
       return OK;
     }
   else
     {
-      berr("Offset: %08 does not lie in D-Space size: %08x\n",
+      berr("Offset: %08" PRIx32 " does not lie in "
+           "D-Space size: %08" PRIx32 "\n",
            offset, loadinfo->dsize);
       return -EINVAL;
     }
@@ -217,8 +223,8 @@ static inline int nxflat_gotrelocs(FAR struct nxflat_loadinfo_s *loadinfo)
 
   /* From this, we can get the offset to the list of relocation entries */
 
-  offset  = ntohl(hdr->h_relocstart);
-  nrelocs = ntohs(hdr->h_reloccount);
+  offset  = NTOHL(hdr->h_relocstart);
+  nrelocs = NTOHS(hdr->h_reloccount);
   binfo("offset: %08lx nrelocs: %d\n", (long)offset, nrelocs);
 
   /* The value of the relocation list that we get from the header is a
@@ -314,8 +320,8 @@ static inline int nxflat_gotrelocs(FAR struct nxflat_loadinfo_s *loadinfo)
 
         default:
           {
-            berr("ERROR: Unrecognized relocation type: %d\n",
-                 NXFLAT_RELOC_TYPE(reloc.r_info));
+            berr("ERROR: Unrecognized relocation type: %" PRId32 "\n",
+                 (uint32_t)NXFLAT_RELOC_TYPE(reloc.r_info));
             result = -EINVAL;
           }
           break;
@@ -375,7 +381,7 @@ static inline int nxflat_bindimports(FAR struct nxflat_loadinfo_s *loadinfo,
   FAR struct nxflat_hdr_s    *hdr;
   FAR const struct symtab_s  *symbol;
 
-  char    *symname;
+  FAR char *symname;
   uint32_t offset;
   uint16_t nimports;
 #ifdef CONFIG_ARCH_ADDRENV
@@ -391,9 +397,9 @@ static inline int nxflat_bindimports(FAR struct nxflat_loadinfo_s *loadinfo,
    * this module and the number of symbols imported by this module.
    */
 
-  offset   = ntohl(hdr->h_importsymbols);
-  nimports = ntohs(hdr->h_importcount);
-  binfo("Imports offset: %08x nimports: %d\n", offset, nimports);
+  offset   = NTOHL(hdr->h_importsymbols);
+  nimports = NTOHS(hdr->h_importcount);
+  binfo("Imports offset: %08" PRIx32 " nimports: %d\n", offset, nimports);
 
   /* The import[] table resides within the D-Space allocation.  If
    * CONFIG_ARCH_ADDRENV=y, then that D-Space allocation lies in an address
@@ -438,7 +444,8 @@ static inline int nxflat_bindimports(FAR struct nxflat_loadinfo_s *loadinfo,
 
       for (i = 0; i < nimports; i++)
         {
-          binfo("Import[%d] (%08p) offset: %08x func: %08x\n",
+          binfo("Import[%d] (%p) "
+                "offset: %08" PRIx32 " func: %08" PRIx32 "\n",
                 i, &imports[i], imports[i].i_funcname,
                 imports[i].i_funcaddress);
 
@@ -454,13 +461,9 @@ static inline int nxflat_bindimports(FAR struct nxflat_loadinfo_s *loadinfo,
           symname = (FAR char *)
             (offset + loadinfo->ispace + sizeof(struct nxflat_hdr_s));
 
-          /* Find the exported symbol value for this this symbol name. */
+          /* Find the exported symbol value for this symbol name. */
 
-#ifdef CONFIG_SYMTAB_ORDEREDBYNAME
-          symbol = symtab_findorderedbyname(exports, symname, nexports);
-#else
           symbol = symtab_findbyname(exports, symname, nexports);
-#endif
           if (!symbol)
             {
               berr("Exported symbol \"%s\" not found\n", symname);
@@ -474,7 +477,7 @@ static inline int nxflat_bindimports(FAR struct nxflat_loadinfo_s *loadinfo,
 
           imports[i].i_funcaddress =  (uint32_t)symbol->sym_value;
 
-          binfo("Bound import[%d] (%08p) to export '%s' (%08x)\n",
+          binfo("Bound import[%d] (%p) to export '%s' (%08" PRIx32 ")\n",
                 i, &imports[i], symname, imports[i].i_funcaddress);
         }
     }

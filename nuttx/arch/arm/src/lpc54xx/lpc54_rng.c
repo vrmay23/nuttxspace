@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/lpc54xx/lpc54_rng.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -42,7 +29,7 @@
 #include <stdint.h>
 
 #include <nuttx/irq.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/drivers/drivers.h>
 
@@ -63,27 +50,23 @@ static ssize_t lpc54_read(struct file *filep, char *buffer, size_t);
 
 struct rng_dev_s
 {
-  sem_t rd_devsem;      /* Threads can only exclusively access the RNG */
+  mutex_t rd_devlock;   /* Threads can only exclusively access the RNG */
 };
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static struct rng_dev_s g_rngdev;
+static struct rng_dev_s g_rngdev =
+{
+  .rd_devlock = NXMUTEX_INITIALIZER,
+};
 
 static const struct file_operations g_rngops =
 {
   NULL,            /* open */
   NULL,            /* close */
   lpc54_read,      /* read */
-  NULL,            /* write */
-  NULL,            /* seek */
-  NULL,            /* ioctl */
-  NULL             /* poll */
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL           /* unlink */
-#endif
 };
 
 /****************************************************************************
@@ -108,15 +91,17 @@ static ssize_t lpc54_read(struct file *filep, char *buffer, size_t buflen)
 
   /* Get exclusive access to ROM random number generator API */
 
-  ret = nxsem_wait(&g_rngdev.rd_devsem);
+  ret = nxmutex_lock(&g_rngdev.rd_devlock);
   if (ret < 0)
     {
       return ret;
     }
 
-  /* Copy the requested number of randome bytes. */
+  /* Copy the requested number of random bytes. */
 
-  for (remaining = buflen; remaining > 0;)
+  for (remaining = buflen;
+       remaining > 0;
+      )
     {
       /* Read the next 32-bit random value */
 
@@ -132,7 +117,7 @@ static ssize_t lpc54_read(struct file *filep, char *buffer, size_t buflen)
         }
     }
 
-  nxsem_post(&g_rngdev.rd_devsem);
+  nxmutex_unlock(&g_rngdev.rd_devlock);
   return buflen;
 }
 
@@ -158,7 +143,6 @@ static ssize_t lpc54_read(struct file *filep, char *buffer, size_t buflen)
 #ifdef CONFIG_DEV_RANDOM
 void devrandom_register(void)
 {
-  nxsem_init(&g_rngdev.rd_devsem, 0, 1);
   register_driver("/dev/random", &g_rngops, 0444, NULL);
 }
 #endif
@@ -180,9 +164,6 @@ void devrandom_register(void)
 #ifdef CONFIG_DEV_URANDOM_ARCH
 void devurandom_register(void)
 {
-#ifndef CONFIG_DEV_RANDOM
-  nxsem_init(&g_rngdev.rd_devsem, 0, 1);
-#endif
   register_driver("/dev/urandom", &g_rngops, 0444, NULL);
 }
 #endif

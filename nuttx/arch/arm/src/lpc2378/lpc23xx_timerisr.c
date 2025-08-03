@@ -1,13 +1,11 @@
 /****************************************************************************
  * arch/arm/src/lpc2378/lpc23xx_timerisr.c
  *
- *   Copyright (C) 2010 Rommel Marcelo. All rights reserved.
- *   Author: Rommel Marcelo
- *
- * This file is part of the NuttX RTOS and based on the lpc2148 port:
- *
- *   Copyright (C) 2010 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2010 Rommel Marcelo. All rights reserved.
+ * SPDX-FileCopyrightText: 2010 Gregory Nutt. All rights reserved.
+ * SPDX-FileContributor: Rommel Marcelo
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -50,8 +48,7 @@
 
 #include "clock/clock.h"
 #include "lpc2378.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "lpc23xx_scb.h"
 #include "lpc23xx_vic.h"
 #include "lpc23xx_timer.h"
@@ -96,7 +93,7 @@
 #ifdef CONFIG_VECTORED_INTERRUPTS
 static int lpc23xx_timerisr(uint32_t * regs)
 #else
-static int lpc23xx_timerisr(int irq, uint32_t * regs, FAR void *arg)
+static int lpc23xx_timerisr(int irq, uint32_t * regs, void *arg)
 #endif
 {
   static uint32_t tick;
@@ -113,6 +110,7 @@ static int lpc23xx_timerisr(int irq, uint32_t * regs, FAR void *arg)
 
 #ifdef CONFIG_VECTORED_INTERRUPTS
   /* write any value to VICAddress to acknowledge the interrupt */
+
   vic_putreg(0, VIC_ADDRESS_OFFSET);
 #endif
 
@@ -180,6 +178,7 @@ void up_timer_initialize(void)
   tmr_putreg16(mcr, TMR_MCR_OFFSET);    /* -- bit 0=1 -int on MR0, bit 1=1 - Reset on MR0 */
 
   /* Enable counting */
+
   /* ~ tmr_putreg32(1, TMR_TCR_OFFSET); */
 
   tmr_putreg8(TMR_CR_ENABLE, TMR_TCR_OFFSET);

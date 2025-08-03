@@ -1,38 +1,22 @@
 /****************************************************************************
  * arch/arm/src/cxd56xx/cxd56_gpioint.c
  *
- *   Copyright (C) 2008-2013 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Copyright 2018 Sony Semiconductor Solutions Corporation
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
- *    the names of its contributors may be used to endorse or promote
- *    products derived from this software without specific prior written
- *    permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,12 +27,14 @@
 #include <arch/board/board.h>
 #include <nuttx/config.h>
 
+#include <assert.h>
 #include <errno.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
+#include <nuttx/spinlock.h>
 
-#include "up_arch.h"
+#include "arm_internal.h"
 #include "chip.h"
 
 #include "cxd56_pinconfig.h"
@@ -109,6 +95,8 @@
  * Private Data
  ****************************************************************************/
 
+static spinlock_t g_cxd56_lock = SP_UNLOCKED;
+
 static xcpt_t g_isr[MAX_SLOT];
 static uint32_t g_bothedge = 0;
 
@@ -128,7 +116,7 @@ static int alloc_slot(int pin, bool isalloc)
                                      : CXD56_TOPREG_IOCAPP_INTSEL0;
   int offset = (pin < PIN_IS_CLK) ? 1 : 56;
 
-  flags = enter_critical_section();
+  flags = spin_lock_irqsave(&g_cxd56_lock);
 
   for (slot = 0; slot < MAX_SYS_SLOT; slot++)
     {
@@ -158,12 +146,12 @@ static int alloc_slot(int pin, bool isalloc)
         }
       else
         {
-          leave_critical_section(flags);
+          spin_unlock_irqrestore(&g_cxd56_lock, flags);
           return -ENXIO; /* no space */
         }
     }
 
-  leave_critical_section(flags);
+  spin_unlock_irqrestore(&g_cxd56_lock, flags);
 
   if (PIN_IS_CLK <= pin)
     {
@@ -307,7 +295,7 @@ static int set_gpioint_config(int slot, uint32_t gpiocfg)
       val |= (INT_ROUTE_PMU_LATCH << shift);
       break;
     default:
-      DEBUGASSERT(0);
+      DEBUGPANIC();
       break;
     }
 
@@ -323,13 +311,13 @@ static void invert_irq(int irq)
   irqstate_t flags;
   uint32_t val;
 
-  flags = enter_critical_section();
+  flags = spin_lock_irqsave(&g_cxd56_lock);
 
   val = getreg32(CXD56_INTC_INVERT);
   val ^= (1 << (irq - CXD56_IRQ_EXTINT));
   putreg32(val, CXD56_INTC_INVERT);
 
-  leave_critical_section(flags);
+  spin_unlock_irqrestore(&g_cxd56_lock, flags);
 }
 
 static bool inverted_irq(int irq)
@@ -348,7 +336,7 @@ static bool enabled_irq(int irq)
   return ((val & (1 << (irq - CXD56_IRQ_EXTINT))) != 0);
 }
 
-static int gpioint_handler(int irq, FAR void *context, FAR void *arg)
+static int gpioint_handler(int irq, void *context, void *arg)
 {
   uint32_t val;
   uint32_t shift;
@@ -420,7 +408,7 @@ static int gpioint_handler(int irq, FAR void *context, FAR void *arg)
  ****************************************************************************/
 
 int cxd56_gpioint_config(uint32_t pin, uint32_t gpiocfg, xcpt_t isr,
-                         FAR void *arg)
+                         void *arg)
 {
   int slot;
   int irq;
@@ -445,9 +433,13 @@ int cxd56_gpioint_config(uint32_t pin, uint32_t gpiocfg, xcpt_t isr,
       irq_attach(irq, NULL, NULL);
       g_isr[slot] = NULL;
 
-      flags = enter_critical_section();
+      /* Set level high for unused interrupt trigger to avoid waking up. */
+
+      set_gpioint_config(slot, GPIOINT_LEVEL_HIGH);
+
+      flags = spin_lock_irqsave(&g_cxd56_lock);
       g_bothedge &= ~(1 << slot);
-      leave_critical_section(flags);
+      spin_unlock_irqrestore(&g_cxd56_lock, flags);
       return irq;
     }
 
@@ -461,9 +453,9 @@ int cxd56_gpioint_config(uint32_t pin, uint32_t gpiocfg, xcpt_t isr,
     {
       /* set GPIO pseudo both edge interrupt */
 
-      flags = enter_critical_section();
+      flags = spin_lock_irqsave(&g_cxd56_lock);
       g_bothedge |= (1 << slot);
-      leave_critical_section(flags);
+      spin_unlock_irqrestore(&g_cxd56_lock, flags);
 
       /* detect the change from the current signal */
 

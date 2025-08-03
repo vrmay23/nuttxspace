@@ -1,33 +1,33 @@
-/*******************************************************************************************************************************
+/****************************************************************************
  * arch/arm/src/armv7-m/etm.h
  *
- *  Copyright 2014 Silicon Laboratories, Inc. http://www.silabs.com</b>
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2014 Pierre-noel Bouteville. All rights reserved.
+ * SPDX-FileCopyrightText: 2014 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2014 2014 Silicon Laboratories, Inc.
+ * SPDX-FileContributor: Pierre-noel Bouteville <pnb990@gmail.com>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Permission is granted to anyone to use this software for any purpose,
  * including commercial applications, and to alter it and redistribute it
  * freely, subject to the following restrictions:
  *
  * 1. The origin of this software must not be misrepresented; you must not
- *    claim that you wrote the original software.@n
+ *    claim that you wrote the original software.
  * 2. Altered source versions must be plainly marked as such, and must not be
- *    misrepresented as being the original software.@n
+ *    misrepresented as being the original software.
  * 3. This notice may not be removed or altered from any source distribution.
  *
  * DISCLAIMER OF WARRANTY/LIMITATION OF REMEDIES: Silicon Laboratories, Inc.
  * has no obligation to support this Software. Silicon Laboratories, Inc. is
- * providing the Software "AS IS", with no express or implied warranties of any
- * kind, including, but not limited to, any implied warranties of
- * merchantability or fitness for any particular purpose or warranties against
- * infringement of any proprietary rights of a third party.
+ * providing the Software "AS IS", with no express or implied warranties of
+ * any kind, including, but not limited to, any implied warranties of
+ * merchantability or fitness for any particular purpose or warranties
+ * against infringement of any proprietary rights of a third party.
  *
  * Silicon Laboratories, Inc. will not be liable for any consequential,
  * incidental, or special damages, or any other relief, or for any claim by
  * any third party, arising from your use of this Software.
- *
- *   Copyright (C) 2014 Pierre-noel Bouteville . All rights reserved.
- *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
- *   Authors: Pierre-noel Bouteville <pnb990@gmail.com>
- *            Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -56,23 +56,24 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- *******************************************************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_ARMV7_M_ETM_H
 #define __ARCH_ARM_SRC_ARMV7_M_ETM_H
 
-/*******************************************************************************************************************************
+/****************************************************************************
  * Included Files
- *******************************************************************************************************************************/
+ ****************************************************************************/
 
-/*******************************************************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- *******************************************************************************************************************************/
-/* ETM Register Base Address ***************************************************************************************************/
+ ****************************************************************************/
+
+/* ETM Register Base Address ************************************************/
 
 #define ETM_BASE                                      (0xe0041000ul)
 
-/* ETM Register Offsets ********************************************************************************************************/
+/* ETM Register Offsets *****************************************************/
 
 #define ETM_ETMCR_OFFSET                              0x0000 /* Main Control Register  */
 #define ETM_ETMCCR_OFFSET                             0x0004 /* Configuration Code Register  */
@@ -115,7 +116,7 @@
 #define ETM_ETMCIDR2_OFFSET                           0x0ff8 /* Component ID2 Register  */
 #define ETM_ETMCIDR3_OFFSET                           0x0ffc /* Component ID3 Register  */
 
-/* ETM Register Addresses ******************************************************************************************************/
+/* ETM Register Addresses ***************************************************/
 
 #define ETM_ETMCR                                     (ETM_BASE+ETM_ETMCR_OFFSET)
 #define ETM_ETMCCR                                    (ETM_BASE+ETM_ETMCCR_OFFSET)
@@ -158,7 +159,7 @@
 #define ETM_ETMCIDR2                                  (ETM_BASE+ETM_ETMCIDR2_OFFSET)
 #define ETM_ETMCIDR3                                  (ETM_BASE+ETM_ETMCIDR3_OFFSET)
 
-/* ETM Register Bit Field Definitions ******************************************************************************************/
+/* ETM Register Bit Field Definitions ***************************************/
 
 /* Bit fields for ETM ETMCR */
 
@@ -532,7 +533,7 @@
 #define _ETM_ETMCCER_EICEWPNT_MASK                    0xF0000UL                              /* Bit mask for ETM_EICEWPNT */
 #define _ETM_ETMCCER_EICEWPNT_DEFAULT                 0x00000004UL                           /* Mode DEFAULT for ETM_ETMCCER */
 #define ETM_ETMCCER_EICEWPNT_DEFAULT                  (_ETM_ETMCCER_EICEWPNT_DEFAULT << 16)  /* Shifted mode DEFAULT for ETM_ETMCCER */
-#define ETM_ETMCCER_TEICEWPNT                         (0x1UL << 20)                          /* Trace Sart/Stop Block Uses EmbeddedICE watchpoint inputs */
+#define ETM_ETMCCER_TEICEWPNT                         (0x1UL << 20)                          /* Trace Start/Stop Block Uses EmbeddedICE watchpoint inputs */
 #define _ETM_ETMCCER_TEICEWPNT_SHIFT                  20                                     /* Shift value for ETM_TEICEWPNT */
 #define _ETM_ETMCCER_TEICEWPNT_MASK                   0x100000UL                             /* Bit mask for ETM_TEICEWPNT */
 #define _ETM_ETMCCER_TEICEWPNT_DEFAULT                0x00000001UL                           /* Mode DEFAULT for ETM_ETMCCER */

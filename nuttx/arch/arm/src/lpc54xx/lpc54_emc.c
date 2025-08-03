@@ -1,14 +1,12 @@
 /****************************************************************************
- * arch/arm/src/lpc54/lpc54_clrpend.c
+ * arch/arm/src/lpc54xx/lpc54_emc.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * Parts of this file were adapted from sample code provided for the LPC54xx
- * family from NXP which has a compatible BSD license.
- *
- *   Copyright (c) 2016, Freescale Semiconductor, Inc.
- *   Copyright (c) 2016 - 2017 , NXP
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2017 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2016 Freescale Semiconductor Inc.
+ * SPDX-FileCopyrightText: 2016 - 2017, NXP
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -50,8 +48,7 @@
 
 #include <nuttx/clock.h>
 
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "hardware/lpc54_syscon.h"
 #include "hardware/lpc54_emc.h"
 #include "lpc54_config.h"
@@ -141,8 +138,8 @@ static uint32_t lpc54_emc_timercycles(uint32_t nsec, uint32_t lower,
  *   Get the shift value to shift the mode register content by.
  *
  * Input Parameters:
- *   addrmap  - EMC address map for the dynamic memory configuration.  This is
- *              bit 14 ~ bit 7 of the EMC_DYNCONFIG.
+ *   addrmap  - EMC address map for the dynamic memory configuration.
+ *              This is bit 14 ~ bit 7 of the EMC_DYNCONFIG.
  *
  * Returned Value:
  *   The offset value to shift the mode register content by.
@@ -174,11 +171,13 @@ static uint32_t lpc54_emc_modeoffset(uint32_t addrmap)
 
       /* Add column length increase check. */
 
-      if (((addrmap & EMC_DYNCTL_COLUMNPLUS_MASK) >> EMC_DYNCTL_COLUMNPLUS_SHIFT) == 1)
+      if (((addrmap & EMC_DYNCTL_COLUMNPLUS_MASK) >>
+            EMC_DYNCTL_COLUMNPLUS_SHIFT) == 1)
         {
           offset += 1;
         }
-      else if (((addrmap & EMC_DYNCTL_COLUMNPLUS_MASK) >> EMC_DYNCTL_COLUMNPLUS_SHIFT) == 2)
+      else if (((addrmap & EMC_DYNCTL_COLUMNPLUS_MASK) >>
+                 EMC_DYNCTL_COLUMNPLUS_SHIFT) == 2)
         {
           offset += 2;
         }
@@ -199,7 +198,9 @@ static uint32_t lpc54_emc_modeoffset(uint32_t addrmap)
       offset += 1;
     }
 
-  /* Add bank select bit if the sdram address map mode is RBC(row-bank-column) mode. */
+  /* Add bank select bit if the sdram address map mode is RBC
+   * (row-bank-column) mode.
+   */
 
   if (!(addrmap & EMC_DYNCTL_BUSADDRMAP_MASK))
     {
@@ -233,7 +234,7 @@ static uint32_t lpc54_emc_modeoffset(uint32_t addrmap)
  *
  ****************************************************************************/
 
-void lpc54_emc_initialize(FAR const struct emc_config_s *config)
+void lpc54_emc_initialize(const struct emc_config_s *config)
 {
   uint32_t regval;
 
@@ -257,7 +258,9 @@ void lpc54_emc_initialize(FAR const struct emc_config_s *config)
   regval = config->bigendian ? EMC_CONFIG_EM : 0;
   putreg32(regval, LPC54_EMC_CONFIG);
 
-  /* Enable the EMC module with normal memory map mode and normal work mode. */
+  /* Enable the EMC module with normal memory map mode and normal
+   * work mode.
+   */
 
   putreg32(EMC_CONTROL_E, LPC54_EMC_CONTROL);
 }
@@ -267,8 +270,8 @@ void lpc54_emc_initialize(FAR const struct emc_config_s *config)
  *
  * Description:
  *   This function initializes the dynamic memory controller in external
- *   memory controller. This function must be called after lpc54_emc_initialize
- *   and before accessing the external dynamic memory.
+ *   memory controller. This function must be called after
+ *   lpc54_emc_initialize and before accessing the external dynamic memory.
  *
  * Input Parameters:
  *   timing   - The timing and latency for dynamica memory controller
@@ -276,7 +279,7 @@ void lpc54_emc_initialize(FAR const struct emc_config_s *config)
  *              therefore the worst timing value for all used chips must be
  *              given.
  *   chconfig - The EMC dynamic memory controller chip-independent
- *              configuration array.  The dimension of the array is given by
+ *              by configuration array.  The dimension of the array is given
  *              nchips.
  *   nchips   - The number of chips to configure and the dimension of the
  *              chconfig array.
@@ -284,11 +287,12 @@ void lpc54_emc_initialize(FAR const struct emc_config_s *config)
  ****************************************************************************/
 
 #ifdef CONFIG_LPC54_EMC_DYNAMIC
-void lpc54_emc_sdram_initialize(FAR const struct emc_dynamic_timing_config_s *timing,
-                                FAR const struct emc_dynamic_chip_config_s *chconfig,
-                                unsigned int nchips)
+void lpc54_emc_sdram_initialize(
+                        const struct emc_dynamic_timing_config_s *timing,
+                        const struct emc_dynamic_chip_config_s *chconfig,
+                        unsigned int nchips)
 {
-  FAR const struct emc_dynamic_chip_config_s *config;
+  const struct emc_dynamic_chip_config_s *config;
   uintptr_t addr;
   uint32_t regval;
   uint32_t offset;
@@ -312,8 +316,10 @@ void lpc54_emc_sdram_initialize(FAR const struct emc_dynamic_timing_config_s *ti
 
       /* Abstract CAS latency from the SDRAM mode register setting values */
 
-      caslat = (config->mode & EMC_SDRAM_MODE_CL_MASK) >> EMC_SDRAM_MODE_CL_SHIFT;
-      regval = EMC_DYNRASCAS_RAS(config->rasnclk) | EMC_DYNRASCAS_CAS(caslat);
+      caslat = (config->mode & EMC_SDRAM_MODE_CL_MASK) >>
+                EMC_SDRAM_MODE_CL_SHIFT;
+      regval = EMC_DYNRASCAS_RAS(config->rasnclk) |
+               EMC_DYNRASCAS_CAS(caslat);
       putreg32(regval, LPC54_EMC_DYNRASCAS(config->chndx));
     }
 
@@ -355,7 +361,7 @@ void lpc54_emc_sdram_initialize(FAR const struct emc_dynamic_timing_config_s *ti
   regval = EMC_DYNRRD(timing->mrd);
   putreg32(regval, LPC54_EMC_DYNMRD);
 
-  /* Initialize the SDRAM.*/
+  /* Initialize the SDRAM. */
 
   for (j = 0; j < EMC_SDRAM_WAIT_CYCLES; j++)
     {
@@ -379,7 +385,7 @@ void lpc54_emc_sdram_initialize(FAR const struct emc_dynamic_timing_config_s *ti
 
   putreg32(2 * EMC_REFRESH_CLOCK_SCALE, LPC54_EMC_DYNREFRESH);
 
-  for (i = 0; i < EMC_SDRAM_WAIT_CYCLES/2; i ++)
+  for (j = 0; j < EMC_SDRAM_WAIT_CYCLES / 2; j++)
     {
     }
 
@@ -404,12 +410,12 @@ void lpc54_emc_sdram_initialize(FAR const struct emc_dynamic_timing_config_s *ti
 
       offset = lpc54_emc_modeoffset(config->addrmap);
       addr   = g_dram_csbase[config->chndx] |
-               ((uint32_t)(config->mode & ~EMC_SDRAM_BANKCS_BA_MASK ) << offset);
+               ((uint32_t)(config->mode & ~EMC_SDRAM_BANKCS_BA_MASK) <<
+                offset);
 
       /* Set the right mode setting value. */
 
       data = *(volatile uint32_t *)addr;
-      data = data;
     }
 
   if (config->dyndev)
@@ -436,7 +442,6 @@ void lpc54_emc_sdram_initialize(FAR const struct emc_dynamic_timing_config_s *ti
           /* Set the right mode setting value. */
 
           data = *(volatile uint32_t *)addr;
-          data = data;
         }
     }
 
@@ -459,6 +464,8 @@ void lpc54_emc_sdram_initialize(FAR const struct emc_dynamic_timing_config_s *ti
       regval |= EMC_DYNCONFIG_B;
       putreg32(regval, regaddr);
     }
+
+  UNUSED(data);
 }
 #endif /* CONFIG_LPC54_EMC_DYNAMIC */
 
@@ -467,8 +474,8 @@ void lpc54_emc_sdram_initialize(FAR const struct emc_dynamic_timing_config_s *ti
  *
  * Description:
  *   This function initializes the static memory controller in external
- *   memory controller. This function must be called after lpc54_emc_initialize
- *   and before accessing the external dynamic memory.
+ *   memory controller. This function must be called after
+ *   lpc54_emc_initialize and before accessing the external dynamic memory.
  *
  * Input Parameters:
  *   extwait    - The extended wait timeout or the read/write transfer time.
@@ -482,11 +489,11 @@ void lpc54_emc_sdram_initialize(FAR const struct emc_dynamic_timing_config_s *ti
  ****************************************************************************/
 
 #ifdef CONFIG_LPC54_EMC_STATIC
-void lpc54_emc_sram_initialize(FAR uint32_t *extwait,
-                               FAR const struct emc_static_chip_config_s *statconfig,
-                               uint32_t nchips)
+void lpc54_emc_sram_initialize(uint32_t *extwait,
+                    const struct emc_static_chip_config_s *statconfig,
+                     uint32_t nchips)
 {
-  FAR const struct emc_static_chip_config_s *config;
+  const struct emc_static_chip_config_s *config;
   uint32_t regval;
   unsigned int i;
 
@@ -509,7 +516,7 @@ void lpc54_emc_sram_initialize(FAR uint32_t *extwait,
       putreg32(EMC_STATEXTWAIT(regval), LPC54_EMC_STATEXTWAIT);
     }
 
-    /* Initialize the static memory chip specific configure. */
+  /* Initialize the static memory chip specific configure. */
 
   for (i = 0, config = statconfig;
        i < nchips && config != NULL; i++,
@@ -519,22 +526,28 @@ void lpc54_emc_sram_initialize(FAR uint32_t *extwait,
       putreg32(regval, LPC54_EMC_STATCONFIG(config->chndx));
 
       regval = lpc54_emc_timercycles(config->waitwriteen, 1, 16);
-      putreg32(EMC_STATWAITWEN(regval), LPC54_EMC_STATWAITWEN(config->chndx));
+      putreg32(EMC_STATWAITWEN(regval),
+               LPC54_EMC_STATWAITWEN(config->chndx));
 
       regval = lpc54_emc_timercycles(config->waitouten, 0, 15);
-      putreg32(EMC_STATWAITOEN(regval), LPC54_EMC_STATWAITOEN(config->chndx));
+      putreg32(EMC_STATWAITOEN(regval),
+               LPC54_EMC_STATWAITOEN(config->chndx));
 
       regval = lpc54_emc_timercycles(config->waitread, 1, 32);
-      putreg32(EMC_STATWAITRD(regval), LPC54_EMC_STATWAITRD(config->chndx));
+      putreg32(EMC_STATWAITRD(regval),
+               LPC54_EMC_STATWAITRD(config->chndx));
 
       regval = lpc54_emc_timercycles(config->waitreadpage, 1, 32);
-      putreg32(EMC_STATWAITPAGE(regval), LPC54_EMC_STATWAITPAGE(config->chndx));
+      putreg32(EMC_STATWAITPAGE(regval),
+               LPC54_EMC_STATWAITPAGE(config->chndx));
 
       regval = lpc54_emc_timercycles(config->waitwrite, 2, 33);
-      putreg32(EMC_STATWAITWR(regval), LPC54_EMC_STATWAITWR(config->chndx));
+      putreg32(EMC_STATWAITWR(regval),
+               LPC54_EMC_STATWAITWR(config->chndx));
 
       regval = lpc54_emc_timercycles(config->waitturn, 1, 16);
-      putreg32(EMC_STATWAITTURN(regval), LPC54_EMC_STATWAITTURN(config->chndx));
+      putreg32(EMC_STATWAITTURN(regval),
+               LPC54_EMC_STATWAITTURN(config->chndx));
     }
 }
 #endif /* CONFIG_LPC54_EMC_STATIC */

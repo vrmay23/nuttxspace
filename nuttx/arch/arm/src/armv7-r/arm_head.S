@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/armv7-r/arm_head.S
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,31 +26,17 @@
 
 #include <nuttx/config.h>
 
+#include <arch/irq.h>
+
 #include "arm.h"
-#include "cp15.h"
 #include "sctlr.h"
+#include "arm_internal.h"
 
-#include "up_internal.h"
-#include "up_arch.h"
+	.file	"arm_head.S"
 
-#include <arch/board/board.h>
-
-/**********************************************************************************
+/****************************************************************************
  * Configuration
- **********************************************************************************/
-
-/* Hard-coded options */
-
-#undef CPU_ALIGNMENT_TRAP
-#undef CPU_CACHE_ROUND_ROBIN
-#undef CPU_DCACHE_DISABLE
-#undef CPU_ICACHE_DISABLE
-#define CPU_SCTLR_CCP15BEN 1
-#define CPU_BACKGROUND_REGION 1
-#undef CPU_DIV0_FAULT
-#undef CPU_FAST_INTERRUPT
-#undef CPU_IMPL_VECTORS
-#undef CPU_NONMASKABLE_FIQ
+ ****************************************************************************/
 
 /* There are three operational memory configurations:
  *
@@ -79,14 +52,14 @@
  *    the boot logic must:
  *
  *    - Configure SDRAM (if present),
- *    - Copy ourself to RAM, and
+ *    - Copy ourself to DRAM, and
  *    - Clear .bss section (data should be fully initialized)
  *
  *   In this case, we assume that the logic within this file executes from FLASH.
  *
- * 3. There is bootloader that copies us to SDRAM (CONFIG_BOOT_RUNFROMFLASH=n &&
- *    CONFIG_BOOT_COPYTORAM=n). In this case SDRAM was initialized by the boot
- *    loader, and this boot logic must:
+ * 3. There is bootloader that copies us to SDRAM (but probably not to the beginning)
+ *    (CONFIG_BOOT_RUNFROMFLASH=n && CONFIG_BOOT_COPYTORAM=n). In this case SDRAM
+ *    was initialized by the boot loader, and this boot logic must:
  *
  *    - Clear .bss section (data should be fully initialized)
  */
@@ -138,22 +111,8 @@
 	.global	arm_data_initialize	/* Perform C data initialization */
 	.global	g_idle_topstack		/* Top of the initial/IDLE stack */
 
-#ifdef CONFIG_ARCH_FPU
-	.cpu	cortex-r4f
-#else
-	.cpu	cortex-r4
-#endif
-	.syntax	unified
-	.file	"arm_head.S"
-
-/***************************************************************************
- * .text
- ***************************************************************************/
-
-	.text
-
 /****************************************************************************
- * OS Entry Point
+ * Name: __start
  ****************************************************************************/
 
 /* We assume the bootloader has already initialized most of the h/w for
@@ -161,17 +120,47 @@
  * below.
  */
 
+	.text
+	.syntax	unified
+	.arm
+	.global	__start
 	.type	__start, #function
+
 __start:
+#if defined(CONFIG_SMP) && CONFIG_SMP_NCPUS > 1
+	/* Get cpuindex, cpu0 continue boot, others wait event from cpu0 */
 
-	/* Make sure that we are in SVC mode with IRQs and FIQs disabled */
+	mrc		CP15_MPIDR(r0)
+	and		r0, r0, #0x3
+	cmp		r0, #0
+	beq		__cpu0_start
+	wfe
+	cmp		r0, #1
+	beq		__cpu1_start
+#  if CONFIG_SMP_NCPUS > 2
+	cmp		r0, #2
+	beq		__cpu2_start
+#  endif
+#  if CONFIG_SMP_NCPUS > 3
+	cmp		r0, #3
+	beq		__cpu3_start
+#  endif
+#  if CONFIG_SMP_NCPUS > 4
+	cmp		r0, #4
+	beq		__cpu4_start
+#  endif
 
-	mov		r0, #(PSR_MODE_SVC | PSR_I_BIT | PSR_F_BIT)
-	msr		cpsr_c, r0
+__cpu0_start:
+#endif
+
+	/* Make sure that we are in SYS mode with IRQs and FIQs disabled */
+
+	cpsid		if, #PSR_MODE_SYS
 
 	/* Set up the stack pointer and clear the frame pointer. */
 
 	ldr		sp, .Lstackpointer
+	bic		sp, sp, #7			/* Get the stack pointer with 8-byte alignment */
 	mov		fp, #0
 
 	/* Invalidate caches and TLBs.
@@ -188,9 +177,11 @@ __start:
 	 */
 
 	mov		r0, #0
+	mcr		CP15_TPIDRPRW(r0)	/* Initialize percpu reg TPIDRPRW */
 	mcr		CP15_BPIALL(r0)		/* Invalidate entire branch prediction array */
 	mcr		CP15_ICIALLU(r0)	/* Invalidate I-cache */
 	mcr		CP15_DCIALLU(r0)	/* Invalidate D-cache */
+	isb
 
 	/* Configure the system control register (see sctrl.h) */
 
@@ -220,19 +211,27 @@ __start:
 	 *   SCTLR_EE       Bit 25: 0=Little endian.
 	 *   SCTLR_NMFI     Bit 27: Non-maskable FIQ (NMFI) support
 	 *   SCTLR_TE       Bit 30: All exceptions handled in ARM state.
-	 *   SCTLR_IE       Bit 31: Instruction endian-ness.
 	 */
 
 	/* Clear all configurable bits */
 
-	bic		r0, r0, #(SCTLR_M | SCTLR_A  | SCTLR_C | SCTLR_CCP15BEN | SCTLR_B)
-	bic		r0, r0, #(SCTLR_SW | SCTLR_I | SCTLR_V   | SCTLR_RR)
-	bic		r0, r0, #(SCTLR_BR | SCTLR_DZ | SCTLR_FI | SCTLR_U)
-	bic		r0, r0, #(SCTLR_VE | SCTLR_EE | SCTLR_NMFI | SCTLR_TE | SCTLR_IE)
+	bic		r0, r0, #(SCTLR_A  | SCTLR_C  | SCTLR_CCP15BEN | SCTLR_B)
+	bic		r0, r0, #(SCTLR_SW | SCTLR_I  | SCTLR_V        | SCTLR_RR)
+	bic		r0, r0, #(SCTLR_BR | SCTLR_DZ | SCTLR_FI)
+	bic		r0, r0, #(SCTLR_VE | SCTLR_EE | SCTLR_NMFI     | SCTLR_TE)
+
+#ifndef CONFIG_SMP
+	/* Set bits to enable the MPU
+	 *
+	 *   SCTLR_M     Bit 0:  Enable the MPU
+	 */
+
+	orr		r0, r0, #(SCTLR_M)
+#endif
 
 	/* Set configured bits */
 
-#ifdef CPU_ALIGNMENT_TRAP
+#ifdef CONFIG_ARMV7R_ALIGNMENT_TRAP
 	/* Alignment abort enable
 	 *
 	 *   SCTLR_A Bit 1:  Strict alignment enabled
@@ -241,7 +240,7 @@ __start:
 	orr		r0, r0, #(SCTLR_A)
 #endif
 
-#ifndef CPU_DCACHE_DISABLE
+#if !defined(CONFIG_ARMV7R_DCACHE_DISABLE) && !defined(CONFIG_SMP)
 	/* Dcache enable
 	 *
 	 *   SCTLR_C    Bit 2:  DCache enable
@@ -250,7 +249,7 @@ __start:
 	orr		r0, r0, #(SCTLR_C)
 #endif
 
-#ifdef CPU_SCTLR_CCP15BEN
+#ifdef CONFIG_ARMV7R_SCTLR_CCP15BEN
 	/* Enable memory barriers
 	 *
 	 *  SCTLR_CCP15BEN Bit 5: CP15 barrier enable
@@ -259,7 +258,7 @@ __start:
 	orr		r0, r0, #(SCTLR_CCP15BEN)
 #endif
 
-#ifndef CPU_ICACHE_DISABLE
+#if !defined(CONFIG_ARMV7R_ICACHE_DISABLE) && !defined(CONFIG_SMP)
 	/* Icache enable
 	 *
 	 *   SCTLR_I    Bit 12: ICache enable
@@ -277,7 +276,7 @@ __start:
 	orr		r0, r0, #(SCTLR_V)
 #endif
 
-#ifdef CPU_CACHE_ROUND_ROBIN
+#ifdef CONFIG_ARMV7R_CACHE_ROUND_ROBIN
 	/* Round Robin cache replacement
 	 *
 	 *   SCTLR_RR   Bit 14: Round-robin replacement strategy.
@@ -286,7 +285,7 @@ __start:
 	orr		r0, r0, #(SCTLR_RR)
 #endif
 
-#ifdef CPU_BACKGROUND_REGION
+#ifdef CONFIG_ARMV7R_BACKGROUND_REGION
 	/* Allow PL1 access to back region when MPU is enabled
 	 *
 	 *  SCTLR_BR Bit 17: Background Region bit
@@ -295,7 +294,7 @@ __start:
 	orr		r0, r0, #(SCTLR_BR)
 #endif
 
-#ifdef CPU_DIV0_FAULT
+#ifdef CONFIG_ARMV7R_DIV0_FAULT
 	/* Enable divide by zero faults
 	 *
 	 *   SCTLR_DZ Bit 19: Divide by Zero fault enable bit
@@ -304,7 +303,7 @@ __start:
 	orr		r0, r0, #(SCTLR_DZ)
 #endif
 
-#ifdef CPU_FAST_INTERRUPT
+#ifdef CONFIG_ARMV7R_FAST_INTERRUPT
 	/* Fast interrupts configuration enable bit
 	 *
 	 *   SCTLR_FI Bit 21: Fast interrupts configuration enable bit
@@ -313,7 +312,7 @@ __start:
 	orr		r0, r0, #(SCTLR_FI)
 #endif
 
-#ifdef CPU_IMPL_VECTORS
+#ifdef CONFIG_ARMV7R_IMPL_VECTORS
 	/* Implementation defined interrupt vectors
 	 *
 	 *   SCTLR_VE Bit 24: Interrupt Vectors Enable bit
@@ -331,7 +330,7 @@ __start:
 	orr		r0, r0, #(SCTLR_EE)
 #endif
 
-#ifdef CPU_NONMASKABLE_FIQ
+#ifdef CONFIG_ARMV7R_NONMASKABLE_FIQ
 	/* Non-maskable FIQ support
 	 *
 	 *   SCTLR_NMFI Bit 27: Non-maskable FIQ (NMFI) support
@@ -343,7 +342,8 @@ __start:
 	/* Then write the configured control register */
 
 	mcr		CP15_SCTLR(r0)			/* Write control reg */
-	.rept	12						/* Some CPUs want want lots of NOPs here */
+	isb
+	.rept		12				/* Some CPUs want want lots of NOPs here */
 	nop
 	.endr
 
@@ -413,12 +413,12 @@ arm_data_initialize:
 	/* Zero BSS */
 
 	adr		r0, .Linitparms
-	ldmia	r0, {r0, r1}
+	ldmia		r0, {r0, r1}
 
-	mov     r2, #0
+	mov		r2, #0
 1:
 	cmp		r0, r1				/* Clear up to _bss_end_ */
-	strcc	r2, [r0], #4
+	strcc		r2, [r0], #4
 	bcc		1b
 
 #ifdef CONFIG_BOOT_RUNFROMFLASH
@@ -432,7 +432,7 @@ arm_data_initialize:
 	 */
 
 	adr		r3, .Ldatainit
-	ldmia	r3, {r0, r1, r2}
+	ldmia		r3, {r0, r1, r2}
 
 2:
 	ldr		r3, [r0], #4
@@ -449,7 +449,7 @@ arm_data_initialize:
 	 */
 
 	adr		r3, .Lfuncinit
-	ldmia	r3, {r0, r1, r2}
+	ldmia		r3, {r0, r1, r2}
 
 3:
 	ldr		r3, [r0], #4
@@ -457,7 +457,7 @@ arm_data_initialize:
 	cmp		r1, r2
 	blt		3b
 
-#ifndef CPU_DCACHE_DISABLE
+#ifndef CONFIG_ARMV7R_DCACHE_DISABLE
 	/* Flush the copied RAM functions into physical RAM so that will
 	 * be available when fetched into the I-Cache.
 	 *
@@ -466,8 +466,8 @@ arm_data_initialize:
 	 */
 
 	adr		r3, ..Lramfunc
-	ldmia	r3, {r0, r1}
-	ldr     r3, =up_clean_dcache
+	ldmia		r3, {r0, r1}
+	ldr		r3, =up_clean_dcache
 	b		r3
 #else
 	/* Otherwise return to the caller */
@@ -480,15 +480,19 @@ arm_data_initialize:
 	bx		lr
 #endif
 
-	/* .text Data:
+/***************************************************************************
+ * Text-section constants
+ ***************************************************************************/
+
+	/* Text-section constants:
 	 *
 	 *   _sbss is the start of the BSS region (see linker script)
 	 *   _ebss is the end of the BSS region (see linker script)
 	 *
 	 * Typical Configuration:
-	 *   The idle task stack starts at the end of BSS and is of size
-	 *   CONFIG_IDLETHREAD_STACKSIZE.  The heap continues from there
-	 * until the end of memory.  See g_idle_topstack below.
+	 * The idle task stack usually starts at the end of BSS and is of size
+	 * CONFIG_IDLETHREAD_STACKSIZE.  The heap continues from there until the
+	 * end of memory.  See g_idle_topstack below.
 	 */
 
 	.type	.Linitparms, %object
@@ -515,7 +519,7 @@ arm_data_initialize:
 	.size	arm_data_initialize, . - arm_data_initialize
 
 /***************************************************************************
- * .rodata
+ * Data section variables
  ***************************************************************************/
 
 	/* This global variable is unsigned long g_idle_topstack and is
@@ -524,10 +528,12 @@ arm_data_initialize:
 	 */
 
 	.section	.rodata, "a"
-	.align		4
-	.type		g_idle_topstack, object
-g_idle_topstack:
-	.long		IDLE_STACK_TOP
-	.size		g_idle_topstack, .-g_idle_topstack
+	.align	4
+	.globl	g_idle_topstack
+	.type	g_idle_topstack, object
 
+g_idle_topstack:
+
+	.long	IDLE_STACK_TOP
+	.size	g_idle_topstack, .-g_idle_topstack
 	.end

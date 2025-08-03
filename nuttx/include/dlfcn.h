@@ -1,35 +1,22 @@
 /****************************************************************************
  * include/dlfcn.h
  *
- *   Copyright (C) 2017, 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -91,6 +78,30 @@
 #define RTLD_NOW    (1 << 0)
 #define RTLD_GLOBAL (1 << 1)
 #define RTLD_LOCAL  (1 << 2)
+
+/****************************************************************************
+ * Public Type Definitions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: Dl_info
+ *
+ * Description: The Dl_info structure is used by the dladdr() function.
+ *
+ * Notice:
+ *   The name of this structure is Dl_info_t in POSIX.
+ *   But, the Dl_info (maybe from Linux?) seems to be used more widely:
+ *   https://man7.org/linux/man-pages/man3/dladdr.3.html
+ *   So, we use Dl_info here.
+ ****************************************************************************/
+
+typedef struct
+{
+  FAR const char *dli_fname;  /* Pathname of shared object that contains address */
+  FAR void       *dli_fbase;  /* Base address at which shared object is loaded */
+  FAR const char *dli_sname;  /* Name of symbol whose definition overlaps addr */
+  FAR void       *dli_saddr;  /* Exact address of symbol named in dli_sname */
+} Dl_info;
 
 /****************************************************************************
  * Public Function Prototypes
@@ -222,7 +233,7 @@ int dlsymtab(FAR const struct symtab_s *symtab, int nsymbols);
  *
  * Reference: OpenGroup.org
  *
- * ****************************************************************************/
+ * **************************************************************************/
 
 FAR void *dlopen(FAR const char *file, int mode);
 
@@ -297,7 +308,7 @@ FAR void *dlsym(FAR void *handle, FAR const char *name);
  *   diagnostic information will be available through dlerror().
  *
  * Reference: OpenGroup.org
- *  ****************************************************************************/
+ *  *************************************************************************/
 
 int dlclose(FAR void *handle);
 
@@ -323,6 +334,26 @@ int dlclose(FAR void *handle);
  ****************************************************************************/
 
 FAR char *dlerror(void);
+
+/****************************************************************************
+ * Name: dladdr
+ *
+ * Description:
+ *   dladdr() provides information about the address of a symbol in a
+ *   dynamically loaded object.
+ *
+ * Input Parameters:
+ *   addr - The address of the symbol for which information is desired.
+ *   info - A pointer to a Dl_info structure that is filled in by dladdr().
+ *
+ * Returned Value:
+ *   On success, these functions return a nonzero value.
+ *
+ * Reference: OpenGroup.org
+ *
+ ****************************************************************************/
+
+int dladdr(const FAR void *addr, FAR Dl_info *info);
 
 #undef EXTERN
 #ifdef __cplusplus

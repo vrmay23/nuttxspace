@@ -1,35 +1,22 @@
 /****************************************************************************
  * apps/system/i2c/i2c_main.c
  *
- *   Copyright (C) 2011 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name Gregory Nutt nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -56,7 +43,8 @@
  * Private Function Prototypes
  ****************************************************************************/
 
-static int i2ccmd_help(FAR struct i2ctool_s *i2ctool, int argc, char **argv);
+static int i2ccmd_help(FAR struct i2ctool_s *i2ctool,
+                       int argc, FAR char **argv);
 static int i2ccmd_unrecognized(FAR struct i2ctool_s *i2ctool, int argc,
                                FAR char **argv);
 
@@ -68,14 +56,23 @@ static struct i2ctool_s g_i2ctool;
 
 static const struct cmdmap_s g_i2ccmds[] =
 {
-  { "?",    i2ccmd_help, "Show help     ",  NULL },
-  { "bus",  i2ccmd_bus,  "List buses    ",  NULL },
-  { "dev",  i2ccmd_dev,  "List devices  ", "[OPTIONS] <first> <last>" },
-  { "get",  i2ccmd_get,  "Read register ", "[OPTIONS] [<repititions>]" },
-  { "dump", i2ccmd_dump, "Dump register ", "[OPTIONS] [<num bytes>]" },
-  { "help", i2ccmd_help, "Show help     ", NULL },
-  { "set",  i2ccmd_set,  "Write register", "[OPTIONS] <value> [<repititions>]" },
-  { "verf", i2ccmd_verf, "Verify access ", "[OPTIONS] [<value>] [<repititions>]" },
+  { "?",     i2ccmd_help,  "Show help     ", NULL },
+  { "bus",   i2ccmd_bus,   "List buses    ", NULL },
+#ifdef CONFIG_I2C_RESET
+  { "reset", i2ccmd_reset, "Reset bus     ", NULL },
+#endif
+  { "dev",   i2ccmd_dev,   "List devices  ", "[OPTIONS] <first> <last>" },
+  { "get",   i2ccmd_get,   "Read register ", "[OPTIONS] [<repetitions>]" },
+  { "dump",  i2ccmd_dump,  "Dump register ", "[OPTIONS] [<num bytes>]" },
+  { "help",  i2ccmd_help,  "Show help     ", NULL },
+  {
+    "set",   i2ccmd_set,   "Write register",
+      "[OPTIONS] <value> [<repetitions>]"
+  },
+  {
+    "verf",  i2ccmd_verf,  "Verify access ",
+      "[OPTIONS] [<value>] [<repetitions>]"
+  },
   { NULL,   NULL,        NULL,             NULL }
 };
 
@@ -85,7 +82,8 @@ static const struct cmdmap_s g_i2ccmds[] =
 
 /* Common, message formats */
 
-const char g_i2cargrequired[] = "i2ctool: %s: missing required argument(s)\n";
+const char g_i2cargrequired[] =
+                    "i2ctool: %s: missing required argument(s)\n";
 const char g_i2carginvalid[]  = "i2ctool: %s: argument invalid\n";
 const char g_i2cargrange[]    = "i2ctool: %s: value out of range\n";
 const char g_i2ccmdnotfound[] = "i2ctool: %s: command not found\n";
@@ -101,7 +99,8 @@ const char g_i2cxfrerror[]    = "i2ctool: %s: Transfer failed: %d\n";
  * Name: i2ccmd_help
  ****************************************************************************/
 
-static int i2ccmd_help(FAR struct i2ctool_s *i2ctool, int argc, char **argv)
+static int i2ccmd_help(FAR struct i2ctool_s *i2ctool, int argc,
+                       FAR char **argv)
 {
   const struct cmdmap_s *ptr;
 
@@ -120,38 +119,58 @@ static int i2ccmd_help(FAR struct i2ctool_s *i2ctool, int argc, char **argv)
         }
     }
 
-  i2ctool_printf(i2ctool, "\nWhere common \"sticky\" OPTIONS include:\n");
-  i2ctool_printf(i2ctool, "  [-a addr] is the I2C device address (hex).  "
-                          "Default: %02x Current: %02x\n",
+  i2ctool_printf(i2ctool,
+                 "\nWhere common \"sticky\" OPTIONS include:\n");
+  i2ctool_printf(i2ctool,
+                 "  [-a addr] is the I2C device address (hex)."
+                 "  Default: %02x Current: %02x\n",
                  CONFIG_I2CTOOL_MINADDR, i2ctool->addr);
-  i2ctool_printf(i2ctool, "  [-b bus] is the I2C bus number (decimal).  "
-                          "Default: %d Current: %d\n",
+  i2ctool_printf(i2ctool,
+                 "  [-b bus] is the I2C bus number (decimal)."
+                 "  Default: %d Current: %d\n",
                  CONFIG_I2CTOOL_MINBUS, i2ctool->bus);
-  i2ctool_printf(i2ctool, "  [-w width] is the data width (8 or 16 decimal).  "
-                          "Default: 8 Current: %d\n",
+  i2ctool_printf(i2ctool,
+                 "  [-w width] is the data width (8 or 16 decimal)."
+                 "  Default: 8 Current: %d\n",
                  i2ctool->width);
-  i2ctool_printf(i2ctool, "  [-s|n], send/don't send start between command and data.  "
-                          "Default: -n Current: %s\n",
+  i2ctool_printf(i2ctool,
+                 "  [-s|n], send/don't send start between command and data."
+                 "  Default: -n Current: %s\n",
                  i2ctool->start ? "-s" : "-n");
-  i2ctool_printf(i2ctool, "  [-i|j], Auto increment|don't increment regaddr on repititions.  "
-                          "Default: NO Current: %s\n",
+  i2ctool_printf(i2ctool,
+                 "  [-i|j], Auto increment|don't increment regaddr on "
+                 "repetitions."
+                 "  Default: NO Current: %s\n",
                  i2ctool->autoincr ? "YES" : "NO");
-  i2ctool_printf(i2ctool, "  [-f freq] I2C frequency.  "
-                          "Default: %d Current: %d\n",
+  i2ctool_printf(i2ctool,
+                 "  [-f freq] I2C frequency."
+                 "  Default: %d Current: %" PRIu32 "\n",
                  CONFIG_I2CTOOL_DEFFREQ, i2ctool->freq);
 
   i2ctool_printf(i2ctool, "\nSpecial non-sticky options:\n");
-  i2ctool_printf(i2ctool, "  [-r regaddr] is the I2C device register index (hex).  "
-                          "Default: not used/sent\n");
+  i2ctool_printf(i2ctool,
+                 "  [-r regaddr] is the I2C device register index (hex)."
+                 "  Default: not used/sent\n");
+  i2ctool_printf(
+      i2ctool,
+      "  [-z] instructs the 'dev' command to scan the I2C bus by sending "
+      "zero-byte write headers (if the architecture supports it)\n");
 
   i2ctool_printf(i2ctool, "\nNOTES:\n");
 #ifndef CONFIG_DISABLE_ENVIRON
-  i2ctool_printf(i2ctool, "o An environment variable like $PATH may be used for any argument.\n");
+  i2ctool_printf(i2ctool, "o An environment variable like $PATH may be used "
+                          "for any argument.\n");
 #endif
-  i2ctool_printf(i2ctool, "o Arguments are \"sticky\".  For example, once the I2C address is\n");
-  i2ctool_printf(i2ctool, "  specified, that address will be re-used until it is changed.\n");
+  i2ctool_printf(i2ctool,
+                 "o Arguments are \"sticky\". For example, once "
+                 "the I2C address is\n");
+  i2ctool_printf(i2ctool,
+                 "  specified, that address will be re-used until "
+                 "it is changed.\n");
   i2ctool_printf(i2ctool, "\nWARNING:\n");
-  i2ctool_printf(i2ctool, "o The I2C dev command may have bad side effects on your I2C devices.\n");
+  i2ctool_printf(i2ctool,
+                 "o The I2C dev command may have bad side effects "
+                 "on your I2C devices.\n");
   i2ctool_printf(i2ctool, "  Use only at your own risk.\n");
   return OK;
 }
@@ -210,7 +229,7 @@ static int i2c_execute(FAR struct i2ctool_s *i2ctool, int argc,
  ****************************************************************************/
 
 static FAR char *i2c_argument(FAR struct i2ctool_s *i2ctool,
-                              int argc, char *argv[], int *pindex)
+                              int argc, FAR char *argv[], FAR int *pindex)
 {
   FAR char *arg;
   int  index = *pindex;
@@ -255,7 +274,8 @@ static FAR char *i2c_argument(FAR struct i2ctool_s *i2ctool,
  * Name: i2c_parse
  ****************************************************************************/
 
-static int i2c_parse(FAR struct i2ctool_s *i2ctool, int argc, char *argv[])
+static int i2c_parse(FAR struct i2ctool_s *i2ctool,
+                     int argc, FAR char *argv[])
 {
   FAR char *newargs[MAX_ARGUMENTS + 2];
   FAR char *cmd;
@@ -384,6 +404,7 @@ int main(int argc, FAR char *argv[])
     }
 
   g_i2ctool.hasregindx = false;
+  g_i2ctool.zerowrite = false;
 
   /* Parse and process the command line */
 
@@ -403,7 +424,7 @@ int main(int argc, FAR char *argv[])
  *
  ****************************************************************************/
 
-int i2ctool_printf(FAR struct i2ctool_s *i2ctool, const char *fmt, ...)
+int i2ctool_printf(FAR struct i2ctool_s *i2ctool, FAR const char *fmt, ...)
 {
   va_list ap;
   int     ret;

@@ -1,5 +1,7 @@
 /****************************************************************************
- * examples/mount/mount.h
+ * apps/examples/mount/mount.h
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -18,8 +20,8 @@
  *
  ****************************************************************************/
 
-#ifndef __EXAMPLES_MOUNT_MOUNT_H
-#define __EXAMPLES_MOUNT_MOUNT_H
+#ifndef __APPS_EXAMPLES_MOUNT_MOUNT_H
+#define __APPS_EXAMPLES_MOUNT_MOUNT_H
 
 /****************************************************************************
  * Included Files
@@ -74,4 +76,4 @@ extern const char g_source[]; /* Mount 'source' path */
 extern int create_ramdisk(void);
 #endif
 
-#endif /* __EXAMPLES_MOUNT_MOUNT_H */
+#endif /* __APPS_EXAMPLES_MOUNT_MOUNT_H */

@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/udpblaster/udpblaster_text.c
+ * apps/examples/udpblaster/udpblaster_text.c
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -57,65 +44,75 @@ const char g_udpblaster_text[] =
 
   "They went along, and they went along, and they went along, till they "
   "met Ducky-daddles. 'Where are you going to, Hennypenny and Cocky-locky?' "
-  "says Ducky-daddles. 'Oh! we're going to tell the king the sky's a-falling,' "
-  "said Henny-penny and Cocky-locky. 'May I come with you?' said Ducky-daddles. "
-  "'Certainly,' said Henny-penny and Cocky-locky. So Hennypenny, Cocky-locky, "
-  "and Ducky-daddles went to tell the king the sky was a-falling.\n\n"
+  "says Ducky-daddles. 'Oh! we're going to tell the king the sky's a-"
+  "falling,' said Henny-penny and Cocky-locky. 'May I come with you?' said "
+  "Ducky-daddles. 'Certainly,' said Henny-penny and Cocky-locky. So "
+  "Hennypenny, Cocky-locky, and Ducky-daddles went to tell the king the sky "
+  "was a-falling.\n\n"
 
-  "So they went along and they went along, and they went along, till they met "
-  "Goosey-poosey. 'Where are you going to, Henny-penny, Cocky-locky, and "
-  "Ducky-daddles?' said Gooseypoosey. 'Oh! we're going to tell the king the "
-  "sky's a-falling,' said Henny-penny and Cocky-locky and Ducky-daddles. 'May "
-  "I come with you?' said Goosey-poosey. 'Certainly,' said Hennypenny, "
-  "Cocky-locky, and Ducky-daddles. So Henny-penny, Cocky-locky, Ducky-daddles, "
-  "and Goosey-poosey went to tell the king the sky was a-falling.\n\n"
-
-  "So they went along, and they went along, and they went along, till they met "
-  "Turkey-lurkey. 'Where are you going, Henny-penny, Cocky-locky, Ducky-daddles, "
-  "and Gooseypoosey?' says Turkey-turkey. 'Oh! we're going to tell the king the "
-  "sky's a-falling,' said Henny-penny, Cocky-locky, Duckydaddies, and Goosey-poosey. "
-  "'May I come with you, Hennypenny, Cocky-locky, Ducky-daddles, and Goosey-poosey?' "
-  "said Turkey-lurkey. 'Oh, certainly, Turkey-turkey,' said Henny-penny, Cocky-locky, "
-  "Ducky-daddles, and Gooseypoosey. So Henny-penny, Cocky-locky, Ducky-daddles, "
-  "Goosey-poosey, and Turkey-lurkey all went to tell the king the sky was a-"
+  "So they went along and they went along, and they went along, till they "
+  "met Goosey-poosey. 'Where are you going to, Henny-penny, Cocky-locky,"
+  "and Ducky-daddles?' said Gooseypoosey. 'Oh! we're going to tell the king "
+  "the sky's a-falling,' said Henny-penny and Cocky-locky and Ducky-"
+  "daddles. 'May I come with you?' said Goosey-poosey. 'Certainly,' said "
+  "Hennypenny, Cocky-locky, and Ducky-daddles. So Henny-penny, Cocky-locky, "
+  "Ducky-daddles, and Goosey-poosey went to tell the king the sky was a-"
   "falling.\n\n"
 
-  "So they went along, and they went along, and they went along, till they met "
-  "Foxy-woxy, and Foxy-woxy said to Hennypenny, Cocky-locky, Ducky-daddles, "
-  "Goosey-poosey, and Turkey-lurkey: 'Where are you going, Henny-penny, "
-  "Cockylocky, Ducky-daddles, Goosey-poosey, and Turkey-lurkey?' And Henny-penny, "
-  "Cocky-locky, Ducky-daddles, Goosey poosey, and Turkey-lurkey said to "
-  "Foxy-woxy: 'We' re going to tell the king the sky's a-falling.' 'Oh! but "
-  "this is not the way to the king, Henny-penny, Cocky-locky, Ducky-daddles, "
-  "Goosey-poosey, and Turkey-lurkey,' says Foxy-woxy; 'I know the proper way; "
-  "shall I show it you?' 'Oh, certainly, Foxywoxy,' said Henny-penny, Cocky-locky, "
-  "Ducky-daddles, Goosey-poosey, and Turkey-lurkey. So Henny-penny, Cockylocky, "
-  "Ducky-daddles, Goosey-poosey, Turkey-lurkey, and Foxy-woxy all went to tell "
-  "the king the sky was a-falling. So they went along, and they went along, and "
-  "they went along, till they came to a narrow and dark hole. Now this was the "
-  "door of Foxy-woxy's cave. But Foxy-woxy said to Henny-penny, Cocky-locky, "
-  "Ducky-daddles, Goosey-poosey, and Turkeyturkey: 'This is the short way to the "
-  "king's palace: you'll soon get there if you follow me. I will go first and you "
-  "come after, Henny-penny, Cocky-locky, Ducky-daddles, Goosey-poosey, and "
-  "Turkey-turkey.' 'Why, of course, certainly, without doubt, why not?' said "
-  "Henny-penny, Cocky-locky, Ducky-daddles, Goosey-poosey, and Turkey-lurkey.\n\n"
+  "So they went along, and they went along, and they went along, till they "
+  "met Turkey-lurkey. 'Where are you going, Henny-penny, Cocky-locky, Ducky-"
+  "daddles, and Gooseypoosey?' says Turkey-turkey. 'Oh! we're going to tell "
+  "the king the sky's a-falling,' said Henny-penny, Cocky-locky, "
+  "Duckydaddies, and Goosey-poosey. 'May I come with you, Hennypenny, "
+  "Cocky-locky, Ducky-daddles, and Goosey-poosey?' said Turkey-lurkey. 'Oh, "
+  " certainly, Turkey-turkey,' said Henny-penny, Cocky-locky, "
+  "Ducky-daddles, and Gooseypoosey. So Henny-penny, Cocky-locky, Ducky-"
+  "daddles,Goosey-poosey, and Turkey-lurkey all went to tell the king "
+  "the sky was a-falling.\n\n"
 
-  "So Foxy-woxy went into his cave, and he didn't go very far, but turned round "
-  "to wait for Henny-penny, Cocky-locky, Ducky-daddles, Goosey-poosey, and "
-  "Turkey-lurkey. So at last at first Turkey-lurkey went through the dark hole "
-  "into the cave. He hadn't got far when 'Hrumph', Foxy-woxy snapped off Turkey-"
-  "lurkey's head and threw his body over his left shoulder. Then Goosey-poosey "
-  "went in, and 'Hrumph', off went her head and Goosey-poosey was thrown beside "
-  "Turkey-lurkey. Then Ducky-daddles waddled down, and 'Hrumph', snapped "
-  "Foxy-woxy, and Ducky-daddles's head was off and Duckydaddies was thrown "
-  "alongside Turkey-turkey and Gooseypoosey. Then Cocky-locky strutted down "
-  "into the cave, and he hadn't gone far when 'Snap, Hrumph!' went Foxy-woxy, "
-  "and Cocky-locky was thrown alongside of Turkey-lurkey, Gooseypoosey, and "
-  "Ducky-daddles.\n\n"
+  "So they went along, and they went along, and they went along, till they "
+  "met Foxy-woxy, and Foxy-woxy said to Hennypenny, Cocky-locky, Ducky-"
+  "daddles, Goosey-poosey, and Turkey-lurkey: 'Where are you going, Henny-"
+  "penny, Cockylocky, Ducky-daddles, Goosey-poosey, and Turkey-lurkey?' And "
+  "Henny-penny, Cocky-locky, Ducky-daddles, Goosey poosey, and Turkey- "
+  "lurkey said to Foxy-woxy: 'We' re going to tell the king the sky's a "
+  "-falling.' 'Oh! butthis is not the way to the king, Henny-penny, Cocky- "
+  "locky, Ducky-daddles, Goosey-poosey, and Turkey-lurkey,' says Foxy-woxy; "
+  "'I know the proper way; shall I show it you?' 'Oh, certainly, Foxywoxy,'"
+  "said Henny-penny, Cocky-locky, Ducky-daddles, Goosey-poosey, and "
+  "Turkey-lurkey. So Henny-penny, Cockylocky, Ducky-daddles, Goosey-poosey, "
+  "Turkey-lurkey, and Foxy-woxy all went to tell the king the sky was a-"
+  "falling. So they went along, and they went along, and they went along, "
+  "till they came to a narrow and dark hole. Now this was the door of Foxy-"
+  "woxy's cave. But Foxy-woxy said to Henny-penny, Cocky-locky, "
+  "Ducky-daddles, Goosey-poosey, and Turkeyturkey: 'This is the short way "
+  "to the king's palace: you'll soon get there if you follow me. I will go "
+  "first and you come after, Henny-penny, Cocky-locky, Ducky-daddles, "
+  "Goosey-poosey, and Turkey-turkey.' 'Why, of course, certainly, without "
+  "doubt, why not?' said Henny-penny, Cocky-locky, Ducky-daddles, Goosey-"
+  "poosey, and Turkey-lurkey.\n\n"
+
+  "So Foxy-woxy went into his cave, and he didn't go very far, but turned "
+  "round to wait for Henny-penny, Cocky-locky, Ducky-daddles, Goosey-"
+  "poosey, and Turkey-lurkey. So at last at first Turkey-lurkey went "
+  "through the dark hole into the cave. He hadn't got far when 'Hrumph', "
+  "Foxy-woxy snapped off Turkey-lurkey's head and threw his body over his "
+  "left shoulder. Then Goosey-poosey went in, and 'Hrumph', off went her "
+  "head and Goosey-poosey was thrown beside Turkey-lurkey. Then Ducky-"
+  "daddles waddled down, and 'Hrumph', snapped Foxy-woxy, and Ducky-"
+  "daddles's head was off and Duckydaddies was thrown alongside Turkey-"
+  "turkey and Gooseypoosey. Then Cocky-locky strutted down into the cave, "
+  "and he hadn't gone far when 'Snap, Hrumph!' went Foxy-woxy, and Cocky-"
+  "locky was thrown alongside of Turkey-lurkey, Gooseypoosey, and Ducky-"
+  "daddles.\n\n"
 
   "But Foxy-woxy had made two bites at Cocky-locky, and when the first snap "
-  "only hurt Cocky-locky, but didn't kill him, he called out to Henny-penny. "
-  "But she turned tail and off she ran home, so she never told the king the "
-  "sky was a-falling.\n\n";
+  "only hurt Cocky-locky, but didn't kill him, he called out to Henny- "
+  "penny. But she turned tail and off she ran home, so she never told the "
+  "king the sky was a-falling.\n\n";
 
 const int g_udpblaster_strlen = sizeof(g_udpblaster_text) - 1;
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/

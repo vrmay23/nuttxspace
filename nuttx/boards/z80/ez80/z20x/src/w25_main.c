@@ -1,6 +1,8 @@
 /****************************************************************************
  * boards/z80/ez80/z20x/src/w25_main.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -101,11 +103,11 @@ static int w25_read_hex(FAR uint24_t *len)
 
   /* Open the W25 device for writing */
 
-  fd = open(W25_CHARDEV, O_WRONLY);
+  fd = open(W25_DEV, O_WRONLY);
   if (fd < 0)
     {
-      ret = -get_errno();
-      fprintf(stderr, "ERROR: Failed to open %s: %d\n", W25_CHARDEV, ret);
+      ret = -errno;
+      fprintf(stderr, "ERROR: Failed to open %s: %d\n", W25_DEV, ret);
       return ret;
     }
 
@@ -131,7 +133,7 @@ static int w25_read_hex(FAR uint24_t *len)
   printf("Send Intel HEX file now\n");
   fflush(stdout);
 
-  ret = hex2bin(&rawinstream.public, &memoutstream.public,
+  ret = hex2bin(&rawinstream.common, &memoutstream.common,
                 (uint32_t)PROGSTART, (uint32_t)(PROGSTART + PROGSIZE),
                 0);
 
@@ -147,7 +149,7 @@ static int w25_read_hex(FAR uint24_t *len)
   printf("Intel HEX file into memory loaded into RAM...\n");
   fflush(stdout);
 
-  *len = memoutstream.public.nput;
+  *len = memoutstream.common.nput;
   return OK;
 }
 
@@ -170,7 +172,7 @@ static int w25_write(int fd, FAR const void *src, size_t len)
       nwritten = write(fd, src, remaining);
       if (nwritten <= 0)
         {
-          int errcode = get_errno();
+          int errcode = errno;
           if (errno != EINTR)
             {
               fprintf(stderr, "ERROR: Write failed: %d\n", errcode);
@@ -204,11 +206,11 @@ static int w25_write_binary(FAR const struct prog_header_s *hdr)
 
   /* Open the W25 device for writing */
 
-  fd = open(W25_CHARDEV, O_WRONLY);
+  fd = open(W25_DEV, O_WRONLY);
   if (fd < 0)
     {
-      ret = -get_errno();
-      fprintf(stderr, "ERROR: Failed to open %s: %d\n", W25_CHARDEV, ret);
+      ret = -errno;
+      fprintf(stderr, "ERROR: Failed to open %s: %d\n", W25_DEV, ret);
       return ret;
     }
 
@@ -255,7 +257,7 @@ static int w25_read(int fd, FAR void *dest, size_t len)
       nread = read(fd, dest, remaining);
       if (nread <= 0)
         {
-          int errcode = get_errno();
+          int errcode = errno;
           if (errno != EINTR)
             {
               fprintf(stderr, "ERROR: Read failed: %d\n", errcode);
@@ -288,10 +290,10 @@ static int w25_read_binary(FAR struct prog_header_s *hdr)
 
   /* Open the W25 device for reading */
 
-  fd = open(W25_CHARDEV, O_RDONLY);
+  fd = open(W25_DEV, O_RDONLY);
   if (fd < 0)
     {
-      ret = -get_errno();
+      ret = -errno;
       return ret;
     }
 
@@ -545,7 +547,6 @@ static int w25_boot_program(void)
       return ret;
     }
 
-#ifdef CONFIG_SERIAL_TERMIOS
   /* Drain all pending Tx output in stdout. "Booting..." message will be
    * lost if the outgoing Tx bytes are not drained.
    */
@@ -553,11 +554,10 @@ static int w25_boot_program(void)
   ret = tcdrain(1);
   if (ret < 0)
     {
-      ret = -get_errno();
+      ret = -errno;
       fprintf(stderr, "ERROR: tcdrain() failed: %d\n", ret);
       return ret;
     }
-#endif
 
   /* Start the successfully loaded program */
 
@@ -590,7 +590,7 @@ static int w25_wait_keypress(FAR char *keyset, int nseconds)
   fd = dup(0);
   if (fd < 0)
     {
-      ret = -get_errno();
+      ret = -errno;
       fprintf(stderr, "ERROR: Failed to dup stdin: %d\n", ret);
       return ret;
     }
@@ -605,7 +605,7 @@ static int w25_wait_keypress(FAR char *keyset, int nseconds)
 
   if (ret < 0)
     {
-      ret = -get_errno();
+      ret = -errno;
       fprintf(stderr, "ERROR: fcnt() failed: %d\n", ret);
       close(fd) ;
       return ret;
@@ -621,7 +621,9 @@ static int w25_wait_keypress(FAR char *keyset, int nseconds)
         {
           char tmpch;
 
-          /* Read handling retries.  We get out of this loop if a key is press. */
+          /* Read handling retries.
+           * We get out of this loop if a key is press.
+           */
 
           for (; ; )
             {
@@ -633,7 +635,7 @@ static int w25_wait_keypress(FAR char *keyset, int nseconds)
 
               if (nread < 0)
                 {
-                  int errcode = get_errno();
+                  int errcode = errno;
 
                   /* If is not an error if a signal occurred or if there is
                    * no key pressed.
@@ -688,7 +690,7 @@ static int w25_wait_keypress(FAR char *keyset, int nseconds)
 
           /* Delay 50 Milliseconds  */
 
-          usleep(50 * 1000);
+          nxsig_usleep(50 * 1000);
 
           /* Output a dot to stdout every 10 * 50 = 500 milliseconds */
 
@@ -727,7 +729,7 @@ errout:
  *
  ****************************************************************************/
 
-int w25_main(int argc, char *argv)
+int w25_main(int argc, char *argv[])
 {
   bool disable = false;
   int ret;

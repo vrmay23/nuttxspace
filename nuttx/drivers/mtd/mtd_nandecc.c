@@ -1,14 +1,8 @@
 /****************************************************************************
  * drivers/mtd/mtd_nandecc.c
  *
- *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * This logic was based largely on Atmel sample code with modifications for
- * better integration with NuttX.  The Atmel sample code has a BSD
- * compatible license that requires this copyright notice:
- *
- *   Copyright (c) 2011, 2012, Atmel Corporation
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: Copyright (c) 2011, 2012, Atmel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,12 +40,11 @@
 #include <nuttx/config.h>
 #include <nuttx/mtd/nand_config.h>
 
-#include <sys/types.h>
-#include <stdint.h>
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
 #include <debug.h>
+#include <inttypes.h>
 
 #include <nuttx/mtd/nand.h>
 #include <nuttx/mtd/hamming.h>
@@ -97,7 +90,8 @@ int nandecc_readpage(FAR struct nand_dev_s *nand, off_t block,
   unsigned int sparesize;
   int ret;
 
-  finfo("block=%d page=%d data=%p spare=%d\n", (int)block, page, data, spare);
+  finfo("block=%" PRIdOFF " page=%d data=%p spare=%p\n",
+        block, page, data, spare);
 
   /* Get convenience pointers */
 
@@ -111,7 +105,7 @@ int nandecc_readpage(FAR struct nand_dev_s *nand, off_t block,
   sparesize = nandmodel_getsparesize(model);
 
   /* Store code in spare buffer, either the buffer provided by the caller or
-   * the scatch buffer in the raw NAND structure.
+   * the scratch buffer in the raw NAND structure.
    */
 
   if (!spare)
@@ -125,7 +119,7 @@ int nandecc_readpage(FAR struct nand_dev_s *nand, off_t block,
   ret = NAND_RAWREAD(raw, block, page, 0, spare);
   if (ret < 0)
     {
-      ferr("ERROR: Failed to read page:d\n", ret);
+      ferr("ERROR: Failed to read page:%d\n", ret);
       return ret;
     }
 
@@ -134,7 +128,7 @@ int nandecc_readpage(FAR struct nand_dev_s *nand, off_t block,
   ret = NAND_RAWREAD(nand->raw, block, page, data, 0);
   if (ret < 0)
     {
-      ferr("ERROR: Failed to read page:d\n", ret);
+      ferr("ERROR: Failed to read page:%d\n", ret);
       return ret;
     }
 
@@ -146,14 +140,19 @@ int nandecc_readpage(FAR struct nand_dev_s *nand, off_t block,
   /* Use the ECC data to verify the page */
 
   ret = hamming_verify256x(data, pagesize, raw->ecc);
-  if (ret && (ret != HAMMING_ERROR_SINGLEBIT))
+  switch (ret)
     {
-      ferr("ERROR: Block=%d page=%d Unrecoverable error: %d\n",
-           block, page, ret);
-      return -EIO;
-    }
+      case HAMMING_SUCCESS:
+        return OK;
 
-  return OK;
+      case HAMMING_ERROR_SINGLEBIT:
+        return -EUCLEAN;
+
+      default:
+      ferr("ERROR: Block=%" PRIdOFF " page=%d Unrecoverable error: %d\n",
+           block, page, ret);
+      return -EBADMSG;
+    }
 }
 
 /****************************************************************************
@@ -189,7 +188,8 @@ int nandecc_writepage(FAR struct nand_dev_s *nand, off_t block,
   unsigned int sparesize;
   int ret;
 
-  finfo("block=%d page=%d data=%p spare=%d\n", (int)block, page, data, spare);
+  finfo("block=%" PRIdOFF " page=%d data=%p spare=%p\n",
+        block, page, data, spare);
 
   /* Get convenience pointers */
 
@@ -216,7 +216,7 @@ int nandecc_writepage(FAR struct nand_dev_s *nand, off_t block,
     }
 
   /* Store code in spare buffer, either the buffer provided by the caller or
-   * the scatch buffer in the raw NAND structure.
+   * the scratch buffer in the raw NAND structure.
    */
 
   if (!spare)
@@ -235,7 +235,7 @@ int nandecc_writepage(FAR struct nand_dev_s *nand, off_t block,
   ret = NAND_RAWWRITE(nand->raw, block, page, data, spare);
   if (ret < 0)
     {
-      ferr("ERROR: Failed to write page:d\n", ret);
+      ferr("ERROR: Failed to write page:%d\n", ret);
     }
 
   return ret;

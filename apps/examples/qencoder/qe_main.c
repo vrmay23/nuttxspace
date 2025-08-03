@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/qe/qe_main.c
+ * apps/examples/qencoder/qe_main.c
  *
- *   Copyright (C) 2012 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -48,6 +35,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <inttypes.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -58,6 +46,12 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+#ifdef CONFIG_EXAMPLES_QENCODER_HAVE_MAXPOS
+#  if CONFIG_EXAMPLES_QENCODER_MAXPOS == 0
+#    error CONFIG_EXAMPLES_QENCODER_MAXPOS not specified
+#  endif
+#endif
 
 /****************************************************************************
  * Private Types
@@ -111,6 +105,7 @@ static void qe_help(void)
   printf("  [-n samples] Number of samples\n");
   printf("  [-t msec]    Delay between samples (msec)\n");
   printf("  [-r]         Reset the position to zero\n");
+  printf("  [-i]         Use the QEIOC_GETINDEX call to obtain samples\n");
   printf("  [-h]         Shows this message and exits\n\n");
 }
 
@@ -160,9 +155,10 @@ static void parse_args(int argc, FAR char **argv)
   int index;
   int nargs;
 
-  g_qeexample.reset  = false;
-  g_qeexample.nloops = CONFIG_EXAMPLES_QENCODER_NSAMPLES;
-  g_qeexample.delay  = CONFIG_EXAMPLES_QENCODER_DELAY;
+  g_qeexample.reset       = false;
+  g_qeexample.use_qeindex = false;
+  g_qeexample.nloops      = CONFIG_EXAMPLES_QENCODER_NSAMPLES;
+  g_qeexample.delay       = CONFIG_EXAMPLES_QENCODER_DELAY;
 
   for (index = 1; index < argc; )
     {
@@ -210,6 +206,11 @@ static void parse_args(int argc, FAR char **argv)
             index++;
             break;
 
+          case 'i':
+            g_qeexample.use_qeindex = true;
+            index++;
+            break;
+
           case 'h':
             qe_help();
             exit(EXIT_SUCCESS);
@@ -237,6 +238,7 @@ int main(int argc, FAR char *argv[])
   int exitval = EXIT_SUCCESS;
   int ret;
   int nloops;
+  struct qe_index_s index;
 
   /* Set the default values */
 
@@ -256,8 +258,21 @@ int main(int argc, FAR char *argv[])
     {
       printf("qe_main: open %s failed: %d\n", g_qeexample.devpath, errno);
       exitval = EXIT_FAILURE;
+      goto errout;
+    }
+
+#ifdef CONFIG_EXAMPLES_QENCODER_HAVE_MAXPOS
+  /* Set the maximum encoder positions */
+
+  ret = ioctl(fd, QEIOC_SETPOSMAX,
+              (unsigned long)CONFIG_EXAMPLES_QENCODER_MAXPOS);
+  if (ret < 0)
+    {
+      printf("qe_main: ioctl(QEIOC_SETMAXPOS) failed: %d\n", errno);
+      exitval = EXIT_FAILURE;
       goto errout_with_dev;
     }
+#endif
 
   /* Reset the count if so requested */
 
@@ -278,7 +293,9 @@ int main(int argc, FAR char *argv[])
    */
 
   printf("qe_main: Number of samples: %u\n", g_qeexample.nloops);
-  for (nloops = 0; !g_qeexample.nloops || nloops < g_qeexample.nloops; nloops++)
+  for (nloops = 0;
+       !g_qeexample.nloops || nloops < g_qeexample.nloops;
+       nloops++)
     {
       /* Flush any output before the loop entered or from the previous pass
        * through the loop.
@@ -288,19 +305,42 @@ int main(int argc, FAR char *argv[])
 
       /* Get the positions data using the ioctl */
 
-      ret = ioctl(fd, QEIOC_POSITION, (unsigned long)((uintptr_t)&position));
-      if (ret < 0)
+      if (g_qeexample.use_qeindex)
         {
-          printf("qe_main: ioctl(QEIOC_POSITION) failed: %d\n", errno);
-          exitval = EXIT_FAILURE;
-          goto errout_with_dev;
+          ret = ioctl(fd, QEIOC_GETINDEX, (unsigned long)((uintptr_t)&index));
+          if (ret < 0)
+            {
+              printf("qe_main: ioctl(QEIOC_GETINDEX) failed: %d\n", errno);
+              printf("Your MCU probably does not support this ioctl call.\n");
+              printf("Consider using this example without the -i option.\n");
+              exitval = EXIT_FAILURE;
+              goto errout_with_dev;
+            }
+
+          /* GETINDEX succesful */
+
+          else
+            {
+              printf("qe_main: %3d. pos: %" PRIi32 ", last index: %" PRIi32 ", hit indexes: %" \
+                     PRIi16 "\n", nloops + 1, index.qenc_pos, index.indx_pos, index.indx_cnt);
+            }
         }
-
-      /* Print the sample data on successful return */
-
       else
         {
-          printf("qe_main: %3d. %d\n", nloops+1, position);
+          ret = ioctl(fd, QEIOC_POSITION, (unsigned long)((uintptr_t)&position));
+          if (ret < 0)
+            {
+              printf("qe_main: ioctl(QEIOC_POSITION) failed: %d\n", errno);
+              exitval = EXIT_FAILURE;
+              goto errout_with_dev;
+            }
+
+          /* Print the sample data on successful return */
+
+          else
+            {
+              printf("qe_main: %3d. %" PRIi32 "\n", nloops + 1, position);
+            }
         }
 
       /* Delay a little bit */

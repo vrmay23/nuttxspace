@@ -1,14 +1,12 @@
 /****************************************************************************
  * arch/arm/src/lpc54xx/lpc54_emc.h
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * Parts of this file were adapted from sample code provided for the LPC54xx
- * family from NXP which has a compatible BSD license.
- *
- *   Copyright (c) 2016, Freescale Semiconductor, Inc.
- *   Copyright (c) 2016 - 2017 , NXP
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2017 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2016 Freescale Semiconductor Inc.
+ * SPDX-FileCopyrightText: 2016 - 2017, NXP
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -169,7 +167,7 @@ struct emc_static_chip_config_s
                           * emc_static_special_config_e settings */
   uint32_t waitwriteen;  /* The delay form chip select to write enable in
                           * units of nanoseconds */
-  uint32_t waitouten;    /* The delay from chip selcet to output enable in
+  uint32_t waitouten;    /* The delay from chip select to output enable in
                           * units of nanoseconds */
   uint32_t waitread;     /* In No-page mode, the delay from chip select to
                           * read access in units of nanoseconds */
@@ -181,8 +179,8 @@ struct emc_static_chip_config_s
                           * nanoseconds */
 };
 
-/***************************************************************************
- * Public Functions
+/****************************************************************************
+ * Public Functions Prototypes
  ****************************************************************************/
 
 /****************************************************************************
@@ -197,15 +195,15 @@ struct emc_static_chip_config_s
  *
  ****************************************************************************/
 
-void lpc54_emc_initialize(FAR const struct emc_config_s *config);
+void lpc54_emc_initialize(const struct emc_config_s *config);
 
 /****************************************************************************
  * Name: lpc54_emc_sdram_initialize
  *
  * Description:
  *   This function initializes the dynamic memory controller in external
- *   memory controller. This function must be called after lpc54_emc_initialize
- *   and before accessing the external dynamic memory.
+ *   memory controller. This function must be called after
+ *   lpc54_emc_initialize and before accessing the external dynamic memory.
  *
  * Input Parameters:
  *   timing   - The timing and latency for dynamica memory controller
@@ -221,9 +219,10 @@ void lpc54_emc_initialize(FAR const struct emc_config_s *config);
  ****************************************************************************/
 
 #ifdef CONFIG_LPC54_EMC_DYNAMIC
-void lpc54_emc_sdram_initialize(FAR const struct emc_dynamic_timing_config_s *timing,
-                                FAR const struct emc_dynamic_chip_config_s *chconfig,
-                                unsigned int nchips);
+void lpc54_emc_sdram_initialize(
+                       const struct emc_dynamic_timing_config_s *timing,
+                       const struct emc_dynamic_chip_config_s *chconfig,
+                       unsigned int nchips);
 #endif /* CONFIG_LPC54_EMC_DYNAMIC */
 
 /****************************************************************************
@@ -231,8 +230,8 @@ void lpc54_emc_sdram_initialize(FAR const struct emc_dynamic_timing_config_s *ti
  *
  * Description:
  *   This function initializes the static memory controller in external
- *   memory controller. This function must be called after lpc54_emc_initialize
- *   and before accessing the external dynamic memory.
+ *   memory controller. This function must be called after
+ *   lpc54_emc_initialize and before accessing the external dynamic memory.
  *
  * Input Parameters:
  *   extwait    - The extended wait timeout or the read/write transfer time.
@@ -246,9 +245,9 @@ void lpc54_emc_sdram_initialize(FAR const struct emc_dynamic_timing_config_s *ti
  ****************************************************************************/
 
 #ifdef CONFIG_LPC54_EMC_STATIC
-void lpc54_emc_sram_initialize(FAR uint32_t *extwait,
-                               FAR const struct emc_static_chip_config_s *statconfig,
-                               uint32_t nchips);
+void lpc54_emc_sram_initialize(uint32_t *extwait,
+                       const struct emc_static_chip_config_s *statconfig,
+                       uint32_t nchips);
 #endif /* CONFIG_LPC54_EMC_STATIC */
 
 #endif /* CONFIG_LPC54_EMC */

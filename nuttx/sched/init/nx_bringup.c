@@ -1,39 +1,22 @@
 /****************************************************************************
  * sched/init/nx_bringup.c
  *
- *   Copyright (C) 2011-2012, 2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * With extensions by:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- *   Author: Uros Platise <uros.platise@isotel.eu>
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,23 +29,34 @@
 #include <sched.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <debug.h>
-#include <sys/mount.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
+#include <nuttx/fs/fs.h>
 #include <nuttx/init.h>
+#include <nuttx/macro.h>
 #include <nuttx/symtab.h>
+#include <nuttx/trace.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/kthread.h>
 #include <nuttx/userspace.h>
 #include <nuttx/binfmt/binfmt.h>
 
-#ifdef CONFIG_PAGING
-# include "paging/paging.h"
+#ifdef CONFIG_LEGACY_PAGING
+#  include "paging/paging.h"
 #endif
-# include "wqueue/wqueue.h"
-# include "init/init.h"
+
+#include "sched/sched.h"
+#include "wqueue/wqueue.h"
+#include "init/init.h"
+#include "misc/coredump.h"
+
+#ifdef CONFIG_ETC_ROMFS
+#  include <nuttx/drivers/ramdisk.h>
+#  include <sys/mount.h>
+#endif
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -76,34 +70,34 @@
 #  error No initialization mechanism selected (CONFIG_INIT_NONE)
 
 #else
-#  if !defined(CONFIG_INIT_ENTRYPOINT) && !defined(CONFIG_INIT_FILEPATH)
+#  if !defined(CONFIG_INIT_ENTRY) && !defined(CONFIG_INIT_FILE)
   /* For backward compatibility with older defconfig files when this was
    * the way things were done.
    */
 
-#    define CONFIG_INIT_ENTRYPOINT 1
+#    define CONFIG_INIT_ENTRY 1
 #  endif
 
-#  if defined(CONFIG_INIT_ENTRYPOINT)
+#  if defined(CONFIG_INIT_ENTRY)
   /* Initialize by starting a task at an entry point */
 
-#    ifndef CONFIG_USER_ENTRYPOINT
+#    ifndef CONFIG_INIT_ENTRYPOINT
   /* Entry point name must have been provided */
 
-#      error CONFIG_USER_ENTRYPOINT must be defined
+#      error CONFIG_INIT_ENTRYPOINT must be defined
 #    endif
 
-#  elif defined(CONFIG_INIT_FILEPATH)
+#  elif defined(CONFIG_INIT_FILE)
   /* Initialize by running an initialization program in the file system.
    * Presumably the user has configured a board initialization function
    * that will mount the file system containing the initialization
    * program.
    */
 
-#    ifndef CONFIG_USER_INITPATH
+#    ifndef CONFIG_INIT_FILEPATH
   /* Path to the initialization program must have been provided */
 
-#      error CONFIG_USER_INITPATH must be defined
+#      error CONFIG_INT_FILEPATH must be defined
 #    endif
 
 #    if !defined(CONFIG_INIT_SYMTAB) || !defined(CONFIG_INIT_NEXPORTS)
@@ -123,11 +117,20 @@ extern const int             CONFIG_INIT_NEXPORTS;
 /* In the protected build (only) we also need to start the user work queue */
 
 #if !defined(CONFIG_BUILD_PROTECTED)
-#  undef CONFIG_LIB_USRWORK
+#  undef CONFIG_LIBC_USRWORK
 #endif
 
-#if !defined(CONFIG_USERMAIN_PRIORITY)
-#  define CONFIG_USERMAIN_PRIORITY SCHED_PRIORITY_DEFAULT
+#if !defined(CONFIG_INIT_PRIORITY)
+#  define CONFIG_INIT_PRIORITY SCHED_PRIORITY_DEFAULT
+#endif
+
+#ifdef CONFIG_ETC_ROMFS
+#  define NSECTORS(b)        (((b)+CONFIG_ETC_ROMFSSECTSIZE-1)/CONFIG_ETC_ROMFSSECTSIZE)
+#  define MKMOUNT_DEVNAME(m) "/dev/ram" STRINGIFY(m)
+#  define MOUNT_DEVNAME      MKMOUNT_DEVNAME(CONFIG_ETC_ROMFSDEVNO)
+
+extern const unsigned char romfs_img[];
+extern const unsigned int romfs_img_len;
 #endif
 
 /****************************************************************************
@@ -150,7 +153,7 @@ extern const int             CONFIG_INIT_NEXPORTS;
  *
  ****************************************************************************/
 
-#ifdef CONFIG_PAGING
+#ifdef CONFIG_LEGACY_PAGING
 static inline void nx_pgworker(void)
 {
   /* Start the page fill worker kernel thread that will resolve page faults.
@@ -162,14 +165,14 @@ static inline void nx_pgworker(void)
 
   g_pgworker = kthread_create("pgfill", CONFIG_PAGING_DEFPRIO,
                               CONFIG_PAGING_STACKSIZE,
-                              (main_t)pg_worker, (FAR char * const *)NULL);
+                              pg_worker, NULL);
   DEBUGASSERT(g_pgworker > 0);
 }
 
-#else /* CONFIG_PAGING */
+#else /* CONFIG_LEGACY_PAGING */
 #  define nx_pgworker()
 
-#endif /* CONFIG_PAGING */
+#endif /* CONFIG_LEGACY_PAGING */
 
 /****************************************************************************
  * Name: nx_workqueues
@@ -188,7 +191,7 @@ static inline void nx_pgworker(void)
 #ifdef CONFIG_SCHED_WORKQUEUE
 static inline void nx_workqueues(void)
 {
-#ifdef CONFIG_LIB_USRWORK
+#ifdef CONFIG_LIBC_USRWORK
   pid_t pid;
 #endif
 
@@ -197,20 +200,20 @@ static inline void nx_workqueues(void)
    * halves.
    */
 
-  work_hpstart();
+  work_start_highpri();
 
 #endif /* CONFIG_SCHED_HPWORK */
 
 #ifdef CONFIG_SCHED_LPWORK
-  /* Start the low-priority worker thread for other, non-critical continuation
-   * tasks
+  /* Start the low-priority worker thread for other, non-critical
+   * continuation tasks
    */
 
-  work_lpstart();
+  work_start_lowpri();
 
 #endif /* CONFIG_SCHED_LPWORK */
 
-#ifdef CONFIG_LIB_USRWORK
+#ifdef CONFIG_LIBC_USRWORK
   /* Start the user-space work queue */
 
   DEBUGASSERT(USERSPACE->work_usrstart != NULL);
@@ -224,6 +227,58 @@ static inline void nx_workqueues(void)
 #  define nx_workqueues()
 
 #endif /* CONFIG_SCHED_WORKQUEUE */
+
+/****************************************************************************
+ * Name: nx_romfsetc
+ *
+ * Description: mount baked-in ROMFS image to /etc.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_ETC_ROMFS
+static inline void nx_romfsetc(void)
+{
+  int ret;
+
+#ifndef CONFIG_ETC_CROMFS
+  /* Create a ROM disk for the /etc filesystem */
+
+  ret = romdisk_register(CONFIG_ETC_ROMFSDEVNO, romfs_img,
+                         NSECTORS(romfs_img_len),
+                         CONFIG_ETC_ROMFSSECTSIZE);
+  if (ret < 0)
+    {
+      ferr("ERROR: romdisk_register failed: %d\n", -ret);
+      return;
+    }
+#endif
+
+  /* Mount the file system */
+
+  finfo("Mounting ROMFS filesystem at target=%s with source=%s\n",
+        CONFIG_ETC_ROMFSMOUNTPT, MOUNT_DEVNAME);
+
+#if defined(CONFIG_ETC_CROMFS)
+  ret = nx_mount(MOUNT_DEVNAME, CONFIG_ETC_ROMFSMOUNTPT,
+                 "cromfs", MS_RDONLY, NULL);
+#else
+  ret = nx_mount(MOUNT_DEVNAME, CONFIG_ETC_ROMFSMOUNTPT,
+                 "romfs", MS_RDONLY, NULL);
+#endif
+  if (ret < 0)
+    {
+      ferr("ERROR: nx_mount(%s,%s,romfs) failed: %d\n",
+           MOUNT_DEVNAME, CONFIG_ETC_ROMFSMOUNTPT, ret);
+    }
+}
+
+#endif /* CONFIG_ETC_ROMFS */
 
 /****************************************************************************
  * Name: nx_start_application
@@ -240,10 +295,24 @@ static inline void nx_workqueues(void)
  *
  ****************************************************************************/
 
-#if defined(CONFIG_INIT_ENTRYPOINT)
 static inline void nx_start_application(void)
 {
-  int pid;
+#ifndef CONFIG_INIT_NONE
+  FAR char * const argv[] =
+  {
+#  ifdef CONFIG_INIT_ARGS
+    CONFIG_INIT_ARGS,
+#  endif
+    NULL,
+  };
+
+  posix_spawnattr_t attr;
+#endif
+  int ret;
+
+#ifdef CONFIG_ETC_ROMFS
+  nx_romfsetc();
+#endif
 
 #ifdef CONFIG_BOARD_LATE_INITIALIZE
   /* Perform any last-minute, board-specific initialization, if so
@@ -253,72 +322,63 @@ static inline void nx_start_application(void)
   board_late_initialize();
 #endif
 
+#ifdef CONFIG_COREDUMP
+  coredump_initialize();
+#endif
+
+  posix_spawnattr_init(&attr);
+  attr.priority  = CONFIG_INIT_PRIORITY;
+  attr.stacksize = CONFIG_INIT_STACKSIZE;
+
+#if defined(CONFIG_INIT_ENTRY)
+
   /* Start the application initialization task.  In a flat build, this is
-   * entrypoint is given by the definitions, CONFIG_USER_ENTRYPOINT.  In
+   * entrypoint is given by the definitions, CONFIG_INIT_ENTRYPOINT.  In
    * the protected build, however, we must get the address of the
    * entrypoint from the header at the beginning of the user-space blob.
    */
 
   sinfo("Starting init thread\n");
 
-#ifdef CONFIG_BUILD_PROTECTED
+#  ifdef CONFIG_BUILD_PROTECTED
   DEBUGASSERT(USERSPACE->us_entrypoint != NULL);
-  pid = nxtask_create("init", CONFIG_USERMAIN_PRIORITY,
-                      CONFIG_USERMAIN_STACKSIZE, USERSPACE->us_entrypoint,
-                      (FAR char * const *)NULL);
-#else
-  pid = nxtask_create("init", CONFIG_USERMAIN_PRIORITY,
-                      CONFIG_USERMAIN_STACKSIZE,
-                      (main_t)CONFIG_USER_ENTRYPOINT,
-                      (FAR char * const *)NULL);
-#endif
-  DEBUGASSERT(pid > 0);
-  UNUSED(pid);
-}
+  ret = task_spawn(CONFIG_INIT_ENTRYNAME,
+                   USERSPACE->us_entrypoint,
+                   NULL, &attr, argv, NULL);
+#  else
+  ret = task_spawn(CONFIG_INIT_ENTRYNAME,
+                   CONFIG_INIT_ENTRYPOINT,
+                   NULL, &attr, argv, NULL);
+#  endif
+#elif defined(CONFIG_INIT_FILE)
 
-#elif defined(CONFIG_INIT_FILEPATH)
-static inline void nx_start_application(void)
-{
-  int ret;
-
-#ifdef CONFIG_BOARD_LATE_INITIALIZE
-  /* Perform any last-minute, board-specific initialization, if so
-   * configured.
-   */
-
-  board_late_initialize();
-#endif
-
-#ifdef CONFIG_INIT_MOUNT
+#  ifdef CONFIG_INIT_MOUNT
   /* Mount the file system containing the init program. */
 
-  ret = mount(CONFIG_INIT_MOUNT_SOURCE, CONFIG_INIT_MOUNT_TARGET,
-              CONFIG_INIT_MOUNT_FSTYPE, CONFIG_INIT_MOUNT_FLAGS,
-              CONFIG_INIT_MOUNT_DATA);
+  ret = nx_mount(CONFIG_INIT_MOUNT_SOURCE, CONFIG_INIT_MOUNT_TARGET,
+                 CONFIG_INIT_MOUNT_FSTYPE, CONFIG_INIT_MOUNT_FLAGS,
+                 CONFIG_INIT_MOUNT_DATA);
   DEBUGASSERT(ret >= 0);
-  UNUSED(ret);
-#endif
+#  endif
 
   /* Start the application initialization program from a program in a
    * mounted file system.  Presumably the file system was mounted as part
    * of the board_late_initialize() operation.
    */
 
-  sinfo("Starting init task: %s\n", CONFIG_USER_INITPATH);
+  sinfo("Starting init task: %s\n", CONFIG_INIT_FILEPATH);
 
-  ret = exec(CONFIG_USER_INITPATH, NULL, CONFIG_INIT_SYMTAB,
-             CONFIG_INIT_NEXPORTS);
-  DEBUGASSERT(ret >= 0);
-  UNUSED(ret);
-}
+  posix_spawnattr_init(&attr);
 
-#elif defined(CONFIG_INIT_NONE)
-#  define nx_start_application()
+  attr.priority  = CONFIG_INIT_PRIORITY;
+  attr.stacksize = CONFIG_INIT_STACKSIZE;
 
-#else
-#  error "Cannot start initialization thread"
-
+  ret = exec_spawn(CONFIG_INIT_FILEPATH, argv, NULL,
+                   CONFIG_INIT_SYMTAB, CONFIG_INIT_NEXPORTS, NULL, &attr);
 #endif
+  posix_spawnattr_destroy(&attr);
+  DEBUGASSERT(ret > 0);
+}
 
 /****************************************************************************
  * Name: nx_start_task
@@ -372,9 +432,10 @@ static inline void nx_create_initthread(void)
    * execution.
    */
 
-  pid = kthread_create("AppBringUp", CONFIG_BOARD_INITTHREAD_PRIORITY,
-                      CONFIG_BOARD_INITTHREAD_STACKSIZE,
-                      (main_t)nx_start_task, (FAR char * const *)NULL);
+  pid = nxthread_create("AppBringUp", TCB_FLAG_TTYPE_KERNEL,
+                        CONFIG_BOARD_INITTHREAD_PRIORITY,
+                        NULL, CONFIG_BOARD_INITTHREAD_STACKSIZE,
+                        nx_start_task, NULL, environ);
   DEBUGASSERT(pid > 0);
   UNUSED(pid);
 #else
@@ -396,8 +457,8 @@ static inline void nx_create_initthread(void)
  *   the conclusion of basic OS initialization.  These initial system tasks
  *   may include:
  *
- *   - pg_worker:   The page-fault worker thread (only if CONFIG_PAGING is
- *                  defined.
+ *   - pg_worker:   The page-fault worker thread (if CONFIG_LEGACY_PAGING is
+ *                  defined).
  *   - work_thread: The work thread.  This general thread can be used to
  *                  perform most any kind of queued work.  Its primary
  *                  function is to serve as the "bottom half" of device
@@ -406,9 +467,9 @@ static inline void nx_create_initthread(void)
  *   And the main application entry point:
  *   symbols, either:
  *
- *   - CONFIG_USER_ENTRYPOINT: This is the default user application entry
+ *   - CONFIG_INIT_ENTRYPOINT: This is the default user application entry
  *                 point, or
- *   - CONFIG_USER_INITPATH: The full path to the location in a mounted
+ *   - CONFIG_INIT_FILEPATH: The full path to the location in a mounted
  *                 file system where we can expect to find the
  *                 initialization program.  Presumably, this file system
  *                 was mounted by board-specific logic when
@@ -424,6 +485,8 @@ static inline void nx_create_initthread(void)
 
 int nx_bringup(void)
 {
+  sched_trace_begin();
+
 #ifndef CONFIG_DISABLE_ENVIRON
   /* Setup up the initial environment for the idle task.  At present, this
    * may consist of only the initial PATH variable and/or and init library
@@ -431,6 +494,10 @@ int nx_bringup(void)
    * However, the environment containing the PATH variable will be inherited
    * by all of the threads created by the IDLE task.
    */
+
+#ifdef CONFIG_LIBC_HOMEDIR
+  setenv("PWD", CONFIG_LIBC_HOMEDIR, 1);
+#endif
 
 #ifdef CONFIG_PATH_INITIAL
   setenv("PATH", CONFIG_PATH_INITIAL, 1);
@@ -463,10 +530,13 @@ int nx_bringup(void)
 
 #if !defined(CONFIG_DISABLE_ENVIRON) && (defined(CONFIG_PATH_INITIAL) || \
      defined(CONFIG_LDPATH_INITIAL))
-  /* We an save a few bytes by discarding the IDLE thread's environment. */
+  /* We would save a few bytes by discarding the IDLE thread's environment.
+   * But when kthreads share the same group, this is no longer proper, so
+   * we can't do clearenv() now.
+   */
 
-  clearenv();
 #endif
 
+  sched_trace_end();
   return OK;
 }

@@ -1,6 +1,8 @@
 /****************************************************************************
  * fs/mount/fs_automount.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -39,17 +41,22 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/fs/automount.h>
+#include <nuttx/lib/lib.h>
+
+#ifdef CONFIG_FS_AUTOMOUNTER_DRIVER
+#  include <stdio.h>
+
+#  include <nuttx/signal.h>
+#  include <nuttx/fs/fs.h>
+#  include <nuttx/fs/ioctl.h>
+#endif /* CONFIG_FS_AUTOMOUNTER_DRIVER */
 
 #include "inode/inode.h"
+#include "fs_heap.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-/* Configuration ************************************************************
- *
- * CONFIG_FS_AUTOMOUNTER - Enables AUTOMOUNT support
- */
 
 /* Pre-requisites */
 
@@ -72,26 +79,304 @@ struct automounter_state_s
 {
   FAR const struct automount_lower_s *lower; /* Board level interfaces */
   struct work_s work;                        /* Work queue support */
-  WDOG_ID wdog;                              /* Delay to retry un-mounts */
+  struct wdog_s wdog;                        /* Delay to retry un-mounts */
   bool mounted;                              /* True: Volume has been mounted */
   bool inserted;                             /* True: Media has been inserted */
+
+#ifdef CONFIG_FS_AUTOMOUNTER_DRIVER
+  mutex_t lock;                              /* Supports exclusive access to the device */
+  bool registered;                           /* True: if driver has been registered */
+
+  /* The following is a singly linked list of open references to the
+   * automounter device.
+   */
+
+  FAR struct automounter_open_s *ao_open;
+#endif /* CONFIG_FS_AUTOMOUNTER_DRIVER */
 };
+
+/* This structure describes the state of one open automounter driver
+ * instance
+ */
+
+#ifdef CONFIG_FS_AUTOMOUNTER_DRIVER
+struct automounter_open_s
+{
+  /* Supports a singly linked list */
+
+  FAR struct automounter_open_s *ao_flink;
+
+  /* Mount event notification information */
+
+  pid_t ao_pid;
+  struct automount_notify_s ao_notify;
+  struct sigwork_s ao_work;
+};
+#endif /* CONFIG_FS_AUTOMOUNTER_DRIVER */
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
+#ifdef CONFIG_FS_AUTOMOUNTER_DRIVER
+static void automount_notify(FAR struct automounter_state_s *priv);
+
+static int  automount_open(FAR struct file *filep);
+static int  automount_close(FAR struct file *filep);
+static int  automount_ioctl(FAR struct file *filep, int cmd,
+                            unsigned long arg);
+#endif /* CONFIG_FS_AUTOMOUNTER_DRIVER */
+
 static int  automount_findinode(FAR const char *path);
 static void automount_mount(FAR struct automounter_state_s *priv);
 static int  automount_unmount(FAR struct automounter_state_s *priv);
-static void automount_timeout(int argc, uint32_t arg1, ...);
+static void automount_timeout(wdparm_t arg);
 static void automount_worker(FAR void *arg);
 static int  automount_interrupt(FAR const struct automount_lower_s *lower,
-              FAR void *arg, bool inserted);
+                                FAR void *arg, bool inserted);
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+#ifdef CONFIG_FS_AUTOMOUNTER_DRIVER
+static const struct file_operations g_automount_fops =
+{
+  automount_open,       /* open */
+  automount_close,      /* close */
+  NULL,                 /* read */
+  NULL,                 /* write */
+  NULL,                 /* seek */
+  automount_ioctl,      /* ioctl */
+};
+#endif /* CONFIG_FS_AUTOMOUNTER_DRIVER */
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+#ifdef CONFIG_FS_AUTOMOUNTER_DRIVER
+
+/****************************************************************************
+ * Name: automount_notify
+ ****************************************************************************/
+
+static void automount_notify(FAR struct automounter_state_s *priv)
+{
+  FAR struct automounter_open_s *opriv;
+  int ret;
+
+  /* Get exclusive access to the driver structure */
+
+  ret = nxmutex_lock(&priv->lock);
+  if (ret < 0)
+    {
+      ferr("ERROR: nxmutex_lock failed: %d\n", ret);
+      return;
+    }
+
+  /* Visit each opened reference to the device */
+
+  for (opriv = priv->ao_open; opriv != NULL; opriv = opriv->ao_flink)
+    {
+      /* Have any signal events occurred? */
+
+      if ((priv->mounted && opriv->ao_notify.an_mount) ||
+          (!priv->mounted && opriv->ao_notify.an_umount))
+        {
+          /* Yes.. Signal the waiter */
+
+          opriv->ao_notify.an_event.sigev_value.sival_int = priv->mounted;
+          nxsig_notification(opriv->ao_pid, &opriv->ao_notify.an_event,
+                             SI_QUEUE, &opriv->ao_work);
+        }
+    }
+
+  nxmutex_unlock(&priv->lock);
+}
+
+/****************************************************************************
+ * Name: automount_open
+ ****************************************************************************/
+
+static int automount_open(FAR struct file *filep)
+{
+  FAR struct inode *inode = filep->f_inode;
+  FAR struct automounter_state_s *priv = inode->i_private;
+  FAR struct automounter_open_s *opriv;
+  int ret;
+
+  /* Get exclusive access to the driver structure */
+
+  ret = nxmutex_lock(&priv->lock);
+  if (ret < 0)
+    {
+      ferr("ERROR: nxmutex_lock failed: %d\n", ret);
+      return ret;
+    }
+
+  /* Allocate a new open structure */
+
+  opriv = fs_heap_zalloc(sizeof(struct automounter_open_s));
+  if (opriv == NULL)
+    {
+      ferr("ERROR: Failed to allocate open structure\n");
+      ret = -ENOMEM;
+      goto errout_with_lock;
+    }
+
+  /* Attach the open structure to the device */
+
+  opriv->ao_flink = priv->ao_open;
+  priv->ao_open = opriv;
+
+  /* Attach the open structure to the file structure */
+
+  filep->f_priv = (FAR void *)opriv;
+  ret = OK;
+
+errout_with_lock:
+  nxmutex_unlock(&priv->lock);
+  return ret;
+}
+
+/****************************************************************************
+ * Name: automount_close
+ ****************************************************************************/
+
+static int automount_close(FAR struct file *filep)
+{
+  FAR struct inode *inode;
+  FAR struct automounter_state_s *priv;
+  FAR struct automounter_open_s *opriv;
+  FAR struct automounter_open_s *curr;
+  FAR struct automounter_open_s *prev;
+  int ret;
+
+  DEBUGASSERT(filep->f_priv);
+  opriv = filep->f_priv;
+  inode = filep->f_inode;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
+
+  /* Get exclusive access to the driver structure */
+
+  ret = nxmutex_lock(&priv->lock);
+  if (ret < 0)
+    {
+      ferr("ERROR: nxmutex_lock failed: %d\n", ret);
+      return ret;
+    }
+
+  /* Find the open structure in the list of open structures for the device */
+
+  for (prev = NULL, curr = priv->ao_open;
+       curr != NULL && curr != opriv;
+       prev = curr, curr = curr->ao_flink);
+
+  DEBUGASSERT(curr);
+  if (curr == NULL)
+    {
+      ferr("ERROR: Failed to find open entry\n");
+      ret = -ENOENT;
+      goto errout_with_lock;
+    }
+
+  /* Remove the structure from the device */
+
+  if (prev != NULL)
+    {
+      prev->ao_flink = opriv->ao_flink;
+    }
+  else
+    {
+      priv->ao_open = opriv->ao_flink;
+    }
+
+  /* Cancel any pending notification */
+
+  nxsig_cancel_notification(&opriv->ao_work);
+
+  /* And free the open structure */
+
+  fs_heap_free(opriv);
+
+  ret = OK;
+
+errout_with_lock:
+  nxmutex_unlock(&priv->lock);
+  return ret;
+}
+
+/****************************************************************************
+ * Name: automount_ioctl
+ ****************************************************************************/
+
+static int automount_ioctl(FAR struct file *filep, int cmd,
+                           unsigned long arg)
+{
+  FAR struct inode *inode;
+  FAR struct automounter_state_s *priv;
+  FAR struct automounter_open_s *opriv;
+  int ret;
+
+  DEBUGASSERT(filep->f_priv);
+  opriv = filep->f_priv;
+  inode = filep->f_inode;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
+
+  /* Get exclusive access to the driver structure */
+
+  ret = nxmutex_lock(&priv->lock);
+  if (ret < 0)
+    {
+      ferr("ERROR: nxmutex_lock failed: %d\n", ret);
+      return ret;
+    }
+
+  /* Handle the ioctl command */
+
+  ret = -EINVAL;
+  switch (cmd)
+    {
+      /* Command:     FIOC_NOTIFY
+       * Description: Register to receive a signal whenever volume is mounted
+       *              or unmounted by automounter.
+       * Argument:    A read-only pointer to an instance of struct
+       *              automount_notify_s
+       * Return:      Zero (OK) on success.  Minus one will be returned on
+       *              failure with the errno value set appropriately.
+       */
+
+      case FIOC_NOTIFY:
+        {
+          FAR struct automount_notify_s *notify =
+            (FAR struct automount_notify_s *)((uintptr_t)arg);
+
+          if (notify != NULL)
+            {
+              /* Save the notification events */
+
+              opriv->ao_notify.an_mount  = notify->an_mount;
+              opriv->ao_notify.an_umount = notify->an_umount;
+              opriv->ao_notify.an_event  = notify->an_event;
+              opriv->ao_pid              = nxsched_getpid();
+              ret = OK;
+            }
+        }
+        break;
+
+      default:
+        ferr("ERROR: Unrecognized command: %d\n", cmd);
+        ret = -ENOTTY;
+        break;
+    }
+
+  nxmutex_unlock(&priv->lock);
+  return ret;
+}
+#endif /* CONFIG_FS_AUTOMOUNTER_DRIVER */
 
 /****************************************************************************
  * Name: automount_findinode
@@ -104,7 +389,7 @@ static int  automount_interrupt(FAR const struct automount_lower_s *lower,
  *
  * Returned Value:
  *   OK_EXIST if the inode exists
- *   OK_NOENT if the indoe does not exist
+ *   OK_NOENT if the inode does not exist
  *   Negated errno if some failure occurs
  *
  ****************************************************************************/
@@ -114,17 +399,13 @@ static int automount_findinode(FAR const char *path)
   struct inode_search_s desc;
   int ret;
 
-  /* Make sure that we were given an absolute path */
+  /* Make sure that we were given a path */
 
-  DEBUGASSERT(path != NULL && path[0] == '/');
+  DEBUGASSERT(path != NULL);
 
   /* Get exclusive access to the in-memory inode tree. */
 
-  ret = inode_semtake();
-  if (ret < 0)
-    {
-      return ret;
-    }
+  inode_rlock();
 
   /* Find the inode */
 
@@ -158,7 +439,7 @@ static int automount_findinode(FAR const char *path)
 
   /* Relinquish our exclusive access to the inode try and return the result */
 
-  inode_semgive();
+  inode_runlock();
   RELEASE_SEARCH(&desc);
   return ret;
 }
@@ -218,21 +499,22 @@ static void automount_mount(FAR struct automounter_state_s *priv)
 
        /* Mount the file system */
 
-      ret = mount(lower->blockdev, lower->mountpoint, lower->fstype,
-                  0, NULL);
+      ret = nx_mount(lower->blockdev, lower->mountpoint, lower->fstype,
+                     0, NULL);
       if (ret < 0)
         {
-          int errcode = get_errno();
-          DEBUGASSERT(errcode > 0);
-
-          ferr("ERROR: Mount failed: %d\n", errcode);
-          UNUSED(errcode);
+          ferr("ERROR: Mount failed: %d\n", ret);
           return;
         }
 
       /* Indicate that the volume is mounted */
 
       priv->mounted = true;
+
+#ifdef CONFIG_FS_AUTOMOUNTER_DRIVER
+      automount_notify(priv);
+#endif /* CONFIG_FS_AUTOMOUNTER_DRIVER */
+
       break;
 
     default:
@@ -276,25 +558,22 @@ static int automount_unmount(FAR struct automounter_state_s *priv)
 
       /* Un-mount the volume */
 
-      ret = umount2(lower->mountpoint, MNT_FORCE);
+      ret = nx_umount2(lower->mountpoint, MNT_FORCE);
       if (ret < 0)
         {
-          int errcode = get_errno();
-          DEBUGASSERT(errcode > 0);
-
           /* We expect the error to be EBUSY meaning that the volume could
            * not be unmounted because there are currently reference via open
            * files or directories.
            */
 
-          if (errcode == EBUSY)
+          if (ret == -EBUSY)
             {
               finfo("WARNING: Volume is busy, try again later\n");
 
               /* Start a timer to retry the umount2 after a delay */
 
-              ret = wd_start(priv->wdog, lower->udelay, automount_timeout, 1,
-                             (uint32_t)((uintptr_t)priv));
+              ret = wd_start(&priv->wdog, lower->udelay,
+                             automount_timeout, (wdparm_t)priv);
               if (ret < 0)
                 {
                   ferr("ERROR: wd_start failed: %d\n", ret);
@@ -306,8 +585,8 @@ static int automount_unmount(FAR struct automounter_state_s *priv)
 
           else
             {
-              ferr("ERROR: umount2 failed: %d\n", errcode);
-              return -errcode;
+              ferr("ERROR: umount2 failed: %d\n", ret);
+              return ret;
             }
         }
 
@@ -320,7 +599,15 @@ static int automount_unmount(FAR struct automounter_state_s *priv)
        * media.  Nice job, Mr. user.
        */
 
-      priv->mounted = false;
+      if (priv->mounted)
+        {
+          priv->mounted = false;
+
+#ifdef CONFIG_FS_AUTOMOUNTER_DRIVER
+          automount_notify(priv);
+#endif /* CONFIG_FS_AUTOMOUNTER_DRIVER */
+        }
+
       return OK;
 
     default:
@@ -349,14 +636,14 @@ static int automount_unmount(FAR struct automounter_state_s *priv)
  *
  ****************************************************************************/
 
-static void automount_timeout(int argc, uint32_t arg1, ...)
+static void automount_timeout(wdparm_t arg)
 {
   FAR struct automounter_state_s *priv =
-    (FAR struct automounter_state_s *)((uintptr_t)arg1);
+    (FAR struct automounter_state_s *)arg;
   int ret;
 
   finfo("Timeout!\n");
-  DEBUGASSERT(argc == 1 && priv);
+  DEBUGASSERT(priv);
 
   /* Check the state of things.  This timeout at the interrupt level and
    * will cancel the timeout if there is any change in the insertion
@@ -372,8 +659,6 @@ static void automount_timeout(int argc, uint32_t arg1, ...)
   ret = work_queue(LPWORK, &priv->work, automount_worker, priv, 0);
   if (ret < 0)
     {
-      /* NOTE: Currently, work_queue only returns success */
-
       ferr("ERROR: Failed to schedule work: %d\n", ret);
     }
 }
@@ -485,15 +770,13 @@ static int automount_interrupt(FAR const struct automount_lower_s *lower,
                    priv->lower->ddelay);
   if (ret < 0)
     {
-      /* NOTE: Currently, work_queue only returns success */
-
       ferr("ERROR: Failed to schedule work: %d\n", ret);
     }
   else
     {
       /* Cancel any retry delays */
 
-      wd_cancel(priv->wdog);
+      wd_cancel(&priv->wdog);
     }
 
   return OK;
@@ -522,34 +805,32 @@ FAR void *automount_initialize(FAR const struct automount_lower_s *lower)
 {
   FAR struct automounter_state_s *priv;
   int ret;
+#ifdef CONFIG_FS_AUTOMOUNTER_DRIVER
+  FAR char *devpath = lib_get_pathbuffer();
+  if (devpath == NULL)
+    {
+      return NULL;
+    }
+#endif /* CONFIG_FS_AUTOMOUNTER_DRIVER */
 
   finfo("lower=%p\n", lower);
   DEBUGASSERT(lower);
 
   /* Allocate an auto-mounter state structure */
 
-  priv = (FAR struct automounter_state_s *)
-    kmm_zalloc(sizeof(struct automounter_state_s));
-
-  if (!priv)
+  priv = fs_heap_zalloc(sizeof(struct automounter_state_s));
+  if (priv == NULL)
     {
       ferr("ERROR: Failed to allocate state structure\n");
+#ifdef CONFIG_FS_AUTOMOUNTER_DRIVER
+      lib_put_pathbuffer(devpath);
+#endif /* CONFIG_FS_AUTOMOUNTER_DRIVER */
       return NULL;
     }
 
   /* Initialize the automounter state structure */
 
   priv->lower = lower;
-
-  /* Get a timer to handle unmount retries */
-
-  priv->wdog  = wd_create();
-  if (!priv->wdog)
-    {
-      ferr("ERROR: Failed to create a timer\n");
-      automount_uninitialize(priv);
-      return NULL;
-    }
 
   /* Handle the initial state of the mount on the caller's thread */
 
@@ -563,10 +844,31 @@ FAR void *automount_initialize(FAR const struct automount_lower_s *lower)
                    priv->lower->ddelay);
   if (ret < 0)
     {
-      /* NOTE: Currently, work_queue only returns success */
-
       ferr("ERROR: Failed to schedule work: %d\n", ret);
     }
+
+#ifdef CONFIG_FS_AUTOMOUNTER_DRIVER
+
+  /* Initialize the new automount driver instance */
+
+  nxmutex_init(&priv->lock);
+
+  /* Register driver */
+
+  snprintf(devpath, PATH_MAX,
+           CONFIG_FS_AUTOMOUNTER_VFS_PATH "%s", lower->mountpoint);
+
+  ret = register_driver(devpath, &g_automount_fops, 0444, priv);
+  lib_put_pathbuffer(devpath);
+  if (ret < 0)
+    {
+      ferr("ERROR: Failed to register automount driver: %d\n", ret);
+      automount_uninitialize(priv);
+      return NULL;
+    }
+
+  priv->registered = true;
+#endif /* CONFIG_FS_AUTOMOUNTER_DRIVER */
 
   /* Attach and enable automounter interrupts */
 
@@ -611,11 +913,30 @@ void automount_uninitialize(FAR void *handle)
   AUTOMOUNT_DISABLE(lower);
   AUTOMOUNT_DETACH(lower);
 
-  /* Release resources */
+#ifdef CONFIG_FS_AUTOMOUNTER_DRIVER
+  if (priv->registered)
+    {
+      FAR char *devpath = lib_get_pathbuffer();
+      if (devpath == NULL)
+        {
+          return;
+        }
 
-  wd_delete(priv->wdog);
+      snprintf(devpath, PATH_MAX,
+               CONFIG_FS_AUTOMOUNTER_VFS_PATH "%s", lower->mountpoint);
+
+      unregister_driver(devpath);
+      lib_put_pathbuffer(devpath);
+    }
+
+  nxmutex_destroy(&priv->lock);
+#endif /* CONFIG_FS_AUTOMOUNTER_DRIVER */
+
+  /* Cancel the watchdog timer */
+
+  wd_cancel(&priv->wdog);
 
   /* And free the state structure */
 
-  kmm_free(priv);
+  fs_heap_free(priv);
 }

@@ -1,42 +1,22 @@
 /****************************************************************************
  * wireless/ieee802154/mac802154_internal.h
  *
- *   Copyright (C) 2016 Sebastien Lorquet. All rights reserved.
- *   Copyright (C) 2017 Verge Inc. All rights reserved.
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
- *   Author: Anthony Merlino <anthony@vergeaero.com>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- *   The naming and comments for various fields are taken directly
- *   from the IEEE 802.15.4 2011 standard.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -57,6 +37,7 @@
 
 #include <nuttx/wdog.h>
 #include <nuttx/wqueue.h>
+#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 
 #include <nuttx/wireless/ieee802154/ieee802154_mac.h>
@@ -114,8 +95,8 @@ enum mac802154_operation_e
 };
 
 /* The privmac structure holds the internal state of the MAC and is the
- * underlying represention of the opaque MACHANDLE.  It contains storage for
- * the IEEE802.15.4 MIB attributes.
+ * underlying representation of the opaque MACHANDLE.  It contains storage
+ * for the IEEE802.15.4 MIB attributes.
  */
 
 struct ieee802154_privmac_s
@@ -126,8 +107,8 @@ struct ieee802154_privmac_s
   FAR struct mac802154_maccb_s   *cb;       /* Head of a list of MAC callbacks */
   FAR struct mac802154_radiocb_s radiocb;   /* Interface to bind to radio */
 
-  sem_t exclsem;                            /* Support exclusive access */
-  uint8_t nclients;                         /* Number of notification clients */
+  mutex_t                        lock;      /* Support exclusive access */
+  uint8_t                        nclients;  /* Number of notification clients */
 
   /* Only support a single command at any given time. As of now I see no
    * condition where you need to have more than one command frame
@@ -219,7 +200,7 @@ struct ieee802154_privmac_s
 
   /****************** Fields related to offloading work *********************/
 
-  /* Work structures for offloading aynchronous work */
+  /* Work structures for offloading asynchronous work */
 
   struct work_s txdone_work;
   struct work_s rx_work;
@@ -327,20 +308,20 @@ struct ieee802154_privmac_s
  ****************************************************************************/
 
 int  mac802154_txdesc_alloc(FAR struct ieee802154_privmac_s *priv,
-      FAR struct ieee802154_txdesc_s **txdesc, bool allow_interrupt);
+                            FAR struct ieee802154_txdesc_s **txdesc);
 
 void mac802154_setupindirect(FAR struct ieee802154_privmac_s *priv,
-      FAR struct ieee802154_txdesc_s *txdesc);
+                             FAR struct ieee802154_txdesc_s *txdesc);
 
 void mac802154_createdatareq(FAR struct ieee802154_privmac_s *priv,
-      FAR struct ieee802154_addr_s *coordaddr,
-      enum ieee802154_addrmode_e srcmode,
-      FAR struct ieee802154_txdesc_s *txdesc);
+                             FAR struct ieee802154_addr_s *coordaddr,
+                             enum ieee802154_addrmode_e srcmode,
+                             FAR struct ieee802154_txdesc_s *txdesc);
 
 void mac802154_updatebeacon(FAR struct ieee802154_privmac_s *priv);
 
 void mac802154_notify(FAR struct ieee802154_privmac_s *priv,
-      FAR struct ieee802154_primitive_s *primitive);
+                      FAR struct ieee802154_primitive_s *primitive);
 
 /****************************************************************************
  * Helper Macros/Inline Functions
@@ -370,7 +351,8 @@ void mac802154_notify(FAR struct ieee802154_privmac_s *priv,
 #define mac802154_puteaddr(iob, eaddr) \
   do \
     { \
-      for (int index = IEEE802154_EADDRSIZE - 1; index >= 0; index--) \
+      int index; \
+      for (index = IEEE802154_EADDRSIZE - 1; index >= 0; index--) \
         { \
           iob->io_data[iob->io_len++] = eaddr[index]; \
         } \
@@ -401,7 +383,8 @@ void mac802154_notify(FAR struct ieee802154_privmac_s *priv,
 #define mac802154_takeeaddr(iob, eaddr) \
   do \
     { \
-      for (int index = IEEE802154_EADDRSIZE - 1; index >= 0; index--) \
+      int index; \
+      for (index = IEEE802154_EADDRSIZE - 1; index >= 0; index--) \
         { \
           eaddr[index] = iob->io_data[iob->io_offset++]; \
         } \
@@ -532,62 +515,12 @@ void mac802154_notify(FAR struct ieee802154_privmac_s *priv,
 
 /* General helpers **********************************************************/
 
-#define mac802154_givesem(s) nxsem_post(s)
-
-static inline int mac802154_takesem(sem_t *sem, bool allowinterrupt)
-{
-  if (allowinterrupt)
-    {
-      return nxsem_wait(sem);
-    }
-  else
-    {
-      return nxsem_wait_uninterruptible(sem);
-    }
-}
-
-#ifdef CONFIG_MAC802154_LOCK_VERBOSE
-#define mac802154_unlock(dev) \
-  mac802154_givesem(&dev->exclsem); \
-  wlinfo("MAC unlocked\n");
-#else
-#define mac802154_unlock(dev) \
-  mac802154_givesem(&dev->exclsem);
-#endif
-
-#define mac802154_lock(dev, allowinterrupt) \
-  mac802154_lockpriv(dev, allowinterrupt, __FUNCTION__)
-
-static inline int
-mac802154_lockpriv(FAR struct ieee802154_privmac_s *dev,
-                   bool allowinterrupt, FAR const char *funcname)
-{
-  int ret;
-
-#ifdef CONFIG_MAC802154_LOCK_VERBOSE
-  wlinfo("Locking MAC: %s\n", funcname);
-#endif
-  ret = mac802154_takesem(&dev->exclsem, allowinterrupt);
-  if (ret < 0)
-    {
-      wlwarn("Failed to lock MAC\n");
-    }
-  else
-    {
-#ifdef CONFIG_MAC802154_LOCK_VERBOSE
-      wlinfo("MAC locked\n");
-#endif
-    }
-
-  return ret;
-}
-
 static inline void
 mac802154_txdesc_free(FAR struct ieee802154_privmac_s *priv,
                       FAR struct ieee802154_txdesc_s *txdesc)
 {
   sq_addlast((FAR sq_entry_t *)txdesc, &priv->txdesc_queue);
-  mac802154_givesem(&priv->txdesc_sem);
+  nxsem_post(&priv->txdesc_sem);
 }
 
 /****************************************************************************
@@ -613,7 +546,7 @@ mac802154_symtoticks(FAR struct ieee802154_privmac_s *priv, uint32_t symbols)
    */
 
   priv->radio->getattr(priv->radio, IEEE802154_ATTR_PHY_SYMBOL_DURATION,
-                        &attrval);
+                       &attrval);
 
   /* After this step, ret represents microseconds */
 
@@ -626,11 +559,11 @@ mac802154_symtoticks(FAR struct ieee802154_privmac_s *priv, uint32_t symbols)
 
   if (ret % USEC_PER_TICK == 0)
     {
-      ret = ret / USEC_PER_TICK;
+      ret /= USEC_PER_TICK;
     }
   else
     {
-      ret = ret / USEC_PER_TICK;
+      ret /= USEC_PER_TICK;
       ret++;
     }
 
@@ -716,7 +649,7 @@ mac802154_setchannel(FAR struct ieee802154_privmac_s *priv,
                      uint8_t channel)
 {
   priv->radio->setattr(priv->radio, IEEE802154_ATTR_PHY_CHAN,
-                        (FAR const union ieee802154_attr_u *)&channel);
+                       (FAR const union ieee802154_attr_u *)&channel);
 }
 
 static inline void
@@ -724,7 +657,7 @@ mac802154_setchpage(FAR struct ieee802154_privmac_s *priv,
                     uint8_t chpage)
 {
   priv->radio->setattr(priv->radio, IEEE802154_ATTR_PHY_CURRENT_PAGE,
-                        (FAR const union ieee802154_attr_u *)&chpage);
+                       (FAR const union ieee802154_attr_u *)&chpage);
 }
 
 static inline void
@@ -733,7 +666,7 @@ mac802154_setpanid(FAR struct ieee802154_privmac_s *priv,
 {
   IEEE802154_PANIDCOPY(priv->addr.panid, panid);
   priv->radio->setattr(priv->radio, IEEE802154_ATTR_MAC_PANID,
-                        (FAR const union ieee802154_attr_u *)panid);
+                       (FAR const union ieee802154_attr_u *)panid);
 }
 
 static inline void
@@ -742,7 +675,7 @@ mac802154_setsaddr(FAR struct ieee802154_privmac_s *priv,
 {
   IEEE802154_SADDRCOPY(priv->addr.saddr, saddr);
   priv->radio->setattr(priv->radio, IEEE802154_ATTR_MAC_SADDR,
-                        (FAR const union ieee802154_attr_u *)saddr);
+                       (FAR const union ieee802154_attr_u *)saddr);
 }
 
 static inline void
@@ -751,7 +684,7 @@ mac802154_setcoordsaddr(FAR struct ieee802154_privmac_s *priv,
 {
   IEEE802154_SADDRCOPY(priv->pandesc.coordaddr.saddr, saddr);
   priv->radio->setattr(priv->radio, IEEE802154_ATTR_MAC_COORD_SADDR,
-                        (FAR const union ieee802154_attr_u *)saddr);
+                       (FAR const union ieee802154_attr_u *)saddr);
 }
 
 static inline void
@@ -760,7 +693,7 @@ mac802154_setcoordeaddr(FAR struct ieee802154_privmac_s *priv,
 {
   IEEE802154_EADDRCOPY(priv->pandesc.coordaddr.eaddr, eaddr);
   priv->radio->setattr(priv->radio, IEEE802154_ATTR_MAC_COORD_EADDR,
-                        (FAR const union ieee802154_attr_u *)eaddr);
+                       (FAR const union ieee802154_attr_u *)eaddr);
 }
 
 static inline void
@@ -769,9 +702,9 @@ mac802154_setcoordaddr(FAR struct ieee802154_privmac_s *priv,
 {
   memcpy(&priv->pandesc.coordaddr, addr, sizeof(struct ieee802154_addr_s));
   priv->radio->setattr(priv->radio, IEEE802154_ATTR_MAC_COORD_EADDR,
-                        (FAR const union ieee802154_attr_u *)addr->eaddr);
+                       (FAR const union ieee802154_attr_u *)addr->eaddr);
   priv->radio->setattr(priv->radio, IEEE802154_ATTR_MAC_COORD_SADDR,
-                        (FAR const union ieee802154_attr_u *)addr->saddr);
+                       (FAR const union ieee802154_attr_u *)addr->saddr);
 }
 
 static inline void
@@ -788,7 +721,7 @@ mac802154_setrxonidle(FAR struct ieee802154_privmac_s *priv, bool rxonidle)
     }
 
   priv->radio->setattr(priv->radio, IEEE802154_ATTR_MAC_RX_ON_WHEN_IDLE,
-                        (FAR const union ieee802154_attr_u *)&rxonidle);
+                       (FAR const union ieee802154_attr_u *)&rxonidle);
 }
 
 static inline void
@@ -796,7 +729,7 @@ mac802154_setdevmode(FAR struct ieee802154_privmac_s *priv, uint8_t mode)
 {
   priv->devmode = mode;
   priv->radio->setattr(priv->radio, IEEE802154_ATTR_MAC_DEVMODE,
-                        (FAR const union ieee802154_attr_u *)&mode);
+                       (FAR const union ieee802154_attr_u *)&mode);
 }
 
 #endif /* __WIRELESS_IEEE802154__MAC802154_INTERNAL_H */

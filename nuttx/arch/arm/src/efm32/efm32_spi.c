@@ -1,37 +1,22 @@
 /****************************************************************************
  * arch/arm/src/efm32/efm32_spi.c
  *
- *   Copyright (C) 2014, 2016-2017 Gregory Nutt. All rights reserved.
- *   Copyright (C) 2014 Bouteville Pierre-Noel. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *            Bouteville Pierre-Noel <pnb990@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -52,14 +37,13 @@
 #include <nuttx/arch.h>
 #include <nuttx/wdog.h>
 #include <nuttx/clock.h>
+#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/spi/spi.h>
 
 #include <arch/board/board.h>
 
-#include "up_internal.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "chip.h"
 #include "hardware/efm32_usart.h"
 #include "efm32_config.h"
@@ -126,7 +110,7 @@ struct efm32_spidev_s
   const struct efm32_spiconfig_s *config; /* Constant SPI hardware configuration */
 
 #ifdef CONFIG_EFM32_SPI_DMA
-  WDOG_ID wdog;              /* Timer to catch hung DMA */
+  struct wdog_s wdog;        /* Timer to catch hung DMA */
   volatile uint8_t rxresult; /* Result of the RX DMA */
   volatile uint8_t txresult; /* Result of the TX DMA */
   DMA_HANDLE rxdmach;        /* RX DMA channel handle */
@@ -135,7 +119,7 @@ struct efm32_spidev_s
   sem_t txdmasem;            /* Wait for TX DMA to complete */
 #endif
 
-  sem_t exclsem;             /* Supports mutually exclusive access */
+  mutex_t lock;              /* Supports mutually exclusive access */
   uint32_t frequency;        /* Requested clock frequency */
   uint32_t actual;           /* Actual clock frequency */
   uint8_t mode;              /* Mode 0,1,2,3 */
@@ -161,7 +145,7 @@ static void      spi_wait_status(const struct efm32_spiconfig_s *config,
 /* DMA support */
 
 #ifdef CONFIG_EFM32_SPI_DMA
-static void      spi_dma_timeout(int argc, uint32_t arg1, ...);
+static void      spi_dma_timeout(wdparm_t arg);
 static void      spi_dmarxwait(struct efm32_spidev_s *priv);
 static void      spi_dmatxwait(struct efm32_spidev_s *priv);
 static inline void spi_dmarxwakeup(struct efm32_spidev_s *priv);
@@ -175,8 +159,8 @@ static void      spi_dmarxsetup(struct efm32_spidev_s *priv,
 static void      spi_dmatxsetup(struct efm32_spidev_s *priv,
                    const void *txbuffer, const void *txdummy,
                    size_t nwords);
-static inline void spi_dmarxstart(FAR struct efm32_spidev_s *priv);
-static inline void spi_dmatxstart(FAR struct efm32_spidev_s *priv);
+static inline void spi_dmarxstart(struct efm32_spidev_s *priv);
+static inline void spi_dmatxstart(struct efm32_spidev_s *priv);
 #endif
 
 /* SPI methods */
@@ -189,7 +173,7 @@ static uint32_t  spi_setfrequency(struct spi_dev_s *dev,
 static void      spi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode);
 static void      spi_setbits(struct spi_dev_s *dev, int nbits);
 #ifdef CONFIG_SPI_HWFEATURES
-static int       spi_hwfeatures(FAR struct spi_dev_s *dev,
+static int       spi_hwfeatures(struct spi_dev_s *dev,
                                 spi_hwfeatures_t features);
 #endif
 static uint8_t   spi_status(struct spi_dev_s *dev, uint32_t devid);
@@ -244,7 +228,15 @@ static const struct spi_ops_s g_spiops =
 #ifdef CONFIG_EFM32_USART0_ISSPI
 /* Support for SPI on USART0 */
 
-static struct efm32_spidev_s g_spi0dev;
+static struct efm32_spidev_s g_spi0dev =
+{
+#ifdef CONFIG_EFM32_SPI_DMA
+  .rxdmasem = SEM_INITIALIZER(0),
+  .txdmasem = SEM_INITIALIZER(0),
+#endif
+  .lock = NXMUTEX_INITIALIZER,
+};
+
 static const struct efm32_spiconfig_s g_spi0config =
 {
   .base              = EFM32_USART0_BASE,
@@ -267,7 +259,15 @@ static const struct efm32_spiconfig_s g_spi0config =
 #ifdef CONFIG_EFM32_USART1_ISSPI
 /* Support for SPI on USART1 */
 
-static struct efm32_spidev_s g_spi1dev;
+static struct efm32_spidev_s g_spi1dev =
+{
+#ifdef CONFIG_EFM32_SPI_DMA
+  .rxdmasem = SEM_INITIALIZER(0),
+  .txdmasem = SEM_INITIALIZER(0),
+#endif
+  .lock = NXMUTEX_INITIALIZER,
+};
+
 static const struct efm32_spiconfig_s g_spi1config =
 {
   .base              = EFM32_USART1_BASE,
@@ -290,7 +290,15 @@ static const struct efm32_spiconfig_s g_spi1config =
 #ifdef CONFIG_EFM32_USART2_ISSPI
 /* Support for SPI on USART2 */
 
-static struct efm32_spidev_s g_spi2dev;
+static struct efm32_spidev_s g_spi2dev =
+{
+#ifdef CONFIG_EFM32_SPI_DMA
+  .rxdmasem = SEM_INITIALIZER(0),
+  .txdmasem = SEM_INITIALIZER(0),
+#endif
+  .lock = NXMUTEX_INITIALIZER,
+};
+
 static const struct efm32_spiconfig_s g_spi2config =
 {
   .base              = EFM32_USART2_BASE,
@@ -407,9 +415,9 @@ static void spi_wait_status(const struct efm32_spiconfig_s *config,
  ****************************************************************************/
 
 #ifdef CONFIG_EFM32_SPI_DMA
-static void spi_dma_timeout(int argc, uint32_t arg1, ...)
+static void spi_dma_timeout(wdparm_t arg)
 {
-  struct efm32_spidev_s *priv = (struct efm32_spidev_s *)((uintptr_t)arg1);
+  struct efm32_spidev_s *priv = (struct efm32_spidev_s *)arg;
 
   /* Mark DMA timeout error and wakeup form RX and TX waiters */
 
@@ -452,7 +460,7 @@ static void spi_dmarxwait(struct efm32_spidev_s *priv)
   DEBUGASSERT(priv->rxresult != EINPROGRESS);
   if (priv->txresult != EINPROGRESS)
     {
-      wd_cancel(priv->wdog);
+      wd_cancel(&priv->wdog);
     }
 
   leave_critical_section(flags);
@@ -482,7 +490,7 @@ static void spi_dmatxwait(struct efm32_spidev_s *priv)
   DEBUGASSERT(priv->txresult != EINPROGRESS);
   if (priv->rxresult != EINPROGRESS)
     {
-      wd_cancel(priv->wdog);
+      wd_cancel(&priv->wdog);
     }
 
   leave_critical_section(flags);
@@ -686,7 +694,7 @@ static void spi_dmatxsetup(struct efm32_spidev_s *priv, const void *txbuffer,
  ****************************************************************************/
 
 #ifdef CONFIG_EFM32_SPI_DMA
-static void spi_dmarxstart(FAR struct efm32_spidev_s *priv)
+static void spi_dmarxstart(struct efm32_spidev_s *priv)
 {
   priv->rxresult = EINPROGRESS;
   efm32_dmastart(priv->rxdmach, spi_dmarxcallback, priv);
@@ -702,7 +710,7 @@ static void spi_dmarxstart(FAR struct efm32_spidev_s *priv)
  ****************************************************************************/
 
 #ifdef CONFIG_EFM32_SPI_DMA
-static inline void spi_dmatxstart(FAR struct efm32_spidev_s *priv)
+static inline void spi_dmatxstart(struct efm32_spidev_s *priv)
 {
   priv->txresult = EINPROGRESS;
   efm32_dmastart(priv->txdmach, spi_dmatxcallback, priv);
@@ -737,11 +745,11 @@ static int spi_lock(struct spi_dev_s *dev, bool lock)
 
   if (lock)
     {
-      ret = nxsem_wait_uninterruptible(&priv->exclsem);
+      ret = nxmutex_lock(&priv->lock);
     }
   else
     {
-      ret = nxsem_post(&priv->exclsem);
+      ret = nxmutex_unlock(&priv->lock);
     }
 
   return ret;
@@ -1044,8 +1052,8 @@ static void spi_setbits(struct spi_dev_s *dev, int nbits)
       regval |= setting;
       spi_putreg(config, EFM32_USART_FRAME_OFFSET, regval);
 
-      /* Save the selection so the subsequence re-configurations will be
-       * faster
+      /* Save the selection so that subsequent re-configurations will be
+       * faster.
        */
 
       priv->nbits = nbits;
@@ -1069,7 +1077,7 @@ static void spi_setbits(struct spi_dev_s *dev, int nbits)
  ****************************************************************************/
 
 #ifdef CONFIG_SPI_HWFEATURES
-static int spi_hwfeatures(FAR struct spi_dev_s *dev,
+static int spi_hwfeatures(struct spi_dev_s *dev,
                           spi_hwfeatures_t features)
 {
 #ifdef CONFIG_SPI_BITORDER
@@ -1105,8 +1113,8 @@ static int spi_hwfeatures(FAR struct spi_dev_s *dev,
 
       spi_putreg(config, EFM32_USART_CTRL_OFFSET, regval);
 
-      /* Save the selection so the subsequence re-configurations will be
-       * faster
+      /* Save the selection so that subsequent re-configurations will be
+       * faster.
        */
 
       priv->lsbfirst = lsbfirst;
@@ -1232,7 +1240,7 @@ static uint32_t spi_send(struct spi_dev_s *dev, uint32_t wd)
   spi_wait_status(config, _USART_STATUS_RXDATAV_MASK, USART_STATUS_RXDATAV);
   ret = spi_getreg(config, EFM32_USART_RXDATA_OFFSET);
 
-  spiinfo("Sent: %04x Return: %04x \n", wd, ret);
+  spiinfo("Sent: %04x Return: %04x\n", wd, ret);
   return ret;
 }
 
@@ -1465,8 +1473,8 @@ static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
        * when both RX and TX transfers complete.
        */
 
-      ret = wd_start(priv->wdog, (int)ticks, spi_dma_timeout, 1,
-                     (uint32_t)priv);
+      ret = wd_start(&priv->wdog, ticks,
+                     spi_dma_timeout, (wdparm_t)priv);
       if (ret < 0)
         {
           spierr("ERROR: Failed to start timeout: %d\n", ret);
@@ -1595,10 +1603,6 @@ static int spi_portinitialize(struct efm32_spidev_s *priv)
 
   spi_putreg(config, EFM32_USART_CMD_OFFSET, USART_CMD_MASTEREN);
 
-  /* Initialize the SPI semaphore that enforces mutually exclusive access */
-
-  nxsem_init(&priv->exclsem, 0, 1);
-
 #ifdef CONFIG_EFM32_SPI_DMA
   /* Allocate two DMA channels... one for the RX and one for the TX side of
    * the transfer.
@@ -1619,27 +1623,6 @@ static int spi_portinitialize(struct efm32_spidev_s *priv)
              port);
       goto errout_with_rxdmach;
     }
-
-  /* Allocate a timer to catch hung DMA transfers */
-
-  priv->wdog = wd_create();
-  if (!priv->wdog)
-    {
-      spierr("ERROR: Failed to create a timer for SPI port: %d\n", port);
-      goto errout_with_txdmach;
-    }
-
-  /* Initialized semaphores used to wait for DMA completion */
-
-  nxsem_init(&priv->rxdmasem, 0, 0);
-  nxsem_init(&priv->txdmasem, 0, 0);
-
-  /* These semaphores are used for signaling and, hence, should not have
-   * priority inheritance enabled.
-   */
-
-  nxsem_setprotocol(&priv->rxdmasem, SEM_PRIO_NONE);
-  nxsem_setprotocol(&priv->txdmasem, SEM_PRIO_NONE);
 #endif
 
   /* Enable SPI */

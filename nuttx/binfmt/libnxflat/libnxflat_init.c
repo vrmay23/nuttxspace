@@ -1,35 +1,22 @@
 /****************************************************************************
  * binfmt/libnxflat/libnxflat_init.c
  *
- *   Copyright (C) 2009, 2018-2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -51,12 +38,14 @@
 #include <nuttx/fs/fs.h>
 #include <nuttx/binfmt/nxflat.h>
 
+#include "libnxflat.h"
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* CONFIG_DEBUG_FEATURES, CONFIG_DEBUG_INFO, and CONFIG_DEBUG_BINFMT have to be
- * defined or CONFIG_NXFLAT_DUMPBUFFER does nothing.
+/* CONFIG_DEBUG_FEATURES, CONFIG_DEBUG_INFO, and CONFIG_DEBUG_BINFMT have to
+ * be defined or CONFIG_NXFLAT_DUMPBUFFER does nothing.
  */
 
 #if !defined(CONFIG_DEBUG_INFO) || !defined (CONFIG_DEBUG_BINFMT)
@@ -64,9 +53,9 @@
 #endif
 
 #ifdef CONFIG_NXFLAT_DUMPBUFFER
-# define nxflat_dumpbuffer(m,b,n) binfodumpbuffer(m,b,n)
+#  define nxflat_dumpbuffer(m,b,n) binfodumpbuffer(m,b,n)
 #else
-# define nxflat_dumpbuffer(m,b,n)
+#  define nxflat_dumpbuffer(m,b,n)
 #endif
 
 /****************************************************************************
@@ -109,10 +98,9 @@ int nxflat_init(const char *filename, struct nxflat_loadinfo_s *loadinfo)
 
   /* Open the binary file */
 
-  loadinfo->filfd = nx_open(filename, O_RDONLY);
-  if (loadinfo->filfd < 0)
+  ret = file_open(&loadinfo->file, filename, O_RDONLY | O_CLOEXEC);
+  if (ret < 0)
     {
-      ret = loadinfo->filfd;
       berr("ERROR: Failed to open NXFLAT binary %s: %d\n", filename, ret);
       return ret;
     }
@@ -124,7 +112,7 @@ int nxflat_init(const char *filename, struct nxflat_loadinfo_s *loadinfo)
   if (ret < 0)
     {
       berr("ERROR: Failed to read NXFLAT header: %d\n", ret);
-      close(loadinfo->filfd);
+      file_close(&loadinfo->file);
       return ret;
     }
 
@@ -137,13 +125,13 @@ int nxflat_init(const char *filename, struct nxflat_loadinfo_s *loadinfo)
     {
       /* This is not an error because we will be called to attempt loading
        * EVERY binary.  Returning -ENOEXEC simply informs the system that
-       * the file is not an NXFLAT file.  Besides, if there is something worth
-       * complaining about, nnxflat_verifyheader() has already
+       * the file is not an NXFLAT file.  Besides, if there is something
+       * worth complaining about, nnxflat_verifyheader() has already
        * done so.
        */
 
       berr("ERROR: Bad NXFLAT header\n");
-      close(loadinfo->filfd);
+      file_close(&loadinfo->file);
       return -ENOEXEC;
     }
 
@@ -153,9 +141,9 @@ int nxflat_init(const char *filename, struct nxflat_loadinfo_s *loadinfo)
    * network order.
    */
 
-  datastart             = ntohl(loadinfo->header.h_datastart);
-  dataend               = ntohl(loadinfo->header.h_dataend);
-  bssend                = ntohl(loadinfo->header.h_bssend);
+  datastart             = NTOHL(loadinfo->header.h_datastart);
+  dataend               = NTOHL(loadinfo->header.h_dataend);
+  bssend                = NTOHL(loadinfo->header.h_bssend);
 
   /* And put this information into the loadinfo structure as well.
    *
@@ -166,12 +154,12 @@ int nxflat_init(const char *filename, struct nxflat_loadinfo_s *loadinfo)
    *   bsssize    = the address range from dataend up to bssend.
    */
 
-  loadinfo->entryoffs   = ntohl(loadinfo->header.h_entry);
+  loadinfo->entryoffs   = NTOHL(loadinfo->header.h_entry);
   loadinfo->isize       = datastart;
 
   loadinfo->datasize    = dataend - datastart;
   loadinfo->bsssize     = bssend - dataend;
-  loadinfo->stacksize   = ntohl(loadinfo->header.h_stacksize);
+  loadinfo->stacksize   = NTOHL(loadinfo->header.h_stacksize);
 
   /* This is the initial dspace size.  We'll re-calculate this later
    * after the memory has been allocated.
@@ -183,8 +171,8 @@ int nxflat_init(const char *filename, struct nxflat_loadinfo_s *loadinfo)
    * this later).
    */
 
-  loadinfo->relocstart  = ntohl(loadinfo->header.h_relocstart);
-  loadinfo->reloccount  = ntohs(loadinfo->header.h_reloccount);
+  loadinfo->relocstart  = NTOHL(loadinfo->header.h_relocstart);
+  loadinfo->reloccount  = NTOHS(loadinfo->header.h_reloccount);
 
   return 0;
 }

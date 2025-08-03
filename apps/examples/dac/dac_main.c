@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/dac/dac_main.c
+ * apps/examples/dac/dac_main.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Author: Juha Niskanen <juha.niskanen@haltian.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -47,6 +34,7 @@
 #include <unistd.h>
 
 #include <sys/ioctl.h>
+#include <sys/param.h>
 #include <nuttx/analog/dac.h>
 #include <nuttx/arch.h>
 
@@ -62,9 +50,12 @@
 #  define CONFIG_EXAMPLES_DAC_DEVPATH "/dev/dac0"
 #endif
 
-#ifndef ARRAY_SIZE
-#  define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#endif
+#define DEFAULT_COUNT          1
+#define DEFAULT_DELAY          0
+#define DEFAULT_CHANNEL        0
+#define DEFAULT_TEST_BIT_RES   8
+#define DEFAULT_TEST_STEP      8
+#define DEFAULT_INITIALIZED    true
 
 /****************************************************************************
  * Private Types
@@ -73,8 +64,8 @@
 struct command
 {
   FAR const char *name;
-  CODE int (* const cmd)(int argc, const char *argv[]);
-  const char *args;
+  CODE int (* const cmd)(int argc, FAR const char *argv[]);
+  FAR const char *args;
 };
 
 struct dac_state_s
@@ -83,6 +74,8 @@ struct dac_state_s
   int count;
   int delay;
   uint8_t channel;
+  int test_bit_res;
+  int test_step;
   bool initialized;
 };
 
@@ -92,6 +85,7 @@ struct dac_state_s
 
 static int cmd_dac_put(int argc, FAR const char *argv[]);
 static int cmd_dac_putv(int argc, FAR const char *argv[]);
+static int cmd_dac_test(int argc, FAR const char *argv[]);
 
 /****************************************************************************
  * Private Data
@@ -101,12 +95,32 @@ static const struct command commands[] =
 {
   { "put", cmd_dac_put, "DATA [DELAY]" },
   { "putv", cmd_dac_putv, "DATA [DATA...]" },
+  { "test", cmd_dac_test, "" },
 };
 
 static struct dac_state_s g_dacstate;
 
 /****************************************************************************
  * Private Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: dac_devpath
+ *
+ * Description:
+ *   Update the DAC device path in the DAC state structure. This function
+ *   manages memory allocation for the device path and frees the previous
+ *   path if it exists.
+ *
+ * Input Parameters:
+ *   dac     - Pointer to the DAC state structure.
+ *   devpath - New DAC device path to be set.
+ *
+ * Operation:
+ *   - Frees the existing DAC device path if it exists.
+ *   - Allocates memory for the new DAC device path.
+ *   - Updates the device path in the DAC state structure.
+ *
  ****************************************************************************/
 
 static void dac_devpath(FAR struct dac_state_s *dac,
@@ -120,12 +134,34 @@ static void dac_devpath(FAR struct dac_state_s *dac,
   dac->devpath = strdup(devpath);
 }
 
+/****************************************************************************
+ * Name: print_cmds
+ *
+ * Description:
+ *   Print a list of commands with their names, arguments, and a given header
+ *   and trailer. This function is used to display available
+ *   commands and their usage information.
+ *
+ * Input Parameters:
+ *   header  - Header string to be printed before the command list.
+ *   cmds    - Pointer to an array of command structures.
+ *   ncmds   - Number of commands in the array.
+ *   trailer - Trailer string to be printed after the command list.
+ *
+ * Operation:
+ *   - Prints the header.
+ *   - Iterates through the array of command structures and prints
+ *     their names, arguments, and a newline character after each command.
+ *   - Prints the trailer.
+ *
+ ****************************************************************************/
+
 static void print_cmds(FAR const char *header,
                        FAR const struct command *cmds,
                        size_t ncmds,
                        FAR const char *trailer)
 {
-  printf(header);
+  printf("%s", header);
   while (ncmds--)
     {
       printf("  %s %s %c", cmds->name, cmds->args,
@@ -133,8 +169,31 @@ static void print_cmds(FAR const char *header,
       cmds++;
     }
 
-  printf(trailer);
+  printf("%s", trailer);
 }
+
+/****************************************************************************
+ * Name: find_cmd
+ *
+ * Description:
+ *   Find a command structure in an array of commands by comparing command
+ *   names.
+ *
+ * Input Parameters:
+ *   name  - Name of the command to be found.
+ *   cmds  - Pointer to an array of command structures.
+ *   ncmds - Number of commands in the array.
+ *
+ * Returned Value:
+ *   Returns a pointer to the found command structure if successful; NULL
+ *   if the command is not found.
+ *
+ * Operation:
+ *   - Iterates through the array of command structures.
+ *   - Compares the name of each command with the specified name.
+ *   - Returns a pointer to the found command structure or NULL if not found.
+ *
+ ****************************************************************************/
 
 static const struct command *find_cmd(FAR const char *name,
                                       FAR const struct command *cmds,
@@ -153,6 +212,30 @@ static const struct command *find_cmd(FAR const char *name,
   return NULL;
 }
 
+/****************************************************************************
+ * Name: execute_cmd
+ *
+ * Description:
+ *   Execute a command function based on the command name.
+ *   This function finds the corresponding command structure in the
+ *   array and invokes the associated function.
+ *
+ * Input Parameters:
+ *   argc  - Number of command-line arguments.
+ *   argv  - Array of command-line argument strings.
+ *   cmds  - Pointer to an array of command structures.
+ *   ncmds - Number of commands in the array.
+ *
+ * Returned Value:
+ *   Returns the result of the executed command function.
+ *
+ * Operation:
+ *   - Finds the command structure for the specified command name.
+ *   - Invokes the associated command function with the provided arguments.
+ *   - Prints an error message if the command is not found.
+ *
+ ****************************************************************************/
+
 static int execute_cmd(int argc,
                        FAR const char *argv[],
                        FAR const struct command *cmds,
@@ -170,6 +253,35 @@ static int execute_cmd(int argc,
 
   return cmd->cmd(argc - 1, argv + 1);
 }
+
+/****************************************************************************
+ * Name: dac_put
+ *
+ * Description:
+ *   Write DAC messages to the specified DAC device. This function writes
+ *   multiple DAC messages, allowing the configuration of DAC channel and
+ *   data values. It handles potential write retries in case of non-blocking
+ *   write operations and provides debug information about the write process.
+ *
+ * Input Parameters:
+ *   devpath - Path to the DAC device.
+ *   msg     - Pointer to an array of DAC messages to be written.
+ *   nmsgs   - Number of DAC messages in the array.
+ *   delay   - Delay between writes in milliseconds.
+ *
+ * Returned Value:
+ *   Returns the number of successfully written messages on success; a
+ *   negated errno value on failure.
+ *
+ * Operation:
+ *   - Opens the specified DAC device for writing.
+ *   - Iterates through the array of DAC messages and writes
+ *       them to the device.
+ *   - Handles non-blocking writes, retries on EAGAIN, and provides
+ *       debug output.
+ *   - Closes the DAC device after completing the write operations.
+ *
+ ****************************************************************************/
 
 static int dac_put(FAR const char *devpath,
                    FAR struct dac_msg_s *msg,
@@ -208,7 +320,8 @@ static int dac_put(FAR const char *devpath,
         }
       else
         {
-          printf("wrote: chan=%d, data=%d\n", msg[i].am_channel, msg[i].am_data);
+          printf("wrote: chan=%d, data=%" PRId32 "\n", msg[i].am_channel,
+                 msg[i].am_data);
           i++;
           retries = 0;
           ret = OK;
@@ -219,6 +332,32 @@ static int dac_put(FAR const char *devpath,
   close(fd);
   return (i > 0) ? i : ret;
 }
+
+/****************************************************************************
+ * Name: cmd_dac_put
+ *
+ * Description:
+ *   Execute the 'put' command, writing a specified DAC value to the DAC
+ *   device.
+ *
+ * Input Parameters:
+ *   argc - Number of command-line arguments.
+ *   argv - Array of command-line argument strings.
+ *
+ * Returned Value:
+ *   Returns OK on success; a negated errno value on failure.
+ *
+ * Operation:
+ *   - Parses the command-line arguments to extract the DAC value and delay.
+ *   - Overrides the "sticky" delay option if provided in the arguments.
+ *   - Repeats the DAC write operation for the specified number of times.
+ *
+ * Usage:
+ *  `put [value] [delay]`: Write the specified DAC value to the device.
+ *  - [value]: DAC value to be written (Default: 100).
+ *  - [delay]: Delay between writes in milliseconds.
+ *
+ ****************************************************************************/
 
 static int cmd_dac_put(int argc, FAR const char *argv[])
 {
@@ -240,12 +379,34 @@ static int cmd_dac_put(int argc, FAR const char *argv[])
     {
       msgs[0].am_channel = g_dacstate.channel;
       msgs[0].am_data = data;
-      ret = dac_put(g_dacstate.devpath, msgs, ARRAY_SIZE(msgs), delay);
+      ret = dac_put(g_dacstate.devpath, msgs, nitems(msgs), delay);
       printf("ret=%d\n", ret);
     }
 
   return ret;
 }
+
+/****************************************************************************
+ * Name: cmd_dac_putv
+ *
+ * Description:
+ *   Execute the 'putv' command, writing DAC values specified in the command
+ *   arguments to the DAC device. The command supports writing
+ *   multiple values in a single execution.
+ *
+ * Input Parameters:
+ *   argc - Number of command-line arguments.
+ *   argv - Array of command-line argument strings.
+ *
+ * Returned Value:
+ *   Returns OK on success; a negated errno value on failure.
+ *
+ * Operation:
+ *   - Parses the command-line arguments to extract DAC values.
+ *   - Constructs DAC messages with the specified channel and data values.
+ *   - Repeats the DAC write operation for the specified number of times.
+ *
+ ****************************************************************************/
 
 static int cmd_dac_putv(int argc, FAR const char *argv[])
 {
@@ -274,23 +435,147 @@ static int cmd_dac_putv(int argc, FAR const char *argv[])
   return ret;
 }
 
+/****************************************************************************
+ * Name: cmd_dac_test
+ *
+ * Description:
+ *   Perform DAC testing by generating a sequence of values and writing them
+ *   to the DAC device specified in the global DAC state structure.
+ *
+ * Input Parameters:
+ *   argc - Number of arguments in argv.
+ *   argv - Array of command-line argument strings.
+ *
+ * Returned Value:
+ *   Total return value, the sum of return values from write calls. Returns
+ *   a negative errno on failure.
+ *
+ * Note: Utilizing the parameters can make testing much easier. If you are
+ *   testing with one config test, you can change the constant definition for
+ *   default value at the top and simply run `nsh> dat test`
+ * If you want setup for multimeter testing, set appropriate delay between
+ *   writes (in ms). Example for 8 bit DAC using step in value of 16
+ *   nsh> dac -d 5000 -b 8 -s 16 test
+ * Example for oscilloscope test for 12 bit DAC:
+ *   nsh> dac -d 10 -b 12 -s 4 test
+ *
+ ****************************************************************************/
+
+static int cmd_dac_test(int argc, FAR const char *argv[])
+{
+  struct dac_msg_s msg;
+  int fd;
+  int i;
+  bool count_up;
+  uint32_t value = 0;
+  uint32_t max_value = (1 << g_dacstate.test_bit_res);
+  int ret = OK;
+  int total_ret = 0;
+
+  fd = open(g_dacstate.devpath, O_WRONLY | O_NONBLOCK);
+  if (fd < 0)
+    {
+      fprintf(stderr, "ERROR: open() failed: %d\n", errno);
+      return -ENODEV;
+    }
+
+  for (i = 0; i < g_dacstate.count; i++)
+    {
+      count_up = true;
+      value = 0;
+      while (count_up || value)
+        {
+          msg.am_channel = g_dacstate.channel;
+          msg.am_data = value;
+
+          if (count_up)
+            {
+              value += g_dacstate.test_step;
+              if (value >= max_value - 1)
+                {
+                  value = max_value - 1;
+                  count_up = false;
+                }
+            }
+          else
+            {
+              value -= g_dacstate.test_step;
+
+              /* Check if value is underflow */
+
+              if (value > UINT32_MAX - g_dacstate.test_step)
+                {
+                  value = 0;
+                }
+            }
+
+            ret = write(fd, &msg, sizeof(struct dac_msg_s));
+            total_ret += ret;
+            usleep(1000 * g_dacstate.delay);
+        }
+    }
+
+  close(fd);
+
+  return total_ret;
+}
+
+/****************************************************************************
+ * Name: dac_help
+ *
+ * Description:
+ *   Display the help message for the DAC testing application.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
 static void dac_help(void)
 {
   printf("Usage: dac [OPTIONS] command [CMD OPTIONS]\n");
-  printf("\nGlobal arguments are \"sticky\".  For example, once the DAC device is\n");
+  printf("\nGlobal arguments are \"sticky\".  "
+         "For example, once the DAC device is\n");
   printf("specified, that device will be re-used until it is changed.\n");
   printf("\n\"sticky\" OPTIONS include:\n");
   printf("  [-c channel] selects the DAC channel.  "
-         "Default: 0 Current: %d\n", g_dacstate.channel);
+         "Default: %d Current: %d\n", DEFAULT_CHANNEL, g_dacstate.channel);
   printf("  [-d delay] pause for DELAY ms between writes.  "
-         "Default: 0 Current: %d\n", g_dacstate.delay);
+         "Default: %d Current: %d\n", DEFAULT_DELAY, g_dacstate.delay);
   printf("  [-n count] repeats device write COUNT times.  "
-         "Default: 1 Current: %d\n", g_dacstate.count);
+         "Default: %d Current: %d\n", DEFAULT_COUNT, g_dacstate.count);
+  printf("  [-b bit_resolution] Test-specific config - set DAC bit"
+         " resolution  Default: %d Current: %d\n",
+         DEFAULT_TEST_BIT_RES, g_dacstate.test_bit_res);
+  printf("  [-s step] Test-specific config - test loop step  "
+         "Default: %d Current: %d\n",
+         DEFAULT_TEST_STEP, g_dacstate.test_step);
   printf("  [-p devpath] selects the DAC device.  "
          "Default: %s Current: %s\n",
-         CONFIG_EXAMPLES_DAC_DEVPATH, g_dacstate.devpath ? g_dacstate.devpath : "NONE");
-  print_cmds("\nCommands:\n", commands, ARRAY_SIZE(commands), "\n");
+         CONFIG_EXAMPLES_DAC_DEVPATH,
+         g_dacstate.devpath ? g_dacstate.devpath : "NONE");
+  printf("  [-h] Print this help and exit.\n");
+  print_cmds("\nCommands:\n", commands, nitems(commands), "\n");
 }
+
+/****************************************************************************
+ * Name: arg_string
+ *
+ * Description:
+ *   Extracts a string argument from a command-line option.
+ *
+ * Input Parameters:
+ *   arg   - Pointer to the current command-line argument being processed.
+ *   value - Pointer to store the extracted string argument.
+ *
+ * Returned Value:
+ *   Integer representing the number of arguments consumed
+ *   (2 if the option takes an additional argument, 1 otherwise).
+ *
+ ****************************************************************************/
 
 static int arg_string(FAR const char **arg, FAR const char **value)
 {
@@ -308,6 +593,26 @@ static int arg_string(FAR const char **arg, FAR const char **value)
     }
 }
 
+/****************************************************************************
+ * Name: arg_decimal
+ *
+ * Description:
+ *   Extracts a decimal value from a command-line option.
+ *
+ * Input Parameters:
+ *   arg   - Pointer to the current command-line argument being processed.
+ *   value - Pointer to store the extracted decimal value.
+ *
+ * Returned Value:
+ *   Integer representing the number of arguments consumed
+ *   (2 if the option takes an additional argument, 1 otherwise).
+ *
+ * Note:
+ *   Utilizes arg_string internally to extract the string argument
+ *   and then converts it to a long integer using strtol.
+ *
+ ****************************************************************************/
+
 static int arg_decimal(FAR const char **arg, FAR long *value)
 {
   FAR const char *string;
@@ -322,12 +627,12 @@ static int parse_args(FAR struct dac_state_s *dac,
                       int argc,
                       const char *argv[])
 {
-  FAR const char *ptr;
-  FAR const char *str;
-  long value;
-  int nargs;
-  int n;
-  int i;
+  FAR const char *ptr; /* Pointer to the current argument in argv */
+  FAR const char *str; /* Pointer to a string argument extracted from argv */
+  long value;          /* Numerical argument value */
+  int nargs;           /* Number of args consumed by the current option */
+  int n;               /* Total number of arguments processed */
+  int i;               /* Loop counter */
 
   for (i = n = 1; i < argc; )
     {
@@ -379,11 +684,42 @@ static int parse_args(FAR struct dac_state_s *dac,
             n += nargs;
             break;
 
+          case 'b':
+            nargs = arg_decimal(&argv[i], &value);
+            if (value < 0)
+              {
+                printf("Bit resolution must be non-negative: %ld\n", value);
+                exit(1);
+              }
+
+            dac->test_bit_res = (uint32_t)value;
+            i += nargs;
+            n += nargs;
+            break;
+
+          case 's':
+            nargs = arg_decimal(&argv[i], &value);
+            if (value < 0)
+              {
+                printf("Step must be non-negative: %ld\n", value);
+                exit(1);
+              }
+
+            dac->test_step = (uint32_t)value;
+            i += nargs;
+            n += nargs;
+            break;
+
           case 'p':
             nargs = arg_string(&argv[i], &str);
             dac_devpath(dac, str);
             i += nargs;
             n += nargs;
+            break;
+
+          case 'h':
+            dac_help();
+            exit(0);
             break;
 
           case '?':
@@ -401,6 +737,23 @@ static int parse_args(FAR struct dac_state_s *dac,
  * Public Functions
  ****************************************************************************/
 
+/****************************************************************************
+ * Name: main
+ *
+ * Description:
+ *   Entry point for the DAC testing application.
+ *   Initializes the DAC hardware and processes command-line
+ *   arguments to execute DAC testing commands.
+ *
+ * Input Parameters:
+ *   argc - Number of command-line arguments.
+ *   argv - Array of command-line argument strings.
+ *
+ * Returned Value:
+ *   EXIT_SUCCESS on success, EXIT_FAILURE on failure.
+ *
+ ****************************************************************************/
+
 int main(int argc, FAR const char *argv[])
 {
   int ret;
@@ -408,16 +761,19 @@ int main(int argc, FAR const char *argv[])
 
   if (!g_dacstate.initialized)
     {
-      /* Initialization of the DAC hardware must be performed by board-specific
-       * logic prior to running this test.
+      /* Initialization of the DAC hardware must be performed by
+       * board-specific logic prior to running this test.
        */
 
       /* Set the default values */
 
       dac_devpath(&g_dacstate, CONFIG_EXAMPLES_DAC_DEVPATH);
-      g_dacstate.count       = 1;
-      g_dacstate.channel     = 0; /* This seems to be ignored by driver. */
-      g_dacstate.initialized = true;
+      g_dacstate.delay         = DEFAULT_DELAY;
+      g_dacstate.count         = DEFAULT_COUNT;
+      g_dacstate.channel       = DEFAULT_CHANNEL;
+      g_dacstate.test_bit_res  = DEFAULT_TEST_BIT_RES;
+      g_dacstate.test_step     = DEFAULT_TEST_STEP;
+      g_dacstate.initialized   = DEFAULT_INITIALIZED;
     }
 
   /* Parse the command line */
@@ -434,7 +790,7 @@ int main(int argc, FAR const char *argv[])
     }
   else
     {
-      ret = execute_cmd(argc, argv, commands, ARRAY_SIZE(commands));
+      ret = execute_cmd(argc, argv, commands, nitems(commands));
     }
 
   return (ret >= 0) ? EXIT_SUCCESS : EXIT_FAILURE;

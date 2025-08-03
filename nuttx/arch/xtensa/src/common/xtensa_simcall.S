@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/xtensa/src/common/xtensa_simcall.S
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -24,7 +26,7 @@
 
 #include <nuttx/config.h>
 
-#include "xtensa_abi.h"
+#include <arch/xtensa/xtensa_abi.h>
 
 /****************************************************************************
  * Public Functions

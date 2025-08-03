@@ -1,35 +1,22 @@
 /****************************************************************************
  * sched/irq/irq_chain.c
  *
- *   Copyright (C) 2018 Pinecone Inc. All rights reserved.
- *   Author: Zhu GuanqQing <zhuguangqing@pinecone.net>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -38,6 +25,8 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+
+#include <assert.h>
 
 #include "irq/irq.h"
 
@@ -68,6 +57,7 @@ static struct irqchain_s g_irqchainpool[CONFIG_PREALLOC_IRQCHAIN];
  */
 
 static sq_queue_t g_irqchainfreelist;
+static spinlock_t g_irqchainlock = SP_UNLOCKED;
 
 /****************************************************************************
  * Private Functions
@@ -157,13 +147,16 @@ int irqchain_attach(int ndx, xcpt_t isr, FAR void *arg)
 {
   FAR struct irqchain_s *node;
   FAR struct irqchain_s *curr;
+  irqstate_t flags;
 
+  flags = spin_lock_irqsave(&g_irqchainlock);
   if (isr != irq_unexpected_isr)
     {
       if (g_irqvector[ndx].handler != irqchain_dispatch)
         {
           if (sq_count(&g_irqchainfreelist) < 2)
             {
+              spin_unlock_irqrestore(&g_irqchainlock, flags);
               return -ENOMEM;
             }
 
@@ -181,6 +174,7 @@ int irqchain_attach(int ndx, xcpt_t isr, FAR void *arg)
       node = (FAR struct irqchain_s *)sq_remfirst(&g_irqchainfreelist);
       if (node == NULL)
         {
+          spin_unlock_irqrestore(&g_irqchainlock, flags);
           return -ENOMEM;
         }
 
@@ -201,6 +195,7 @@ int irqchain_attach(int ndx, xcpt_t isr, FAR void *arg)
       irqchain_detach_all(ndx);
     }
 
+  spin_unlock_irqrestore(&g_irqchainlock, flags);
   return OK;
 }
 
@@ -214,24 +209,15 @@ int irqchain_detach(int irq, xcpt_t isr, FAR void *arg)
 
   if ((unsigned)irq < NR_IRQS)
     {
+      int ndx = IRQ_TO_NDX(irq);
       irqstate_t flags;
-      int ndx;
 
-#ifdef CONFIG_ARCH_MINIMAL_VECTORTABLE
-      /* Is there a mapping for this IRQ number? */
-
-      ndx = g_irqmap[irq];
-      if ((unsigned)ndx >= CONFIG_ARCH_NUSER_INTERRUPTS)
+      if (ndx < 0)
         {
-          /* No.. then return failure. */
-
-          return ret;
+          return ndx;
         }
-#else
-      ndx = irq;
-#endif
 
-      flags = enter_critical_section();
+      flags = spin_lock_irqsave(&g_irqchainlock);
 
       if (g_irqvector[ndx].handler == irqchain_dispatch)
         {
@@ -277,7 +263,7 @@ int irqchain_detach(int irq, xcpt_t isr, FAR void *arg)
           ret = irq_detach(irq);
         }
 
-      leave_critical_section(flags);
+      spin_unlock_irqrestore(&g_irqchainlock, flags);
     }
 
   return ret;

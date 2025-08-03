@@ -1,6 +1,8 @@
 ;**************************************************************************
 ; arch/z80/src/ze80/ez80_io.c
 ;
+; SPDX-License-Identifier: Apache-2.0
+;
 ; Licensed to the Apache Software Foundation (ASF) under one or more
 ; contributor license agreements.  See the NOTICE file distributed with
 ; this work for additional information regarding copyright ownership.  The
@@ -33,7 +35,7 @@
 ; Global Symbols Expported
 ;**************************************************************************
 
-	CONFIG_EZ80_Z80MODE equ 0
+CONFIG_EZ80_Z80MODE	equ	0
 
 ;**************************************************************************
 ; Code
@@ -54,7 +56,7 @@ _outp:
 	; Create a stack frame
 
 	push	ix
-	ld	ix, #0
+	ld	ix, 0
 	add	ix, sp
 
 	; Get the arguments from the stack
@@ -104,7 +106,7 @@ _inp:
 	; Create a stack frame
 
 	push	ix
-	ld	ix, #0
+	ld	ix, 0
 	add	ix, sp
 
 	; Get the arguments from the stack

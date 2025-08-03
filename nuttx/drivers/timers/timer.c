@@ -1,36 +1,22 @@
 /****************************************************************************
  * drivers/timers/timer.c
  *
- *   Copyright (C) 2014, 2016-2017 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *            Bob Doiron
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -50,25 +36,27 @@
 #include <debug.h>
 
 #include <nuttx/irq.h>
-#include <nuttx/kmalloc.h>
+#include <nuttx/lib/lib.h>
 #include <nuttx/signal.h>
 #include <nuttx/fs/fs.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 #include <nuttx/timers/timer.h>
+#include <sys/poll.h>
 
 #ifdef CONFIG_TIMER
 
 /****************************************************************************
- * Private Type Definitions
+ * Private Types
  ****************************************************************************/
 
 /* This structure describes the state of the upper half driver */
 
 struct timer_upperhalf_s
 {
-  sem_t exclsem;           /* Supports mutual exclusion */
+  mutex_t lock;            /* Supports mutual exclusion */
   uint8_t crefs;           /* The number of times the device has been opened */
   FAR char *path;          /* Registration path */
+  FAR struct pollfd *fds;
 
   /* The contained signal info */
 
@@ -88,11 +76,13 @@ static bool    timer_notifier(FAR uint32_t *next_interval_us, FAR void *arg);
 static int     timer_open(FAR struct file *filep);
 static int     timer_close(FAR struct file *filep);
 static ssize_t timer_read(FAR struct file *filep, FAR char *buffer,
-                 size_t buflen);
+                          size_t buflen);
 static ssize_t timer_write(FAR struct file *filep, FAR const char *buffer,
-                 size_t buflen);
+                           size_t buflen);
 static int     timer_ioctl(FAR struct file *filep, int cmd,
-                 unsigned long arg);
+                           unsigned long arg);
+static int     timer_poll(FAR struct file *filep,
+                          FAR struct pollfd *fds, bool setup);
 
 /****************************************************************************
  * Private Data
@@ -106,17 +96,16 @@ static const struct file_operations g_timerops =
   timer_write, /* write */
   NULL,        /* seek */
   timer_ioctl, /* ioctl */
-  NULL         /* poll */
-#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS
-  , NULL       /* unlink */
-#endif
+  NULL,        /* mmap */
+  NULL,        /* truncate */
+  timer_poll,  /* poll */
 };
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
-/************************************************************************************
+/****************************************************************************
  * Name: timer_notifier
  *
  * Description:
@@ -124,7 +113,7 @@ static const struct file_operations g_timerops =
  *
  * REVISIT: This function prototype is insufficient to support signaling
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 static bool timer_notifier(FAR uint32_t *next_interval_us, FAR void *arg)
 {
@@ -135,19 +124,20 @@ static bool timer_notifier(FAR uint32_t *next_interval_us, FAR void *arg)
 
   /* Signal the waiter.. if there is one */
 
-  nxsig_notification(notify->pid, &notify->event,
-                     SI_QUEUE, &upper->work);
+  poll_notify(&upper->fds, 1, POLLIN);
 
-  return true;
+  nxsig_notification(notify->pid, &notify->event, SI_QUEUE, &upper->work);
+
+  return notify->periodic;
 }
 
-/************************************************************************************
+/****************************************************************************
  * Name: timer_open
  *
  * Description:
  *   This function is called whenever the timer device is opened.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 static int timer_open(FAR struct file *filep)
 {
@@ -160,7 +150,7 @@ static int timer_open(FAR struct file *filep)
 
   /* Get exclusive access to the device structures */
 
-  ret = nxsem_wait(&upper->exclsem);
+  ret = nxmutex_lock(&upper->lock);
   if (ret < 0)
     {
       goto errout;
@@ -177,7 +167,7 @@ static int timer_open(FAR struct file *filep)
       /* More than 255 opens; uint8_t overflows to zero */
 
       ret = -EMFILE;
-      goto errout_with_sem;
+      goto errout_with_lock;
     }
 
   /* Save the new open count */
@@ -185,20 +175,20 @@ static int timer_open(FAR struct file *filep)
   upper->crefs = tmp;
   ret = OK;
 
-errout_with_sem:
-  nxsem_post(&upper->exclsem);
+errout_with_lock:
+  nxmutex_unlock(&upper->lock);
 
 errout:
   return ret;
 }
 
-/************************************************************************************
+/****************************************************************************
  * Name: timer_close
  *
  * Description:
  *   This function is called when the timer device is closed.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 static int timer_close(FAR struct file *filep)
 {
@@ -210,7 +200,7 @@ static int timer_close(FAR struct file *filep)
 
   /* Get exclusive access to the device structures */
 
-  ret = nxsem_wait(&upper->exclsem);
+  ret = nxmutex_lock(&upper->lock);
   if (ret < 0)
     {
       return ret;
@@ -225,32 +215,33 @@ static int timer_close(FAR struct file *filep)
       upper->crefs--;
     }
 
-  nxsem_post(&upper->exclsem);
+  nxmutex_unlock(&upper->lock);
   return OK;
 }
 
-/************************************************************************************
+/****************************************************************************
  * Name: timer_read
  *
  * Description:
  *   A dummy read method.  This is provided only to satisfy the VFS layer.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
-static ssize_t timer_read(FAR struct file *filep, FAR char *buffer, size_t buflen)
+static ssize_t timer_read(FAR struct file *filep, FAR char *buffer,
+                          size_t buflen)
 {
   /* Return zero -- usually meaning end-of-file */
 
   return 0;
 }
 
-/************************************************************************************
+/****************************************************************************
  * Name: timer_write
  *
  * Description:
  *   A dummy write method.  This is provided only to satisfy the VFS layer.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 static ssize_t timer_write(FAR struct file *filep, FAR const char *buffer,
                            size_t buflen)
@@ -258,14 +249,14 @@ static ssize_t timer_write(FAR struct file *filep, FAR const char *buffer,
   return 0;
 }
 
-/************************************************************************************
+/****************************************************************************
  * Name: timer_ioctl
  *
  * Description:
  *   The standard ioctl method.  This is where ALL of the timer work is
  *   done.
  *
- ************************************************************************************/
+ ****************************************************************************/
 
 static int timer_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
@@ -282,7 +273,7 @@ static int timer_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   /* Get exclusive access to the device structures */
 
-  ret = nxsem_wait(&upper->exclsem);
+  ret = nxmutex_lock(&upper->lock);
   if (ret < 0)
     {
       return ret;
@@ -301,14 +292,7 @@ static int timer_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       {
         /* Start the timer, resetting the time to the current timeout */
 
-        if (lower->ops->start)
-          {
-            ret = lower->ops->start(lower);
-          }
-        else
-          {
-            ret = -ENOSYS;
-          }
+        ret = TIMER_START(lower);
       }
       break;
 
@@ -321,8 +305,7 @@ static int timer_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       {
         /* Stop the timer */
 
-        DEBUGASSERT(lower->ops->stop != NULL); /* Required */
-        ret = lower->ops->stop(lower);
+        ret = TIMER_STOP(lower);
         nxsig_cancel_notification(&upper->work);
       }
       break;
@@ -338,21 +321,14 @@ static int timer_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
         /* Get the current timer status */
 
-        if (lower->ops->getstatus) /* Optional */
+        status = (FAR struct timer_status_s *)((uintptr_t)arg);
+        if (status)
           {
-            status = (FAR struct timer_status_s *)((uintptr_t)arg);
-            if (status)
-              {
-                ret = lower->ops->getstatus(lower, status);
-              }
-            else
-              {
-                ret = -EINVAL;
-              }
+            ret = TIMER_GETSTATUS(lower, status);
           }
         else
           {
-            ret = -ENOSYS;
+            ret = -EINVAL;
           }
       }
       break;
@@ -369,14 +345,7 @@ static int timer_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       {
         /* Set a new timeout value (and reset the timer) */
 
-        if (lower->ops->settimeout) /* Optional */
-          {
-            ret = lower->ops->settimeout(lower, (uint32_t)arg);
-          }
-        else
-          {
-            ret = -ENOSYS;
-          }
+        ret = TIMER_SETTIMEOUT(lower, (uint32_t)arg);
       }
       break;
 
@@ -393,7 +362,8 @@ static int timer_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         if (notify != NULL)
           {
             memcpy(&upper->notify, notify, sizeof(*notify));
-            ret = timer_setcallback((FAR void *)upper, timer_notifier, upper);
+            ret = timer_setcallback((FAR void *)upper, timer_notifier,
+                                    (FAR void *)upper);
           }
         else
           {
@@ -411,18 +381,13 @@ static int timer_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       {
         /*  Get the maximum supported timeout value */
 
-        if (lower->ops->maxtimeout) /* Optional */
-          {
-            ret = lower->ops->maxtimeout(lower, (uint32_t *)arg);
-          }
-        else
-          {
-            ret = -ENOSYS;
-          }
+        ret = TIMER_MAXTIMEOUT(lower, (FAR uint32_t *)arg);
       }
       break;
 
-    /* Any unrecognized IOCTL commands might be platform-specific ioctl commands */
+    /* Any unrecognized IOCTL commands might be platform-specific ioctl
+     * commands
+     */
 
     default:
       {
@@ -433,19 +398,52 @@ static int timer_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
          * method.
          */
 
-        if (lower->ops->ioctl) /* Optional */
-          {
-            ret = lower->ops->ioctl(lower, cmd, arg);
-          }
-        else
-          {
-            ret = -ENOSYS;
-          }
+        ret = TIMER_IOCTL(lower, cmd, arg);
       }
       break;
     }
 
-  nxsem_post(&upper->exclsem);
+  nxmutex_unlock(&upper->lock);
+  return ret;
+}
+
+/****************************************************************************
+ * Name: timer_poll
+ ****************************************************************************/
+
+static int timer_poll(FAR struct file *filep,
+                      FAR struct pollfd *fds, bool setup)
+{
+  FAR struct inode             *inode = filep->f_inode;
+  FAR struct timer_upperhalf_s *upper = inode->i_private;
+  irqstate_t flags;
+  int ret = OK;
+
+  if (upper == NULL || fds == NULL)
+    {
+      return -EINVAL;
+    }
+
+  flags = enter_critical_section();
+
+  if (setup)
+    {
+      if (upper->fds)
+        {
+          ret = -EBUSY;
+          goto errout;
+        }
+
+      upper->fds = fds;
+    }
+  else
+    {
+      upper->fds = NULL;
+    }
+
+errout:
+  leave_critical_section(flags);
+
   return ret;
 }
 
@@ -503,7 +501,7 @@ FAR void *timer_register(FAR const char *path,
    */
 
   upper->lower = lower;
-  nxsem_init(&upper->exclsem, 0, 1);
+  nxmutex_init(&upper->lock);
 
   /* Copy the registration path */
 
@@ -526,10 +524,10 @@ FAR void *timer_register(FAR const char *path,
   return (FAR void *)upper;
 
 errout_with_path:
-  kmm_free(upper->path);
+  lib_free(upper->path);
 
 errout_with_upper:
-  nxsem_destroy(&upper->exclsem);
+  nxmutex_destroy(&upper->lock);
   kmm_free(upper);
 
 errout:
@@ -566,8 +564,7 @@ void timer_unregister(FAR void *handle)
 
   /* Disable the timer */
 
-  DEBUGASSERT(lower->ops->stop); /* Required */
-  lower->ops->stop(lower);
+  TIMER_STOP(lower);
   nxsig_cancel_notification(&upper->work);
 
   /* Unregister the timer device */
@@ -576,8 +573,8 @@ void timer_unregister(FAR void *handle)
 
   /* Then free all of the driver resources */
 
-  nxsem_destroy(&upper->exclsem);
-  kmm_free(upper->path);
+  nxmutex_destroy(&upper->lock);
+  lib_free(upper->path);
   kmm_free(upper);
 }
 
@@ -614,7 +611,7 @@ int timer_setcallback(FAR void *handle, tccb_t callback, FAR void *arg)
 
   /* Check if the lower half driver supports the setcallback method */
 
-  if (lower->ops->setcallback != NULL) /* Optional */
+  if (lower->ops->setcallback != NULL)
     {
       /* Yes.. Defer the handler attachment to the lower half driver */
 

@@ -1,35 +1,22 @@
 /****************************************************************************
  * boards/arm/cxd56xx/common/src/cxd56_sensors.c
  *
- *   Copyright 2018 Sony Semiconductor Solutions Corporation
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of Sony Semiconductor Solutions Corporation nor
- *    the names of its contributors may be used to endorse or promote
- *    products derived from this software without specific prior written
- *    permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -66,6 +53,12 @@
 #  define _BMI160  1
 #else
 #  define _BMI160  0
+#endif
+
+#if defined(CONFIG_SENSORS_BMI270) || defined(CONFIG_SENSORS_BMI270_SCU)
+#  define _BMI270  1
+#else
+#  define _BMI270  0
 #endif
 
 #if defined(CONFIG_SENSORS_KX022) || defined(CONFIG_SENSORS_KX022_SCU)
@@ -122,7 +115,7 @@
 #  define _RPR0521RS  0
 #endif
 
-#if (_BMI160 + _KX022) > 1
+#if (_BMI160 + _BMI270 + _KX022) > 1
 #  error "Duplicate accelerometer sensor device."
 #endif
 
@@ -166,12 +159,12 @@
 #define _I2C_DEVICE_WOPATH(_name) _DEVICE_WOPATH(_name, SENSOR_I2C)
 #define _SPI_DEVICE_WOPATH(_name) _DEVICE_WOPATH(_name, SENSOR_SPI)
 
-/************************************************************************************
+/****************************************************************************
  * Private Types
- ************************************************************************************/
+ ****************************************************************************/
 
 typedef int (*_init_t)(int bus);
-typedef int (*_initdev_t)(FAR const char *devpath, int bus);
+typedef int (*_initdev_t)(const char *devpath, int bus);
 
 struct sensor_device_s
 {
@@ -192,10 +185,17 @@ struct sensor_device_s
 static struct sensor_device_s sensor_device[] =
 {
 #if defined(CONFIG_SENSORS_BMI160) || defined(CONFIG_SENSORS_BMI160_SCU)
-#  ifdef CONFIG_SENSORS_BMI160_I2C
+#  if defined(CONFIG_SENSORS_BMI160_I2C) || defined(CONFIG_SENSORS_BMI160_SCU_I2C)
   _I2C_DEVICE_WOPATH(bmi160), /* Accel + Gyro */
 #  else /* CONFIG_SENSORS_BMI160_SPI */
   _SPI_DEVICE_WOPATH(bmi160),
+#  endif
+#endif
+#if defined(CONFIG_SENSORS_BMI270) || defined(CONFIG_SENSORS_BMI270_SCU)
+#  if defined(CONFIG_SENSORS_BMI270_I2C) || defined(CONFIG_SENSORS_BMI270_SCU_I2C)
+  _I2C_DEVICE_WOPATH(bmi270),
+#  else /* CONFIG_SENSORS_BMI270_SPI */
+  _SPI_DEVICE_WOPATH(bmi270),
 #  endif
 #endif
 #if defined(CONFIG_SENSORS_KX022) || defined(CONFIG_SENSORS_KX022_SCU)
@@ -231,6 +231,9 @@ static struct sensor_device_s sensor_device[] =
 #if defined(CONFIG_SENSORS_BH1745NUC) || defined(CONFIG_SENSORS_BH1745NUC_SCU)
   _I2C_DEVICE(bh1745nuc, "/dev/color"), /* Color */
 #endif
+#if defined(CONFIG_SENSORS_SCD41)
+  _I2C_DEVICE(scd41, "/dev/co2"), /* CO2 */
+#endif
 };
 
 /****************************************************************************
@@ -249,7 +252,7 @@ int board_sensors_initialize(void)
 {
   int ret = 0;
   int i;
-  FAR struct sensor_device_s *dev;
+  struct sensor_device_s *dev;
 
   ret = board_power_control(POWER_SENSOR, true);
   if (ret)
@@ -278,7 +281,8 @@ int board_sensors_initialize(void)
 
       if (ret < 0)
         {
-          _err("Failed to init %s at bus %d: %d\n", dev->name, dev->bus, ret);
+          _err("Failed to init %s at bus %d: %d\n",
+                dev->name, dev->bus, ret);
         }
     }
 

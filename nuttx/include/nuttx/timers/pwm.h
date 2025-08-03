@@ -1,46 +1,33 @@
 /****************************************************************************
  * include/nuttx/timers/pwm.h
  *
- *   Copyright (C) 2011-2012 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
-#ifndef __INCLUDE_NUTTX_DRIVERS_PWM_H
-#define __INCLUDE_NUTTX_DRIVERS_PWM_H
+#ifndef __INCLUDE_NUTTX_TIMERS_PWM_H
+#define __INCLUDE_NUTTX_TIMERS_PWM_H
 
 /* For the purposes of this driver, a PWM device is any device that generates
  * periodic output pulses s of controlled frequency and pulse width.  Such a
- * device might be used, for example, to perform pulse-width modulated output or
- * frequency/pulse-count modulated output (such as might be needed to control
- * a stepper motor).
+ * device might be used, for example, to perform pulse-width modulated output
+ * or frequency/pulse-count modulated output (such as might be needed to
+ * control a stepper motor).
  *
  * The PWM driver is split into two parts:
  *
@@ -79,6 +66,14 @@
  *   debug the PWM driver.
  */
 
+/* Channel Numbers **********************************************************/
+
+/* PWM channels should use numbers from 1 to CONFIG_PWM_NCHANNELS. Channel
+ * number 0 indicates the channel not used and therefore is skipped by
+ * the driver (its output remains at the value defined by the peripheral),
+ * number -1 indicates the channel and all following channels are not used.
+ */
+
 /* IOCTL Commands ***********************************************************/
 
 /* The PWM module uses a standard character driver framework.  However, since
@@ -86,41 +81,75 @@
  * interface, the majority of the functionality is implemented in driver
  * ioctl calls.  The PWM ioctl commands are listed below:
  *
- * PWMIOC_SETCHARACTERISTICS - Set the characteristics of the next pulsed
- *   output.  This command will neither start nor stop the pulsed output.
- *   It will either setup the configuration that will be used when the
- *   output is started; or it will change the characteristics of the pulsed
- *   output on the fly if the timer is already started.  This command will
- *   set the PWM characteristics and return immediately.
+ * PWMIOC_SETCHARACTERISTICS - Set the characteristics of the next
+ *  pulsed output and start the pulsed output. It will change the
+ *  characteristics of the pulsed output on the fly if the timer is
+ *  already started.
  *
- *   ioctl argument:  A read-only reference to struct pwm_info_s that provides
- *   the characteristics of the pulsed output.
+ *  ioctl argument: A read-only reference to struct pwm_info_s that provides
+ *  the characteristics of the pulsed output.
  *
  * PWMIOC_GETCHARACTERISTICS - Get the currently selected characteristics of
- *   the pulsed output (independent of whether the output is start or stopped).
+ *                             the pulsed output (independent of whether the
+ *                             output is start or stopped).
  *
- *   ioctl argument:  A reference to struct pwm_info_s to receive the
- *   characteristics of the pulsed output.
+ *  ioctl argument:  A reference to struct pwm_info_s to receive the
+ *  characteristics of the pulsed output.
  *
  * PWMIOC_START - Start the pulsed output.  The PWMIOC_SETCHARACTERISTICS
- *   command must have previously been sent. If CONFIG_PWM_PULSECOUNT is
- *   defined and the pulse count was configured to a non-zero value, then
- *   this ioctl call will, by default, block until the programmed pulse count
- *   completes.  That default blocking behavior can be overridden by using
- *   the O_NONBLOCK flag when the PWM driver is opened.
+ *  command must have previously been sent. If CONFIG_PWM_PULSECOUNT is
+ *  defined and the pulse count was configured to a non-zero value, then
+ *  this ioctl call will, by default, block until the programmed pulse count
+ *  completes.  That default blocking behavior can be overridden by using
+ *  the O_NONBLOCK flag when the PWM driver is opened.
  *
- *   ioctl argument:  None
+ *  ioctl argument:  None
  *
  * PWMIOC_STOP - Stop the pulsed output.  This command will stop the PWM
- *   and return immediately.
+ *  and return immediately.
  *
- *   ioctl argument:  None
+ *  ioctl argument:  None
+ *
+ * PWMIOC_FAULTS_FETCH_AND_CLEAR - Fetch current faults and clear them.
+ *  This command will clear fault inputs and re-enable PWM output. It also
+ *  fetches the faults active before the clear operation.
+ *
+ *  ioctl argument:  A pointer to an unsigned long bitmask of fault inputs to
+ *  be cleared. The previously active faults are also saved into this
+ *  bitmask, therefore it ioctl is both input and output. Passing NULL
+ *  clears all active faults and does not read them back. Passing a pointer
+ *  to a bitmask full of zeros will read the current faults and clear none.
  */
 
-#define PWMIOC_SETCHARACTERISTICS _PWMIOC(1)
-#define PWMIOC_GETCHARACTERISTICS _PWMIOC(2)
-#define PWMIOC_START              _PWMIOC(3)
-#define PWMIOC_STOP               _PWMIOC(4)
+#define PWMIOC_SETCHARACTERISTICS      _PWMIOC(1)
+#define PWMIOC_GETCHARACTERISTICS      _PWMIOC(2)
+#define PWMIOC_START                   _PWMIOC(3)
+#define PWMIOC_STOP                    _PWMIOC(4)
+#define PWMIOC_FAULTS_FETCH_AND_CLEAR  _PWMIOC(5)
+
+/* PWM channel polarity *****************************************************/
+
+/* These are helper definitions for setting PWM channel output polarity to
+ * logical low or high level. The pulsed output should start with this
+ * logical value.
+ * The output polarity of the PWM's disabled channel does not depend on this
+ * value, refer to DCPOL instead.
+ */
+
+#define PWM_CPOL_NDEF             0   /* Not defined, default value by arch driver should be used */
+#define PWM_CPOL_LOW              1   /* Logical zero */
+#define PWM_CPOL_HIGH             2   /* Logical one */
+
+/* PWM disabled channel polarity ********************************************/
+
+/* The output of the PWM disabled channel may depend on the platform
+ * dependent peripheral. These helper definitions can be used for setting
+ * the disabled channel's output state.
+ */
+
+#define PWM_DCPOL_NDEF           0   /* Not defined, the default output state is arch dependent */
+#define PWM_DCPOL_LOW            1   /* Logical zero */
+#define PWM_DCPOL_HIGH           2   /* Logical one  */
 
 /****************************************************************************
  * Public Types
@@ -133,8 +162,18 @@
 #ifdef CONFIG_PWM_MULTICHAN
 struct pwm_chan_s
 {
-  ub16_t  duty;
-  uint8_t channel;
+  ub16_t duty;
+#ifdef CONFIG_PWM_OVERWRITE
+  bool ch_outp_ovrwr;
+  bool ch_outp_ovrwr_val;
+#endif
+#ifdef CONFIG_PWM_DEADTIME
+  ub16_t dead_time_a;
+  ub16_t dead_time_b;
+#endif
+  uint8_t cpol;
+  uint8_t dcpol;
+  int8_t channel;
 };
 #endif
 
@@ -146,17 +185,27 @@ struct pwm_info_s
 
 #ifdef CONFIG_PWM_MULTICHAN
                                 /* Per-channel output state */
+
   struct pwm_chan_s  channels[CONFIG_PWM_NCHANNELS];
 
 #else
   ub16_t             duty;      /* Duty of the pulse train, "1"-to-"0" duration.
                                  * Maximum: 65535/65536 (0x0000ffff)
                                  * Minimum:     1/65536 (0x00000001) */
+#ifdef CONFIG_PWM_DEADTIME
+  ub16_t dead_time_a;           /* Dead time value for main output */
+  ub16_t dead_time_b;           /* Dead time value for complementary output */
+#endif
 #  ifdef CONFIG_PWM_PULSECOUNT
   uint32_t           count;     /* The number of pulse to generate.  0 means to
                                  * generate an indefinite number of pulses */
 #  endif
+  uint8_t cpol;                 /* Channel polarity */
+  uint8_t dcpol;                /* Disabled channel polarity */
 #endif /* CONFIG_PWM_MULTICHAN */
+
+  FAR void           *arg;      /* User provided argument to be used in the
+                                 * lower half */
 };
 
 /* This structure is a set a callback functions used to call from the upper-
@@ -175,8 +224,8 @@ struct pwm_ops_s
   CODE int (*setup)(FAR struct pwm_lowerhalf_s *dev);
 
   /* This method is called when the driver is closed.  The lower half driver
-   * should stop pulsed output, free any resources, disable the timer hardware, and
-   * put the system into the lowest possible power usage state
+   * should stop pulsed output, free any resources, disable the timer
+   * hardware, and put the system into the lowest possible power usage state
    */
 
   CODE int (*shutdown)(FAR struct pwm_lowerhalf_s *dev);
@@ -212,9 +261,9 @@ struct pwm_ops_s
  * maintain state information.
  *
  * Normally that timer logic will have its own, custom state structure
- * that is simply cast to struct pwm_lowerhalf_s.  In order to perform such casts,
- * the initial fields of the custom state structure match the initial fields
- * of the following generic PWM state structure.
+ * that is simply cast to struct pwm_lowerhalf_s.  In order to perform such
+ * casts, the initial fields of the custom state structure match the initial
+ * fields of the following generic PWM state structure.
  */
 
 struct pwm_lowerhalf_s
@@ -249,6 +298,7 @@ extern "C"
 /****************************************************************************
  * "Upper-Half" PWM Driver Interfaces
  ****************************************************************************/
+
 /****************************************************************************
  * Name: pwm_register
  *
@@ -265,7 +315,7 @@ extern "C"
  *     filesystem.  The recommended convention is to name all PWM drivers
  *     as "/dev/pwm0", "/dev/pwm1", etc.  where the driver path differs only
  *     in the "minor" number at the end of the device name.
- *   dev - A pointer to an instance of lower half timer driver.  This instance
+ *   dev - A pointer to an instance of lower half timer driver. This instance
  *     is bound to the PWM driver and must persists as long as the driver
  *     persists.
  *
@@ -326,4 +376,4 @@ void pwm_expired(FAR void *handle);
 }
 #endif
 
-#endif /* __INCLUDE_NUTTX_DRIVERS_PWM_H */
+#endif /* __INCLUDE_NUTTX_TIMERS_PWM_H */

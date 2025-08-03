@@ -1,35 +1,22 @@
 /****************************************************************************
  * sched/environ/env_findvar.c
  *
- *   Copyright (C) 2007, 2009, 2013-2014 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,6 +31,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <sched.h>
+#include <assert.h>
 
 #include "environ/environ.h"
 
@@ -89,7 +77,7 @@ static bool env_cmpname(const char *pszname, const char *peqname)
  *   pname - The variable name to find
  *
  * Returned Value:
- *   A pointer to the name=value string in the environment
+ *   A index to the name=value string in the environment
  *
  * Assumptions:
  *   - Not called from an interrupt handler
@@ -97,25 +85,30 @@ static bool env_cmpname(const char *pszname, const char *peqname)
  *
  ****************************************************************************/
 
-FAR char *env_findvar(FAR struct task_group_s *group, FAR const char *pname)
+ssize_t env_findvar(FAR struct task_group_s *group, FAR const char *pname)
 {
-  FAR char *ptr;
-  FAR char *end;
+  ssize_t i;
 
   /* Verify input parameters */
 
   DEBUGASSERT(group != NULL && pname != NULL);
 
+  if (group->tg_envp == NULL)
+    {
+      return -ENOENT;
+    }
+
   /* Search for a name=value string with matching name */
 
-  end = &group->tg_envp[group->tg_envsize];
-  for (ptr = group->tg_envp;
-       ptr < end && !env_cmpname(pname, ptr);
-       ptr += (strlen(ptr) + 1));
+  for (i = 0; group->tg_envp[i] != NULL; i++)
+    {
+      if (env_cmpname(pname, group->tg_envp[i]))
+        {
+          return i;
+        }
+    }
 
-  /* Check for success */
-
-  return (ptr < end) ? ptr : NULL;
+  return -ENOENT;
 }
 
 #endif /* CONFIG_DISABLE_ENVIRON */

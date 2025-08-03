@@ -1,14 +1,10 @@
 /****************************************************************************
  * apps/include/netutils/xmlrpc.h
  *
- *   Copyright (C) 2012 Max Holtzberg. All rights reserved.
- *   Author: Max Holtzberg <mh@uvc.de>
- *
- * Based on the embeddable lightweight XML-RPC server code discussed
- * in the article at: http://www.drdobbs.com/web-development/\
- *    an-embeddable-lightweight-xml-rpc-server/184405364
- *
- *  Copyright (c) 2002 Cogito LLC.  All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2012 Max Holtzberg. All rights reserved.
+ * SPDX-FileCopyrightText: 2002 Cogito LLC.  All rights reserved.
+ * SPDX-FileContributor: Max Holtzberg <mh@uvc.de>
  *
  *  Redistribution and use in source and binary forms, with or
  *  without modification, is hereby granted without fee provided
@@ -41,10 +37,14 @@
  ****************************************************************************/
 
 /*
- *  Lightweight Embedded XML-RPC Server Types and Definitions
+ * Based on the embeddable lightweight XML-RPC server code discussed
+ * in the article at: http://www.drdobbs.com/web-development/\
+ *    an-embeddable-lightweight-xml-rpc-server/184405364
+ */
+
+/* Lightweight Embedded XML-RPC Server Types and Definitions
  *
- *  mtj@cogitollc.com
- *
+ * mtj@cogitollc.com
  */
 
 #ifndef __APPS_INCLUDE_NETUTILS_XMLRPC_H
@@ -86,13 +86,13 @@ struct xmlrpc_arg_s
     int i;
     char boolean;
     double d;
-    char string[CONFIG_XMLRPC_STRINGSIZE+1];
+    char string[CONFIG_XMLRPC_STRINGSIZE + 1];
   } u;
 };
 
 struct xmlrpc_s
 {
-  char  name[CONFIG_XMLRPC_STRINGSIZE+1];
+  char  name[CONFIG_XMLRPC_STRINGSIZE + 1];
   struct xmlrpc_arg_s arguments[MAX_ARGS];
   char  args[MAX_ARGS];
   int   argsize;
@@ -104,7 +104,7 @@ struct xmlrpc_s
 struct xmlrpc_entry_s
 {
   struct xmlrpc_entry_s *next;
-  int (*func)(struct xmlrpc_s*);
+  int (*func)(struct xmlrpc_s *);
   char *name;
 };
 

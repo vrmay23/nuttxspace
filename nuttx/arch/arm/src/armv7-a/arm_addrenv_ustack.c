@@ -1,35 +1,22 @@
 /****************************************************************************
- * arch/arm/src/armv7/arm_addrenv_ustack.c
+ * arch/arm/src/armv7-a/arm_addrenv_ustack.c
  *
- *   Copyright (C) 2014 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -37,7 +24,7 @@
  * Address Environment Interfaces
  *
  * Low-level interfaces used in binfmt/ to instantiate tasks with address
- * environments.  These interfaces all operate on type group_addrenv_t which
+ * environments.  These interfaces all operate on type arch_addrenv_t which
  * is an abstract representation of a task group's address environment and
  * must be defined in arch/arch.h if CONFIG_ARCH_ADDRENV is defined.
  *
@@ -49,7 +36,6 @@
  *                         address environment
  *   up_addrenv_heapsize - Returns the size of the initial heap allocation.
  *   up_addrenv_select   - Instantiate an address environment
- *   up_addrenv_restore  - Restore an address environment
  *   up_addrenv_clone    - Copy an address environment from one location to
  *                         another.
  *
@@ -141,26 +127,22 @@
  *
  ****************************************************************************/
 
-int up_addrenv_ustackalloc(FAR struct tcb_s *tcb, size_t stacksize)
+int up_addrenv_ustackalloc(struct tcb_s *tcb, size_t stacksize)
 {
+  arch_addrenv_t *addrenv;
   int ret;
 
   binfo("tcb=%p stacksize=%lu\n", tcb, (unsigned long)stacksize);
 
   DEBUGASSERT(tcb);
 
-  /* Initialize the address environment list to all zeroes */
+  addrenv = tcb->addrenv_own;
 
-  memset(tcb->xcp.ustack, 0, ARCH_STACK_NSECTS * sizeof(uintptr_t *));
-
-  /* Back the allocation up with physical pages and set up the level 2
-   * mapping (which of course does nothing until the L2 page table is hooked
-   * into the L1 page table).
+  /* Create a mmu page and store entry in task l1 table.
+   * Page will be enable once task addrenv/mmu l1 table selected.
    */
 
-  /* Allocate .text space pages */
-
-  ret = arm_addrenv_create_region(tcb->xcp.ustack, ARCH_STACK_NSECTS,
+  ret = arm_addrenv_create_region(addrenv->l1table, ARCH_STACK_NSECTS,
                                   CONFIG_ARCH_STACK_VBASE, stacksize,
                                   MMU_L2_UDATAFLAGS);
   if (ret < 0)
@@ -169,6 +151,8 @@ int up_addrenv_ustackalloc(FAR struct tcb_s *tcb, size_t stacksize)
       up_addrenv_ustackfree(tcb);
       return ret;
     }
+
+  tcb->xcp.ustackbase = CONFIG_ARCH_STACK_VBASE;
 
   return OK;
 }
@@ -190,17 +174,22 @@ int up_addrenv_ustackalloc(FAR struct tcb_s *tcb, size_t stacksize)
  *
  ****************************************************************************/
 
-int up_addrenv_ustackfree(FAR struct tcb_s *tcb)
+int up_addrenv_ustackfree(struct tcb_s *tcb)
 {
+  arch_addrenv_t *addrenv;
+
   binfo("tcb=%p\n", tcb);
   DEBUGASSERT(tcb);
 
+  addrenv = tcb->addrenv_own;
+
   /* Destroy the stack region */
 
-  arm_addrenv_destroy_region(tcb->xcp.ustack, ARCH_STACK_NSECTS,
+  arm_addrenv_destroy_region(addrenv->l1table, ARCH_STACK_NSECTS,
                              CONFIG_ARCH_STACK_VBASE, false);
 
-  memset(tcb->xcp.ustack, 0, ARCH_STACK_NSECTS * sizeof(uintptr_t *));
+  tcb->xcp.ustackbase = 0;
+
   return OK;
 }
 
@@ -221,14 +210,14 @@ int up_addrenv_ustackfree(FAR struct tcb_s *tcb)
  *
  ****************************************************************************/
 
-int up_addrenv_vustack(FAR const struct tcb_s *tcb, FAR void **vstack)
+int up_addrenv_vustack(const struct tcb_s *tcb, void **vstack)
 {
-  binfo("Return=%p\n", (FAR void *)CONFIG_ARCH_STACK_VBASE);
+  binfo("Return=%p\n", (void *)CONFIG_ARCH_STACK_VBASE);
 
   /* Not much to do in this case */
 
   DEBUGASSERT(tcb);
-  *vstack = (FAR void *)CONFIG_ARCH_STACK_VBASE;
+  *vstack = (void *)CONFIG_ARCH_STACK_VBASE;
   return OK;
 }
 
@@ -251,7 +240,7 @@ int up_addrenv_vustack(FAR const struct tcb_s *tcb, FAR void **vstack)
  *
  ****************************************************************************/
 
-int up_addrenv_ustackselect(FAR const struct tcb_s *tcb)
+int up_addrenv_ustackselect(const struct tcb_s *tcb)
 {
   uintptr_t vaddr;
   uintptr_t paddr;

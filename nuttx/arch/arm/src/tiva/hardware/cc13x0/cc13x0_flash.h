@@ -1,13 +1,10 @@
-/****************************************************************************************************
+/****************************************************************************
  * arch/arm/src/tiva/hardware/cc13x0/cc13x0_flash.h
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *
- * Technical content derives from a TI header file that has a compatible BSD license:
- *
- *   Copyright (c) 2015-2017, Texas Instruments Incorporated
- *   All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2018 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2015-2017, Texas Instruments Incorporated
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,23 +33,23 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ****************************************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_TIVA_HARDWARE_CC13X0_CC13X0_FLASH_H
 #define __ARCH_ARM_SRC_TIVA_HARDWARE_CC13X0_CC13X0_FLASH_H
 
-/****************************************************************************************************
+/****************************************************************************
  * Included Files
- ****************************************************************************************************/
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 #include "hardware/tiva_memorymap.h"
 
-/****************************************************************************************************
+/****************************************************************************
  * Pre-processor Definitions
- ****************************************************************************************************/
+ ****************************************************************************/
 
-/* FLASH Register Offsets ***************************************************************************/
+/* FLASH Register Offsets ***************************************************/
 
 #define TIVA_FLASH_STAT_OFFSET               0x001c  /* FMC and Efuse Status */
 #define TIVA_FLASH_CFG_OFFSET                0x0024
@@ -178,7 +175,7 @@
 #define TIVA_FLASH_FCFG_B7_START_OFFSET      0x242c
 #define TIVA_FLASH_FCFG_B0_SSIZE0_OFFSET     0x2430
 
-/* FLASH Register Addresses *************************************************************************/
+/* FLASH Register Addresses *************************************************/
 
 #define TIVA_FLASH_STAT                      (TIVA_FLASH_BASE + TIVA_FLASH_STAT_OFFSET)
 #define TIVA_FLASH_CFG                       (TIVA_FLASH_BASE + TIVA_FLASH_CFG_OFFSET)
@@ -304,7 +301,7 @@
 #define TIVA_FLASH_FCFG_B7_START             (TIVA_FLASH_BASE + TIVA_FLASH_FCFG_B7_START_OFFSET)
 #define TIVA_FLASH_FCFG_B0_SSIZE0            (TIVA_FLASH_BASE + TIVA_FLASH_FCFG_B0_SSIZE0_OFFSET)
 
-/* FLASH Bitfield Definitions ***********************************************************************/
+/* FLASH Bitfield Definitions ***********************************************/
 
 /* TIVA_FLASH_STAT */
 
@@ -494,6 +491,7 @@
 #define FLASH_TWOBIT_FROMN_MASK              (0x7fffffff << FLASH_TWOBIT_FROMN_SHIFT)
 
 /* TIVA_FLASH_SELFTESTCYC (32-bit value) */
+
 /* TIVA_FLASH_SELFTESTSIGN (32-bit value) */
 
 /* TIVA_FLASH_FRDCTL */
@@ -726,12 +724,19 @@
 #define FLASH_FTCTL_WDATA_BLK_CLR            (1 << 16) /* Bit 16 */
 
 /* TIVA_FLASH_FWPWRITE0 (32-bit value) */
+
 /* TIVA_FLASH_FWPWRITE1 (32-bit value) */
+
 /* TIVA_FLASH_FWPWRITE2 (32-bit value) */
+
 /* TIVA_FLASH_FWPWRITE3 (32-bit value) */
+
 /* TIVA_FLASH_FWPWRITE4 (32-bit value) */
+
 /* TIVA_FLASH_FWPWRITE5 (32-bit value) */
+
 /* TIVA_FLASH_FWPWRITE6 (32-bit value) */
+
 /* TIVA_FLASH_FWPWRITE7 (32-bit value) */
 
 /* TIVA_FLASH_FWPWRITE_ECC */
@@ -991,10 +996,15 @@
 #define FLASH_FSM_EXECUTE_SUSPEND_NOW_MASK   (15 << FLASH_FSM_EXECUTE_SUSPEND_NOW_SHIFT)
 
 /* TIVA_FLASH_FSM_SECTOR1 (32-bit value) */
+
 /* TIVA_FLASH_FSM_SECTOR2 (32-bit value) */
+
 /* TIVA_FLASH_FSM_BSLE0 (32-bit value) */
+
 /* TIVA_FLASH_FSM_BSLE1 (32-bit value) */
+
 /* TIVA_FLASH_FSM_BSLP0 (32-bit value) */
+
 /* TIVA_FLASH_FSM_BSLP1 (32-bit value) */
 
 /* TIVA_FLASH_FCFG_BANK */

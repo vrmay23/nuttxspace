@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/touchscreen/tc_main.c
+ * apps/examples/touchscreen/tc_main.c
  *
- *   Copyright (C) 2011, 2014-2025 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -109,7 +96,8 @@ int main(int argc, FAR char *argv[])
     {
       nsamples = strtol(argv[1], NULL, 10);
     }
-  printf("tc_main: nsamples: %d\n", nsamples);
+
+  printf("tc_main: nsamples: %ld\n", nsamples);
 
   /* Open the touchscreen device for reading */
 
@@ -127,104 +115,106 @@ int main(int argc, FAR char *argv[])
    * touchscreen samples.
    */
 
-  for (;;)
-  {
-    /* Flush any output before the loop entered or from the previous pass
-     * through the loop.
-     */
+  for (; ; )
+    {
+      /* Flush any output before the loop entered or from the previous pass
+       * through the loop.
+       */
 
-    fflush(stdout);
+      fflush(stdout);
 
 #ifdef CONFIG_EXAMPLES_TOUCHSCREEN_MOUSE
-    /* Read one sample */
+      /* Read one sample */
 
-    iinfo("Reading...\n");
-    nbytes = read(fd, &sample, sizeof(struct mouse_report_s));
-    iinfo("Bytes read: %d\n", nbytes);
+      iinfo("Reading...\n");
+      nbytes = read(fd, &sample, sizeof(struct mouse_report_s));
+      iinfo("Bytes read: %zd\n", nbytes);
 
-    /* Handle unexpected return values */
+      /* Handle unexpected return values */
 
-    if (nbytes < 0)
-      {
-        errval = errno;
-        if (errval != EINTR)
-          {
-            printf("tc_main: read %s failed: %d\n",
-                   CONFIG_EXAMPLES_TOUCHSCREEN_DEVPATH, errval);
-            errval = 3;
-            goto errout_with_dev;
-          }
+      if (nbytes < 0)
+        {
+          errval = errno;
+          if (errval != EINTR)
+            {
+              printf("tc_main: read %s failed: %d\n",
+                     CONFIG_EXAMPLES_TOUCHSCREEN_DEVPATH, errval);
+              errval = 3;
+              goto errout_with_dev;
+            }
 
-        printf("tc_main: Interrupted read...\n");
-      }
-    else if (nbytes != sizeof(struct mouse_report_s))
-      {
-        printf("tc_main: Unexpected read size=%d, expected=%d, Ignoring\n",
-               nbytes, sizeof(struct mouse_report_s));
-      }
+          printf("tc_main: Interrupted read...\n");
+        }
+      else if (nbytes != sizeof(struct mouse_report_s))
+        {
+          printf("tc_main: Unexpected read size=%zd,expected=%zd,Ignoring\n",
+                 nbytes, sizeof(struct mouse_report_s));
+        }
 
-    /* Print the sample data on successful return */
+      /* Print the sample data on successful return */
 
-    else
-      {
-        printf("Sample     :\n");
-        printf("   buttons : %02x\n", sample.buttons);
-        printf("         x : %d\n",   sample.x);
-        printf("         y : %d\n",   sample.y);
-#ifdef CONFIG_MOUSE_WHEEL
-        printf("     wheel : %d\n",   sample.wheel);
+      else
+        {
+          printf("Sample     :\n");
+          printf("   buttons : %02x\n", sample.buttons);
+          printf("         x : %d\n",   sample.x);
+          printf("         y : %d\n",   sample.y);
+#ifdef CONFIG_INPUT_MOUSE_WHEEL
+          printf("     wheel : %d\n",   sample.wheel);
 #endif
-      }
+        }
 #else
-    /* Read one sample */
+      /* Read one sample */
 
-    iinfo("Reading...\n");
-    nbytes = read(fd, &sample, sizeof(struct touch_sample_s));
-    iinfo("Bytes read: %d\n", nbytes);
+      iinfo("Reading...\n");
+      nbytes = read(fd, &sample, sizeof(struct touch_sample_s));
+      iinfo("Bytes read: %zd\n", nbytes);
 
-    /* Handle unexpected return values */
+      /* Handle unexpected return values */
 
-    if (nbytes < 0)
-      {
-        errval = errno;
-        if (errval != EINTR)
-          {
-            printf("tc_main: read %s failed: %d\n",
-                   CONFIG_EXAMPLES_TOUCHSCREEN_DEVPATH, errval);
-            errval = 3;
-            goto errout_with_dev;
-          }
+      if (nbytes < 0)
+        {
+          errval = errno;
+          if (errval != EINTR)
+            {
+              printf("tc_main: read %s failed: %d\n",
+                     CONFIG_EXAMPLES_TOUCHSCREEN_DEVPATH, errval);
+              errval = 3;
+              goto errout_with_dev;
+            }
 
-        printf("tc_main: Interrupted read...\n");
-      }
-    else if (nbytes != sizeof(struct touch_sample_s))
-      {
-        printf("tc_main: Unexpected read size=%ld, expected=%d, Ignoring\n",
-               (long)nbytes, sizeof(struct touch_sample_s));
-      }
+          printf("tc_main: Interrupted read...\n");
+        }
+      else if (nbytes != sizeof(struct touch_sample_s))
+        {
+          printf("tc_main: Unexpected read size=%zd, expected=%zd, "
+                 "Ignoring\n",
+                 nbytes, sizeof(struct touch_sample_s));
+        }
 
-    /* Print the sample data on successful return */
+      /* Print the sample data on successful return */
 
-    else
-      {
-        printf("Sample     :\n");
-        printf("   npoints : %d\n",   sample.npoints);
-        printf("Point 1    :\n");
-        printf("        id : %d\n",   sample.point[0].id);
-        printf("     flags : %02x\n", sample.point[0].flags);
-        printf("         x : %d\n",   sample.point[0].x);
-        printf("         y : %d\n",   sample.point[0].y);
-        printf("         h : %d\n",   sample.point[0].h);
-        printf("         w : %d\n",   sample.point[0].w);
-        printf("  pressure : %d\n",   sample.point[0].pressure);
-      }
+      else
+        {
+          printf("Sample     :\n");
+          printf("   npoints : %d\n",   sample.npoints);
+          printf("Point 1    :\n");
+          printf("        id : %d\n",   sample.point[0].id);
+          printf("     flags : %02x\n", sample.point[0].flags);
+          printf("         x : %d\n",   sample.point[0].x);
+          printf("         y : %d\n",   sample.point[0].y);
+          printf("         h : %d\n",   sample.point[0].h);
+          printf("         w : %d\n",   sample.point[0].w);
+          printf("  pressure : %d\n",   sample.point[0].pressure);
+          printf(" timestamp : %" PRIu64"\n", sample.point[0].timestamp);
+        }
 #endif
 
-    if (nsamples && --nsamples <= 0)
-      {
-        break;
-      }
-  }
+      if (nsamples && --nsamples <= 0)
+        {
+          break;
+        }
+    }
 
 errout_with_dev:
   close(fd);

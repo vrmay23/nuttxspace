@@ -1,19 +1,8 @@
 /****************************************************************************
- * include/nuttx/mtd/mtd_onfi.c
+ * drivers/mtd/mtd_onfi.c
  *
- * ONFI Support.  The Open NAND Flash Interface (ONFI) is an industry
- * Workgroup made up of more than 100 companies that build, design-in, or
- * enable NAND Flash memory. This file provides definitions for standardized
- * ONFI NAND interfaces.
- *
- *   Copyright (C) 2013 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * This ONFI logic was based largely on Atmel sample code with modifications
- * for better integration with NuttX.  The Atmel sample code has a BSD
- * compatible license that requires this copyright notice:
- *
- *   Copyright (c) 2010, Atmel Corporation
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: Copyright (c) 2010, Atmel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -49,12 +38,7 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/mtd/nand_config.h>
 
-#include <sys/types.h>
-
-#include <stdint.h>
-#include <stdbool.h>
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
@@ -106,7 +90,7 @@
   } while (0)
 
 #define READ_NAND(a) \
-  ((*(volatile uint8_t *)(uint32_t)a))
+  ((*(volatile uint8_t *)(uintptr_t)a))
 
 #define WRITE_NAND(d,a) \
   do { \
@@ -189,7 +173,7 @@ static int onfi_readstatus(uintptr_t cmdaddr, uintptr_t dataaddr)
  ****************************************************************************/
 
 #ifdef CONFIG_MTD_NAND_EMBEDDEDECC
-bool onfi_have_embeddedecc(FAR struct onfi_pgparam_s *onfi)
+bool onfi_have_embeddedecc(FAR const struct onfi_pgparam_s *onfi)
 {
   /* Check if the Nandflash has an embedded ECC controller.  Known memories
    * with this feature:
@@ -243,8 +227,8 @@ bool onfi_compatible(uintptr_t cmdaddr, uintptr_t addraddr,
   parmtab[3] = READ_NAND(dataaddr);
 
   return
-   (parmtab[0] == 'O' && parmtab[1] == 'N' &&
-    parmtab[2] == 'F' && parmtab[3] == 'I');
+      (parmtab[0] == 'O' && parmtab[1] == 'N' &&
+      parmtab[2] == 'F' && parmtab[3] == 'I');
 }
 
 /****************************************************************************
@@ -318,7 +302,7 @@ int onfi_read(uintptr_t cmdaddr, uintptr_t addraddr, uintptr_t dataaddr,
     {
       ferr("ERROR: Failed to read ONFI parameter table\n");
       return -EIO;
-   }
+    }
 
   /* JEDEC manufacturer ID */
 
@@ -357,15 +341,15 @@ int onfi_read(uintptr_t cmdaddr, uintptr_t addraddr, uintptr_t dataaddr,
   onfi->model = *(FAR uint8_t *)(parmtab + 49);
 
   finfo("Returning:\n");
-  finfo("  manufacturer:  0x%02x\n", onfi->manufacturer);
-  finfo("  buswidth:      %d\n",     onfi->buswidth);
-  finfo("  luns:          %d\n",     onfi->luns);
-  finfo("  eccsize:       %d\n",     onfi->eccsize);
-  finfo("  model:         0x%02s\n", onfi->model);
-  finfo("  sparesize:     %d\n",     onfi->sparesize);
-  finfo("  pagesperblock: %d\n",     onfi->pagesperblock);
-  finfo("  blocksperlun:  %d\n",     onfi->blocksperlun);
-  finfo("  pagesize:      %d\n",     onfi->pagesize);
+  finfo("  manufacturer:  0x%02x\n",      onfi->manufacturer);
+  finfo("  buswidth:      %d\n",          onfi->buswidth);
+  finfo("  luns:          %d\n",          onfi->luns);
+  finfo("  eccsize:       %d\n",          onfi->eccsize);
+  finfo("  model:         0x%02x\n",      onfi->model);
+  finfo("  sparesize:     %d\n",          onfi->sparesize);
+  finfo("  pagesperblock: %d\n",          onfi->pagesperblock);
+  finfo("  blocksperlun:  %d\n",          onfi->blocksperlun);
+  finfo("  pagesize:      %" PRId32 "\n", onfi->pagesize);
   return OK;
 }
 
@@ -398,6 +382,7 @@ bool onfi_embeddedecc(FAR const struct onfi_pgparam_s *onfi,
   if (onfi_have_embeddedecc(onfi))
     {
       /* Yes... enable or disable it */
+
       /* Perform common setup */
 
       WRITE_NAND_COMMAND(NAND_CMD_SET_FEATURE, cmdaddr);
@@ -411,7 +396,6 @@ bool onfi_embeddedecc(FAR const struct onfi_pgparam_s *onfi,
           WRITE_NAND(0x00, dataaddr);
           WRITE_NAND(0x00, dataaddr);
           WRITE_NAND(0x00, dataaddr);
-          setSmcOpEccType(SMC_ECC_INTERNAL);
         }
       else
         {
@@ -495,11 +479,11 @@ bool onfi_ebidetect(uintptr_t cmdaddr, uintptr_t addraddr,
       if (onfi_compatible(cmdaddr, addraddr, dataaddr))
         {
           /* Report true if it is an ONFI device that is not in device
-           * list (perhaps it is a new device that is ONFI campatible
+           * list (perhaps it is a new device that is ONFI compatible).
            */
 
           found = true;
-       }
+        }
     }
 
   return found;

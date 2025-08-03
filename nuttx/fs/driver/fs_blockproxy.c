@@ -1,6 +1,8 @@
 /****************************************************************************
  * fs/driver/fs_blockproxy.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -36,10 +38,13 @@
 #include <assert.h>
 #include <debug.h>
 
-#include <nuttx/kmalloc.h>
+#include <nuttx/lib/lib.h>
 #include <nuttx/drivers/drivers.h>
 #include <nuttx/fs/fs.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
+
+#include "driver.h"
+#include "fs_heap.h"
 
 #if !defined(CONFIG_DISABLE_MOUNTPOINT) && \
     !defined(CONFIG_DISABLE_PSEUDOFS_OPERATIONS)
@@ -49,7 +54,7 @@
  ****************************************************************************/
 
 static uint32_t g_devno;
-static sem_t g_devno_sem = SEM_INITIALIZER(1);
+static mutex_t g_devno_lock = NXMUTEX_INITIALIZER;
 
 /****************************************************************************
  * Private Functions
@@ -84,32 +89,33 @@ static FAR char *unique_chardev(void)
 
   for (; ; )
     {
-      /* Get the semaphore protecting the path number */
+      /* Get the mutex protecting the path number */
 
-      ret = nxsem_wait_uninterruptible(&g_devno_sem);
+      ret = nxmutex_lock(&g_devno_lock);
       if (ret < 0)
         {
-          ferr("ERROR: nxsem_wait_uninterruptible failed: %d\n", ret);
+          ferr("ERROR: nxmutex_lock failed: %d\n", ret);
           return NULL;
         }
 
       /* Get the next device number and release the semaphore */
 
       devno = ++g_devno;
-      nxsem_post(&g_devno_sem);
+      nxmutex_unlock(&g_devno_lock);
 
       /* Construct the full device number */
 
       devno &= 0xffffff;
-      snprintf(devbuf, 16, "/dev/tmpc%06lx", (unsigned long)devno);
+      snprintf(devbuf, sizeof(devbuf), "/dev/tmpc%06lx",
+               (unsigned long)devno);
 
       /* Make sure that file name is not in use */
 
-      ret = stat(devbuf, &statbuf);
+      ret = nx_stat(devbuf, &statbuf, 1);
       if (ret < 0)
         {
-          DEBUGASSERT(errno == ENOENT);
-          return strdup(devbuf);
+          DEBUGASSERT(ret == -ENOENT);
+          return fs_heap_strdup(devbuf);
         }
 
       /* It is in use, try again */
@@ -128,31 +134,22 @@ static FAR char *unique_chardev(void)
  *   oriented accessed to the block driver.
  *
  * Input Parameters:
+ *   filep  - The caller provided location in which to return the 'struct
+ *            file' instance.
  *   blkdev - The path to the block driver
  *   oflags - Character driver open flags
  *
  * Returned Value:
- *   If positive, non-zero file descriptor is returned on success.  This
- *   is the file descriptor of the nameless character driver that mediates
- *   accesses to the block driver.
- *
- *   Errors that may be returned:
- *
- *     ENOMEM - Failed to create a temporary path name.
- *
- *   Plus:
- *
- *     - Errors reported from bchdev_register()
- *     - Errors reported from open() or unlink()
+ *   Zero (OK) is returned on success.  On failure, a negated errno value is
+ *   returned.
  *
  ****************************************************************************/
 
-int block_proxy(FAR const char *blkdev, int oflags)
+int block_proxy(FAR struct file *filep, FAR const char *blkdev, int oflags)
 {
+  struct file temp;
   FAR char *chardev;
-  bool readonly;
   int ret;
-  int fd;
 
   DEBUGASSERT(blkdev);
 
@@ -165,13 +162,9 @@ int block_proxy(FAR const char *blkdev, int oflags)
       return -ENOMEM;
     }
 
-  /* Should this character driver be read-only? */
-
-  readonly = ((oflags & O_WROK) == 0);
-
   /* Wrap the block driver with an instance of the BCH driver */
 
-  ret = bchdev_register(blkdev, chardev, readonly);
+  ret = bchdev_register(blkdev, chardev, oflags);
   if (ret < 0)
     {
       ferr("ERROR: bchdev_register(%s, %s) failed: %d\n",
@@ -183,11 +176,18 @@ int block_proxy(FAR const char *blkdev, int oflags)
   /* Open the newly created character driver */
 
   oflags &= ~(O_CREAT | O_EXCL | O_APPEND | O_TRUNC);
-  fd = nx_open(chardev, oflags);
-  if (fd < 0)
+  ret = file_open(&temp, chardev, oflags);
+  if (ret < 0)
     {
-      ret = fd;
       ferr("ERROR: Failed to open %s: %d\n", chardev, ret);
+      goto errout_with_bchdev;
+    }
+
+  ret = file_dup2(&temp, filep);
+  file_close(&temp);
+  if (ret < 0)
+    {
+      ferr("ERROR: Failed to dup2%s: %d\n", chardev, ret);
       goto errout_with_bchdev;
     }
 
@@ -196,25 +196,23 @@ int block_proxy(FAR const char *blkdev, int oflags)
    * a problem here!)
    */
 
-  ret = unlink(chardev);
+  ret = nx_unlink(chardev);
   if (ret < 0)
     {
-      ret = -errno;
       ferr("ERROR: Failed to unlink %s: %d\n", chardev, ret);
+      goto errout_with_chardev;
     }
 
-  /* Free the allocate character driver name and return the open file
-   * descriptor.
-   */
+  /* Free the allocated character driver name. */
 
-  kmm_free(chardev);
-  return fd;
+  fs_heap_free(chardev);
+  return OK;
 
 errout_with_bchdev:
-  unlink(chardev);
+  nx_unlink(chardev);
 
 errout_with_chardev:
-  kmm_free(chardev);
+  fs_heap_free(chardev);
   return ret;
 }
 

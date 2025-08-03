@@ -1,63 +1,50 @@
-/*******************************************************************************
+/****************************************************************************
  * boards/arm/stm32l4/nucleo-l432kc/include/board.h
  *
- *   Copyright (C) 2016, 2018-2019 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- ******************************************************************************/
+ ****************************************************************************/
 
 #ifndef __BOARDS_ARM_STM32L4_NUCLEO_L432KC_INCLUDE_BOARD_H
 #define __BOARDS_ARM_STM32L4_NUCLEO_L432KC_INCLUDE_BOARD_H
 
-/*******************************************************************************
- * Included File
- ******************************************************************************/
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
 
 #include <nuttx/config.h>
 #ifndef __ASSEMBLY__
-# include <stdint.h>
+#  include <stdint.h>
 #endif
 
-/* Do not include STM32L4 header files here */
-
-/*******************************************************************************
- * Pre-processor Definitions
- ******************************************************************************/
-
-/* Clocking *******************************************************************/
+/* Clocking *****************************************************************/
 
 #if defined(CONFIG_ARCH_CHIP_STM32L432KC)
 #  include <arch/board/nucleo-l432kc.h>
 #endif
 
-/* DMA Channel/Stream Selections **********************************************/
+/* Do not include STM32L4 header files here */
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+/* DMA Channel/Stream Selections ********************************************/
 
 /* Stream selections are arbitrary for now but might become important in the
  * future is we set aside more DMA channels/streams.
@@ -76,7 +63,21 @@
 
 #define ADC1_DMA_CHAN DMACHAN_ADC1_1
 
-/* Alternate function pin selections ******************************************/
+/* Analog pin selections ****************************************************/
+
+/* ADC
+ * Build time configurable pins are defined in ../src/stm32_adc.c.
+ * ADC1 with DMA: GPIO_ADC1_IN11 (PA6/A5), GPIO_ADC1_IN12 (PA7/A6).
+ * ADC1 no DMA  : GPIO_ADC1_IN11 (PA6/A5).
+ */
+
+/* DAC
+ * DAC1: GPIO_DAC1_OUT_1 (PA4/A3).
+ */
+
+#define GPIO_DAC1_OUT            GPIO_DAC1_OUT_1
+
+/* Alternate function pin selections ****************************************/
 
 /* USART1:
  *   RXD: PA10  CN9 pin 3, CN10 pin 33
@@ -133,10 +134,10 @@
  * but are normally-high GPIOs.
  */
 
-#define GPIO_I2C1_D4 \
-   (GPIO_INPUT | GPIO_FLOAT | GPIO_PORTB | GPIO_PIN7)
-#define GPIO_I2C1_D5 \
-   (GPIO_INPUT | GPIO_FLOAT | GPIO_PORTB | GPIO_PIN6)
+#define GPIO_I2C1_A4 \
+   (GPIO_INPUT | GPIO_FLOAT | GPIO_PORTA | GPIO_PIN5)
+#define GPIO_I2C1_A5 \
+   (GPIO_INPUT | GPIO_FLOAT | GPIO_PORTA | GPIO_PIN6)
 #define GPIO_I2C1_SCL \
    (GPIO_I2C1_SCL_1 | GPIO_OPENDRAIN | GPIO_SPEED_50MHz | GPIO_OUTPUT_SET)
 #define GPIO_I2C1_SDA \
@@ -147,6 +148,11 @@
 #define GPIO_I2C1_SDA_GPIO \
    (GPIO_OUTPUT | GPIO_OPENDRAIN | GPIO_SPEED_50MHz | GPIO_OUTPUT_SET | \
     GPIO_PORTB | GPIO_PIN7)
+
+#define GPIO_I2C3_SCL \
+   (GPIO_I2C3_SCL_1 | GPIO_OPENDRAIN | GPIO_SPEED_50MHz | GPIO_OUTPUT_SET)
+#define GPIO_I2C3_SDA \
+   (GPIO_I2C3_SDA_1 | GPIO_OPENDRAIN | GPIO_SPEED_50MHz | GPIO_OUTPUT_SET)
 
 /* SPI */
 
@@ -237,14 +243,20 @@
 /* PWM output for full bridge, uses config 1, because port E is N/A on QFP64
  * CH1     | 1(A8) 2(E9)
  * CH2     | 1(A9) 2(E11)
+ * CH3     | 1(A10) 2(E10)
+ * CH4     | 1(A11) 2(E14)
  * CHN1    | 1(A7) 2(B13) 3(E8)
  * CHN2    | 1(B0) 2(B14) 3(E10)
+ * CHN3    | 1(B1) 2(B15) 3(E12)
  */
 
 #define GPIO_TIM1_CH1OUT  GPIO_TIM1_CH1OUT_1
 #define GPIO_TIM1_CH1NOUT GPIO_TIM1_CH1N_1
 #define GPIO_TIM1_CH2OUT  GPIO_TIM1_CH2OUT_1
 #define GPIO_TIM1_CH2NOUT GPIO_TIM1_CH2N_1
+#define GPIO_TIM1_CH3OUT GPIO_TIM1_CH3OUT_1
+#define GPIO_TIM1_CH3NOUT GPIO_TIM1_CH3OUT_1
+#define GPIO_TIM1_CH4OUT GPIO_TIM1_CH4OUT_1
 
 /* LPTIM2 PWM output
  * REVISIT : Add support for the other clock sources, LSE, LSI and HSI
@@ -262,9 +274,9 @@
 #  define GPIO_LPTIM2_CH1OUT GPIO_LPTIM2_OUT_2
 #endif
 
-/*******************************************************************************
+/****************************************************************************
  * Public Data
- ******************************************************************************/
+ ****************************************************************************/
 
 #ifndef __ASSEMBLY__
 
@@ -277,19 +289,20 @@ extern "C"
 #define EXTERN extern
 #endif
 
-/*******************************************************************************
+/****************************************************************************
  * Public Function Prototypes
- ******************************************************************************/
+ ****************************************************************************/
 
-/*******************************************************************************
+/****************************************************************************
  * Name: stm32l4_board_initialize
  *
  * Description:
- *   All STM32L4 architectures must provide the following entry point.  This
- *   entry point is called early in the initialization -- after all memory has
- *   been configured and mapped but before any devices have been initialized.
+ *   All STM32L4 architectures must provide the following entry point.
+ *   This entry point is called early in the initialization -- after all
+ *   memory has been configured and mapped but before any devices have been
+ *   initialized.
  *
- ******************************************************************************/
+ ****************************************************************************/
 
 void stm32l4_board_initialize(void);
 

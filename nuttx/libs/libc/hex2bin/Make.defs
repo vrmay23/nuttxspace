@@ -1,6 +1,8 @@
 ############################################################################
 # libs/libc/hex2bin/Make.defs
 #
+# SPDX-License-Identifier: Apache-2.0
+#
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
 # this work for additional information regarding copyright ownership.  The
@@ -18,7 +20,7 @@
 #
 ############################################################################
 
-ifeq ($(CONFIG_LIB_HEX2BIN),y)
+ifeq ($(CONFIG_LIBC_HEX2BIN),y)
 
 # Add the hex2bin sources to the build
 

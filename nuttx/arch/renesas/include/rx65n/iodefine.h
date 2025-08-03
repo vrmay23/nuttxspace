@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/renesas/include/rx65n/iodefine.h
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -18,8 +20,8 @@
  *
  ****************************************************************************/
 
-#ifndef __RX65NIODEFINE_HEADER__
-#define __RX65NIODEFINE_HEADER__
+#ifndef __ARCH_RENESAS_INCLUDE_RX65N_IODEFINE_H
+#define __ARCH_RENESAS_INCLUDE_RX65N_IODEFINE_H
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -1021,6 +1023,8 @@
 #define WDT     (*(volatile struct st_wdt      *)0x88020)
 #define FLASHCONST      (*(volatile struct st_flashconst      *)0xfe7f7d90)
 #define TEMPSCONST      (*(volatile struct st_tempsconst      *)0xfe7f7d7c)
+
+#undef B0 /* Avoid the conflicted macro in termios.h */
 
 /****************************************************************************
  * Public Types
@@ -38096,5 +38100,4 @@ typedef struct st_s12ad1
 #pragma pack()
 
 #endif  /* __ASSEMBLER__ */
-#endif
-
+#endif /* __ARCH_RENESAS_INCLUDE_RX65N_IODEFINE_H */

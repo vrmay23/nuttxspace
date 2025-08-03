@@ -7,7 +7,7 @@ config EXAMPLES_NXIMAGE
 	tristate "NX graphics image example"
 	default n
 	depends on NX
-	select LIB_BOARDCTL
+	select BOARDCTL
 	---help---
 		Enable the X graphics image example
 
@@ -15,7 +15,7 @@ if EXAMPLES_NXIMAGE
 
 config EXAMPLES_NXIMAGE_PROGNAME
 	string "NX Image Program name"
-	default "nxhello"
+	default "nximage"
 	---help---
 		This is the name of the program that will be used when the NSH ELF
 		program is installed.
@@ -115,11 +115,5 @@ config EXAMPLES_NXIMAGE_LISTENERPRIO
 	default 80
 	---help---
 		The priority of the event listener thread. Default 80.
-
-config EXAMPLES_NXIMAGE_NOTIFYSIGNO
-	int "Notify Signal Number"
-	default 4
-	---help---
-		The signal number to use with nx_eventnotify().  Default: 4
 
 endif

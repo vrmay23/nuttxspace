@@ -1,35 +1,22 @@
 /****************************************************************************
  * net/devif/devif_loopback.c
  *
- *   Copyright (C) 2018 Pinecone Inc. All rights reserved.
- *   Author: Xiang Xiao <xiaoxiang@pinecone.net>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -47,19 +34,23 @@
 #include <nuttx/net/netdev.h>
 
 /****************************************************************************
- * Pre-processor Definitions
+ * Public Functions
  ****************************************************************************/
-
-/* This is a helper pointer for accessing the contents of the ip header */
-
-#define IPv4BUF ((FAR struct ipv4_hdr_s *)(dev->d_buf + dev->d_llhdrlen))
-#define IPv6BUF ((FAR struct ipv6_hdr_s *)(dev->d_buf + dev->d_llhdrlen))
 
 /****************************************************************************
- * Private Functions
+ * Name: devif_is_loopback
+ *
+ * Description:
+ *   The function checks the destination address of the packet to see
+ *   whether the target of packet is ourself.
+ *
+ * Returned Value:
+ *   true is returned if the packet need loop back to ourself, otherwise
+ *   false is returned.
+ *
  ****************************************************************************/
 
-static bool is_loopback(FAR struct net_driver_s *dev)
+bool devif_is_loopback(FAR struct net_driver_s *dev)
 {
   if (dev->d_len > 0)
     {
@@ -73,7 +64,7 @@ static bool is_loopback(FAR struct net_driver_s *dev)
 
 #ifdef CONFIG_NET_IPv6
       if ((IPv6BUF->vtc & IP_VERSION_MASK) == IPv6_VERSION &&
-          net_ipv6addr_hdrcmp(IPv6BUF->destipaddr, dev->d_ipv6addr))
+          NETDEV_IS_MY_V6ADDR(dev, IPv6BUF->destipaddr))
         {
           return true;
         }
@@ -88,9 +79,9 @@ static bool is_loopback(FAR struct net_driver_s *dev)
  *
  * Description:
  *   This function should be called before sending out a packet. The function
- *   checks the destination address of the packet to see whether the target of
- *   packet is ourself and then consume the packet directly by calling input
- *   process functions.
+ *   checks the destination address of the packet to see whether the target
+ *   of packet is ourself and then consume the packet directly by calling
+ *   input process functions.
  *
  * Returned Value:
  *   Zero is returned if the packet don't loop back to ourself, otherwise
@@ -100,7 +91,7 @@ static bool is_loopback(FAR struct net_driver_s *dev)
 
 int devif_loopback(FAR struct net_driver_s *dev)
 {
-  if (!is_loopback(dev))
+  if (!devif_is_loopback(dev))
     {
       return 0;
     }
@@ -115,7 +106,7 @@ int devif_loopback(FAR struct net_driver_s *dev)
        NETDEV_RXPACKETS(dev);
 
 #ifdef CONFIG_NET_PKT
-      /* When packet sockets are enabled, feed the frame into the packet tap */
+      /* When packet sockets are enabled, feed the frame into the tap */
 
        pkt_input(dev);
 #endif
@@ -143,17 +134,12 @@ int devif_loopback(FAR struct net_driver_s *dev)
       else
 #endif
         {
+          nwarn("WARNING: Unrecognized IP version\n");
           NETDEV_RXDROPPED(dev);
+          dev->d_len = 0;
         }
 
       NETDEV_TXDONE(dev);
-
-      /* Add the link layer header length for the next loop */
-
-      if (dev->d_len != 0)
-        {
-          dev->d_len += dev->d_llhdrlen;
-        }
     }
   while (dev->d_len > 0);
 

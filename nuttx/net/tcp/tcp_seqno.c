@@ -1,6 +1,8 @@
 /****************************************************************************
  * net/tcp/tcp_seqno.c
  *
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  *   Copyright (C) 2007-2009 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
@@ -43,21 +45,84 @@
 #include <nuttx/config.h>
 #if defined(CONFIG_NET) && defined(CONFIG_NET_TCP)
 
-#include <stdint.h>
+#include <crypto/md5.h>
 #include <debug.h>
+#include <stdint.h>
+#include <stdlib.h>
 
+#include <nuttx/clock.h>
 #include <nuttx/net/netconfig.h>
 #include <nuttx/net/netdev.h>
 
 #include "devif/devif.h"
+#include "tcp/tcp.h"
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-/* g_tcpsequence is used to generate initial TCP sequence numbers */
+/* These fields are used to generate initial TCP sequence numbers */
 
+#ifdef CONFIG_NET_TCP_ISN_RFC6528
+/* RFC 6528, Section 3: Key lengths of 128 bits should be adequate. */
+
+static uint32_t g_tcp_isnkey[4];
+#else
 static uint32_t g_tcpsequence;
+#endif
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: tcp_isn_rfc6528
+ *
+ * Description:
+ *   Calculate the initial sequence number described in RFC 6528.
+ *   ISN = M + F(localip, localport, remoteip, remoteport, secretkey)
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NET_TCP_ISN_RFC6528
+static uint32_t tcp_isn_rfc6528(FAR struct tcp_conn_s *conn)
+{
+  const size_t addrlen = net_ip_domain_select(conn->domain,
+                                  sizeof(in_addr_t), sizeof(net_ipv6addr_t));
+  MD5_CTX ctx;
+  uint32_t digest[MD5_DIGEST_LENGTH / 4];
+  uint32_t m;
+
+  /* Make sure we have a secret key */
+
+  if (g_tcp_isnkey[0] == 0)
+    {
+      arc4random_buf(g_tcp_isnkey, sizeof(g_tcp_isnkey));
+    }
+
+  /* M is the 4 microsecond timer */
+
+  m = TICK2USEC(clock_systime_ticks()) / 4;
+
+  /* F() is suggested to be MD5 */
+
+  md5init(&ctx);
+
+  /* Calculate F(localip, localport, remoteip, remoteport, secretkey) */
+
+  md5update(&ctx, net_ip_binding_laddr(&conn->u, conn->domain), addrlen);
+  md5update(&ctx, &conn->lport, sizeof(conn->lport));
+  md5update(&ctx, net_ip_binding_raddr(&conn->u, conn->domain), addrlen);
+  md5update(&ctx, &conn->rport, sizeof(conn->rport));
+  md5update(&ctx, g_tcp_isnkey, sizeof(g_tcp_isnkey));
+
+  md5final((FAR uint8_t *)digest, &ctx);
+
+  /* ISN = M + F(localip, localport, remoteip, remoteport, secretkey) */
+
+  return m + digest[0];
+}
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -140,9 +205,33 @@ uint32_t tcp_addsequence(FAR uint8_t *seqno, uint16_t len)
  *
  ****************************************************************************/
 
-void tcp_initsequence(FAR uint8_t *seqno)
+void tcp_initsequence(FAR struct tcp_conn_s *conn)
 {
-  tcp_setsequence(seqno, g_tcpsequence);
+#ifdef CONFIG_NET_TCP_ISN_RFC6528
+  tcp_setsequence(conn->sndseq, tcp_isn_rfc6528(conn));
+#else
+  /* If g_tcpsequence is already initialized, just copy it */
+
+  if (g_tcpsequence == 0)
+    {
+      /* Get a random TCP sequence number */
+
+      arc4random_buf(&g_tcpsequence, sizeof(uint32_t));
+
+      /* Use about half of allowed values */
+
+      g_tcpsequence = g_tcpsequence % 2000000000;
+
+      /* If the random value is "small" increase it */
+
+      if (g_tcpsequence < 1000000000)
+        {
+          g_tcpsequence += 1000000000;
+        }
+    }
+
+  tcp_setsequence(conn->sndseq, g_tcpsequence);
+#endif
 }
 
 /****************************************************************************
@@ -158,7 +247,9 @@ void tcp_initsequence(FAR uint8_t *seqno)
 
 void tcp_nextsequence(void)
 {
+#ifndef CONFIG_NET_TCP_ISN_RFC6528
   g_tcpsequence++;
+#endif
 }
 
 #endif /* CONFIG_NET && CONFIG_NET_TCP */

@@ -1,6 +1,8 @@
 /****************************************************************************
  * drivers/usbhost/usbhost_storage.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -24,6 +26,7 @@
 
 #include <nuttx/config.h>
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,7 +42,7 @@
 #include <nuttx/wqueue.h>
 #include <nuttx/scsi.h>
 #include <nuttx/fs/fs.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 
 #include <nuttx/usb/usb.h>
 #include <nuttx/usb/usbhost.h>
@@ -117,7 +120,7 @@ struct usbhost_state_s
   int16_t                 crefs;        /* Reference count on the driver instance */
   uint16_t                blocksize;    /* Block size of USB mass storage device */
   uint32_t                nblocks;      /* Number of blocks on the USB mass storage device */
-  sem_t                   exclsem;      /* Used to maintain mutual exclusive access */
+  mutex_t                 lock;         /* Used to maintain mutual exclusive access */
   struct work_s           work;         /* For interacting with the worker thread */
   FAR uint8_t            *tbuffer;      /* The allocated transfer buffer */
   size_t                  tbuflen;      /* Size of the allocated transfer buffer */
@@ -135,12 +138,6 @@ struct usbhost_freestate_s
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
-
-/* Semaphores */
-
-static int usbhost_takesem(FAR sem_t *sem);
-static void usbhost_forcetake(FAR sem_t *sem);
-#define usbhost_givesem(s) nxsem_post(s);
 
 /* Memory allocation services */
 
@@ -170,10 +167,10 @@ static inline void usbhost_requestsensecbw(FAR struct usbmsc_cbw_s *cbw);
 static inline void usbhost_testunitreadycbw(FAR struct usbmsc_cbw_s *cbw);
 static inline void usbhost_readcapacitycbw(FAR struct usbmsc_cbw_s *cbw);
 static inline void usbhost_inquirycbw (FAR struct usbmsc_cbw_s *cbw);
-static inline void usbhost_readcbw (size_t startsector, uint16_t blocksize,
+static inline void usbhost_readcbw (blkcnt_t startsector, uint16_t blocksize,
                                     unsigned int nsectors,
                                     FAR struct usbmsc_cbw_s *cbw);
-static inline void usbhost_writecbw(size_t startsector, uint16_t blocksize,
+static inline void usbhost_writecbw(blkcnt_t startsector, uint16_t blocksize,
                                     unsigned int nsectors,
                                     FAR struct usbmsc_cbw_s *cbw);
 
@@ -202,7 +199,9 @@ static inline uint16_t usbhost_getle16(const uint8_t *val);
 static inline uint16_t usbhost_getbe16(const uint8_t *val);
 static inline void usbhost_putle16(uint8_t *dest, uint16_t val);
 static inline void usbhost_putbe16(uint8_t *dest, uint16_t val);
+#if defined(CONFIG_DEBUG_USB) && defined(CONFIG_DEBUG_INFO)
 static inline uint32_t usbhost_getle32(const uint8_t *val);
+#endif
 static inline uint32_t usbhost_getbe32(const uint8_t *val);
 static void usbhost_putle32(uint8_t *dest, uint32_t val);
 static void usbhost_putbe32(uint8_t *dest, uint32_t val);
@@ -231,11 +230,11 @@ static int usbhost_disconnected(FAR struct usbhost_class_s *usbclass);
 static int usbhost_open(FAR struct inode *inode);
 static int usbhost_close(FAR struct inode *inode);
 static ssize_t usbhost_read(FAR struct inode *inode,
-                            FAR unsigned char *buffer, size_t startsector,
+                            FAR unsigned char *buffer, blkcnt_t startsector,
                             unsigned int nsectors);
 static ssize_t usbhost_write(FAR struct inode *inode,
                              FAR const unsigned char *buffer,
-                             size_t startsector, unsigned int nsectors);
+                             blkcnt_t startsector, unsigned int nsectors);
 static int usbhost_geometry(FAR struct inode *inode,
                             FAR struct geometry *geometry);
 static int usbhost_ioctl(FAR struct inode *inode, int cmd,
@@ -302,48 +301,6 @@ static uint32_t g_devinuse;
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: usbhost_takesem
- *
- * Description:
- *   This is just a wrapper to handle the annoying behavior of semaphore
- *   waits that return due to the receipt of a signal.
- *
- ****************************************************************************/
-
-static int usbhost_takesem(FAR sem_t *sem)
-{
-  return nxsem_wait_uninterruptible(sem);
-}
-
-/****************************************************************************
- * Name: usbhost_forcetake
- *
- * Description:
- *   This is just another wrapper but this one continues even if the thread
- *   is canceled.  This must be done in certain conditions where were must
- *   continue in order to clean-up resources.
- *
- ****************************************************************************/
-
-static void usbhost_forcetake(FAR sem_t *sem)
-{
-  int ret;
-
-  do
-    {
-      ret = nxsem_wait_uninterruptible(sem);
-
-      /* The only expected error would -ECANCELED meaning that the
-       * parent thread has been canceled.  We have to continue and
-       * terminate the poll in this case.
-       */
-
-      DEBUGASSERT(ret == OK || ret == -ECANCELED);
-    }
-  while (ret < 0);
-}
 
 /****************************************************************************
  * Name: usbhost_allocclass
@@ -482,7 +439,7 @@ static int usbhost_allocdevno(FAR struct usbhost_state_s *priv)
 
 static void usbhost_freedevno(FAR struct usbhost_state_s *priv)
 {
-  int devno = 'a' - priv->sdchar;
+  int devno = priv->sdchar - 'a';
 
   if (devno >= 0 && devno < 26)
     {
@@ -629,7 +586,7 @@ static inline void usbhost_inquirycbw (FAR struct usbmsc_cbw_s *cbw)
 }
 
 static inline void
-usbhost_readcbw (size_t startsector, uint16_t blocksize,
+usbhost_readcbw (blkcnt_t startsector, uint16_t blocksize,
                  unsigned int nsectors, FAR struct usbmsc_cbw_s *cbw)
 {
   FAR struct scsicmd_read10_s *rd10;
@@ -651,7 +608,7 @@ usbhost_readcbw (size_t startsector, uint16_t blocksize,
 }
 
 static inline void
-usbhost_writecbw(size_t startsector, uint16_t blocksize,
+usbhost_writecbw(blkcnt_t startsector, uint16_t blocksize,
                  unsigned int nsectors, FAR struct usbmsc_cbw_s *cbw)
 {
   FAR struct scsicmd_write10_s *wr10;
@@ -730,7 +687,7 @@ static inline int usbhost_testunitready(FAR struct usbhost_state_s *priv)
   DEBUGASSERT(priv->usbclass.hport);
   hport = priv->usbclass.hport;
 
-  /* Initialize a CBW (re-using the allocated transfer buffer) */
+  /* Initialize a CBW (reusing the allocated transfer buffer) */
 
   cbw = usbhost_cbwalloc(priv);
   if (!cbw)
@@ -768,7 +725,7 @@ static inline int usbhost_requestsense(FAR struct usbhost_state_s *priv)
   DEBUGASSERT(priv->usbclass.hport);
   hport = priv->usbclass.hport;
 
-  /* Initialize a CBW (re-using the allocated transfer buffer) */
+  /* Initialize a CBW (reusing the allocated transfer buffer) */
 
   cbw = usbhost_cbwalloc(priv);
   if (!cbw)
@@ -814,7 +771,7 @@ static inline int usbhost_readcapacity(FAR struct usbhost_state_s *priv)
   DEBUGASSERT(priv->usbclass.hport);
   hport = priv->usbclass.hport;
 
-  /* Initialize a CBW (re-using the allocated transfer buffer) */
+  /* Initialize a CBW (reusing the allocated transfer buffer) */
 
   cbw = usbhost_cbwalloc(priv);
   if (!cbw)
@@ -866,7 +823,7 @@ static inline int usbhost_inquiry(FAR struct usbhost_state_s *priv)
   DEBUGASSERT(priv->usbclass.hport);
   hport = priv->usbclass.hport;
 
-  /* Initialize a CBW (re-using the allocated transfer buffer) */
+  /* Initialize a CBW (reusing the allocated transfer buffer) */
 
   cbw = usbhost_cbwalloc(priv);
   if (!cbw)
@@ -961,9 +918,9 @@ static void usbhost_destroy(FAR void *arg)
 
   usbhost_tfree(priv);
 
-  /* Destroy the semaphores */
+  /* Destroy the mutex */
 
-  nxsem_destroy(&priv->exclsem);
+  nxmutex_destroy(&priv->lock);
 
   /* Disconnect the USB host device */
 
@@ -1043,7 +1000,7 @@ static inline int usbhost_cfgdesc(FAR struct usbhost_state_s *priv,
   configdesc += cfgdesc->len;
   remaining  -= cfgdesc->len;
 
-  /* Loop where there are more dscriptors to examine */
+  /* Loop where there are more descriptors to examine */
 
   while (remaining >= sizeof(struct usb_desc_s))
     {
@@ -1378,7 +1335,7 @@ static inline int usbhost_initvolume(FAR struct usbhost_state_s *priv)
    * driver has been registered.
    */
 
-  usbhost_forcetake(&priv->exclsem);
+  nxmutex_lock(&priv->lock);
   DEBUGASSERT(priv->crefs >= 2);
 
   /* Decrement the reference count */
@@ -1400,6 +1357,14 @@ static inline int usbhost_initvolume(FAR struct usbhost_state_s *priv)
 
       ret = -ENODEV;
     }
+#  ifdef CONFIG_USBHOST_MSC_NOTIFIER
+  else
+    {
+      /* Signal the connect */
+
+      usbhost_msc_notifier_signal(WORK_USB_MSC_CONNECT, priv->sdchar);
+    }
+#  endif
 
   /* Release the semaphore... there is a race condition here.
    * Decrementing the reference count and releasing the semaphore
@@ -1408,7 +1373,7 @@ static inline int usbhost_initvolume(FAR struct usbhost_state_s *priv)
    * ready to handle it!
    */
 
-  usbhost_givesem(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -1507,6 +1472,7 @@ static void usbhost_putbe16(uint8_t *dest, uint16_t val)
  *
  ****************************************************************************/
 
+#if defined(CONFIG_DEBUG_USB) && defined(CONFIG_DEBUG_INFO)
 static inline uint32_t usbhost_getle32(const uint8_t *val)
 {
   /* Little endian means LS halfword first in byte stream */
@@ -1514,6 +1480,7 @@ static inline uint32_t usbhost_getle32(const uint8_t *val)
   return (uint32_t)usbhost_getle16(&val[2]) << 16 |
          (uint32_t)usbhost_getle16(val);
 }
+#endif
 
 /****************************************************************************
  * Name: usbhost_getbe32
@@ -1647,7 +1614,7 @@ static inline int usbhost_tfree(FAR struct usbhost_state_s *priv)
  * Name: usbhost_cbwalloc
  *
  * Description:
- *   Initialize a CBW (re-using the allocated transfer buffer). Upon
+ *   Initialize a CBW (reusing the allocated transfer buffer). Upon
  *   successful return, the CBW is cleared and has the CBW signature in
  *   place.
  *
@@ -1731,11 +1698,11 @@ static FAR struct usbhost_class_s *
 
           priv->crefs = 1;
 
-          /* Initialize semaphores
+          /* Initialize mutex
            * (this works okay in the interrupt context)
            */
 
-          nxsem_init(&priv->exclsem, 0, 1);
+          nxmutex_init(&priv->lock);
 
           /* NOTE: We do not yet know the geometry of the USB mass storage
            * device.
@@ -1848,6 +1815,12 @@ static int usbhost_disconnected(struct usbhost_class_s *usbclass)
 
   DEBUGASSERT(priv != NULL);
 
+#  ifdef CONFIG_USBHOST_MSC_NOTIFIER
+  /* Signal the disconnect */
+
+  usbhost_msc_notifier_signal(WORK_USB_MSC_DISCONNECT, priv->sdchar);
+#  endif
+
   /* Set an indication to any users of the mass storage device that the
    * device is no longer available.
    */
@@ -1904,13 +1877,13 @@ static int usbhost_open(FAR struct inode *inode)
   int ret;
 
   uinfo("Entry\n");
-  DEBUGASSERT(inode && inode->i_private);
-  priv = (FAR struct usbhost_state_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv = inode->i_private;
 
   /* Make sure that we have exclusive access to the private data structure */
 
   DEBUGASSERT(priv->crefs > 0 && priv->crefs < USBHOST_MAX_CREFS);
-  ret = usbhost_takesem(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -1941,7 +1914,7 @@ static int usbhost_open(FAR struct inode *inode)
 
   leave_critical_section(flags);
 
-  usbhost_givesem(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -1958,14 +1931,14 @@ static int usbhost_close(FAR struct inode *inode)
   irqstate_t flags;
 
   uinfo("Entry\n");
-  DEBUGASSERT(inode && inode->i_private);
-  priv = (FAR struct usbhost_state_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv = inode->i_private;
 
   /* Decrement the reference count on the block driver */
 
   DEBUGASSERT(priv->crefs > 1);
 
-  usbhost_forcetake(&priv->exclsem);
+  nxmutex_lock(&priv->lock);
   priv->crefs--;
 
   /* Release the semaphore.  The following operations when crefs == 1 are
@@ -1973,7 +1946,7 @@ static int usbhost_close(FAR struct inode *inode)
    * the block driver.
    */
 
-  usbhost_givesem(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
 
   /* We need to disable interrupts momentarily to assure that there are
    * no asynchronous disconnect events.
@@ -2009,21 +1982,21 @@ static int usbhost_close(FAR struct inode *inode)
  ****************************************************************************/
 
 static ssize_t usbhost_read(FAR struct inode *inode, unsigned char *buffer,
-                            size_t startsector, unsigned int nsectors)
+                            blkcnt_t startsector, unsigned int nsectors)
 {
   FAR struct usbhost_state_s *priv;
   FAR struct usbhost_hubport_s *hport;
   ssize_t nbytes = 0;
   int ret;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv = (FAR struct usbhost_state_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv = inode->i_private;
 
   DEBUGASSERT(priv->usbclass.hport);
   hport = priv->usbclass.hport;
 
-  uinfo("startsector: %d nsectors: %d sectorsize: %d\n",
-        startsector, nsectors, priv->blocksize);
+  uinfo("startsector: %" PRIuOFF " nsectors: %u "
+        "sectorsize: %" PRIu16 "\n", startsector, nsectors, priv->blocksize);
 
   /* Check if the mass storage device is still connected */
 
@@ -2040,7 +2013,7 @@ static ssize_t usbhost_read(FAR struct inode *inode, unsigned char *buffer,
     {
       FAR struct usbmsc_cbw_s *cbw;
 
-      ret = usbhost_takesem(&priv->exclsem);
+      ret = nxmutex_lock(&priv->lock);
       if (ret < 0)
         {
           return ret;
@@ -2050,7 +2023,7 @@ static ssize_t usbhost_read(FAR struct inode *inode, unsigned char *buffer,
 
       nbytes = -ENOMEM;
 
-      /* Initialize a CBW (re-using the allocated transfer buffer) */
+      /* Initialize a CBW (reusing the allocated transfer buffer) */
 
       cbw = usbhost_cbwalloc(priv);
       if (cbw)
@@ -2103,7 +2076,7 @@ static ssize_t usbhost_read(FAR struct inode *inode, unsigned char *buffer,
           while (nbytes == -EAGAIN);
         }
 
-      usbhost_givesem(&priv->exclsem);
+      nxmutex_unlock(&priv->lock);
     }
 
   /* On success, return the number of blocks read */
@@ -2122,17 +2095,17 @@ static ssize_t usbhost_read(FAR struct inode *inode, unsigned char *buffer,
 
 static ssize_t usbhost_write(FAR struct inode *inode,
                              FAR const unsigned char *buffer,
-                             size_t startsector, unsigned int nsectors)
+                             blkcnt_t startsector, unsigned int nsectors)
 {
   FAR struct usbhost_state_s *priv;
   FAR struct usbhost_hubport_s *hport;
   ssize_t nbytes;
   int ret;
 
-  uinfo("sector: %d nsectors: %d sectorsize: %d\n");
+  uinfo("sector: %" PRIuOFF " nsectors: %u\n", startsector, nsectors);
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv = (FAR struct usbhost_state_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv = inode->i_private;
 
   DEBUGASSERT(priv->usbclass.hport);
   hport = priv->usbclass.hport;
@@ -2152,7 +2125,7 @@ static ssize_t usbhost_write(FAR struct inode *inode,
     {
       FAR struct usbmsc_cbw_s *cbw;
 
-      ret = usbhost_takesem(&priv->exclsem);
+      ret = nxmutex_lock(&priv->lock);
       if (ret < 0)
         {
           return ret;
@@ -2162,7 +2135,7 @@ static ssize_t usbhost_write(FAR struct inode *inode,
 
       nbytes = -ENOMEM;
 
-      /* Initialize a CBW (re-using the allocated transfer buffer) */
+      /* Initialize a CBW (reusing the allocated transfer buffer) */
 
       cbw = usbhost_cbwalloc(priv);
       if (cbw)
@@ -2206,7 +2179,7 @@ static ssize_t usbhost_write(FAR struct inode *inode,
             }
         }
 
-      usbhost_givesem(&priv->exclsem);
+      nxmutex_unlock(&priv->lock);
     }
 
   /* On success, return the number of blocks written */
@@ -2228,11 +2201,11 @@ static int usbhost_geometry(FAR struct inode *inode,
   int ret = -EINVAL;
 
   uinfo("Entry\n");
-  DEBUGASSERT(inode && inode->i_private);
+  DEBUGASSERT(inode->i_private);
 
   /* Check if the mass storage device is still connected */
 
-  priv = (FAR struct usbhost_state_s *)inode->i_private;
+  priv = inode->i_private;
   if (priv->disconnected)
     {
       /* No... the block driver is no longer bound to the class.  That means
@@ -2246,18 +2219,20 @@ static int usbhost_geometry(FAR struct inode *inode,
     {
       /* Return the geometry of the USB mass storage device */
 
-      ret = usbhost_takesem(&priv->exclsem);
+      ret = nxmutex_lock(&priv->lock);
       if (ret >= 0)
         {
+          memset(geometry, 0, sizeof(*geometry));
+
           geometry->geo_available     = true;
           geometry->geo_mediachanged  = false;
           geometry->geo_writeenabled  = true;
           geometry->geo_nsectors      = priv->nblocks;
           geometry->geo_sectorsize    = priv->blocksize;
-          usbhost_givesem(&priv->exclsem);
+          nxmutex_unlock(&priv->lock);
 
-          uinfo("nsectors: %ld sectorsize: %d\n",
-                 (long)geometry->geo_nsectors, geometry->geo_sectorsize);
+          uinfo("nsectors: %" PRIdOFF " sectorsize: %" PRIi16 "\n",
+                geometry->geo_nsectors, geometry->geo_sectorsize);
         }
     }
 
@@ -2277,8 +2252,8 @@ static int usbhost_ioctl(FAR struct inode *inode, int cmd, unsigned long arg)
   int ret;
 
   uinfo("Entry\n");
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct usbhost_state_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv = inode->i_private;
 
   /* Check if the mass storage device is still connected */
 
@@ -2295,7 +2270,7 @@ static int usbhost_ioctl(FAR struct inode *inode, int cmd, unsigned long arg)
     {
       /* Process the IOCTL by command */
 
-      ret = usbhost_takesem(&priv->exclsem);
+      ret = nxmutex_lock(&priv->lock);
       if (ret >= 0)
         {
           switch (cmd)
@@ -2307,7 +2282,7 @@ static int usbhost_ioctl(FAR struct inode *inode, int cmd, unsigned long arg)
                 break;
             }
 
-          usbhost_givesem(&priv->exclsem);
+          nxmutex_unlock(&priv->lock);
         }
     }
 
@@ -2359,5 +2334,98 @@ int usbhost_msc_initialize(void)
 
   return usbhost_registerclass(&g_storage);
 }
+
+#  ifdef CONFIG_USBHOST_MSC_NOTIFIER
+
+/****************************************************************************
+ * Name: usbhost_msc_notifier_setup
+ *
+ * Description:
+ *   Set up to perform a callback to the worker function when a mass storage
+ *   device is attached.
+ *
+ * Input Parameters:
+ *   worker - The worker function to execute on the low priority work queue
+ *            when the event occurs.
+ *   event  - Currently only USBHOST_MSC_DISCONNECT and USBHOST_MSC_CONNECT
+ *   sdchar - sdchar of the connected or disconnected block device
+ *   arg    - A user-defined argument that will be available to the worker
+ *            function when it runs.
+ *
+ * Returned Value:
+ *   > 0   - The notification is in place. The returned value is a key that
+ *           may be used later in a call to
+ *           usbmsc_attach_notifier_teardown().
+ *   == 0  - Not used.
+ *   < 0   - An unexpected error occurred and no notification will occur. The
+ *           returned value is a negated errno value that indicates the
+ *           nature of the failure.
+ *
+ ****************************************************************************/
+
+int usbhost_msc_notifier_setup(worker_t worker, uint8_t event, char sdchar,
+    FAR void *arg)
+{
+  struct work_notifier_s info;
+
+  DEBUGASSERT(worker != NULL);
+
+  info.evtype    = event;
+  info.qid       = LPWORK;
+  info.qualifier = (FAR void *)(uintptr_t)sdchar;
+  info.arg       = arg;
+  info.worker    = worker;
+
+  return work_notifier_setup(&info);
+}
+
+/****************************************************************************
+ * Name: usbhost_msc_notifier_teardown
+ *
+ * Description:
+ *   Eliminate an USB MSC notification previously setup by
+ *   usbhost_msc_notifier_setup().
+ *   This function should only be called if the notification should be
+ *   aborted prior to the notification.  The notification will automatically
+ *   be torn down after the notification.
+ *
+ * Input Parameters:
+ *   key - The key value returned from a previous call to
+ *         usbhost_msc_notifier_setup().
+ *
+ * Returned Value:
+ *   None.
+ *
+ ****************************************************************************/
+
+void usbhost_msc_notifier_teardown(int key)
+{
+  /* This is just a simple wrapper around work_notifier_teardown(). */
+
+  work_notifier_teardown(key);
+}
+
+/****************************************************************************
+ * Name: usbhost_msc_notifier_signal
+ *
+ * Description:
+ *   An USB mass storage device has been connected or disconnected.
+ *   Signal all threads.
+ *
+ * Input Parameters:
+ *   event  - Currently only USBHOST_MSC_DISCONNECT and USBHOST_MSC_CONNECT
+ *   sdchar - sdchar of the connected or disconnected block device
+ *
+ * Returned Value:
+ *   None.
+ *
+ ****************************************************************************/
+
+void usbhost_msc_notifier_signal(uint8_t event, char sdchar)
+{
+  work_notifier_signal(event, (FAR void *)(uintptr_t)sdchar);
+}
+
+#  endif /* CONFIG_USBHOST_MSC_NOTIFIER */
 
 #endif /* CONFIG_USBHOST && !CONFIG_USBHOST_BULK_DISABLE && !CONFIG_DISABLE_MOUNTPOINT */

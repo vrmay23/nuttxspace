@@ -1,35 +1,22 @@
 /****************************************************************************
- * examples/unionfs/unionfs_main.c
+ * apps/examples/unionfs/unionfs_main.c
  *
- *   Copyright (C) 2015 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -43,6 +30,7 @@
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/boardctl.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,7 +41,6 @@
 #include <errno.h>
 
 #include <nuttx/drivers/ramdisk.h>
-#include <nuttx/fs/unionfs.h>
 
 #include "romfs_atestdir.h"
 #include "romfs_btestdir.h"
@@ -66,10 +53,6 @@
 
 #ifdef CONFIG_DISABLE_MOUNTPOINT
 #  error "Mountpoint support is disabled"
-#endif
-
-#if CONFIG_NFILE_DESCRIPTORS < 4
-#  error "Not enough file descriptors"
 #endif
 
 #ifndef CONFIG_FS_ROMFS
@@ -93,15 +76,15 @@
 #endif
 
 #ifndef CONFIG_EXAMPLES_UNIONFS_MOUNTPT
-#  define "/mnt/unionfs"
+#  define CONFIG_EXAMPLES_UNIONFS_MOUNTPT "/mnt/unionfs"
 #endif
 
 #ifndef CONFIG_EXAMPLES_UNIONFS_TMPA
-#  define "/mnt/a"
+#  define CONFIG_EXAMPLES_UNIONFS_TMPA "/mnt/a"
 #endif
 
 #ifndef CONFIG_EXAMPLES_UNIONFS_TMPB
-#  define "/mnt/b"
+#  define CONFIG_EXAMPLES_UNIONFS_TMPB "/mnt/b"
 #endif
 
 #define NSECTORS(b)        (((b)+CONFIG_EXAMPLES_UNIONFS_SECTORSIZE-1)/CONFIG_EXAMPLES_UNIONFS_SECTORSIZE)
@@ -131,16 +114,22 @@
 
 int main(int argc, FAR char *argv[])
 {
-   int  ret;
+  int ret;
+  struct boardioc_romdisk_s desc;
 
   /* Create a RAM disk for file system 1 */
 
-  ret = romdisk_register(CONFIG_EXAMPLES_UNIONFS_RAMDEVNO_A, atestdir_img,
-                         NSECTORS(atestdir_img_len),
-                         CONFIG_EXAMPLES_UNIONFS_SECTORSIZE);
+  desc.minor    = CONFIG_EXAMPLES_UNIONFS_RAMDEVNO_A;       /* Minor device number of the ROM disk. */
+  desc.nsectors = NSECTORS(atestdir_img_len);               /* The number of sectors in the ROM disk */
+  desc.sectsize = CONFIG_EXAMPLES_UNIONFS_SECTORSIZE;       /* The size of one sector in bytes */
+  desc.image    = (FAR uint8_t *)atestdir_img;              /* File system image */
+
+  ret = boardctl(BOARDIOC_ROMDISK, (uintptr_t)&desc);
+
   if (ret < 0)
     {
-      printf("ERROR: Failed to create file system 1 RAM disk\n");
+      printf("ERROR: Failed to create file system 1 RAM disk: %s\n",
+             strerror(errno));
       return EXIT_FAILURE;
     }
 
@@ -153,18 +142,22 @@ int main(int argc, FAR char *argv[])
               MS_RDONLY, NULL);
   if (ret < 0)
     {
-      printf("ERROR: File system 1 mount failed: %d\n", errno);
+      printf("ERROR: File system 1 mount failed: %s\n", strerror(errno));
       return EXIT_FAILURE;
     }
 
-  /* Create a RAM disk for file system 2 */
+  /* Create a RAM disk for file system 2  */
 
-  ret = romdisk_register(CONFIG_EXAMPLES_UNIONFS_RAMDEVNO_B, btestdir_img,
-                         NSECTORS(btestdir_img_len),
-                         CONFIG_EXAMPLES_UNIONFS_SECTORSIZE);
+  desc.minor    = CONFIG_EXAMPLES_UNIONFS_RAMDEVNO_B;      /* Minor device number of the ROM disk. */
+  desc.nsectors = NSECTORS(btestdir_img_len);              /* The number of sectors in the ROM disk */
+  desc.image    = (FAR uint8_t *)btestdir_img;             /* File system image */
+
+  ret = boardctl(BOARDIOC_ROMDISK, (uintptr_t)&desc);
+
   if (ret < 0)
     {
-      printf("ERROR: Failed to register file system 1: %d\n", ret);
+      printf("ERROR: Failed to create file system 2 RAM disk: %s\n",
+             strerror(errno));
       return EXIT_FAILURE;
     }
 
@@ -177,15 +170,15 @@ int main(int argc, FAR char *argv[])
               MS_RDONLY, NULL);
   if (ret < 0)
     {
-      printf("ERROR: Failed to register file system 1: %d\n", ret);
+      printf("ERROR: File system 2 mount failed: %s\n", strerror(errno));
       return EXIT_FAILURE;
     }
 
   /* Now create and mount the union file system */
 
-  ret = unionfs_mount(CONFIG_EXAMPLES_UNIONFS_TMPA, NULL,
-                      CONFIG_EXAMPLES_UNIONFS_TMPB, "offset",
-                      CONFIG_EXAMPLES_UNIONFS_MOUNTPT);
+  ret = mount(NULL, CONFIG_EXAMPLES_UNIONFS_MOUNTPT, "unionfs", 0,
+              "fspath1=" CONFIG_EXAMPLES_UNIONFS_TMPA
+              ",fspath2=" CONFIG_EXAMPLES_UNIONFS_TMPB ",prefix2=offset");
   if (ret < 0)
     {
       printf("ERROR: Failed to create the union file system: %d\n", ret);

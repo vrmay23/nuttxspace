@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/arm/src/imx1/imx_spi.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -34,12 +36,11 @@
 #include <nuttx/spi/spi.h>
 
 #include <nuttx/irq.h>
+#include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 #include <arch/board/board.h>
 
-#include "up_internal.h"
-#include "up_arch.h"
-
+#include "arm_internal.h"
 #include "chip.h"
 #include "imx_gpio.h"
 #include "imx_cspi.h"
@@ -78,7 +79,7 @@
 #define IMX_TXFIFO_WORDS 8
 
 /****************************************************************************
- * Private Type Definitions
+ * Private Types
  ****************************************************************************/
 
 struct imx_spidev_s
@@ -87,7 +88,7 @@ struct imx_spidev_s
 #ifndef CONFIG_SPI_POLLWAIT
   sem_t waitsem;                /* Wait for transfer to complete */
 #endif
-  sem_t exclsem;                /* Supports mutually exclusive access */
+  mutex_t lock;                 /* Supports mutually exclusive access */
 
   /* These following are the source and destination buffers of the transfer.
    * they are retained in this structure so that they will be accessible
@@ -152,24 +153,24 @@ static int    spi_transfer(struct imx_spidev_s *priv, const void *txbuffer,
 #ifndef CONFIG_SPI_POLLWAIT
 static inline struct imx_spidev_s *spi_mapirq(int irq);
 static int    spi_interrupt(int irq, void *context,
-                            FAR void *arg, FAR void *arg);
+                            void *arg, void *arg);
 #endif
 
 /* SPI methods */
 
-static int    spi_lock(FAR struct spi_dev_s *dev, bool lock);
-static uint32_t spi_setfrequency(FAR struct spi_dev_s *dev,
+static int    spi_lock(struct spi_dev_s *dev, bool lock);
+static uint32_t spi_setfrequency(struct spi_dev_s *dev,
                                  uint32_t frequency);
-static void   spi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode);
-static void   spi_setbits(FAR struct spi_dev_s *dev, int nbits);
-static uint32_t spi_send(FAR struct spi_dev_s *dev, uint32_t wd);
+static void   spi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode);
+static void   spi_setbits(struct spi_dev_s *dev, int nbits);
+static uint32_t spi_send(struct spi_dev_s *dev, uint32_t wd);
 #ifdef CONFIG_SPI_EXCHANGE
-static void spi_exchange(FAR struct spi_dev_s *dev, FAR const void *txbuffer,
-                         FAR void *rxbuffer, size_t nwords);
+static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
+                         void *rxbuffer, size_t nwords);
 #else
-static void spi_sndblock(FAR struct spi_dev_s *dev, FAR const void *buffer,
+static void spi_sndblock(struct spi_dev_s *dev, const void *buffer,
                          size_t nwords);
-static void spi_recvblock(FAR struct spi_dev_s *dev, FAR void *buffer,
+static void spi_recvblock(struct spi_dev_s *dev, void *buffer,
                           size_t nwords);
 #endif
 
@@ -208,19 +209,23 @@ static struct imx_spidev_s g_spidev[] =
 {
 #ifdef CONFIG_IMX1_SPI1
   {
-    .ops  = &g_spiops,
-    .base = IMX_CSPI1_VBASE,
+    .ops     = &g_spiops,
+    .base    = IMX_CSPI1_VBASE,
+    .lock    = NXMUTEX_INITIALIZER,
 #ifndef CONFIG_SPI_POLLWAIT
-    .irq  = IMX_IRQ_CSPI1,
+    .waitsem = SEM_INITIALIZER(0),
+    .irq     = IMX_IRQ_CSPI1,
 #endif
   },
 #endif
 #ifdef CONFIG_IMX1_SPI2
   {
-    .ops  = &g_spiops,
-    .base = IMX_CSPI2_VBASE,
+    .ops     = &g_spiops,
+    .base    = IMX_CSPI2_VBASE,
+    .lock    = NXMUTEX_INITIALIZER,
 #ifndef CONFIG_SPI_POLLWAIT
-    .irq  = IMX_IRQ_CSPI2,
+    .waitsem = SEM_INITIALIZER(0),
+    .irq     = IMX_IRQ_CSPI2,
 #endif
   },
 #endif
@@ -393,7 +398,9 @@ static int spi_performtx(struct imx_spidev_s *priv)
         }
       else
         {
-          /* Yes.. The transfer is complete, disable Tx FIFO empty interrupt */
+          /* Yes..
+           * The transfer is complete, disable Tx FIFO empty interrupt
+           */
 
           regval = spi_getreg(priv, CSPI_INTCS_OFFSET);
           regval &= ~CSPI_INTCS_TEEN;
@@ -643,7 +650,7 @@ static inline struct imx_spidev_s *spi_mapirq(int irq)
 
 #ifndef CONFIG_SPI_POLLWAIT
 static int spi_interrupt(int irq, void *context,
-                         FAR void *arg, FAR void *arg)
+                         void *arg, void *arg)
 {
   struct imx_spidev_s *priv = spi_mapirq(irq);
   int ntxd;
@@ -696,18 +703,18 @@ static int spi_interrupt(int irq, void *context,
  *
  ****************************************************************************/
 
-static int spi_lock(FAR struct spi_dev_s *dev, bool lock)
+static int spi_lock(struct spi_dev_s *dev, bool lock)
 {
   struct imx_spidev_s *priv = (struct imx_spidev_s *)dev;
   int ret;
 
   if (lock)
     {
-      ret = nxsem_wait_uninterruptible(&priv->exclsem);
+      ret = nxmutex_lock(&priv->lock);
     }
   else
     {
-      ret = nxsem_post(&priv->exclsem);
+      ret = nxmutex_unlock(&priv->lock);
     }
 
   return ret;
@@ -728,7 +735,7 @@ static int spi_lock(FAR struct spi_dev_s *dev, bool lock)
  *
  ****************************************************************************/
 
-static uint32_t spi_setfrequency(FAR struct spi_dev_s *dev,
+static uint32_t spi_setfrequency(struct spi_dev_s *dev,
                                  uint32_t frequency)
 {
   struct imx_spidev_s *priv = (struct imx_spidev_s *)dev;
@@ -812,7 +819,7 @@ static uint32_t spi_setfrequency(FAR struct spi_dev_s *dev,
  *
  ****************************************************************************/
 
-static void spi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode)
+static void spi_setmode(struct spi_dev_s *dev, enum spi_mode_e mode)
 {
   struct imx_spidev_s *priv = (struct imx_spidev_s *)dev;
   if (priv && mode != priv->mode)
@@ -824,19 +831,19 @@ static void spi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode)
 
       switch (mode)
         {
-        case SPIDEV_MODE0: /* CPOL=0 CHPHA=0 */
+        case SPIDEV_MODE0: /* CPOL=0 CPHA=0 */
           modebits = 0;
           break;
 
-        case SPIDEV_MODE1: /* CPOL=0 CHPHA=1 */
+        case SPIDEV_MODE1: /* CPOL=0 CPHA=1 */
           modebits = CSPI_CTRL_PHA;
           break;
 
-        case SPIDEV_MODE2: /* CPOL=1 CHPHA=0 */
+        case SPIDEV_MODE2: /* CPOL=1 CPHA=0 */
           modebits = CSPI_CTRL_POL;
          break;
 
-        case SPIDEV_MODE3: /* CPOL=1 CHPHA=1 */
+        case SPIDEV_MODE3: /* CPOL=1 CPHA=1 */
           modebits = CSPI_CTRL_PHA | CSPI_CTRL_POL;
           break;
 
@@ -868,7 +875,7 @@ static void spi_setmode(FAR struct spi_dev_s *dev, enum spi_mode_e mode)
  *
  ****************************************************************************/
 
-static void spi_setbits(FAR struct spi_dev_s *dev, int nbits)
+static void spi_setbits(struct spi_dev_s *dev, int nbits)
 {
   struct imx_spidev_s *priv = (struct imx_spidev_s *)dev;
   if (priv && nbits != priv->nbits && nbits > 0 && nbits <= 16)
@@ -897,7 +904,7 @@ static void spi_setbits(FAR struct spi_dev_s *dev, int nbits)
  *
  ****************************************************************************/
 
-static uint32_t spi_send(FAR struct spi_dev_s *dev, uint32_t wd)
+static uint32_t spi_send(struct spi_dev_s *dev, uint32_t wd)
 {
   struct imx_spidev_s *priv = (struct imx_spidev_s *)dev;
   uint32_t response = 0;
@@ -928,8 +935,8 @@ static uint32_t spi_send(FAR struct spi_dev_s *dev, uint32_t wd)
  ****************************************************************************/
 
 #ifdef CONFIG_SPI_EXCHANGE
-static void spi_exchange(FAR struct spi_dev_s *dev, FAR const void *txbuffer,
-                         FAR void *rxbuffer, size_t nwords)
+static void spi_exchange(struct spi_dev_s *dev, const void *txbuffer,
+                         void *rxbuffer, size_t nwords)
 {
   struct imx_spidev_s *priv = (struct imx_spidev_s *)dev;
   spi_transfer(priv, txbuffer, rxbuffer, nwords);
@@ -957,7 +964,7 @@ static void spi_exchange(FAR struct spi_dev_s *dev, FAR const void *txbuffer,
  ****************************************************************************/
 
 #ifndef CONFIG_SPI_EXCHANGE
-static void spi_sndblock(FAR struct spi_dev_s *dev, FAR const void *buffer,
+static void spi_sndblock(struct spi_dev_s *dev, const void *buffer,
                          size_t nwords)
 {
   struct imx_spidev_s *priv = (struct imx_spidev_s *)dev;
@@ -986,7 +993,7 @@ static void spi_sndblock(FAR struct spi_dev_s *dev, FAR const void *buffer,
  ****************************************************************************/
 
 #ifndef CONFIG_SPI_EXCHANGE
-static void spi_recvblock(FAR struct spi_dev_s *dev, FAR void *buffer,
+static void spi_recvblock(struct spi_dev_s *dev, void *buffer,
                           size_t nwords)
 {
   struct imx_spidev_s *priv = (struct imx_spidev_s *)dev;
@@ -1020,7 +1027,7 @@ static void spi_recvblock(FAR struct spi_dev_s *dev, FAR void *buffer,
  *
  ****************************************************************************/
 
-FAR struct spi_dev_s *imx_spibus_initialize(int port)
+struct spi_dev_s *imx_spibus_initialize(int port)
 {
   struct imx_spidev_s *priv;
   uint8_t regval;
@@ -1107,18 +1114,9 @@ FAR struct spi_dev_s *imx_spibus_initialize(int port)
 
   /* Initialize the state structure */
 
-#ifndef CONFIG_SPI_POLLWAIT
-  /* Initialize the semaphore that is used to wake up the waiting
-   * thread when the DMA transfer completes.  This semaphore is used for
-   * signaling and, hence, should not have priority inheritance enabled.
+  /* Initialize control register:
+   * min frequency, ignore ready, master mode, mode=0, 8-bit
    */
-
-  nxsem_init(&priv->waitsem, 0, 0);
-  nxsem_setprotocol(&priv->waitsem, SEM_PRIO_NONE);
-#endif
-  nxsem_init(&priv->exclsem, 0, 1);
-
-  /* Initialize control register: min frequency, ignore ready, master mode, mode=0, 8-bit */
 
   spi_putreg(priv, CSPI_CTRL_OFFSET,
              CSPI_CTRL_DIV512 |                /* Lowest frequency */
@@ -1133,7 +1131,7 @@ FAR struct spi_dev_s *imx_spibus_initialize(int port)
 
   /* Set the initial clock frequency for identification mode < 400kHz */
 
-  spi_setfrequency((FAR struct spi_dev_s *)priv, 400000);
+  spi_setfrequency((struct spi_dev_s *)priv, 400000);
 
   /* Enable interrupts on data ready (and certain error conditions */
 
@@ -1173,7 +1171,7 @@ FAR struct spi_dev_s *imx_spibus_initialize(int port)
 #ifndef CONFIG_SPI_POLLWAIT
   up_enable_irq(priv->irq);
 #endif
-  return (FAR struct spi_dev_s *)priv;
+  return (struct spi_dev_s *)priv;
 }
 
 #endif /* NSPIS > 0 */

@@ -1,36 +1,22 @@
 /****************************************************************************
  * drivers/usbhost/usbhost_xboxcontroller.c
  *
- *   Copyright (C) 2016-2017 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *            Brian Webb <webbbn@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -56,7 +42,7 @@
 #include <nuttx/arch.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/signal.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 
 #include <nuttx/usb/usb.h>
 #include <nuttx/usb/usbhost.h>
@@ -176,10 +162,10 @@ struct usbhost_state_s
   uint8_t                              nwaiters;     /* Number of threads waiting for controller data */
   sem_t                                waitsem;      /* Used to wait for controller data */
   int16_t                              crefs;        /* Reference count on the driver instance */
-  sem_t                                exclsem;      /* Used to maintain mutual exclusive access */
+  mutex_t                              lock;         /* Used to maintain mutual exclusive access */
   struct work_s                        work;         /* For interacting with the worker thread */
   FAR uint8_t                         *tbuffer;      /* The allocated transfer buffer */
-  FAR uint8_t                          obuffer[20];  /* The fixed output transfer buffer */
+  uint8_t                              obuffer[20];  /* The fixed output transfer buffer */
   size_t                               tbuflen;      /* Size of the allocated transfer buffer */
   usbhost_ep_t                         epin;         /* IN endpoint */
   usbhost_ep_t                         epout;        /* OUT endpoint */
@@ -192,18 +178,12 @@ struct usbhost_state_s
    * retained in the f_priv field of the 'struct file'.
    */
 
-  struct pollfd *fds[CONFIG_XBOXCONTROLLER_NPOLLWAITERS];
+  FAR struct pollfd *fds[CONFIG_XBOXCONTROLLER_NPOLLWAITERS];
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
-
-/* Semaphores */
-
-static int usbhost_takesem(FAR sem_t *sem);
-static void usbhost_forcetake(FAR sem_t *sem);
-#define usbhost_givesem(s) nxsem_post(s);
 
 /* Memory allocation services */
 
@@ -224,7 +204,7 @@ static void usbhost_destroy(FAR void *arg);
 /* Polling support */
 
 static void usbhost_pollnotify(FAR struct usbhost_state_s *dev);
-static int usbhost_xboxcontroller_poll(int argc, char *argv[]);
+static int usbhost_xboxcontroller_poll(int argc, FAR char *argv[]);
 
 /* Helpers for usbhost_connect() */
 
@@ -235,12 +215,8 @@ static inline int usbhost_devinit(FAR struct usbhost_state_s *priv);
 
 /* (Little Endian) Data helpers */
 
-static inline uint16_t usbhost_getle16(const uint8_t *val);
-static inline void usbhost_putle16(uint8_t *dest, uint16_t val);
-static inline uint32_t usbhost_getle32(const uint8_t *val);
-#if 0 /* Not used */
-static void usbhost_putle32(uint8_t *dest, uint32_t val);
-#endif
+static inline uint16_t usbhost_getle16(FAR const uint8_t *val);
+static inline void usbhost_putle16(FAR uint8_t *dest, uint16_t val);
 
 /* Transfer descriptor memory management */
 
@@ -249,9 +225,9 @@ static inline int usbhost_tfree(FAR struct usbhost_state_s *priv);
 
 /* struct usbhost_registry_s methods */
 
-static struct usbhost_class_s *
-  usbhost_create(FAR struct usbhost_hubport_s *hport,
-                 FAR const struct usbhost_id_s *id);
+static FAR struct usbhost_class_s *
+usbhost_create(FAR struct usbhost_hubport_s *hport,
+               FAR const struct usbhost_id_s *id);
 
 /* struct usbhost_class_s methods */
 
@@ -322,6 +298,8 @@ static const struct file_operations g_xboxcontroller_fops =
   usbhost_write,            /* write */
   NULL,                     /* seek */
   usbhost_ioctl,            /* ioctl */
+  NULL,                     /* mmap */
+  NULL,                     /* truncate */
   usbhost_poll              /* poll */
 };
 
@@ -331,55 +309,13 @@ static uint32_t g_devinuse;
 
 /* The following are used to managed the class creation operation */
 
-static sem_t                   g_exclsem; /* For mutually exclusive thread creation */
-static sem_t                   g_syncsem; /* Thread data passing interlock */
-static struct usbhost_state_s *g_priv;    /* Data passed to thread */
+static mutex_t g_lock = NXMUTEX_INITIALIZER;
+static sem_t g_syncsem = SEM_INITIALIZER(0);
+static FAR struct usbhost_state_s *g_priv;
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: usbhost_takesem
- *
- * Description:
- *   This is just a wrapper to handle the annoying behavior of semaphore
- *   waits that return due to the receipt of a signal.
- *
- ****************************************************************************/
-
-static int usbhost_takesem(FAR sem_t *sem)
-{
-  return nxsem_wait_uninterruptible(sem);
-}
-
-/****************************************************************************
- * Name: usbhost_forcetake
- *
- * Description:
- *   This is just another wrapper but this one continues even if the thread
- *   is canceled.  This must be done in certain conditions where were must
- *   continue in order to clean-up resources.
- *
- ****************************************************************************/
-
-static void usbhost_forcetake(FAR sem_t *sem)
-{
-  int ret;
-
-  do
-    {
-      ret = nxsem_wait_uninterruptible(sem);
-
-      /* The only expected error would -ECANCELED meaning that the
-       * parent thread has been canceled.  We have to continue and
-       * terminate the poll in this case.
-       */
-
-      DEBUGASSERT(ret == OK || ret == -ECANCELED);
-    }
-  while (ret < 0);
-}
 
 /****************************************************************************
  * Name: usbhost_allocclass
@@ -539,9 +475,9 @@ static void usbhost_destroy(FAR void *arg)
 
   usbhost_tfree(priv);
 
-  /* Destroy the semaphores */
+  /* Destroy the semaphores & mutex */
 
-  nxsem_destroy(&priv->exclsem);
+  nxmutex_destroy(&priv->lock);
   nxsem_destroy(&priv->waitsem);
 
   /* Disconnect the USB host device */
@@ -574,8 +510,6 @@ static void usbhost_destroy(FAR void *arg)
 
 static void usbhost_pollnotify(FAR struct usbhost_state_s *priv)
 {
-  int i;
-
   /* If there are threads waiting for read data, then signal one of them
    * that the read data is available.
    */
@@ -591,16 +525,7 @@ static void usbhost_pollnotify(FAR struct usbhost_state_s *priv)
    * read the data, then some make end up blocking after all.
    */
 
-  for (i = 0; i < CONFIG_XBOXCONTROLLER_NPOLLWAITERS; i++)
-    {
-      FAR struct pollfd *fds = priv->fds[i];
-      if (fds)
-        {
-          fds->revents |= POLLIN;
-          iinfo("Report events: %02x\n", fds->revents);
-          nxsem_post(fds->sem);
-        }
-    }
+  poll_notify(priv->fds, CONFIG_XBOXCONTROLLER_NPOLLWAITERS, POLLIN);
 }
 
 /****************************************************************************
@@ -617,7 +542,7 @@ static void usbhost_pollnotify(FAR struct usbhost_state_s *priv)
  *
  ****************************************************************************/
 
-static int usbhost_xboxcontroller_poll(int argc, char *argv[])
+static int usbhost_xboxcontroller_poll(int argc, FAR char *argv[])
 {
   FAR struct usbhost_state_s *priv;
   FAR struct usbhost_hubport_s *hport;
@@ -644,7 +569,7 @@ static int usbhost_xboxcontroller_poll(int argc, char *argv[])
   hport = priv->usbclass.hport;
 
   priv->polling = true;
-  usbhost_givesem(&g_syncsem);
+  nxsem_post(&g_syncsem);
   nxsig_sleep(1);
 
   /* Loop here until the device is disconnected */
@@ -707,7 +632,7 @@ static int usbhost_xboxcontroller_poll(int argc, char *argv[])
                 {
                   /* Get exclusive access to the controller state data */
 
-                  ret = usbhost_takesem(&priv->exclsem);
+                  ret = nxmutex_lock(&priv->lock);
                   if (ret < 0)
                     {
                       goto exitloop;
@@ -724,7 +649,7 @@ static int usbhost_xboxcontroller_poll(int argc, char *argv[])
 
                   /* Release our lock on the state structure */
 
-                  usbhost_givesem(&priv->exclsem);
+                  nxmutex_unlock(&priv->lock);
                 }
 
               break;
@@ -733,7 +658,7 @@ static int usbhost_xboxcontroller_poll(int argc, char *argv[])
 
               /* Get exclusive access to the controller state data */
 
-              ret = usbhost_takesem(&priv->exclsem);
+              ret = nxmutex_lock(&priv->lock);
               if (ret < 0)
                 {
                   goto exitloop;
@@ -766,7 +691,9 @@ static int usbhost_xboxcontroller_poll(int argc, char *argv[])
                   memcpy(priv->tbuffer, guide_button_report_ack,
                          sizeof(guide_button_report_ack));
 
-                  /* Ensure the sequence number is the same as the input packet. */
+                  /* Ensure the sequence number is the same as the input
+                   * packet.
+                   */
 
                   priv->tbuffer[2] = seq_num;
 
@@ -783,19 +710,21 @@ static int usbhost_xboxcontroller_poll(int argc, char *argv[])
 
               /* Release our lock on the state structure */
 
-              usbhost_givesem(&priv->exclsem);
+              nxmutex_unlock(&priv->lock);
 
               break;
 
             case USBHOST_BUTTON_DATA:
 
-              /* Ignore the controller data if no task has opened the driver. */
+              /* Ignore the controller data if no task has opened the
+               * driver.
+               */
 
               if (priv->open)
                 {
                   /* Get exclusive access to the controller state data */
 
-                  ret = usbhost_takesem(&priv->exclsem);
+                  ret = nxmutex_lock(&priv->lock);
                   if (ret < 0)
                     {
                       goto exitloop;
@@ -864,28 +793,30 @@ static int usbhost_xboxcontroller_poll(int argc, char *argv[])
                                     XBOX_BUTTON_STICK_RIGHT_INDEX,
                                     XBOX_BUTTON_STICK_RIGHT_MASK);
 
-                  priv->rpt.trigger_left =
-                    ((int16_t *)(priv->tbuffer))[XBOX_BUTTON_TRIGGER_LEFT];
-                  priv->rpt.trigger_right =
-                    ((int16_t *)(priv->tbuffer))[XBOX_BUTTON_TRIGGER_RIGHT];
-                  priv->rpt.stick_left_x =
-                    ((int16_t *)(priv->tbuffer))[XBOX_BUTTON_STICK_LEFT_X];
-                  priv->rpt.stick_left_y =
-                    ((int16_t *)(priv->tbuffer))[XBOX_BUTTON_STICK_LEFT_Y];
-                  priv->rpt.stick_right_x =
-                    ((int16_t *)(priv->tbuffer))[XBOX_BUTTON_STICK_RIGHT_X];
-                  priv->rpt.stick_right_y =
-                    ((int16_t *)(priv->tbuffer))[XBOX_BUTTON_STICK_RIGHT_Y];
+                  priv->rpt.trigger_left = ((FAR int16_t *)
+                      (priv->tbuffer))[XBOX_BUTTON_TRIGGER_LEFT];
+                  priv->rpt.trigger_right = ((FAR int16_t *)
+                      (priv->tbuffer))[XBOX_BUTTON_TRIGGER_RIGHT];
+                  priv->rpt.stick_left_x = ((FAR int16_t *)
+                      (priv->tbuffer))[XBOX_BUTTON_STICK_LEFT_X];
+                  priv->rpt.stick_left_y = ((FAR int16_t *)
+                      (priv->tbuffer))[XBOX_BUTTON_STICK_LEFT_Y];
+                  priv->rpt.stick_right_x = ((FAR int16_t *)
+                      (priv->tbuffer))[XBOX_BUTTON_STICK_RIGHT_X];
+                  priv->rpt.stick_right_y = ((FAR int16_t *)
+                      (priv->tbuffer))[XBOX_BUTTON_STICK_RIGHT_Y];
 
                   priv->valid = true;
 
-                  /* Notify any waiters that new controller data is available */
+                  /* Notify any waiters that new controller data is
+                   * available.
+                   */
 
                   usbhost_pollnotify(priv);
 
                   /* Release our lock on the state structure */
 
-                  usbhost_givesem(&priv->exclsem);
+                  nxmutex_unlock(&priv->lock);
                 }
 
               break;
@@ -909,7 +840,6 @@ static int usbhost_xboxcontroller_poll(int argc, char *argv[])
     }
 
 exitloop:
-
   /* We get here when the driver is removed, when too many errors have
    * been encountered, or when the thread is canceled.
    *
@@ -918,7 +848,7 @@ exitloop:
    * trying to interact with the class driver.
    */
 
-  usbhost_forcetake(&priv->exclsem);
+  nxmutex_lock(&priv->lock);
 
   /* Indicate that we are no longer running and decrement the reference
    * count held by this thread.  If there are no other users of the class,
@@ -960,7 +890,7 @@ exitloop:
        * reference is closed
        */
 
-      usbhost_givesem(&priv->exclsem);
+      nxmutex_unlock(&priv->lock);
     }
 
   leave_critical_section(flags);
@@ -985,7 +915,7 @@ static int usbhost_sample(FAR struct usbhost_state_s *priv,
   irqstate_t flags;
   int ret = -EAGAIN;
 
-  /* Interrupts me be disabled when this is called to (1) prevent posting
+  /* Interrupts must be disabled when this is called to (1) prevent posting
    * of semaphores from interrupt handlers, and (2) to prevent sampled data
    * from changing until it has been reported.
    */
@@ -1029,15 +959,11 @@ static int usbhost_waitsample(FAR struct usbhost_state_s *priv,
   irqstate_t flags;
   int ret;
 
-  /* Interrupts me be disabled when this is called to (1) prevent posting
+  /* Interrupts must be disabled when this is called to (1) prevent posting
    * of semaphores from interrupt handlers, and (2) to prevent sampled data
    * from changing until it has been reported.
-   *
-   * In addition, we will also disable pre-emption to prevent other threads
-   * from getting control while we muck with the semaphores.
    */
 
-  sched_lock();
   flags = enter_critical_section();
 
   /* Now release the semaphore that manages mutually exclusive access to
@@ -1045,7 +971,7 @@ static int usbhost_waitsample(FAR struct usbhost_state_s *priv,
    * run, but they cannot run yet because pre-emption is disabled.
    */
 
-  nxsem_post(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
 
   /* Try to get the a sample... if we cannot, then wait on the semaphore
    * that is posted when new sample data is available.
@@ -1082,7 +1008,7 @@ static int usbhost_waitsample(FAR struct usbhost_state_s *priv,
    * sample.  Interrupts and pre-emption will be re-enabled while we wait.
    */
 
-  ret = nxsem_wait(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
 
 errout:
   /* Then re-enable interrupts.  We might get interrupt here and there
@@ -1091,14 +1017,6 @@ errout:
    */
 
   leave_critical_section(flags);
-
-  /* Restore pre-emption.  We might get suspended here but that is okay
-   * because we already have our sample.  Note:  this means that if there
-   * were two threads reading from the HIDMOUSE for some reason, the data
-   * might be read out of order.
-   */
-
-  sched_unlock();
   return ret;
 }
 
@@ -1167,7 +1085,7 @@ static inline int usbhost_cfgdesc(FAR struct usbhost_state_s *priv,
   configdesc += cfgdesc->len;
   remaining  -= cfgdesc->len;
 
-  /* Loop where there are more dscriptors to examine */
+  /* Loop where there are more descriptors to examine */
 
   while (remaining >= sizeof(struct usb_desc_s) && !done)
     {
@@ -1185,7 +1103,9 @@ static inline int usbhost_cfgdesc(FAR struct usbhost_state_s *priv,
             uinfo("Interface descriptor\n");
             DEBUGASSERT(remaining >= USB_SIZEOF_IFDESC);
 
-            /* Did we already find what we needed from a preceding interface? */
+            /* Did we already find what we needed from a preceding
+             * interface?
+             */
 
             if ((found & USBHOST_ALLFOUND) == USBHOST_ALLFOUND)
               {
@@ -1399,7 +1319,7 @@ static inline int usbhost_devinit(FAR struct usbhost_state_s *priv)
    * likelihood of this being used?  About zero, but we protect it anyway).
    */
 
-  ret = usbhost_takesem(&g_exclsem);
+  ret = nxmutex_lock(&g_lock);
   if (ret < 0)
     {
       usbhost_tfree(priv);
@@ -1409,23 +1329,25 @@ static inline int usbhost_devinit(FAR struct usbhost_state_s *priv)
   g_priv = priv;
 
   uinfo("Starting thread\n");
-  priv->pollpid = kthread_create("xbox", CONFIG_XBOXCONTROLLER_DEFPRIO,
-                                 CONFIG_XBOXCONTROLLER_STACKSIZE,
-                                 (main_t)usbhost_xboxcontroller_poll,
-                                 (FAR char * const *)NULL);
-  if (priv->pollpid < 0)
+  ret = kthread_create("xbox", CONFIG_XBOXCONTROLLER_DEFPRIO,
+                       CONFIG_XBOXCONTROLLER_STACKSIZE,
+                       usbhost_xboxcontroller_poll, NULL);
+  if (ret < 0)
     {
-      /* Failed to started the poll thread... probably due to memory resources */
+      /* Failed to started the poll thread... probably due to memory
+       * resources.
+       */
 
-      usbhost_givesem(&g_exclsem);
-      ret = priv->pollpid;
+      nxmutex_unlock(&g_lock);
       goto errout;
     }
 
+  priv->pollpid = (pid_t)ret;
+
   /* Now wait for the poll task to get properly initialized */
 
-  usbhost_forcetake(&g_syncsem);
-  usbhost_givesem(&g_exclsem);
+  nxsem_wait_uninterruptible(&g_syncsem);
+  nxmutex_unlock(&g_lock);
 
   /* Configure the device */
 
@@ -1441,9 +1363,9 @@ static inline int usbhost_devinit(FAR struct usbhost_state_s *priv)
    */
 
 errout:
-  usbhost_forcetake(&priv->exclsem);
+  nxmutex_lock(&priv->lock);
   priv->crefs--;
-  usbhost_givesem(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -1461,7 +1383,7 @@ errout:
  *
  ****************************************************************************/
 
-static inline uint16_t usbhost_getle16(const uint8_t *val)
+static inline uint16_t usbhost_getle16(FAR const uint8_t *val)
 {
   return (uint16_t)val[1] << 8 | (uint16_t)val[0];
 }
@@ -1481,59 +1403,11 @@ static inline uint16_t usbhost_getle16(const uint8_t *val)
  *
  ****************************************************************************/
 
-static void usbhost_putle16(uint8_t *dest, uint16_t val)
+static void usbhost_putle16(FAR uint8_t *dest, uint16_t val)
 {
   dest[0] = val & 0xff; /* Little endian means LS byte first in byte stream */
   dest[1] = val >> 8;
 }
-
-/****************************************************************************
- * Name: usbhost_getle32
- *
- * Description:
- *   Get a (possibly unaligned) 32-bit little endian value.
- *
- * Input Parameters:
- *   dest - A pointer to the first byte to save the big endian value.
- *   val - The 32-bit value to be saved.
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-static inline uint32_t usbhost_getle32(const uint8_t *val)
-{
-  /* Little endian means LS halfword first in byte stream */
-
-  return (uint32_t)usbhost_getle16(&val[2]) << 16 |
-         (uint32_t)usbhost_getle16(val);
-}
-
-/****************************************************************************
- * Name: usbhost_putle32
- *
- * Description:
- *   Put a (possibly unaligned) 32-bit little endian value.
- *
- * Input Parameters:
- *   dest - A pointer to the first byte to save the little endian value.
- *   val - The 32-bit value to be saved.
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-#if 0 /* Not used */
-static void usbhost_putle32(uint8_t *dest, uint32_t val)
-{
-  /* Little endian means LS halfword first in byte stream */
-
-  usbhost_putle16(dest, (uint16_t)(val & 0xffff));
-  usbhost_putle16(dest + 2, (uint16_t)(val >> 16));
-}
-#endif
 
 /****************************************************************************
  * Name: usbhost_talloc
@@ -1625,8 +1499,8 @@ static inline int usbhost_tfree(FAR struct usbhost_state_s *priv)
  ****************************************************************************/
 
 static FAR struct usbhost_class_s *
-  usbhost_create(FAR struct usbhost_hubport_s *hport,
-                 FAR const struct usbhost_id_s *id)
+usbhost_create(FAR struct usbhost_hubport_s *hport,
+               FAR const struct usbhost_id_s *id)
 {
   FAR struct usbhost_state_s *priv;
 
@@ -1649,20 +1523,18 @@ static FAR struct usbhost_class_s *
           priv->usbclass.connect      = usbhost_connect;
           priv->usbclass.disconnected = usbhost_disconnected;
 
-          /* The initial reference count is 1... One reference is held by the driver */
+          /* The initial reference count is 1... One reference is held by the
+           * driver.
+           */
 
           priv->crefs = 1;
 
-          /* Initialize semaphores (this works okay in the interrupt context) */
-
-          nxsem_init(&priv->exclsem, 0, 1);
-          nxsem_init(&priv->waitsem, 0, 0);
-
-          /* The waitsem semaphore is used for signaling and, hence, should
-           * not have priority inheritance enabled.
+          /* Initialize mutex & semaphores (this works okay in the interrupt
+           * context).
            */
 
-          nxsem_setprotocol(&priv->waitsem, SEM_PRIO_NONE);
+          nxmutex_init(&priv->lock);
+          nxsem_init(&priv->waitsem, 0, 0);
 
           /* Return the instance of the USB class driver */
 
@@ -1768,7 +1640,7 @@ static int usbhost_connect(FAR struct usbhost_class_s *usbclass,
  *
  ****************************************************************************/
 
-static int usbhost_disconnected(struct usbhost_class_s *usbclass)
+static int usbhost_disconnected(FAR struct usbhost_class_s *usbclass)
 {
   FAR struct usbhost_state_s *priv = (FAR struct usbhost_state_s *)usbclass;
   int i;
@@ -1782,13 +1654,15 @@ static int usbhost_disconnected(struct usbhost_class_s *usbclass)
   priv->disconnected = true;
   uinfo("Disconnected\n");
 
-  /* Are there a thread(s) waiting for controller data that will never come? */
+  /* Are there a thread(s) waiting for controller data that will never
+   * come?
+   */
 
   for (i = 0; i < priv->nwaiters; i++)
     {
       /* Yes.. wake them up */
 
-      usbhost_givesem(&priv->waitsem);
+      nxsem_post(&priv->waitsem);
     }
 
   /* Possibilities:
@@ -1845,14 +1719,13 @@ static int usbhost_open(FAR struct file *filep)
   int ret;
 
   uinfo("Entry\n");
-  DEBUGASSERT(filep && filep->f_inode);
   inode = filep->f_inode;
   priv  = inode->i_private;
 
   /* Make sure that we have exclusive access to the private data structure */
 
   DEBUGASSERT(priv && priv->crefs > 0 && priv->crefs < USBHOST_MAX_CREFS);
-  ret = usbhost_takesem(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -1888,7 +1761,7 @@ static int usbhost_open(FAR struct file *filep)
 #ifdef NEVER
           priv->xlast = INVALID_POSITION_B16;
           priv->ylast = INVALID_POSITION_B16;
-#ifdef CONFIG_MOUSE_WHEEL
+#ifdef CONFIG_INPUT_MOUSE_WHEEL
           priv->wlast = INVALID_POSITION_B16;
 #endif
           /* Set the reported position to the center of the range */
@@ -1906,7 +1779,7 @@ static int usbhost_open(FAR struct file *filep)
     }
 
   leave_critical_section(flags);
-  usbhost_givesem(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -1926,14 +1799,13 @@ static int usbhost_close(FAR struct file *filep)
   int ret;
 
   uinfo("Entry\n");
-  DEBUGASSERT(filep && filep->f_inode);
   inode = filep->f_inode;
   priv  = inode->i_private;
 
   /* Decrement the reference count on the driver */
 
   DEBUGASSERT(priv->crefs >= 1);
-  ret = usbhost_takesem(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -2000,7 +1872,7 @@ static int usbhost_close(FAR struct file *filep)
         }
     }
 
-  usbhost_givesem(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
   leave_critical_section(flags);
   return OK;
 }
@@ -2016,19 +1888,19 @@ static int usbhost_close(FAR struct file *filep)
 static ssize_t usbhost_read(FAR struct file *filep, FAR char *buffer,
                             size_t len)
 {
-  FAR struct inode                          *inode;
-  FAR struct usbhost_state_s                *priv;
-  FAR struct xbox_controller_buttonstate_s  sample;
-  int                                       ret;
+  FAR struct inode                     *inode;
+  FAR struct usbhost_state_s           *priv;
+  struct xbox_controller_buttonstate_s sample;
+  int                                  ret;
 
-  DEBUGASSERT(filep && filep->f_inode && buffer);
+  DEBUGASSERT(buffer);
   inode = filep->f_inode;
   priv  = inode->i_private;
 
   /* Make sure that we have exclusive access to the private data structure */
 
   DEBUGASSERT(priv && priv->crefs > 0 && priv->crefs < USBHOST_MAX_CREFS);
-  ret = usbhost_takesem(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -2088,7 +1960,7 @@ static ssize_t usbhost_read(FAR struct file *filep, FAR char *buffer,
   ret = sizeof(struct xbox_controller_buttonstate_s);
 
 errout:
-  usbhost_givesem(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
   iinfo("Returning: %d\n", ret);
   return (ssize_t)ret;
 }
@@ -2131,7 +2003,7 @@ static int usbhost_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   };
 
   uinfo("Entered\n");
-  DEBUGASSERT(filep && filep->f_inode && buffer);
+  DEBUGASSERT(buffer);
   inode = filep->f_inode;
   priv  = inode->i_private;
   hport = priv->usbclass.hport;
@@ -2183,7 +2055,7 @@ static int usbhost_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
     default:
 
-      ret = -EINVAL;
+      ret = -ENOTTY;
       goto errout;
     }
 
@@ -2208,14 +2080,14 @@ static int usbhost_poll(FAR struct file *filep, FAR struct pollfd *fds,
   int                         ret;
   int                         i;
 
-  DEBUGASSERT(filep && filep->f_inode && fds);
+  DEBUGASSERT(fds);
   inode = filep->f_inode;
   priv  = inode->i_private;
 
   /* Make sure that we have exclusive access to the private data structure */
 
   DEBUGASSERT(priv);
-  ret = usbhost_takesem(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       return ret;
@@ -2257,8 +2129,8 @@ static int usbhost_poll(FAR struct file *filep, FAR struct pollfd *fds,
 
       if (i >= CONFIG_XBOXCONTROLLER_NPOLLWAITERS)
         {
-          fds->priv    = NULL;
-          ret          = -EBUSY;
+          fds->priv = NULL;
+          ret       = -EBUSY;
           goto errout;
         }
 
@@ -2268,7 +2140,7 @@ static int usbhost_poll(FAR struct file *filep, FAR struct pollfd *fds,
 
       if (priv->valid)
         {
-          usbhost_pollnotify(priv);
+          poll_notify(&fds, 1, POLLIN);
         }
     }
   else
@@ -2285,7 +2157,7 @@ static int usbhost_poll(FAR struct file *filep, FAR struct pollfd *fds,
     }
 
 errout:
-  nxsem_post(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -2312,17 +2184,6 @@ errout:
 
 int usbhost_xboxcontroller_init(void)
 {
-  /* Perform any one-time initialization of the class implementation */
-
-  nxsem_init(&g_exclsem, 0, 1);
-  nxsem_init(&g_syncsem, 0, 0);
-
-  /* The g_syncsem semaphore is used for signaling and, hence, should not
-   * have priority inheritance enabled.
-   */
-
-  nxsem_setprotocol(&g_syncsem, SEM_PRIO_NONE);
-
   /* Advertise our availability to support (certain) devices */
 
   return usbhost_registerclass(&g_xboxcontroller);

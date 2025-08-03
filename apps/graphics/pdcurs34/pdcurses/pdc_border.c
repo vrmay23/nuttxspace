@@ -1,41 +1,27 @@
 /****************************************************************************
- * apps/graphics/pdcurses/pdc_border.c
- * Public Domain Curses
- * RCSID("$Id: border.c,v 1.53 2008/07/13 16:08:18 wmcbrine Exp $")
+ * apps/graphics/pdcurs34/pdcurses/pdc_border.c
  *
- *   Copyright (C) 2017 Gregory Nutt. All rights reserved.
- *   Adapted by: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Adapted from the original public domain pdcurses by Gregory Nutt and
- * released as part of NuttX under the 3-clause BSD license:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Adapted from the original public domain pdcurses by Gregory Nutt
  ****************************************************************************/
 
 /* Name: border
@@ -63,15 +49,18 @@
  *                       const cchar_t *ts, const cchar_t *bs,
  *                       const cchar_t *tl, const cchar_t *tr,
  *                       const cchar_t *bl, const cchar_t *br);
- *       int box_set(WINDOW *win, const cchar_t *verch, const cchar_t *horch);
+ *       int box_set(WINDOW *win, const cchar_t *verch,
+ *                   const cchar_t *horch);
  *       int hline_set(const cchar_t *wch, int n);
  *       int vline_set(const cchar_t *wch, int n);
  *       int whline_set(WINDOW *win, const cchar_t *wch, int n);
  *       int wvline_set(WINDOW *win, const cchar_t *wch, int n);
  *       int mvhline_set(int y, int x, const cchar_t *wch, int n);
  *       int mvvline_set(int y, int x, const cchar_t *wch, int n);
- *       int mvwhline_set(WINDOW *win, int y, int x, const cchar_t *wch, int n);
- *       int mvwvline_set(WINDOW *win, int y, int x, const cchar_t *wch, int n);
+ *       int mvwhline_set(WINDOW *win, int y, int x,
+ *                        const cchar_t *wch, int n);
+ *       int mvwvline_set(WINDOW *win, int y, int x,
+ *                        const cchar_t *wch, int n);
  *
  * Description:
  *       border(), wborder(), and box() draw a border around the edge of
@@ -159,7 +148,7 @@ static chtype _attr_passthru(WINDOW *win, chtype ch)
     }
 
   /* wrs (4/10/93) -- Apply the same sort of logic for the window background,
-   * in that it only takes precedence if other color attributes are not there.
+   * in that it only takes precedence if other color attributes aren't there.
    */
 
   if (!(attr & A_COLOR))
@@ -255,7 +244,8 @@ int box(WINDOW *win, chtype verch, chtype horch)
 int whline(WINDOW *win, chtype ch, int n)
 {
   chtype *dest;
-  int startpos, endpos;
+  int startpos;
+  int endpos;
 
   PDC_LOG(("whline() - called\n"));
 
@@ -431,8 +421,7 @@ int box_set(WINDOW *win, const cchar_t *verch, const cchar_t *horch)
   PDC_LOG(("box_set() - called\n"));
 
   return wborder_set(win, verch, verch, horch, horch,
-                     (const cchar_t *)NULL, (const cchar_t *)NULL,
-                     (const cchar_t *)NULL, (const cchar_t *)NULL);
+                     NULL, NULL, NULL, NULL);
 }
 
 int whline_set(WINDOW *win, const cchar_t *wch, int n)

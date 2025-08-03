@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/c5471/c5471_irq.c
  *
- *   Copyright (C) 2007, 2009, 2011-2012 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,12 +27,11 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
-#include <nuttx/irq.h>
+#include <nuttx/arch.h>
 
 #include "arm.h"
 #include "chip.h"
-#include "up_arch.h"
-#include "up_internal.h"
+#include "arm_internal.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -55,18 +41,6 @@
 #define ILR_PRIORITY      0x0000001E
 
 /****************************************************************************
- * Public Data
- ****************************************************************************/
-
-/* g_current_regs[] holds a references to the current interrupt level
- * register storage structure.  If is non-NULL only during interrupt
- * processing.  Access to g_current_regs[] must be through the macro
- * CURRENT_REGS for portability.
- */
-
-volatile uint32_t *g_current_regs[1];
-
-/****************************************************************************
  * Private Data
  ****************************************************************************/
 
@@ -74,7 +48,7 @@ volatile uint32_t *g_current_regs[1];
  * because we know that correct IRAM area is 0xffc00000.
  */
 
-extern int _svectors; /* Type does not matter */
+extern up_vector_t _svectors[];
 
 /* The C5471 has FLASH at the low end of memory.  The rrload bootloaer will
  * catch all interrupts and re-vector them to vectors stored in IRAM.  The
@@ -83,14 +57,14 @@ extern int _svectors; /* Type does not matter */
 
 static up_vector_t g_vectorinittab[] =
 {
-  (up_vector_t)NULL,
-  up_vectorundefinsn,
-  up_vectorswi,
-  up_vectorprefetch,
-  up_vectordata,
-  up_vectoraddrexcptn,
-  up_vectorirq,
-  up_vectorfiq
+  NULL,
+  arm_vectorundefinsn,
+  arm_vectorsvc,
+  arm_vectorprefetch,
+  arm_vectordata,
+  arm_vectoraddrexcptn,
+  arm_vectorirq,
+  arm_vectorfiq
 };
 #define NVECTORS ((sizeof(g_vectorinittab)) / sizeof(up_vector_t))
 
@@ -102,7 +76,7 @@ static up_vector_t g_vectorinittab[] =
  * Name: up_ackirq
  *
  * Description:
- *   Acknowlede the IRQ.Bit 0 of the Interrupt Control
+ *   Acknowledge the IRQ.Bit 0 of the Interrupt Control
  *   Register ==  New IRQ agreement (NEW_IRQ_AGR). Reset IRQ
  *   output. Clear source IRQ register. Enables a new IRQ
  *   generation. Reset by internal logic.
@@ -141,7 +115,7 @@ static inline void up_ackfiq(unsigned int irq)
 static inline void up_vectorinitialize(void)
 {
   up_vector_t *src  = g_vectorinittab;
-  up_vector_t *dest = (up_vector_t *)&_svectors;
+  up_vector_t *dest = _svectors;
   int i;
 
   for (i = 0; i < NVECTORS; i++)
@@ -180,12 +154,11 @@ void up_irqinitialize(void)
   /* Initialize hardware interrupt vectors */
 
   up_vectorinitialize();
-  CURRENT_REGS = NULL;
 
   /* And finally, enable interrupts */
 
 #ifndef CONFIG_SUPPRESS_INTERRUPTS
-  up_irq_restore(SVC_MODE | PSR_F_BIT);
+  up_irq_restore(PSR_MODE_SYS | PSR_F_BIT);
 #endif
 }
 
@@ -224,14 +197,14 @@ void up_enable_irq(int irq)
 }
 
 /****************************************************************************
- * Name: up_ack_irq
+ * Name: arm_ack_irq
  *
  * Description:
  *   Acknowledge the interrupt
  *
  ****************************************************************************/
 
-void up_ack_irq(int irq)
+void arm_ack_irq(int irq)
 {
   uint32_t reg;
 

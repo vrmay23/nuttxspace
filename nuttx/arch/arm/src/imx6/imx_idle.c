@@ -1,5 +1,7 @@
 /****************************************************************************
- *  arch/arm/src/imx6/imx_idle.c
+ * arch/arm/src/imx6/imx_idle.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -25,7 +27,7 @@
 #include <nuttx/config.h>
 
 #include <nuttx/arch.h>
-#include "up_internal.h"
+#include "arm_internal.h"
 
 /****************************************************************************
  * Public Functions
@@ -35,7 +37,7 @@
  * Name: up_idle
  *
  * Description:
- *   up_idle() is the logic that will be executed when their is no other
+ *   up_idle() is the logic that will be executed when there is no other
  *   ready-to-run task.  This is processor idle time and will continue until
  *   some interrupt occurs to cause a context switch from the idle task.
  *

@@ -1,6 +1,8 @@
 /****************************************************************************
  * boards/z80/ez80/z20x/src/ez80_bringup.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -25,8 +27,9 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <sys/mount.h>
 #include <debug.h>
+
+#include <nuttx/fs/fs.h>
 
 #include "z20x.h"
 
@@ -43,7 +46,7 @@
  *   CONFIG_BOARD_LATE_INITIALIZE=y :
  *     Called from board_late_initialize().
  *
- *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_LIB_BOARDCTL=y :
+ *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_BOARDCTL=y :
  *     Called from the NSH library
  *
  ****************************************************************************/
@@ -55,7 +58,7 @@ int ez80_bringup(void)
 #ifdef CONFIG_FS_PROCFS
   /* Mount the procfs file system */
 
-  ret = mount(NULL, "/proc", "procfs", 0, NULL);
+  ret = nx_mount(NULL, "/proc", "procfs", 0, NULL);
   if (ret < 0)
     {
       ferr("ERROR: Failed to mount procfs at /proc: %d\n", ret);

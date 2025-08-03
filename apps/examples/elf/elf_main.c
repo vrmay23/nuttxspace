@@ -1,5 +1,7 @@
 /****************************************************************************
- * examples/elf/elf_main.c
+ * apps/examples/elf/elf_main.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -24,12 +26,14 @@
 
 #include <nuttx/config.h>
 #include <nuttx/compiler.h>
+#include <sys/boardctl.h>
 
 #include <sys/mount.h>
 #include <sys/stat.h>
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <malloc.h>
 #include <unistd.h>
 #include <string.h>
 #include <pthread.h>
@@ -39,18 +43,6 @@
 #include <nuttx/symtab.h>
 #include <nuttx/drivers/ramdisk.h>
 #include <nuttx/binfmt/binfmt.h>
-
-#include "platform/cxxinitialize.h"
-
-#if defined(CONFIG_EXAMPLES_ELF_ROMFS)
-#  include "tests/romfs.h"
-#elif defined(CONFIG_EXAMPLES_ELF_CROMFS)
-#  include "tests/cromfs.h"
-#elif !defined(CONFIG_EXAMPLES_ELF_EXTERN)
-#  error "No file system selected"
-#endif
-
-#include "tests/dirlist.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -72,30 +64,26 @@
 #  error "You must not disable mountpoints via CONFIG_DISABLE_MOUNTPOINT in your configuration file"
 #endif
 
+#ifndef CONFIG_EXAMPLES_ELF_DEVMINOR
+#  define CONFIG_EXAMPLES_ELF_DEVMINOR 0
+#endif
+
 #if defined(CONFIG_EXAMPLES_ELF_ROMFS)
 /* Describe the ROMFS file system */
 
 #  define SECTORSIZE   512
 #  define NSECTORS(b)  (((b) + SECTORSIZE - 1) / SECTORSIZE)
-#  define MOUNTPT      "/mnt/romfs"
-
-#  ifndef CONFIG_EXAMPLES_ELF_DEVMINOR
-#    define CONFIG_EXAMPLES_ELF_DEVMINOR 0
-#  endif
-
-#  ifndef CONFIG_EXAMPLES_ELF_DEVPATH
-#    define CONFIG_EXAMPLES_ELF_DEVPATH "/dev/ram0"
-#  endif
+#  define MOUNTPT      "/mnt/elf/romfs"
 
 #elif defined(CONFIG_EXAMPLES_ELF_CROMFS)
 /* Describe the CROMFS file system */
 
-#  define MOUNTPT      "/mnt/cromfs"
+#  define MOUNTPT      "/mnt/elf/cromfs"
 
 #elif defined(CONFIG_EXAMPLES_ELF_EXTERN) && defined(CONFIG_EXAMPLES_ELF_FSMOUNT)
 /* Describe the external file system */
 
-#  define MOUNTPT      "/mnt/" CONFIG_EXAMPLES_ELF_FSTYPE
+#  define MOUNTPT      "/mnt/elf/" CONFIG_EXAMPLES_ELF_FSTYPE
 
 #else
 #  undef MOUNTPT
@@ -105,29 +93,18 @@
  * that the output will be synchronous with the debug output.
  */
 
-#ifdef CONFIG_CPP_HAVE_VARARGS
-#  ifdef CONFIG_DEBUG_INFO
-#    define message(format, ...)  syslog(LOG_INFO, format, ##__VA_ARGS__)
-#  else
-#    define message(format, ...)  printf(format, ##__VA_ARGS__)
-#  endif
-#  ifdef CONFIG_DEBUG_ERROR
-#    define errmsg(format, ...)   syslog(LOG_ERR, format, ##__VA_ARGS__)
-#  else
-#    define errmsg(format, ...)   fprintf(stderr, format, ##__VA_ARGS__)
-#  endif
+#ifdef CONFIG_DEBUG_INFO
+#  define message               _info
 #else
-#  ifdef CONFIG_DEBUG_INFO
-#    define message               _info
-#  else
-#    define message               printf
-#  endif
-#  ifdef CONFIG_DEBUG_ERROR
-#    define errmsg                _err
-#  else
-#    define errmsg                printf
-#  endif
+#  define message               printf
 #endif
+#ifdef CONFIG_DEBUG_ERROR
+#  define errmsg                _err
+#else
+#  define errmsg                printf
+#endif
+
+#define ELF_DEVPATH_FMT "/dev/ram%d"
 
 /****************************************************************************
  * Private Data
@@ -140,13 +117,22 @@ static const char delimiter[] =
   "**************************************"
   "**************************************";
 
-#ifndef CONFIG_LIB_ENVPATH
+#ifndef CONFIG_LIBC_ENVPATH
 static char fullpath[128];
 #endif
 
 /****************************************************************************
  * Symbols from Auto-Generated Code
  ****************************************************************************/
+
+#if defined(CONFIG_EXAMPLES_ELF_ROMFS) || defined(CONFIG_EXAMPLES_ELF_CROMFS)
+extern const unsigned char elf_romfs_img[];
+extern const unsigned int elf_romfs_img_len;
+#elif !defined(CONFIG_EXAMPLES_ELF_EXTERN)
+#  error "No file system selected"
+#endif
+
+extern const char *dirlist[];
 
 extern const struct symtab_s g_elf_exports[];
 extern const int g_elf_nexports;
@@ -214,60 +200,58 @@ static inline void testheader(FAR const char *progname)
 
 int main(int argc, FAR char *argv[])
 {
+  char devname[32];
 #ifdef CONFIG_EXAMPLES_ELF_FSREMOVEABLE
   struct stat buf;
 #endif
-  FAR char *args[1];
+#ifdef CONFIG_EXAMPLES_ELF_ROMFS
+  struct boardioc_romdisk_s desc;
+#endif
+  FAR char *args[2];
   int ret;
   int i;
-
-#if defined(CONFIG_EXAMPLES_ELF_CXXINITIALIZE)
-  /* Call all C++ static constructors */
-
-  up_cxxinitialize();
-#endif
 
   /* Initialize the memory monitor */
 
   mm_initmonitor();
 
+#if defined(CONFIG_EXAMPLES_ELF_FSMOUNT)
+  sprintf(devname, CONFIG_EXAMPLES_ELF_DEVPATH);
+#else
+  sprintf(devname, ELF_DEVPATH_FMT, CONFIG_EXAMPLES_ELF_DEVMINOR);
+#endif
+
 #if defined(CONFIG_EXAMPLES_ELF_ROMFS)
-#if defined(CONFIG_BUILD_FLAT)
-  /* This example violates the portable POSIX interface by calling the OS
-   * internal function romdisk_register() (aka ramdisk_register()).  We can
-   * squeak by in with this violation in the FLAT build mode, but not in
-   * other build modes.  In other build modes, the following logic must be
-   * performed in the OS board initialization logic (where it really belongs
-   * anyway).
-   */
 
   /* Create a ROM disk for the ROMFS filesystem */
 
   message("Registering romdisk at /dev/ram%d\n",
           CONFIG_EXAMPLES_ELF_DEVMINOR);
-  ret = romdisk_register(CONFIG_EXAMPLES_ELF_DEVMINOR,
-                         (FAR uint8_t *)romfs_img,
-                         NSECTORS(romfs_img_len), SECTORSIZE);
+
+  desc.minor    = CONFIG_EXAMPLES_ELF_DEVMINOR;         /* Minor device number of the ROM disk. */
+  desc.nsectors = NSECTORS(elf_romfs_img_len);          /* The number of sectors in the ROM disk */
+  desc.sectsize = SECTORSIZE;                           /* The size of one sector in bytes */
+  desc.image    = (FAR uint8_t *)elf_romfs_img;         /* File system image */
+
+  ret = boardctl(BOARDIOC_ROMDISK, (uintptr_t)&desc);
   if (ret < 0)
     {
-      errmsg("ERROR: romdisk_register failed: %d\n", ret);
+      errmsg("ERROR: romdisk_register failed: %s\n", strerror(errno));
       exit(1);
     }
 
   mm_update(&g_mmstep, "after romdisk_register");
-#endif
 
   /* Mount the ROMFS file system */
 
   message("Mounting ROMFS filesystem at target=%s with source=%s\n",
-         MOUNTPT, CONFIG_EXAMPLES_ELF_DEVPATH);
+          MOUNTPT, devname);
 
-  ret = mount(CONFIG_EXAMPLES_ELF_DEVPATH, MOUNTPT, "romfs",
-              MS_RDONLY, NULL);
+  ret = mount(devname, MOUNTPT, "romfs", MS_RDONLY, NULL);
   if (ret < 0)
     {
       errmsg("ERROR: mount(%s,%s,romfs) failed: %s\n",
-             CONFIG_EXAMPLES_ELF_DEVPATH, MOUNTPT, errno);
+             devname, MOUNTPT, strerror(errno));
     }
 
 #elif defined(CONFIG_EXAMPLES_ELF_CROMFS)
@@ -278,7 +262,8 @@ int main(int argc, FAR char *argv[])
   ret = mount(NULL, MOUNTPT, "cromfs", MS_RDONLY, NULL);
   if (ret < 0)
     {
-      errmsg("ERROR: mount(%s, cromfs) failed: %d\n", MOUNTPT, errno);
+      errmsg("ERROR: mount(%s, cromfs) failed: %s\n",
+             MOUNTPT, strerror(errno));
     }
 #elif defined(CONFIG_EXAMPLES_ELF_EXTERN)
   /* An external file system is being used */
@@ -289,27 +274,26 @@ int main(int argc, FAR char *argv[])
 
   do
     {
-      ret = stat(CONFIG_EXAMPLES_ELF_DEVPATH, &buf);
+      ret = stat(devname, &buf);
       if (ret < 0)
         {
           int errcode = errno;
           if (errcode == ENOENT)
             {
-              printf("%s does not exist.  Waiting...\n",
-                     CONFIG_EXAMPLES_ELF_DEVPATH);
+              printf("%s does not exist.  Waiting...\n", devname);
               sleep(1);
             }
           else
             {
-              printf("ERROR: stat(%s) failed: %d  Aborting...\n",
-                     CONFIG_EXAMPLES_ELF_DEVPATH, errcode);
+              printf("ERROR: stat(%s) failed: %s  Aborting...\n",
+                     devname, strerror(errcode));
               exit(EXIT_FAILURE);
             }
         }
       else if (!S_ISBLK(buf.st_mode))
         {
           printf("ERROR: stat(%s) exists but is not a block driver: %04x\n",
-                 CONFIG_EXAMPLES_ELF_DEVPATH, buf.st_mode);
+                 devname, buf.st_mode);
           exit(EXIT_FAILURE);
         }
     }
@@ -318,16 +302,14 @@ int main(int argc, FAR char *argv[])
 
   /* Mount the external file system */
 
-  message("Mounting %s filesystem at target=%s\n",
-          CONFIG_EXAMPLES_ELF_FSTYPE, MOUNTPT);
+  message("Mounting %s filesystem at target=%s on %s\n",
+          CONFIG_EXAMPLES_ELF_FSTYPE, MOUNTPT, devname);
 
-  ret = mount(CONFIG_EXAMPLES_ELF_DEVPATH, MOUNTPT,
-              CONFIG_EXAMPLES_ELF_FSTYPE, MS_RDONLY, NULL);
+  ret = mount(devname, MOUNTPT, CONFIG_EXAMPLES_ELF_FSTYPE, MS_RDONLY, NULL);
   if (ret < 0)
     {
-      errmsg("ERROR: mount(%s, %s, %s) failed: %d\n",
-             CONFIG_EXAMPLES_ELF_DEVPATH, CONFIG_EXAMPLES_ELF_FSTYPE,
-             MOUNTPT, errno);
+      errmsg("ERROR: mount(%s, %s, %s) failed: %s\n", devname,
+             CONFIG_EXAMPLES_ELF_FSTYPE, MOUNTPT, strerror(errno));
     }
 #endif
 #else
@@ -336,7 +318,7 @@ int main(int argc, FAR char *argv[])
 
   mm_update(&g_mmstep, "after mount");
 
-#if defined(CONFIG_LIB_ENVPATH) && defined(MOUNTPT)
+#if defined(CONFIG_LIBC_ENVPATH) && defined(MOUNTPT)
   /* Does the system support the PATH variable?
    * If YES, then set the PATH variable to the ROMFS mountpoint.
    */
@@ -362,10 +344,10 @@ int main(int argc, FAR char *argv[])
        * search the PATH variable to find the executable.
        */
 
-#ifdef CONFIG_LIB_ENVPATH
+#ifdef CONFIG_LIBC_ENVPATH
       filename = dirlist[i];
 #else
-      snprintf(fullpath, 128, "%s/%s", MOUNTPT, dirlist[i]);
+      snprintf(fullpath, sizeof(fullpath), "%s/%s", MOUNTPT, dirlist[i]);
       filename = fullpath;
 #endif
 
@@ -378,14 +360,16 @@ int main(int argc, FAR char *argv[])
        * table information is available within the OS.
        */
 
-      args[0] = NULL;
-      ret = exec(filename, args, g_elf_exports, g_elf_nexports);
+      args[0] = (FAR char *)dirlist[i];
+      args[1] = NULL;
+      ret = exec(filename, args, NULL, g_elf_exports, g_elf_nexports);
 
       mm_update(&g_mmstep, "after exec");
 
       if (ret < 0)
         {
-          errmsg("ERROR: exec(%s) failed: %d\n", dirlist[i], errno);
+          errmsg("ERROR: exec(%s) failed: %s\n",
+                 dirlist[i], strerror(errno));
         }
       else
         {

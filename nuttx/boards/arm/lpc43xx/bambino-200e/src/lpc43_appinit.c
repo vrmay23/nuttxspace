@@ -1,36 +1,22 @@
 /****************************************************************************
  * boards/arm/lpc43xx/bambino-200e/src/lpc43_appinit.c
  *
- *   Copyright (C) 2016, 2020 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *           Alan Carvalho de Assis acassis@gmail.com
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -53,7 +39,7 @@
 #  include "lpc43_spifi.h"
 
 #  ifdef CONFIG_SPFI_NXFFS
-#    include <sys/mount.h>
+#    include <nuttx/fs/fs.h>
 #    include <nuttx/fs/nxffs.h>
 #  endif
 #endif
@@ -92,7 +78,7 @@
 #ifdef CONFIG_LPC43_SPIFI
 static int nsh_spifi_initialize(void)
 {
-  FAR struct mtd_dev_s *mtd;
+  struct mtd_dev_s *mtd;
   int ret;
 
   /* Initialize the SPIFI interface and create the MTD driver instance */
@@ -105,12 +91,15 @@ static int nsh_spifi_initialize(void)
     }
 
 #ifndef CONFIG_SPFI_NXFFS
-  /* And finally, use the FTL layer to wrap the MTD driver as a block driver */
+  /* Register the MTD driver */
 
-  ret = ftl_initialize(CONFIG_SPIFI_DEVNO, mtd);
+  char path[32];
+  snprintf(path, sizeof(path), "/dev/mtdblock%d", CONFIG_SPIFI_DEVNO);
+  ret = register_mtddriver(path, mtd, 0755, NULL);
   if (ret < 0)
     {
-      ferr("ERROR: Initializing the FTL layer: %d\n", ret);
+      ferr("ERROR: Failed to register the MTD driver %s, ret %d\n",
+           path, ret);
       return ret;
     }
 #else
@@ -125,10 +114,10 @@ static int nsh_spifi_initialize(void)
 
   /* Mount the file system at /mnt/spifi */
 
-  ret = mount(NULL, "/mnt/spifi", "nxffs", 0, NULL);
+  ret = nx_mount(NULL, "/mnt/spifi", "nxffs", 0, NULL);
   if (ret < 0)
     {
-      ferr("ERROR: Failed to mount the NXFFS volume: %d\n", errno);
+      ferr("ERROR: Failed to mount the NXFFS volume: %d\n", ret);
       return ret;
     }
 #endif
@@ -152,7 +141,7 @@ static int nsh_spifi_initialize(void)
  *         implementation without modification.  The argument has no
  *         meaning to NuttX; the meaning of the argument is a contract
  *         between the board-specific initialization logic and the
- *         matching application logic.  The value cold be such things as a
+ *         matching application logic.  The value could be such things as a
  *         mode enumeration value, a set of DIP switch switch settings, a
  *         pointer to configuration data read from a file or serial FLASH,
  *         or whatever you would like to do with it.  Every implementation

@@ -1,37 +1,22 @@
 /****************************************************************************
  * arch/arm/src/kinetis/kinetis_serial.c
  *
- *   Copyright (C) 2011-2012, 2017-2018 Gregory Nutt. All rights reserved.
- *   Authors: Gregory Nutt <gnutt@nuttx.org>
- *            David Sidrane <david_s5@nscdg.com>
- *            Jan Okle <jan@leitwert.ch>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -46,6 +31,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -53,6 +39,7 @@
 #include <nuttx/arch.h>
 #include <nuttx/fs/ioctl.h>
 #include <nuttx/serial/serial.h>
+#include <nuttx/spinlock.h>
 
 #ifdef CONFIG_SERIAL_TERMIOS
 #  include <termios.h>
@@ -60,23 +47,22 @@
 
 #include <arch/board/board.h>
 
-#include "up_arch.h"
-#include "up_internal.h"
-
+#include "arm_internal.h"
 #include "kinetis_config.h"
 #include "chip.h"
 #include "hardware/kinetis_dmamux.h"
 #include "hardware/kinetis_uart.h"
 #include "hardware/kinetis_pinmux.h"
 #include "kinetis.h"
-#include "kinetis_dma.h"
+#include "kinetis_edma.h"
 #include "kinetis_uart.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Some sanity checks *******************************************************/
+/* Some sanity checks */
+
 /* Is there at least one UART enabled and configured as a RS-232 device? */
 
 #ifndef HAVE_UART_DEVICE
@@ -285,9 +271,6 @@
 #  define RXDMA_BUFFER_SIZE   ((CONFIG_KINETIS_SERIAL_RXDMA_BUFFER_SIZE \
                                 + RXDMA_BUFFER_MASK) & ~RXDMA_BUFFER_MASK)
 
-#  define SERIAL_DMA_CONTROL_WORD \
-                              (DMA_TCD_CSR_MAJORELINK | \
-                               DMA_TCD_CSR_INTHALF)
 #endif /* SERIAL_HAVE_DMA */
 
 /****************************************************************************
@@ -321,10 +304,11 @@ struct up_dev_s
 #endif
 #ifdef SERIAL_HAVE_DMA
   const uint8_t rxdma_reqsrc;
-  DMA_HANDLE        rxdma;     /* currently-open receive DMA stream */
+  DMACH_HANDLE      rxdma;     /* currently-open receive DMA stream */
   uint32_t          rxdmanext; /* Next byte in the DMA buffer to be read */
   char      *const  rxfifo;    /* Receive DMA buffer */
 #endif
+  spinlock_t lock;             /* Spinlock */
 };
 
 /****************************************************************************
@@ -336,13 +320,13 @@ static void up_shutdown(struct uart_dev_s *dev);
 static int  up_attach(struct uart_dev_s *dev);
 static void up_detach(struct uart_dev_s *dev);
 #ifdef CONFIG_DEBUG_FEATURES
-static int  up_interrupt(int irq, void *context, FAR void *arg);
+static int  up_interrupt(int irq, void *context, void *arg);
 #endif
-static int  up_interrupts(int irq, void *context, FAR void *arg);
+static int  up_interrupts(int irq, void *context, void *arg);
 static int  up_ioctl(struct file *filep, int cmd, unsigned long arg);
 static void up_rxint(struct uart_dev_s *dev, bool enable);
 #if !defined(SERIAL_HAVE_ALL_DMA)
-static int  up_receive(struct uart_dev_s *dev, uint32_t *status);
+static int  up_receive(struct uart_dev_s *dev, unsigned int *status);
 static bool up_rxavailable(struct uart_dev_s *dev);
 #endif
 #ifdef CONFIG_SERIAL_IFLOWCONTROL
@@ -362,7 +346,8 @@ static void up_dma_shutdown(struct uart_dev_s *dev);
 static int  up_dma_receive(struct uart_dev_s *dev, unsigned int *status);
 static bool up_dma_rxavailable(struct uart_dev_s *dev);
 static uint8_t get_and_clear_uart_status(struct up_dev_s *priv);
-static void up_dma_rxcallback(DMA_HANDLE handle, void *arg, int result);
+static void up_dma_rxcallback(DMACH_HANDLE handle, void *arg, bool done,
+                              int result);
 #endif
 
 /****************************************************************************
@@ -424,55 +409,55 @@ static const struct uart_ops_s g_uart_dma_ops =
 #ifdef CONFIG_KINETIS_UART0
 static char g_uart0rxbuffer[CONFIG_UART0_RXBUFSIZE];
 static char g_uart0txbuffer[CONFIG_UART0_TXBUFSIZE];
-# ifdef CONFIG_KINETIS_UART0_RXDMA
+#  ifdef CONFIG_KINETIS_UART0_RXDMA
 static char g_uart0rxfifo[RXDMA_BUFFER_SIZE]
-  __attribute__((aligned(ARMV7M_DCACHE_LINESIZE)));
-# endif
+  aligned_data(ARMV7M_DCACHE_LINESIZE);
+#  endif
 #endif
 
 #ifdef CONFIG_KINETIS_UART1
 static char g_uart1rxbuffer[CONFIG_UART1_RXBUFSIZE];
 static char g_uart1txbuffer[CONFIG_UART1_TXBUFSIZE];
-# ifdef CONFIG_KINETIS_UART1_RXDMA
+#  ifdef CONFIG_KINETIS_UART1_RXDMA
 static char g_uart1rxfifo[RXDMA_BUFFER_SIZE]
-  __attribute__((aligned(ARMV7M_DCACHE_LINESIZE)));
-# endif
+  aligned_data(ARMV7M_DCACHE_LINESIZE);
+#  endif
 #endif
 
 #ifdef CONFIG_KINETIS_UART2
 static char g_uart2rxbuffer[CONFIG_UART2_RXBUFSIZE];
 static char g_uart2txbuffer[CONFIG_UART2_TXBUFSIZE];
-# ifdef CONFIG_KINETIS_UART2_RXDMA
+#  ifdef CONFIG_KINETIS_UART2_RXDMA
 static char g_uart2rxfifo[RXDMA_BUFFER_SIZE]
-  __attribute__((aligned(ARMV7M_DCACHE_LINESIZE)));
-# endif
+  aligned_data(ARMV7M_DCACHE_LINESIZE);
+#  endif
 #endif
 
 #ifdef CONFIG_KINETIS_UART3
 static char g_uart3rxbuffer[CONFIG_UART3_RXBUFSIZE];
 static char g_uart3txbuffer[CONFIG_UART3_TXBUFSIZE];
-# ifdef CONFIG_KINETIS_UART3_RXDMA
+#  ifdef CONFIG_KINETIS_UART3_RXDMA
 static char g_uart3rxfifo[RXDMA_BUFFER_SIZE]
-  __attribute__((aligned(ARMV7M_DCACHE_LINESIZE)));
-# endif
+  aligned_data(ARMV7M_DCACHE_LINESIZE);
+#  endif
 #endif
 
 #ifdef CONFIG_KINETIS_UART4
 static char g_uart4rxbuffer[CONFIG_UART4_RXBUFSIZE];
 static char g_uart4txbuffer[CONFIG_UART4_TXBUFSIZE];
-# ifdef CONFIG_KINETIS_UART4_RXDMA
+#  ifdef CONFIG_KINETIS_UART4_RXDMA
 static char g_uart4rxfifo[RXDMA_BUFFER_SIZE]
-  __attribute__((aligned(ARMV7M_DCACHE_LINESIZE)));
-# endif
+  aligned_data(ARMV7M_DCACHE_LINESIZE);
+#  endif
 #endif
 
 #ifdef CONFIG_KINETIS_UART5
 static char g_uart5rxbuffer[CONFIG_UART5_RXBUFSIZE];
 static char g_uart5txbuffer[CONFIG_UART5_TXBUFSIZE];
-# ifdef CONFIG_KINETIS_UART5_RXDMA
+#  ifdef CONFIG_KINETIS_UART5_RXDMA
 static char g_uart5rxfifo[RXDMA_BUFFER_SIZE]
-  __attribute__((aligned(ARMV7M_DCACHE_LINESIZE)));
-# endif
+  aligned_data(ARMV7M_DCACHE_LINESIZE);
+#  endif
 #endif
 
 /* This describes the state of the Kinetis UART0 port. */
@@ -483,46 +468,46 @@ static struct up_dev_s g_uart0priv =
   .uartbase       = KINETIS_UART0_BASE,
   .clock          = BOARD_CORECLK_FREQ,
   .baud           = CONFIG_UART0_BAUD,
-#ifdef CONFIG_DEBUG_FEATURES
+#  ifdef CONFIG_DEBUG_FEATURES
   .irqe           = KINETIS_IRQ_UART0E,
-#endif
+#  endif
   .irqs           = KINETIS_IRQ_UART0S,
   .parity         = CONFIG_UART0_PARITY,
   .bits           = CONFIG_UART0_BITS,
   .stop2          = CONFIG_UART0_2STOP,
-#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART0_OFLOWCONTROL)
+#  if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART0_OFLOWCONTROL)
   .oflow          = true,
   .cts_gpio       = PIN_UART0_CTS,
-#endif
-#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART0_IFLOWCONTROL)
+#  endif
+#  if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART0_IFLOWCONTROL)
   .iflow          = true,
   .rts_gpio       = PIN_UART0_RTS,
-#endif
-#ifdef CONFIG_KINETIS_UART0_RXDMA
+#  endif
+#  ifdef CONFIG_KINETIS_UART0_RXDMA
   .rxdma_reqsrc   = KINETIS_DMA_REQUEST_SRC_UART0_RX,
   .rxfifo         = g_uart0rxfifo,
-#endif
-
+#  endif
+  .lock           = SP_UNLOCKED
 };
 
 static uart_dev_t g_uart0port =
 {
-  .recv     =
-  {
-    .size   = CONFIG_UART0_RXBUFSIZE,
-    .buffer = g_uart0rxbuffer,
-  },
-  .xmit     =
-  {
-    .size   = CONFIG_UART0_TXBUFSIZE,
-    .buffer = g_uart0txbuffer,
-   },
-#ifdef CONFIG_KINETIS_UART0_RXDMA
-  .ops      = &g_uart_dma_ops,
-#else
-  .ops      = &g_uart_ops,
-#endif
-  .priv     = &g_uart0priv,
+  .recv       =
+    {
+      .size   = CONFIG_UART0_RXBUFSIZE,
+      .buffer = g_uart0rxbuffer,
+    },
+  .xmit       =
+    {
+      .size   = CONFIG_UART0_TXBUFSIZE,
+      .buffer = g_uart0txbuffer,
+    },
+#  ifdef CONFIG_KINETIS_UART0_RXDMA
+  .ops        = &g_uart_dma_ops,
+#  else
+  .ops        = &g_uart_ops,
+#  endif
+  .priv       = &g_uart0priv,
 };
 #endif
 
@@ -534,45 +519,46 @@ static struct up_dev_s g_uart1priv =
   .uartbase       = KINETIS_UART1_BASE,
   .clock          = BOARD_CORECLK_FREQ,
   .baud           = CONFIG_UART1_BAUD,
-#ifdef CONFIG_DEBUG_FEATURES
+#  ifdef CONFIG_DEBUG_FEATURES
   .irqe           = KINETIS_IRQ_UART1E,
-#endif
+#  endif
   .irqs           = KINETIS_IRQ_UART1S,
   .parity         = CONFIG_UART1_PARITY,
   .bits           = CONFIG_UART1_BITS,
   .stop2          = CONFIG_UART1_2STOP,
-#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART1_OFLOWCONTROL)
+#  if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART1_OFLOWCONTROL)
   .oflow          = true,
   .cts_gpio       = PIN_UART1_CTS,
-#endif
-#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART1_IFLOWCONTROL)
+#  endif
+#  if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART1_IFLOWCONTROL)
   .iflow          = true,
   .rts_gpio       = PIN_UART1_RTS,
-#endif
-#ifdef CONFIG_KINETIS_UART1_RXDMA
+#  endif
+#  ifdef CONFIG_KINETIS_UART1_RXDMA
   .rxdma_reqsrc   = KINETIS_DMA_REQUEST_SRC_UART1_RX,
   .rxfifo         = g_uart1rxfifo,
-#endif
+#  endif
+  .lock           = SP_UNLOCKED
 };
 
 static uart_dev_t g_uart1port =
 {
-  .recv     =
-  {
-    .size   = CONFIG_UART1_RXBUFSIZE,
-    .buffer = g_uart1rxbuffer,
-  },
-  .xmit     =
-  {
-    .size   = CONFIG_UART1_TXBUFSIZE,
-    .buffer = g_uart1txbuffer,
-   },
-#ifdef CONFIG_KINETIS_UART1_RXDMA
-  .ops      = &g_uart_dma_ops,
-#else
-  .ops      = &g_uart_ops,
-#endif
-  .priv     = &g_uart1priv,
+  .recv       =
+    {
+      .size   = CONFIG_UART1_RXBUFSIZE,
+      .buffer = g_uart1rxbuffer,
+    },
+  .xmit       =
+    {
+      .size   = CONFIG_UART1_TXBUFSIZE,
+      .buffer = g_uart1txbuffer,
+    },
+#  ifdef CONFIG_KINETIS_UART1_RXDMA
+  .ops        = &g_uart_dma_ops,
+#  else
+  .ops        = &g_uart_ops,
+#  endif
+  .priv       = &g_uart1priv,
 };
 #endif
 
@@ -584,45 +570,46 @@ static struct up_dev_s g_uart2priv =
   .uartbase       = KINETIS_UART2_BASE,
   .clock          = BOARD_BUS_FREQ,
   .baud           = CONFIG_UART2_BAUD,
-#ifdef CONFIG_DEBUG_FEATURES
+#  ifdef CONFIG_DEBUG_FEATURES
   .irqe           = KINETIS_IRQ_UART2E,
-#endif
+#  endif
   .irqs           = KINETIS_IRQ_UART2S,
   .parity         = CONFIG_UART2_PARITY,
   .bits           = CONFIG_UART2_BITS,
   .stop2          = CONFIG_UART2_2STOP,
-#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART2_OFLOWCONTROL)
+#  if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART2_OFLOWCONTROL)
   .oflow          = true,
   .cts_gpio       = PIN_UART2_CTS,
-#endif
-#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART2_IFLOWCONTROL)
+#  endif
+#  if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART2_IFLOWCONTROL)
   .iflow          = true,
   .rts_gpio       = PIN_UART2_RTS,
-#endif
-#ifdef CONFIG_KINETIS_UART2_RXDMA
+#  endif
+#  ifdef CONFIG_KINETIS_UART2_RXDMA
   .rxdma_reqsrc   = KINETIS_DMA_REQUEST_SRC_UART2_RX,
   .rxfifo         = g_uart2rxfifo,
-#endif
+#  endif
+  .lock           = SP_UNLOCKED
 };
 
 static uart_dev_t g_uart2port =
 {
-  .recv     =
-  {
-    .size   = CONFIG_UART2_RXBUFSIZE,
-    .buffer = g_uart2rxbuffer,
-  },
-  .xmit     =
-  {
-    .size   = CONFIG_UART2_TXBUFSIZE,
-    .buffer = g_uart2txbuffer,
-   },
-#ifdef CONFIG_KINETIS_UART2_RXDMA
-  .ops      = &g_uart_dma_ops,
-#else
-  .ops      = &g_uart_ops,
-#endif
-  .priv     = &g_uart2priv,
+  .recv       =
+    {
+      .size   = CONFIG_UART2_RXBUFSIZE,
+      .buffer = g_uart2rxbuffer,
+    },
+  .xmit       =
+    {
+      .size   = CONFIG_UART2_TXBUFSIZE,
+      .buffer = g_uart2txbuffer,
+    },
+#  ifdef CONFIG_KINETIS_UART2_RXDMA
+  .ops        = &g_uart_dma_ops,
+#  else
+  .ops        = &g_uart_ops,
+#  endif
+  .priv       = &g_uart2priv,
 };
 #endif
 
@@ -634,45 +621,46 @@ static struct up_dev_s g_uart3priv =
   .uartbase       = KINETIS_UART3_BASE,
   .clock          = BOARD_BUS_FREQ,
   .baud           = CONFIG_UART3_BAUD,
-#ifdef CONFIG_DEBUG_FEATURES
+#  ifdef CONFIG_DEBUG_FEATURES
   .irqe           = KINETIS_IRQ_UART3E,
-#endif
+#  endif
   .irqs           = KINETIS_IRQ_UART3S,
   .parity         = CONFIG_UART3_PARITY,
   .bits           = CONFIG_UART3_BITS,
   .stop2          = CONFIG_UART3_2STOP,
-#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART3_OFLOWCONTROL)
+#  if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART3_OFLOWCONTROL)
   .oflow          = true,
   .cts_gpio       = PIN_UART3_CTS,
-#endif
-#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART3_IFLOWCONTROL)
+#  endif
+#  if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART3_IFLOWCONTROL)
   .iflow          = true,
   .rts_gpio       = PIN_UART3_RTS,
-#endif
-#ifdef CONFIG_KINETIS_UART3_RXDMA
+#  endif
+#  ifdef CONFIG_KINETIS_UART3_RXDMA
   .rxdma_reqsrc   = KINETIS_DMA_REQUEST_SRC_UART3_RX,
   .rxfifo         = g_uart3rxfifo,
-#endif
+#  endif
+  .lock           = SP_UNLOCKED
 };
 
 static uart_dev_t g_uart3port =
 {
-  .recv     =
-  {
-    .size   = CONFIG_UART3_RXBUFSIZE,
-    .buffer = g_uart3rxbuffer,
-  },
-  .xmit     =
-  {
-    .size   = CONFIG_UART3_TXBUFSIZE,
-    .buffer = g_uart3txbuffer,
-   },
-#ifdef CONFIG_KINETIS_UART3_RXDMA
-  .ops      = &g_uart_dma_ops,
-#else
-  .ops      = &g_uart_ops,
-#endif
-  .priv     = &g_uart3priv,
+  .recv       =
+    {
+      .size   = CONFIG_UART3_RXBUFSIZE,
+      .buffer = g_uart3rxbuffer,
+    },
+  .xmit       =
+    {
+      .size   = CONFIG_UART3_TXBUFSIZE,
+      .buffer = g_uart3txbuffer,
+    },
+#  ifdef CONFIG_KINETIS_UART3_RXDMA
+  .ops        = &g_uart_dma_ops,
+#  else
+  .ops        = &g_uart_ops,
+#  endif
+  .priv       = &g_uart3priv,
 };
 #endif
 
@@ -684,45 +672,46 @@ static struct up_dev_s g_uart4priv =
   .uartbase       = KINETIS_UART4_BASE,
   .clock          = BOARD_BUS_FREQ,
   .baud           = CONFIG_UART4_BAUD,
-#ifdef CONFIG_DEBUG_FEATURES
+#  ifdef CONFIG_DEBUG_FEATURES
   .irqe           = KINETIS_IRQ_UART4E,
-#endif
+#  endif
   .irqs           = KINETIS_IRQ_UART4S,
   .parity         = CONFIG_UART4_PARITY,
   .bits           = CONFIG_UART4_BITS,
   .stop2          = CONFIG_UART4_2STOP,
-#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART4_OFLOWCONTROL)
+#  if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART4_OFLOWCONTROL)
   .oflow          = true,
   .cts_gpio       = PIN_UART4_CTS,
-#endif
-#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART4_IFLOWCONTROL)
+#  endif
+#  if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART4_IFLOWCONTROL)
   .iflow          = true,
   .rts_gpio       = PIN_UART4_RTS,
-#endif
-#ifdef CONFIG_KINETIS_UART4_RXDMA
+#  endif
+#  ifdef CONFIG_KINETIS_UART4_RXDMA
   .rxdma_reqsrc   = KINETIS_DMA_REQUEST_SRC_UART4_RXTX,
   .rxfifo         = g_uart4rxfifo,
-#endif
+#  endif
+  .lock           = SP_UNLOCKED
 };
 
 static uart_dev_t g_uart4port =
 {
-  .recv     =
-  {
-    .size   = CONFIG_UART4_RXBUFSIZE,
-    .buffer = g_uart4rxbuffer,
-  },
-  .xmit     =
-  {
-    .size   = CONFIG_UART4_TXBUFSIZE,
-    .buffer = g_uart4txbuffer,
-   },
-#ifdef CONFIG_KINETIS_UART4_RXDMA
-  .ops      = &g_uart_dma_ops,
-#else
-  .ops      = &g_uart_ops,
-#endif
-  .priv     = &g_uart4priv,
+  .recv       =
+    {
+      .size   = CONFIG_UART4_RXBUFSIZE,
+      .buffer = g_uart4rxbuffer,
+    },
+  .xmit       =
+    {
+      .size   = CONFIG_UART4_TXBUFSIZE,
+      .buffer = g_uart4txbuffer,
+    },
+#  ifdef CONFIG_KINETIS_UART4_RXDMA
+  .ops        = &g_uart_dma_ops,
+#  else
+  .ops        = &g_uart_ops,
+#  endif
+  .priv       = &g_uart4priv,
 };
 #endif
 
@@ -734,45 +723,46 @@ static struct up_dev_s g_uart5priv =
   .uartbase       = KINETIS_UART5_BASE,
   .clock          = BOARD_BUS_FREQ,
   .baud           = CONFIG_UART5_BAUD,
-#ifdef CONFIG_DEBUG_FEATURES
+#  ifdef CONFIG_DEBUG_FEATURES
   .irqe           = KINETIS_IRQ_UART5E,
-#endif
+#  endif
   .irqs           = KINETIS_IRQ_UART5S,
   .parity         = CONFIG_UART5_PARITY,
   .bits           = CONFIG_UART5_BITS,
   .stop2          = CONFIG_UART5_2STOP,
-#if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART5_OFLOWCONTROL)
+#  if defined(CONFIG_SERIAL_OFLOWCONTROL) && defined(CONFIG_UART5_OFLOWCONTROL)
   .oflow          = true,
   .cts_gpio       = PIN_UART5_CTS,
-#endif
-#if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART5_IFLOWCONTROL)
+#  endif
+#  if defined(CONFIG_SERIAL_IFLOWCONTROL) && defined(CONFIG_UART5_IFLOWCONTROL)
   .iflow          = true,
   .rts_gpio       = PIN_UART5_RTS,
-#endif
-#ifdef CONFIG_KINETIS_UART5_RXDMA
+#  endif
+#  ifdef CONFIG_KINETIS_UART5_RXDMA
   .rxdma_reqsrc   = KINETIS_DMA_REQUEST_SRC_UART5_RX,
   .rxfifo         = g_uart5rxfifo,
-#endif
+#  endif
+  .lock           = SP_UNLOCKED
 };
 
 static uart_dev_t g_uart5port =
 {
-  .recv     =
-  {
-    .size   = CONFIG_UART5_RXBUFSIZE,
-    .buffer = g_uart5rxbuffer,
-  },
-  .xmit     =
-  {
-    .size   = CONFIG_UART5_TXBUFSIZE,
-    .buffer = g_uart5txbuffer,
-   },
-#ifdef CONFIG_KINETIS_UART5_RXDMA
-  .ops      = &g_uart_dma_ops,
-#else
-  .ops      = &g_uart_ops,
-#endif
-  .priv     = &g_uart5priv,
+  .recv       =
+    {
+      .size   = CONFIG_UART5_RXBUFSIZE,
+      .buffer = g_uart5rxbuffer,
+    },
+  .xmit       =
+    {
+      .size   = CONFIG_UART5_TXBUFSIZE,
+      .buffer = g_uart5txbuffer,
+    },
+#  ifdef CONFIG_KINETIS_UART5_RXDMA
+  .ops        = &g_uart_dma_ops,
+#  else
+  .ops        = &g_uart_ops,
+#  endif
+  .priv       = &g_uart5priv,
 };
 #endif
 
@@ -793,7 +783,8 @@ static inline uint8_t up_serialin(struct up_dev_s *priv, int offset)
  * Name: up_serialout
  ****************************************************************************/
 
-static inline void up_serialout(struct up_dev_s *priv, int offset, uint8_t value)
+static inline void up_serialout(struct up_dev_s *priv, int offset,
+                                uint8_t value)
 {
   putreg8(value, priv->uartbase + offset);
 }
@@ -802,19 +793,27 @@ static inline void up_serialout(struct up_dev_s *priv, int offset, uint8_t value
  * Name: up_setuartint
  ****************************************************************************/
 
-static void up_setuartint(struct up_dev_s *priv)
+static void up_setuartint_nolock(struct up_dev_s *priv)
 {
-  irqstate_t flags;
   uint8_t regval;
 
-  /* Re-enable/re-disable interrupts corresponding to the state of bits in ie */
+  /* Re-enable/re-disable interrupts corresponding to the state of bits in
+   * ie
+   */
 
-  flags    = enter_critical_section();
   regval   = up_serialin(priv, KINETIS_UART_C2_OFFSET);
   regval  &= ~UART_C2_ALLINTS;
   regval  |= priv->ie;
   up_serialout(priv, KINETIS_UART_C2_OFFSET, regval);
-  leave_critical_section(flags);
+}
+
+static void up_setuartint(struct up_dev_s *priv)
+{
+  irqstate_t flags;
+
+  flags    = spin_lock_irqsave(&priv->lock);
+  up_setuartint_nolock(priv);
+  spin_unlock_irqrestore(&priv->lock, flags);
 }
 
 /****************************************************************************
@@ -825,12 +824,14 @@ static void up_restoreuartint(struct up_dev_s *priv, uint8_t ie)
 {
   irqstate_t flags;
 
-  /* Re-enable/re-disable interrupts corresponding to the state of bits in ie */
+  /* Re-enable/re-disable interrupts corresponding to the state of bits in
+   * ie
+   */
 
-  flags    = enter_critical_section();
+  flags    = spin_lock_irqsave(&priv->lock);
   priv->ie = ie & UART_C2_ALLINTS;
-  up_setuartint(priv);
-  leave_critical_section(flags);
+  up_setuartint_nolock(priv);
+  spin_unlock_irqrestore(&priv->lock, flags);
 }
 
 /****************************************************************************
@@ -842,14 +843,15 @@ static void up_disableuartint(struct up_dev_s *priv, uint8_t *ie)
 {
   irqstate_t flags;
 
-  flags = enter_critical_section();
+  flags = spin_lock_irqsave(&priv->lock);
   if (ie)
     {
       *ie = priv->ie;
     }
 
-  up_restoreuartint(priv, 0);
-  leave_critical_section(flags);
+  priv->ie = 0;
+  up_setuartint_nolock(priv);
+  spin_unlock_irqrestore(&priv->lock, flags);
 }
 #endif
 
@@ -939,7 +941,7 @@ static int up_dma_setup(struct uart_dev_s *dev)
   struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
   int result;
   uint8_t regval;
-  DMA_HANDLE rxdma = NULL;
+  DMACH_HANDLE rxdma = NULL;
 
   /* Do the basic UART setup first, unless we are the console */
 
@@ -952,25 +954,39 @@ static int up_dma_setup(struct uart_dev_s *dev)
         }
     }
 
-  /* Acquire the DMA channel.*/
+  /* Acquire the DMA channel. */
 
-  rxdma = kinetis_dmachannel(priv->rxdma_reqsrc,
-                             priv->uartbase + KINETIS_UART_D_OFFSET,
-                             KINETIS_DMA_DATA_SZ_8BIT,
-                             KINETIS_DMA_DIRECTION_PERIPHERAL_TO_MEMORY);
+  rxdma = kinetis_dmach_alloc(priv->rxdma_reqsrc | DMAMUX_CHCFG_ENBL, 0);
   if (rxdma == NULL)
-  {
-    return -EBUSY;
-  }
+    {
+      return -EBUSY;
+    }
 
   /* Configure for circular DMA reception into the RX FIFO */
 
-  kinetis_dmasetup(rxdma, (uint32_t)priv->rxfifo, RXDMA_BUFFER_SIZE,
-                   SERIAL_DMA_CONTROL_WORD);
+  struct kinetis_edma_xfrconfig_s config;
+  config.saddr  = priv->uartbase + KINETIS_UART_D_OFFSET;
+  config.daddr  = (uint32_t) priv->rxfifo;
+  config.soff   = 0;
+  config.doff   = 1;
+  config.iter   = RXDMA_BUFFER_SIZE;
+  config.flags  = EDMA_CONFIG_LINKTYPE_LINKNONE | EDMA_CONFIG_LOOPDEST;
+  config.ssize  = EDMA_8BIT;
+  config.dsize  = EDMA_8BIT;
+  config.nbytes = 1;
+#ifdef CONFIG_KINETIS_EDMA_ELINK
+  config.linkch = NULL;
+#endif
+  kinetis_dmach_xfrsetup(rxdma, &config);
 
-  /* Reset our DMA shadow pointer to match the address just programmed above. */
+  /* Reset our DMA shadow pointer to match the address just programmed
+   * above.
+   */
 
   priv->rxdmanext = 0;
+
+  up_invalidate_dcache((uintptr_t)priv->rxfifo,
+                       (uintptr_t)priv->rxfifo + RXDMA_BUFFER_SIZE);
 
   /* Enable receive DMA for the UART */
 
@@ -983,7 +999,7 @@ static int up_dma_setup(struct uart_dev_s *dev)
    * worth of time to claim bytes before they are overwritten.
    */
 
-  kinetis_dmastart(rxdma, up_dma_rxcallback, (void *)dev);
+  kinetis_dmach_start(rxdma, up_dma_rxcallback, (void *)dev);
   priv->rxdma = rxdma;
   return OK;
 }
@@ -1024,8 +1040,7 @@ static void up_shutdown(struct uart_dev_s *dev)
 static void up_dma_shutdown(struct uart_dev_s *dev)
 {
   struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
-  DMA_HANDLE rxdma = priv->rxdma;
-  priv->rxdma = NULL;
+  DMACH_HANDLE rxdma = priv->rxdma;
 
   /* Perform the normal UART shutdown */
 
@@ -1033,11 +1048,13 @@ static void up_dma_shutdown(struct uart_dev_s *dev)
 
   /* Stop the DMA channel */
 
-  kinetis_dmastop(rxdma);
+  kinetis_dmach_stop(rxdma);
 
   /* Release the DMA channel */
 
-  kinetis_dmafree(rxdma);
+  kinetis_dmach_free(rxdma);
+
+  priv->rxdma = NULL;
 }
 #endif
 
@@ -1045,14 +1062,15 @@ static void up_dma_shutdown(struct uart_dev_s *dev)
  * Name: up_attach
  *
  * Description:
- *   Configure the UART to operation in interrupt driven mode.  This method is
- *   called when the serial port is opened.  Normally, this is just after the
- *   the setup() method is called, however, the serial console may operate in
- *   a non-interrupt driven mode during the boot phase.
+ *   Configure the UART to operation in interrupt driven mode.  This method
+ *   is called when the serial port is opened.  Normally, this is just after
+ *   the the setup() method is called, however, the serial console may
+ *   operate in a non-interrupt driven mode during the boot phase.
  *
- *   RX and TX interrupts are not enabled when by the attach method (unless the
- *   hardware supports multiple levels of interrupt enabling).  The RX and TX
- *   interrupts are not enabled until the txint() and rxint() methods are called.
+ *   RX and TX interrupts are not enabled when by the attach method (unless
+ *   the hardware supports multiple levels of interrupt enabling).  The RX
+ *   and TX interrupts are not enabled until the txint() and rxint() methods
+ *   are called.
  *
  ****************************************************************************/
 
@@ -1089,8 +1107,8 @@ static int up_attach(struct uart_dev_s *dev)
  *
  * Description:
  *   Detach UART interrupts.  This method is called when the serial port is
- *   closed normally just before the shutdown method is called.  The exception
- *   is the serial console which is never shutdown.
+ *   closed normally just before the shutdown method is called.  The
+ *   exception is the serial console which is never shutdown.
  *
  ****************************************************************************/
 
@@ -1124,7 +1142,7 @@ static void up_detach(struct uart_dev_s *dev)
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_FEATURES
-static int up_interrupt(int irq, void *context, FAR void *arg)
+static int up_interrupt(int irq, void *context, void *arg)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
   struct up_dev_s   *priv;
@@ -1158,15 +1176,15 @@ static int up_interrupt(int irq, void *context, FAR void *arg)
  * Name: up_interrupts
  *
  * Description:
- *   This is the UART status interrupt handler.  It will be invoked when an
- *   interrupt received on the 'irq'  It should call uart_transmitchars or
- *   uart_receivechar to perform the appropriate data transfers.  The
- *   interrupt handling logic must be able to map the 'irq' number into the
+ *   This is the UART interrupt handler.  It will be invoked when an
+ *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
+ *   uart_recvchars to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'arg' to the
  *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
 
-static int up_interrupts(int irq, void *context, FAR void *arg)
+static int up_interrupts(int irq, void *context, void *arg)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
   struct up_dev_s   *priv;
@@ -1276,7 +1294,6 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
   struct up_dev_s   *priv;
   int                ret   = OK;
 
-  DEBUGASSERT(filep != NULL && filep->f_inode != NULL);
   inode = filep->f_inode;
   dev   = inode->i_private;
   DEBUGASSERT(dev != NULL && dev->priv != NULL);
@@ -1305,7 +1322,7 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
       {
         if ((arg & SER_SINGLEWIRE_PULLUP) != 0)
           {
-            ret = -EINVAL; // Not supported
+            ret = -EINVAL; /* Not supported */
             break;
           }
 
@@ -1341,11 +1358,9 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
             break;
           }
 
-        cfsetispeed(termiosp, priv->baud);
-
-        /* Note: CSIZE only supports 5-8 bits. The driver only support 8/9 bit
-         * modes and therefore is no way to report 9-bit mode, we always claim
-         * 8 bit mode.
+        /* Note: CSIZE only supports 5-8 bits. The driver only support
+         * 8/9 bit modes and therefore is no way to report 9-bit mode, we
+         * always claim 8 bit mode.
          */
 
         termiosp->c_cflag =
@@ -1360,7 +1375,9 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
 #  endif
           CS8;
 
-        /* TODO: CCTS_IFLOW, CCTS_OFLOW */
+        cfsetispeed(termiosp, priv->baud);
+
+        /* TODO: CRTS_IFLOW, CCTS_OFLOW */
       }
       break;
 
@@ -1559,7 +1576,7 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
  ****************************************************************************/
 
 #if !defined(SERIAL_HAVE_ALL_DMA)
-static int up_receive(struct uart_dev_s *dev, uint32_t *status)
+static int up_receive(struct uart_dev_s *dev, unsigned int *status)
 {
   struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
   uint8_t s1;
@@ -1666,8 +1683,8 @@ static void up_rxint(struct uart_dev_s *dev, bool enable)
   flags = enter_critical_section();
   if (enable)
     {
-      /* Receive an interrupt when their is anything in the Rx data register (or an Rx
-       * timeout occurs).
+      /* Receive an interrupt when their is anything in the Rx data register
+       * (or an RX timeout occurs).
        */
 
 #ifndef CONFIG_SUPPRESS_SERIAL_INTS
@@ -1829,7 +1846,7 @@ static int up_dma_nextrx(struct up_dev_s *priv)
 {
   size_t dmaresidual;
 
-  dmaresidual = kinetis_dmaresidual(priv->rxdma);
+  dmaresidual = kinetis_dmach_getcount(priv->rxdma);
 
   return (RXDMA_BUFFER_SIZE - (int)dmaresidual) % RXDMA_BUFFER_SIZE;
 }
@@ -1935,7 +1952,8 @@ static bool up_txempty(struct uart_dev_s *dev)
 
   /* Return true if the transmit buffer/fifo is "empty." */
 
-  return (up_serialin(priv, KINETIS_UART_SFIFO_OFFSET) & UART_SFIFO_TXEMPT) != 0;
+  return (up_serialin(priv, KINETIS_UART_SFIFO_OFFSET) & \
+          UART_SFIFO_TXEMPT) != 0;
 }
 #endif
 
@@ -1949,7 +1967,8 @@ static bool up_txempty(struct uart_dev_s *dev)
  ****************************************************************************/
 
 #ifdef SERIAL_HAVE_DMA
-static void up_dma_rxcallback(DMA_HANDLE handle, void *arg, int result)
+static void up_dma_rxcallback(DMACH_HANDLE handle, void *arg, bool done,
+                              int result)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
 
@@ -1969,8 +1988,8 @@ static void up_dma_rxcallback(DMA_HANDLE handle, void *arg, int result)
  *
  * Description:
  *   Performs the low level UART initialization early in debug so that the
- *   serial console will be available during bootup.  This must be called
- *   before up_serialinit.  NOTE:  This function depends on GPIO pin
+ *   serial console will be available during boot up.  This must be called
+ *   before arm_serialinit.  NOTE:  This function depends on GPIO pin
  *   configuration performed in up_consoleinit() and main clock
  *   initialization performed in up_clkinitialize().
  *
@@ -1979,9 +1998,7 @@ static void up_dma_rxcallback(DMA_HANDLE handle, void *arg, int result)
 #if defined(USE_EARLYSERIALINIT)
 void kinetis_uart_earlyserialinit(void)
 {
-  /* Disable interrupts from all UARTS.  The console is enabled in
-   * pic32mx_consoleinit()
-   */
+  /* Disable interrupts from all UARTS. */
 
   up_restoreuartint(TTYS0_DEV.priv, 0);
 #ifdef TTYS1_DEV
@@ -2000,7 +2017,7 @@ void kinetis_uart_earlyserialinit(void)
   up_restoreuartint(TTYS5_DEV.priv, 0);
 #endif
 
-  /* Configuration whichever one is the console */
+  /* Configuration whichever one is the console. */
 
 #ifdef HAVE_UART_CONSOLE
   CONSOLE_DEV.isconsole = true;
@@ -2014,7 +2031,7 @@ void kinetis_uart_earlyserialinit(void)
  *
  * Description:
  *   Register serial console and serial ports.  This assumes
- *   that up_earlyserialinit was called previously.
+ *   that arm_earlyserialinit was called previously.
  *
  * Input Parameters:
  *   first: - First TTY number to assign
@@ -2042,26 +2059,26 @@ unsigned int kinetis_uart_serialinit(unsigned int first)
 
   /* Register all UARTs */
 
-  devname[(sizeof(devname)/sizeof(devname[0]))-2] = '0' + first++;
+  devname[(sizeof(devname) / sizeof(devname[0]))-2] = '0' + first++;
   uart_register(devname, &TTYS0_DEV);
 #ifdef TTYS1_DEV
-  devname[(sizeof(devname)/sizeof(devname[0]))-2] = '0' + first++;
+  devname[(sizeof(devname) / sizeof(devname[0]))-2] = '0' + first++;
   uart_register(devname, &TTYS1_DEV);
 #endif
 #ifdef TTYS2_DEV
-  devname[(sizeof(devname)/sizeof(devname[0]))-2] = '0' + first++;
+  devname[(sizeof(devname) / sizeof(devname[0]))-2] = '0' + first++;
   uart_register(devname, &TTYS2_DEV);
 #endif
 #ifdef TTYS3_DEV
-  devname[(sizeof(devname)/sizeof(devname[0]))-2] = '0' + first++;
+  devname[(sizeof(devname) / sizeof(devname[0]))-2] = '0' + first++;
   uart_register(devname, &TTYS3_DEV);
 #endif
 #ifdef TTYS4_DEV
-  devname[(sizeof(devname)/sizeof(devname[0]))-2] = '0' + first++;
+  devname[(sizeof(devname) / sizeof(devname[0]))-2] = '0' + first++;
   uart_register(devname, &TTYS4_DEV);
 #endif
 #ifdef TTYS5_DEV
-  devname[(sizeof(devname)/sizeof(devname[0]))-2] = '0' + first++;
+  devname[(sizeof(devname) / sizeof(devname[0]))-2] = '0' + first++;
   uart_register(devname, &TTYS5_DEV);
 #endif
   return first;
@@ -2088,42 +2105,42 @@ void kinetis_serial_dma_poll(void)
 #ifdef CONFIG_KINETIS_UART0_RXDMA
   if (g_uart0priv.rxdma != NULL)
     {
-      up_dma_rxcallback(g_uart0priv.rxdma, (void *)&g_uart0port, 0);
+      up_dma_rxcallback(g_uart0priv.rxdma, (void *)&g_uart0port, false, 0);
     }
 #endif
 
 #ifdef CONFIG_KINETIS_UART1_RXDMA
   if (g_uart1priv.rxdma != NULL)
     {
-      up_dma_rxcallback(g_uart1priv.rxdma, (void *)&g_uart1port, 0);
+      up_dma_rxcallback(g_uart1priv.rxdma, (void *)&g_uart1port, false, 0);
     }
 #endif
 
 #ifdef CONFIG_KINETIS_UART2_RXDMA
   if (g_uart2priv.rxdma != NULL)
     {
-      up_dma_rxcallback(g_uart2priv.rxdma, (void *)&g_uart2port, 0);
+      up_dma_rxcallback(g_uart2priv.rxdma, (void *)&g_uart2port, false, 0);
     }
 #endif
 
 #ifdef CONFIG_KINETIS_UART3_RXDMA
   if (g_uart3priv.rxdma != NULL)
     {
-      up_dma_rxcallback(g_uart3priv.rxdma, (void *)&g_uart3port, 0);
+      up_dma_rxcallback(g_uart3priv.rxdma, (void *)&g_uart3port, false, 0);
     }
 #endif
 
 #ifdef CONFIG_KINETIS_UART4_RXDMA
   if (g_uart4priv.rxdma != NULL)
     {
-      up_dma_rxcallback(g_uart4priv.rxdma, (void *)&g_uart4port, 0);
+      up_dma_rxcallback(g_uart4priv.rxdma, (void *)&g_uart4port, false, 0);
     }
 #endif
 
 #ifdef CONFIG_KINETIS_UART5_RXDMA
   if (g_uart5priv.rxdma != NULL)
     {
-      up_dma_rxcallback(g_uart5priv.rxdma, (void *)&g_uart5port, 0);
+      up_dma_rxcallback(g_uart5priv.rxdma, (void *)&g_uart5port, false, 0);
     }
 #endif
 
@@ -2140,27 +2157,16 @@ void kinetis_serial_dma_poll(void)
  ****************************************************************************/
 
 #ifdef HAVE_UART_PUTC
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_UART_CONSOLE
   struct up_dev_s *priv = (struct up_dev_s *)CONSOLE_DEV.priv;
   uint8_t ie;
 
   up_disableuartint(priv, &ie);
-
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      up_lowputc('\r');
-    }
-
-  up_lowputc(ch);
+  arm_lowputc(ch);
   up_restoreuartint(priv, ie);
 #endif
-  return ch;
 }
 #endif
 
@@ -2175,21 +2181,11 @@ int up_putc(int ch)
  ****************************************************************************/
 
 #ifdef HAVE_UART_PUTC
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_UART_CONSOLE
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      up_lowputc('\r');
-    }
-
-  up_lowputc(ch);
+  arm_lowputc(ch);
 #endif
-  return ch;
 }
 #endif
 

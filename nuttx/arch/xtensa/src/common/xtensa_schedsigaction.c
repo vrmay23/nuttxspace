@@ -1,35 +1,22 @@
 /****************************************************************************
- * arch/xtensa/src/common/xtensa_schedulesigaction.c
+ * arch/xtensa/src/common/xtensa_schedsigaction.c
  *
- *   Copyright (C) 2016-2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -41,15 +28,17 @@
 
 #include <stdint.h>
 #include <sched.h>
+#include <assert.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 
-#include "sched/sched.h"
-#include "xtensa.h"
-
 #include "irq/irq.h"
+#include "sched/sched.h"
+
+#include "chip.h"
+#include "xtensa.h"
 
 /****************************************************************************
  * Public Functions
@@ -86,318 +75,72 @@
  *       currently executing task -- just call the signal
  *       handler now.
  *
+ * Assumptions:
+ *   Called from critical section
+ *
  ****************************************************************************/
 
-#ifndef CONFIG_SMP
-void up_schedule_sigaction(struct tcb_s *tcb, sig_deliver_t sigdeliver)
+void up_schedule_sigaction(struct tcb_s *tcb)
 {
-  irqstate_t flags;
+  sinfo("tcb=%p, rtcb=%p current_regs=%p\n", tcb, this_task(),
+        this_task()->xcp.regs);
 
-  sinfo("tcb=0x%p sigdeliver=0x%p\n", tcb, sigdeliver);
+  /* First, handle some special cases when the signal is being delivered
+   * to task that is currently executing on any CPU.
+   */
 
-  /* Make sure that interrupts are disabled */
-
-  flags = enter_critical_section();
-
-  /* Refuse to handle nested signal actions */
-
-  if (!tcb->xcp.sigdeliver)
+  if (tcb == this_task() && !up_interrupt_context())
     {
-      /* First, handle some special cases when the signal is being delivered
-       * to the currently executing task.
+      /* In this case just deliver the signal now.
+       * REVISIT:  Signal handler will run in a critical section!
        */
 
-      sinfo("rtcb=0x%p CURRENT_REGS=0x%p\n", this_task(), CURRENT_REGS);
-
-      if (tcb == this_task())
-        {
-          /* CASE 1:  We are not in an interrupt handler and a task is
-           * signaling itself for some reason.
-           */
-
-          if (!CURRENT_REGS)
-            {
-              /* In this case just deliver the signal now.
-               * REVISIT:  Signal handler will run in a critical section!
-               */
-
-              sigdeliver(tcb);
-            }
-
-          /* CASE 2:  We are in an interrupt handler AND the interrupted
-           * task is the same as the one that must receive the signal, then
-           * we will have to modify the return state as well as the state
-           * in the TCB.
-           *
-           * Hmmm... there looks like a latent bug here: The following logic
-           * would fail in the strange case where we are in an interrupt
-           * handler, the thread is signaling itself, but a context switch
-           * to another task has occurred so that CURRENT_REGS does not
-           * refer to the thread of this_task()!
-           */
-
-          else
-            {
-              /* Save the return pc and ps.  These will be restored by the
-               * signal trampoline after the signals have been delivered.
-               *
-               * NOTE: that hi-priority interrupts are not disabled.
-               */
-
-              tcb->xcp.sigdeliver  = sigdeliver;
-              tcb->xcp.saved_pc    = CURRENT_REGS[REG_PC];
-              tcb->xcp.saved_ps    = CURRENT_REGS[REG_PS];
-
-              /* Then set up to vector to the trampoline with interrupts
-               * disabled
-               */
-
-              CURRENT_REGS[REG_PC] = (uint32_t)_xtensa_sig_trampoline;
-#ifdef __XTENSA_CALL0_ABI__
-              CURRENT_REGS[REG_PS] = (uint32_t)
-                  (PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM);
-#else
-              CURRENT_REGS[REG_PS] = (uint32_t)
-                  (PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM | PS_WOE);
-#endif
-
-              /* And make sure that the saved context in the TCB is the same
-               * as the interrupt return context.
-               */
-
-              xtensa_savestate(tcb->xcp.regs);
-            }
-        }
-
-      /* Otherwise, we are (1) signaling a task is not running from an
-       * interrupt handler or (2) we are not in an interrupt handler and the
-       * running task is signaling some non-running task.
-       */
-
-      else
-        {
-          /* Save the return pc and ps.  These will be restored by the
-           * signal trampoline after the signals have been delivered.
-           *
-           * NOTE: that hi-priority interrupts are not disabled.
-           */
-
-          tcb->xcp.sigdeliver   = sigdeliver;
-          tcb->xcp.saved_pc     = tcb->xcp.regs[REG_PC];
-          tcb->xcp.saved_ps     = tcb->xcp.regs[REG_PS];
-
-          /* Then set up to vector to the trampoline with interrupts
-           * disabled
-           */
-
-          tcb->xcp.regs[REG_PC] = (uint32_t)_xtensa_sig_trampoline;
-#ifdef __XTENSA_CALL0_ABI__
-          tcb->xcp.regs[REG_PS] = (uint32_t)
-              (PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM);
-#else
-          tcb->xcp.regs[REG_PS] = (uint32_t)
-              (PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM | PS_WOE);
-#endif
-        }
+      (tcb->sigdeliver)(tcb);
+      tcb->sigdeliver = NULL;
     }
-
-  leave_critical_section(flags);
-}
-#endif /* !CONFIG_SMP */
-
-#ifdef CONFIG_SMP
-void up_schedule_sigaction(struct tcb_s *tcb, sig_deliver_t sigdeliver)
-{
-  irqstate_t flags;
-  int cpu;
-  int me;
-
-  sinfo("tcb=0x%p sigdeliver=0x%p\n", tcb, sigdeliver);
-
-  /* Make sure that interrupts are disabled */
-
-  flags = enter_critical_section();
-
-  /* Refuse to handle nested signal actions */
-
-  if (!tcb->xcp.sigdeliver)
+  else
     {
-      /* First, handle some special cases when the signal is being delivered
-       * to task that is currently executing on any CPU.
+      /* Save the context registers.  These will be restored by the
+       * signal trampoline after the signals have been delivered.
+       *
+       * NOTE: that hi-priority interrupts are not disabled.
        */
 
-      sinfo("rtcb=0x%p CURRENT_REGS=0x%p\n", this_task(), CURRENT_REGS);
+      tcb->xcp.saved_regs   = tcb->xcp.regs;
 
-      if (tcb->task_state == TSTATE_TASK_RUNNING)
+      if ((tcb->xcp.saved_regs[REG_PS] & PS_EXCM_MASK) != 0)
         {
-          me  = this_cpu();
-          cpu = tcb->cpu;
-
-          /* CASE 1:  We are not in an interrupt handler and a task is
-           * signaling itself for some reason.
-           */
-
-          if (cpu == me && !CURRENT_REGS)
-            {
-              /* In this case just deliver the signal now.
-               * REVISIT:  Signal handler will run in a critical section!
-               */
-
-              sigdeliver(tcb);
-            }
-
-          /* CASE 2:  The task that needs to receive the signal is running.
-           * This could happen if the task is running on another CPU OR if
-           * we are in an interrupt handler and the task is running on this
-           * CPU.  In the former case, we will have to PAUSE the other CPU
-           * first.  But in either case, we will have to modify the return
-           * state as well as the state in the TCB.
-           */
-
-          else
-            {
-              /* If we signaling a task running on the other CPU, we have
-               * to PAUSE the other CPU.
-               */
-
-              if (cpu != me)
-                {
-                  /* Pause the CPU */
-
-                  up_cpu_pause(cpu);
-
-                  /* Wait while the pause request is pending */
-
-                  while (up_cpu_pausereq(cpu))
-                    {
-                    }
-
-                  /* Now tcb on the other CPU can be accessed safely */
-
-                  /* Copy tcb->xcp.regs to tcp.xcp.saved. These will be
-                   * restored by the signal trampoline after the signal has
-                   * been delivered.
-                   *
-                   * NOTE: that hi-priority interrupts are not disabled.
-                   */
-
-                  tcb->xcp.sigdeliver  = sigdeliver;
-                  tcb->xcp.saved_pc    = tcb->xcp.regs[REG_PC];
-                  tcb->xcp.saved_ps    = tcb->xcp.regs[REG_PS];
-
-                  /* Then set up to vector to the trampoline with interrupts
-                   * disabled
-                   */
-
-                  tcb->xcp.regs[REG_PC] = (uint32_t)_xtensa_sig_trampoline;
-#ifdef __XTENSA_CALL0_ABI__
-                  tcb->xcp.regs[REG_PS] = (uint32_t)
-                      (PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM);
-#else
-                  tcb->xcp.regs[REG_PS] = (uint32_t)
-                      (PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM | PS_WOE);
-#endif
-                }
-              else
-                {
-                  /* tcb is running on the same CPU */
-
-                  /* Copy tcb->xcp.regs to tcp.xcp.saved. These will be
-                   * restored by the signal trampoline after the signal has
-                   * been delivered.
-                   *
-                   * NOTE: that hi-priority interrupts are not disabled.
-                   */
-
-                  tcb->xcp.sigdeliver  = sigdeliver;
-                  tcb->xcp.saved_pc    = CURRENT_REGS[REG_PC];
-                  tcb->xcp.saved_ps    = CURRENT_REGS[REG_PS];
-
-                  /* Then set up to vector to the trampoline with interrupts
-                   * disabled
-                   */
-
-                  CURRENT_REGS[REG_PC] = (uint32_t)_xtensa_sig_trampoline;
-#ifdef __XTENSA_CALL0_ABI__
-                  CURRENT_REGS[REG_PS] = (uint32_t)
-                      (PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM);
-#else
-                  CURRENT_REGS[REG_PS] = (uint32_t)
-                      (PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM | PS_WOE);
-#endif
-                  /* And make sure that the saved context in the TCB is the
-                   * same as the interrupt return context.
-                   */
-
-                  xtensa_savestate(tcb->xcp.regs);
-                }
-
-              /* Increment the IRQ lock count so that when the task is
-               * restarted, it will hold the IRQ spinlock.
-               */
-
-              DEBUGASSERT(tcb->irqcount < INT16_MAX);
-              tcb->irqcount++;
-
-              /* In an SMP configuration, the interrupt disable logic also
-               * involves spinlocks that are configured per the TCB irqcount
-               * field.  This is logically equivalent to
-               * enter_critical_section().
-               * The matching call to leave_critical_section() will be
-               * performed in up_sigdeliver().
-               */
-
-              spin_setbit(&g_cpu_irqset, cpu, &g_cpu_irqsetlock,
-                          &g_cpu_irqlock);
-
-              /* RESUME the other CPU if it was PAUSED */
-
-              if (cpu != me)
-                {
-                  up_cpu_resume(cpu);
-                }
-            }
+          tcb->xcp.saved_regs[REG_PS] &= ~PS_EXCM_MASK;
         }
 
-      /* Otherwise, we are (1) signaling a task is not running from an
-       * interrupt handler or (2) we are not in an interrupt handler and the
-       * running task is signaling some other non-running task.
+      /* Duplicate the register context.  These will be
+       * restored by the signal trampoline after the signal has been
+       * delivered.
        */
 
-      else
-        {
-          /* Save the return pc and ps.  These will be restored by the
-           * signal trampoline after the signals have been delivered.
-           *
-           * NOTE: that hi-priority interrupts are not disabled.
-           */
+      tcb->xcp.regs         = (void *)
+                              ((uint32_t)tcb->xcp.regs -
+                                         XCPTCONTEXT_SIZE);
+      memcpy(tcb->xcp.regs, tcb->xcp.saved_regs, XCPTCONTEXT_SIZE);
 
-          tcb->xcp.sigdeliver   = sigdeliver;
-          tcb->xcp.saved_pc     = tcb->xcp.regs[REG_PC];
-          tcb->xcp.saved_ps     = tcb->xcp.regs[REG_PS];
+      tcb->xcp.regs[REG_A1] = (uint32_t)tcb->xcp.regs +
+                                        XCPTCONTEXT_SIZE;
 
-          /* Increment the IRQ lock count so that when the task is restarted,
-           * it will hold the IRQ spinlock.
-           */
+      /* Then set up to vector to the trampoline with interrupts
+       * disabled
+       */
 
-          DEBUGASSERT(tcb->irqcount < INT16_MAX);
-          tcb->irqcount++;
-
-          /* Then set up to vector to the trampoline with interrupts
-           * disabled
-           */
-
-          tcb->xcp.regs[REG_PC] = (uint32_t)_xtensa_sig_trampoline;
+      tcb->xcp.regs[REG_PC] = (uint32_t)xtensa_sig_deliver;
 #ifdef __XTENSA_CALL0_ABI__
-          tcb->xcp.regs[REG_PS] = (uint32_t)
-              (PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM);
+      tcb->xcp.regs[REG_PS] = (uint32_t)
+          (PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM);
 #else
-          tcb->xcp.regs[REG_PS] = (uint32_t)
-              (PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM | PS_WOE);
+      tcb->xcp.regs[REG_PS] = (uint32_t)
+          (PS_INTLEVEL(XCHAL_EXCM_LEVEL) | PS_UM |
+            PS_WOE | PS_CALLINC(1));
 #endif
-        }
+#ifndef CONFIG_BUILD_FLAT
+      xtensa_raiseprivilege(tcb->xcp.regs);
+#endif
     }
-
-  leave_critical_section(flags);
 }
-#endif /* CONFIG_SMP */

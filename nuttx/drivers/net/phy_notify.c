@@ -1,6 +1,8 @@
 /****************************************************************************
  * drivers/net/phy_notify.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -36,13 +38,14 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 #include <net/if.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
-#include <nuttx/semaphore.h>
+#include <nuttx/mutex.h>
 #include <nuttx/signal.h>
 #include <nuttx/net/phy.h>
 
@@ -101,7 +104,6 @@ struct phy_notify_s
  * Private Function Prototypes
  ****************************************************************************/
 
-static int phy_semtake(void);
 static FAR struct phy_notify_s *phy_find_unassigned(void);
 static FAR struct phy_notify_s *phy_find_assigned(FAR const char *intf,
                                                   pid_t pid);
@@ -113,7 +115,7 @@ static int phy_handler(int irq, FAR void *context, FAR void *arg);
 
 /* Serializes access to the g_notify_clients array */
 
-static sem_t g_notify_clients_sem = SEM_INITIALIZER(1);
+static mutex_t g_notify_clients_lock = NXMUTEX_INITIALIZER;
 
 /* This is a array the hold information for each PHY notification client */
 
@@ -125,17 +127,6 @@ static struct phy_notify_s
  ****************************************************************************/
 
 /****************************************************************************
- * Name: phy_semtake
- ****************************************************************************/
-
-static int phy_semtake(void)
-{
-  return nxsem_wait_uninterruptible(&g_notify_clients_sem);
-}
-
-#define phy_semgive() nxsem_post(&g_notify_clients_sem);
-
-/****************************************************************************
  * Name: phy_find_unassigned
  ****************************************************************************/
 
@@ -145,10 +136,10 @@ static FAR struct phy_notify_s *phy_find_unassigned(void)
   int ret;
   int i;
 
-  ret = phy_semtake();
+  ret = nxmutex_lock(&g_notify_clients_lock);
   if (ret < 0)
     {
-      phyerr("ERROR: phy_semtake failed: %d\n", ret);
+      phyerr("ERROR: nxmutex_lock failed: %d\n", ret);
       return NULL;
     }
 
@@ -161,12 +152,12 @@ static FAR struct phy_notify_s *phy_find_unassigned(void)
 
           client->assigned = true;
           client->intf[0]  = '\0';
-          client->pid      = -1;
+          client->pid      = INVALID_PROCESS_ID;
           client->enable   = NULL;
 
           /* Return the client entry assigned to the caller */
 
-          phy_semgive();
+          nxmutex_unlock(&g_notify_clients_lock);
           phyinfo("Returning client %d\n", i);
           return client;
         }
@@ -175,7 +166,7 @@ static FAR struct phy_notify_s *phy_find_unassigned(void)
   /* Ooops... too many */
 
   phyerr("ERROR: No free client entries\n");
-  phy_semgive();
+  nxmutex_unlock(&g_notify_clients_lock);
   return NULL;
 }
 
@@ -190,10 +181,10 @@ static FAR struct phy_notify_s *phy_find_assigned(FAR const char *intf,
   int ret;
   int i;
 
-  ret = phy_semtake();
+  ret = nxmutex_lock(&g_notify_clients_lock);
   if (ret < 0)
     {
-      phyerr("ERROR: phy_semtake failed: %d\n", ret);
+      phyerr("ERROR: nxmutex_lock failed: %d\n", ret);
       return NULL;
     }
 
@@ -205,7 +196,7 @@ static FAR struct phy_notify_s *phy_find_assigned(FAR const char *intf,
         {
           /* Return the matching client entry to the caller */
 
-          phy_semgive();
+          nxmutex_unlock(&g_notify_clients_lock);
           phyinfo("Returning client %d\n", i);
           return client;
         }
@@ -213,7 +204,7 @@ static FAR struct phy_notify_s *phy_find_assigned(FAR const char *intf,
 
   /* Ooops... not found */
 
-  phy_semgive();
+  nxmutex_unlock(&g_notify_clients_lock);
   return NULL;
 }
 
@@ -286,7 +277,7 @@ int phy_notify_subscribe(FAR const char *intf, pid_t pid,
 
   if (pid == 0)
     {
-      pid = getpid();
+      pid = nxsched_getpid();
       phyinfo("Actual PID=%d\n", pid);
     }
 
@@ -321,7 +312,7 @@ int phy_notify_subscribe(FAR const char *intf, pid_t pid,
 
       client->pid   = pid;
       client->event = *event;
-      strncpy(client->intf, intf, IFNAMSIZ + 1);
+      strlcpy(client->intf, intf, IFNAMSIZ + 1);
       client->intf[IFNAMSIZ] = '\0';
 
       /* Attach/re-attach the PHY interrupt */
@@ -374,7 +365,7 @@ int phy_notify_unsubscribe(FAR const char *intf, pid_t pid)
 
   /* Detach and disable the PHY interrupt */
 
-  ret = phy_semtake();
+  ret = nxmutex_lock(&g_notify_clients_lock);
   if (ret >= 0)
     {
       arch_phy_irq(intf, NULL, NULL, NULL);
@@ -387,9 +378,9 @@ int phy_notify_unsubscribe(FAR const char *intf, pid_t pid)
 
       client->assigned = false;
       client->intf[0]  = '\0';
-      client->pid      = -1;
+      client->pid      = INVALID_PROCESS_ID;
 
-      phy_semgive();
+      nxmutex_unlock(&g_notify_clients_lock);
     }
 
   return OK;

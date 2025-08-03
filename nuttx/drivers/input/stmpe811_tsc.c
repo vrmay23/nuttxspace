@@ -1,41 +1,29 @@
 /****************************************************************************
  * drivers/input/stmpe811_tsc.c
  *
- *   Copyright (C) 2012, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * References:
- *   "STMPE811 S-Touch® advanced resistive touchscreen controller with 8-bit
- *    GPIO expander," Doc ID 14489 Rev 6, CD00186725, STMicroelectronics"
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
+
+/* References:
+ *   "STMPE811 S-Touch advanced resistive touchscreen controller with 8-bit
+ *    GPIO expander," Doc ID 14489 Rev 6, CD00186725, STMicroelectronics"
+ */
 
 /****************************************************************************
  * Included Files
@@ -63,7 +51,6 @@
 #include <nuttx/wqueue.h>
 #include <nuttx/random.h>
 
-#include <nuttx/arch.h>
 #include <nuttx/input/touchscreen.h>
 #include <nuttx/input/stmpe811.h>
 
@@ -74,14 +61,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-#define Direction_IN             0x00
-#define Direction_OUT            0x01
-
-#define Polarity_Low             0x00
-#define Polarity_High            0x04
-#define Type_Level               0x00
-#define Type_Edge                0x02
 
 #define IO_IT_0                  0x01
 #define IO_IT_1                  0x02
@@ -96,10 +75,10 @@
 #define IOE_TS_IT                (uint8_t)(IO_IT_0 | IO_IT_1 | IO_IT_2)
 #define IOE_INMEMS_IT            (uint8_t)(IO_IT_2 | IO_IT_3)
 
-#define EDGE_FALLING              0x01
-#define EDGE_RISING               0x02
-
-#define TIMEOUT_MAX    0x3000 /*<! The value of the maximal timeout for I2C waiting loops */
+#define EDGE_FALLING             0x01
+#define EDGE_RISING              0x02
+/* <! The value of the maximal timeout for I2C waiting loops */
+#define TIMEOUT_MAX              0x3000
 
 /****************************************************************************
  * Private Types
@@ -108,24 +87,25 @@
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
+
 /* Internal logic */
 
 static void     stmpe811_notify(FAR struct stmpe811_dev_s *priv);
 static int      stmpe811_sample(FAR struct stmpe811_dev_s *priv,
-                  FAR struct stmpe811_sample_s *sample);
+                                FAR struct stmpe811_sample_s *sample);
 static inline int stmpe811_waitsample(FAR struct stmpe811_dev_s *priv,
-                  FAR struct stmpe811_sample_s *sample);
+                                      FAR struct stmpe811_sample_s *sample);
 
 /* Character driver methods */
 
 static int      stmpe811_open(FAR struct file *filep);
 static int      stmpe811_close(FAR struct file *filep);
 static ssize_t  stmpe811_read(FAR struct file *filep, FAR char *buffer,
-                  size_t len);
+                              size_t len);
 static int      stmpe811_ioctl(FAR struct file *filep, int cmd,
-                  unsigned long arg);
-static int      stmpe811_poll(FAR struct file *filep, struct pollfd *fds,
-                  bool setup);
+                               unsigned long arg);
+static int      stmpe811_poll(FAR struct file *filep, FAR struct pollfd *fds,
+                              bool setup);
 
 /* Initialization logic */
 
@@ -145,12 +125,15 @@ static const struct file_operations g_stmpe811fops =
   NULL,             /* write */
   NULL,             /* seek */
   stmpe811_ioctl,   /* ioctl */
+  NULL,             /* mmap */
+  NULL,             /* truncate */
   stmpe811_poll     /* poll */
 };
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
 /****************************************************************************
  * Name: stmpe811_notify
  *
@@ -162,7 +145,13 @@ static const struct file_operations g_stmpe811fops =
 
 static void stmpe811_notify(FAR struct stmpe811_dev_s *priv)
 {
-  int i;
+  /* If there are threads waiting on poll() for STMPE811 data to become
+   * available, then wake them up now.  NOTE: we wake up all waiting threads
+   * because we do not know that they are going to do.  If they all try to
+   * read the data, then some make end up blocking after all.
+   */
+
+  poll_notify(priv->fds, CONFIG_STMPE811_NPOLLWAITERS, POLLIN);
 
   /* If there are threads waiting for read data, then signal one of them
    * that the read data is available.
@@ -175,23 +164,6 @@ static void stmpe811_notify(FAR struct stmpe811_dev_s *priv)
        */
 
       nxsem_post(&priv->waitsem);
-    }
-
-  /* If there are threads waiting on poll() for STMPE811 data to become available,
-   * then wake them up now.  NOTE: we wake up all waiting threads because we
-   * do not know that they are going to do.  If they all try to read the data,
-   * then some make end up blocking after all.
-   */
-
-  for (i = 0; i < CONFIG_STMPE811_NPOLLWAITERS; i++)
-    {
-      struct pollfd *fds = priv->fds[i];
-      if (fds)
-        {
-          fds->revents |= POLLIN;
-          iinfo("Report events: %02x\n", fds->revents);
-          nxsem_post(fds->sem);
-        }
     }
 }
 
@@ -238,15 +210,15 @@ static int stmpe811_sample(FAR struct stmpe811_dev_s *priv,
           priv->id++;
         }
       else if (sample->contact == CONTACT_DOWN)
-       {
+        {
           /* The sampling logic has detected pen-up in some condition other
-           * than CONTACT_MOVE. Set the next state to CONTACT_MOVE:  Further
-           * samples collected while the pen is down will reported as movement
-           * events.
+           * than CONTACT_MOVE. Set the next state to CONTACT_MOVE: Further
+           * samples collected while the pen is down will reported as
+           * movement events.
            */
 
          priv->sample.contact = CONTACT_MOVE;
-       }
+        }
 
       priv->penchange = false;
       ret = OK;
@@ -268,19 +240,20 @@ static inline int stmpe811_waitsample(FAR struct stmpe811_dev_s *priv,
                                       FAR struct stmpe811_sample_s *sample)
 {
   int ret;
+  irqstate_t flags;
 
   /* Disable pre-emption to prevent the worker thread from running
    * asynchronously.
    */
 
-  sched_lock();
+  flags = enter_critical_section();
 
   /* Now release the semaphore that manages mutually exclusive access to
    * the device structure.  This may cause other tasks to become ready to
    * run, but they cannot run yet because pre-emption is disabled.
    */
 
-  nxsem_post(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
 
   /* Try to get the a sample... if we cannot, then wait on the semaphore
    * that is posted when new sample data is available.
@@ -304,20 +277,19 @@ static inline int stmpe811_waitsample(FAR struct stmpe811_dev_s *priv,
     }
 
   /* Re-acquire the semaphore that manages mutually exclusive access to
-   * the device structure.  We may have to wait here.  But we have our sample.
+   * the device structure. We may have to wait here. But we have our sample.
    * Interrupts and pre-emption will be re-enabled while we wait.
    */
 
-  ret = nxsem_wait(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
 
 errout:
-  /* Restore pre-emption.  We might get suspended here but that is okay
-   * because we already have our sample.  Note:  this means that if there
-   * were two threads reading from the STMPE811 for some reason, the data
-   * might be read out of order.
+  /* Then re-enable interrupts.  We might get interrupt here and there
+   * could be a new sample.  But no new threads will run because we still
+   * have pre-emption disabled.
    */
 
-  sched_unlock();
+  leave_critical_section(flags);
   return ret;
 }
 
@@ -337,15 +309,14 @@ static int stmpe811_open(FAR struct file *filep)
   uint8_t                   tmp;
   int                       ret;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct stmpe811_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxsem_wait(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       ierr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -360,7 +331,7 @@ static int stmpe811_open(FAR struct file *filep)
       /* More than 255 opens; uint8_t overflows to zero */
 
       ret = -EMFILE;
-      goto errout_with_sem;
+      goto errout_with_lock;
     }
 
   /* When the reference increments to 1, this is the first open event
@@ -371,8 +342,8 @@ static int stmpe811_open(FAR struct file *filep)
 
   priv->crefs = tmp;
 
-errout_with_sem:
-  nxsem_post(&priv->exclsem);
+errout_with_lock:
+  nxmutex_unlock(&priv->lock);
   return ret;
 #else
   return OK;
@@ -394,15 +365,14 @@ static int stmpe811_close(FAR struct file *filep)
   FAR struct stmpe811_dev_s *priv;
   int                       ret;
 
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct stmpe811_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxsem_wait(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       ierr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -419,7 +389,7 @@ static int stmpe811_close(FAR struct file *filep)
       priv->crefs--;
     }
 
-  nxsem_post(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
 #endif
   return OK;
 }
@@ -432,7 +402,8 @@ static int stmpe811_close(FAR struct file *filep)
  *
  ****************************************************************************/
 
-static ssize_t stmpe811_read(FAR struct file *filep, FAR char *buffer, size_t len)
+static ssize_t stmpe811_read(FAR struct file *filep,
+                             FAR char *buffer, size_t len)
 {
   FAR struct inode          *inode;
   FAR struct stmpe811_dev_s  *priv;
@@ -441,11 +412,10 @@ static ssize_t stmpe811_read(FAR struct file *filep, FAR char *buffer, size_t le
   int                        ret;
 
   iinfo("len=%d\n", len);
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct stmpe811_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Verify that the caller has provided a buffer large enough to receive
    * the touch data.
@@ -462,7 +432,7 @@ static ssize_t stmpe811_read(FAR struct file *filep, FAR char *buffer, size_t le
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxsem_wait(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       ierr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -483,7 +453,7 @@ static ssize_t stmpe811_read(FAR struct file *filep, FAR char *buffer, size_t le
         {
           ret = -EAGAIN;
           goto errout;
-       }
+        }
 
       /* Wait for sample data */
 
@@ -547,7 +517,7 @@ static ssize_t stmpe811_read(FAR struct file *filep, FAR char *buffer, size_t le
   ret = SIZEOF_TOUCH_SAMPLE_S(1);
 
 errout:
-  nxsem_post(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -566,15 +536,14 @@ static int stmpe811_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   int                        ret;
 
   iinfo("cmd: %d arg: %ld\n", cmd, arg);
-  DEBUGASSERT(filep);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct stmpe811_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Get exclusive access to the driver data structure */
 
-  ret = nxsem_wait(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       ierr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -601,12 +570,44 @@ static int stmpe811_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         }
         break;
 
+      case TSIOC_GETOFFSETX:  /* arg: Pointer to int offsetx config value */
+        {
+          FAR int *ptr = (FAR int *)((uintptr_t)arg);
+          DEBUGASSERT(ptr != NULL);
+          *ptr = CONFIG_STMPE811_OFFSETX;
+        }
+        break;
+
+      case TSIOC_GETOFFSETY:  /* arg: Pointer to int offsety config value */
+        {
+          FAR int *ptr = (FAR int *)((uintptr_t)arg);
+          DEBUGASSERT(ptr != NULL);
+          *ptr = CONFIG_STMPE811_OFFSETY;
+        }
+        break;
+
+      case TSIOC_GETTHRESHX:  /* arg: Pointer to int threshx config value */
+        {
+          FAR int *ptr = (FAR int *)((uintptr_t)arg);
+          DEBUGASSERT(ptr != NULL);
+          *ptr = CONFIG_STMPE811_THRESHX;
+        }
+        break;
+
+      case TSIOC_GETTHRESHY:  /* arg: Pointer to int threshy config value */
+        {
+          FAR int *ptr = (FAR int *)((uintptr_t)arg);
+          DEBUGASSERT(ptr != NULL);
+          *ptr = CONFIG_STMPE811_THRESHY;
+        }
+        break;
+
       default:
         ret = -ENOTTY;
         break;
     }
 
-  nxsem_post(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -627,15 +628,15 @@ static int stmpe811_poll(FAR struct file *filep, FAR struct pollfd *fds,
   int                        i;
 
   iinfo("setup: %d\n", (int)setup);
-  DEBUGASSERT(filep && fds);
+  DEBUGASSERT(fds);
   inode = filep->f_inode;
 
-  DEBUGASSERT(inode && inode->i_private);
-  priv  = (FAR struct stmpe811_dev_s *)inode->i_private;
+  DEBUGASSERT(inode->i_private);
+  priv  = inode->i_private;
 
   /* Are we setting up the poll?  Or tearing it down? */
 
-  ret = nxsem_wait(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       /* This should only happen if the wait was canceled by an signal */
@@ -650,7 +651,8 @@ static int stmpe811_poll(FAR struct file *filep, FAR struct pollfd *fds,
 
       if ((fds->events & POLLIN) == 0)
         {
-          ierr("ERROR: Missing POLLIN: revents: %08x\n", fds->revents);
+          ierr("ERROR: Missing POLLIN: revents: %08" PRIx32 "\n",
+               fds->revents);
           ret = -EDEADLK;
           goto errout;
         }
@@ -676,8 +678,8 @@ static int stmpe811_poll(FAR struct file *filep, FAR struct pollfd *fds,
       if (i >= CONFIG_STMPE811_NPOLLWAITERS)
         {
           ierr("ERROR: No available slot found: %d\n", i);
-          fds->priv    = NULL;
-          ret          = -EBUSY;
+          fds->priv = NULL;
+          ret       = -EBUSY;
           goto errout;
         }
 
@@ -685,24 +687,24 @@ static int stmpe811_poll(FAR struct file *filep, FAR struct pollfd *fds,
 
       if (priv->penchange)
         {
-          stmpe811_notify(priv);
+          poll_notify(&fds, 1, POLLIN);
         }
     }
   else if (fds->priv)
     {
       /* This is a request to tear down the poll. */
 
-      struct pollfd **slot = (struct pollfd **)fds->priv;
+      FAR struct pollfd **slot = (FAR struct pollfd **)fds->priv;
       DEBUGASSERT(slot != NULL);
 
       /* Remove all memory of the poll setup */
 
-      *slot                = NULL;
-      fds->priv            = NULL;
+      *slot     = NULL;
+      fds->priv = NULL;
     }
 
 errout:
-  nxsem_post(&priv->exclsem);
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -734,9 +736,9 @@ static void stmpe811_timeoutworker(FAR void *arg)
  *
  ****************************************************************************/
 
-static void stmpe811_timeout(int argc, uint32_t arg1, ...)
+static void stmpe811_timeout(wdparm_t arg)
 {
-  FAR struct stmpe811_dev_s *priv = (FAR struct stmpe811_dev_s *)((uintptr_t)arg1);
+  FAR struct stmpe811_dev_s *priv = (FAR struct stmpe811_dev_s *)arg;
   int ret;
 
   /* Are we still stuck in the pen down state? */
@@ -755,7 +757,8 @@ static void stmpe811_timeout(int argc, uint32_t arg1, ...)
            * action should be required to protect the work queue.
            */
 
-          ret = work_queue(HPWORK, &priv->timeout, stmpe811_timeoutworker, priv, 0);
+          ret = work_queue(HPWORK, &priv->timeout,
+                           stmpe811_timeoutworker, priv, 0);
           if (ret != 0)
             {
               ierr("ERROR: Failed to queue work: %d\n", ret);
@@ -811,8 +814,8 @@ static inline void stmpe811_tscinitialize(FAR struct stmpe811_dev_s *priv)
 
   /* Select 2 nF filter capacitor */
 
-  stmpe811_putreg8(priv, STMPE811_TSC_CFG,
-                 (TSC_CFG_AVE_CTRL_4SAMPLES | TSC_CFG_TOUCH_DELAY_500US | TSC_CFG_SETTLING_500US));
+  stmpe811_putreg8(priv, STMPE811_TSC_CFG, TSC_CFG_AVE_CTRL_4SAMPLES |
+                   TSC_CFG_TOUCH_DELAY_500US | TSC_CFG_SETTLING_500US);
 
   /* Select single point reading */
 
@@ -875,7 +878,7 @@ int stmpe811_register(STMPE811_HANDLE handle, int minor)
 
   /* Get exclusive access to the device structure */
 
-  ret = nxsem_wait(&priv->exclsem);
+  ret = nxmutex_lock(&priv->lock);
   if (ret < 0)
     {
       ierr("ERROR: nxsem_wait failed: %d\n", ret);
@@ -887,7 +890,7 @@ int stmpe811_register(STMPE811_HANDLE handle, int minor)
   if ((priv->inuse & TSC_PIN_SET) != 0)
     {
       ierr("ERROR: TSC pins is already in-use: %02x\n", priv->inuse);
-      nxsem_post(&priv->exclsem);
+      nxmutex_unlock(&priv->lock);
       return -EBUSY;
     }
 
@@ -898,24 +901,14 @@ int stmpe811_register(STMPE811_HANDLE handle, int minor)
   priv->threshx   = 0;
   priv->threshy   = 0;
 
-  /* Create a timer for catching missed pen up conditions */
-
-  priv->wdog      = wd_create();
-  if (!priv->wdog)
-    {
-      ierr("ERROR: Failed to create a watchdog\n", errno);
-      nxsem_post(&priv->exclsem);
-      return -ENOSPC;
-    }
-
   /* Register the character driver */
 
-  snprintf(devname, DEV_NAMELEN, DEV_FORMAT, minor);
+  snprintf(devname, sizeof(devname), DEV_FORMAT, minor);
   ret = register_driver(devname, &g_stmpe811fops, 0666, priv);
   if (ret < 0)
     {
       ierr("ERROR: Failed to register driver %s: %d\n", devname, ret);
-      nxsem_post(&priv->exclsem);
+      nxmutex_unlock(&priv->lock);
       return ret;
     }
 
@@ -923,11 +916,11 @@ int stmpe811_register(STMPE811_HANDLE handle, int minor)
 
   stmpe811_tscinitialize(priv);
 
-  /* Inidicate that the touchscreen controller was successfully initialized */
+  /* Indicate that the touchscreen controller was successfully initialized */
 
   priv->inuse |= TSC_PIN_SET;                    /* Pins 4-7 are now in-use */
-  priv->flags |= STMPE811_FLAGS_TSC_INITIALIZED;  /* TSC function is initialized */
-  nxsem_post(&priv->exclsem);
+  priv->flags |= STMPE811_FLAGS_TSC_INITIALIZED; /* TSC function is initialized */
+  nxmutex_unlock(&priv->lock);
   return ret;
 }
 
@@ -953,25 +946,29 @@ void stmpe811_tscworker(FAR struct stmpe811_dev_s *priv, uint8_t intsta)
 
   /* Cancel the missing pen up timer */
 
-  wd_cancel(priv->wdog);
+  wd_cancel(&priv->wdog);
 
-  /* Check for pen up or down from the TSC_STA ibit n the STMPE811_TSC_CTRL register. */
+  /* Check for pen up or down from the TSC_STA bit in STMPE811_TSC_CTRL. */
 
-  pendown = (stmpe811_getreg8(priv, STMPE811_TSC_CTRL) & TSC_CTRL_TSC_STA) != 0;
+  pendown = !!(stmpe811_getreg8(priv, STMPE811_TSC_CTRL) & TSC_CTRL_TSC_STA);
+
+  /* Get exclusive access to the driver data structure */
+
+  nxmutex_lock(&priv->lock);
 
   /* Handle the change from pen down to pen up */
 
   if (!pendown)
     {
-      /* The pen is up.. reset thresholding variables.  FIFOs will read zero if
-       * there is no data available (hence the choice of (0,0))
+      /* The pen is up.. reset thresholding variables.  FIFOs will read zero
+       * if there is no data available (hence the choice of (0,0))
        */
 
       priv->threshx = 0;
       priv->threshy = 0;
 
-      /* Ignore the interrupt if the pen was already up (CONTACT_NONE == pen up and
-       * already reported; CONTACT_UP == pen up, but not reported)
+      /* Ignore the interrupt if the pen was already up (CONTACT_NONE == pen
+       * up and already reported; CONTACT_UP == pen up, but not reported)
        */
 
       if (priv->sample.contact == CONTACT_NONE ||
@@ -980,9 +977,9 @@ void stmpe811_tscworker(FAR struct stmpe811_dev_s *priv, uint8_t intsta)
           goto ignored;
         }
 
-      /* A pen-down to up transition has been detected.  CONTACT_UP indicates the
-       * initial loss of contact.  The state will be changed to CONTACT_NONE
-       * after the loss of contact is sampled.
+      /* A pen-down to up transition has been detected.  CONTACT_UP indicates
+       * the initial loss of contact.  The state will be changed to
+       * CONTACT_NONE after the loss of contact is sampled.
        */
 
        priv->sample.contact = CONTACT_UP;
@@ -1021,9 +1018,10 @@ void stmpe811_tscworker(FAR struct stmpe811_dev_s *priv, uint8_t intsta)
           goto ignored;
         }
 
-      /* Perform a thresholding operation so that the results will be more stable.
-       * If the difference from the last sample is small, then ignore the event.
-       * REVISIT:  Should a large change in pressure also generate a event?
+      /* Perform a thresholding operation so that the results will be more
+       * stable. If the difference from the last sample is small, then ignore
+       * the event. REVISIT:  Should a large change in pressure also generate
+       * a event?
        */
 
       xdiff = x > priv->threshx ? (x - priv->threshx) : (priv->threshx - x);
@@ -1031,7 +1029,9 @@ void stmpe811_tscworker(FAR struct stmpe811_dev_s *priv, uint8_t intsta)
 
       if (xdiff < CONFIG_STMPE811_THRESHX && ydiff < CONFIG_STMPE811_THRESHY)
         {
-          /* Little or no change in either direction ... don't report anything. */
+          /* Little or no change in either direction ...
+           * don't report anything.
+           */
 
           goto ignored;
         }
@@ -1090,11 +1090,12 @@ void stmpe811_tscworker(FAR struct stmpe811_dev_s *priv, uint8_t intsta)
    */
 
 ignored:
+  nxmutex_unlock(&priv->lock);
   if (priv->sample.contact == CONTACT_DOWN ||
       priv->sample.contact == CONTACT_MOVE)
     {
-      wd_start(priv->wdog, STMPE811_PENUP_TICKS, stmpe811_timeout,
-               1, (uint32_t)((uintptr_t)priv));
+      wd_start(&priv->wdog, STMPE811_PENUP_TICKS,
+               stmpe811_timeout, (wdparm_t)priv);
     }
 
   /*  Reset and clear all data in the FIFO */

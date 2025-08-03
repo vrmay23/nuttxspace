@@ -1,39 +1,26 @@
 ############################################################################
 # apps/testing/ostest/Makefile
 #
-#   Copyright (C) 2007-2012, 2014, 2017 Gregory Nutt. All rights reserved.
-#   Author: Gregory Nutt <gnutt@nuttx.org>
+# SPDX-License-Identifier: Apache-2.0
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
 #
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in
-#    the documentation and/or other materials provided with the
-#    distribution.
-# 3. Neither the name NuttX nor the names of its contributors may be
-#    used to endorse or promote products derived from this software
-#    without specific prior written permission.
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
-# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
-# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
 #
 ############################################################################
 
--include $(TOPDIR)/Make.defs
+include $(APPDIR)/Make.defs
 
 # ostest built-in application info
 
@@ -44,8 +31,14 @@ MODULE = $(CONFIG_TESTING_OSTEST)
 
 # NuttX OS Test
 
-CSRCS   = dev_null.c restart.c sigprocmask.c sighand.c signest.c
+CSRCS   = getopt.c libc_memmem.c restart.c sigprocmask.c sighand.c \
+          signest.c sighelper.c
+
 MAINSRC = ostest_main.c
+
+ifeq ($(CONFIG_DEV_NULL),y)
+CSRCS += dev_null.c
+endif
 
 ifeq ($(CONFIG_SIG_SIGSTOP_ACTION),y)
 ifeq ($(CONFIG_SIG_SIGKILL_ACTION),y)
@@ -63,8 +56,12 @@ ifneq ($(CONFIG_STDIO_DISABLE_BUFFERING),y)
 CSRCS += setvbuf.c
 endif
 
-ifeq ($(CONFIG_TLS),y)
+ifneq ($(CONFIG_TLS_NELEM),0)
 CSRCS += tls.c
+endif
+
+ifeq ($(CONFIG_SCHED_THREAD_LOCAL),y)
+CSRCS += sched_thread_local.c
 endif
 
 ifeq ($(CONFIG_TESTING_OSTEST_AIO),y)
@@ -77,14 +74,17 @@ endif
 
 ifneq ($(CONFIG_DISABLE_PTHREAD),y)
 CSRCS += cancel.c cond.c mutex.c timedmutex.c sem.c semtimed.c barrier.c
-CSRCS += timedwait.c
-CSRCS += pthread_rwlock.c pthread_rwlock_cancel.c
+CSRCS += timedwait.c pthread_rwlock.c pthread_rwlock_cancel.c schedlock.c
 
-ifneq ($(CONFIG_NPTHREAD_KEYS),0)
+ifeq ($(CONFIG_SCHED_WAITPID),y)
+CSRCS += pthread_exit.c
+endif
+
+ifneq ($(CONFIG_TLS_NELEM),0)
 CSRCS += specific.c
 endif
 
-ifeq ($(CONFIG_PTHREAD_CLEANUP),y)
+ifneq ($(CONFIG_TLS_NCLEANUP),0)
 CSRCS += pthread_cleanup.c
 endif
 
@@ -105,7 +105,15 @@ CSRCS += roundrobin.c
 endif
 
 ifeq ($(CONFIG_SCHED_SPORADIC),y)
-CSRCS += sporadic.c
+CSRCS += sporadic.c sporadic2.c
+endif
+
+ifeq ($(CONFIG_SCHED_WORKQUEUE),y)
+CSRCS += wqueue.c
+endif
+
+ifeq ($(CONFIG_PRIORITY_INHERITANCE),y)
+CSRCS += prioinherit.c
 endif
 endif # CONFIG_DISABLE_PTHREAD
 
@@ -122,16 +130,28 @@ CSRCS += sigev_thread.c
 endif
 endif
 
-ifeq ($(CONFIG_ARCH_HAVE_VFORK),y)
+ifeq ($(CONFIG_ARCH_HAVE_FORK),y)
 ifeq ($(CONFIG_SCHED_WAITPID),y)
 CSRCS += vfork.c
 endif
 endif
 
-ifneq ($(CONFIG_DISABLE_PTHREAD),y)
-ifeq ($(CONFIG_PRIORITY_INHERITANCE),y)
-CSRCS += prioinherit.c
-endif # CONFIG_PRIORITY_INHERITANCE
-endif # CONFIG_DISABLE_PTHREAD
+ifeq ($(CONFIG_ARCH_SETJMP_H),y)
+CSRCS += setjmp.c
+endif
+
+ifeq ($(CONFIG_SMP),y)
+CSRCS += smp_call.c
+endif
+
+ifeq ($(CONFIG_SCHED_EVENTS),y)
+ifeq ($(CONFIG_BUILD_FLAT),y)
+CSRCS += nxevent.c
+endif
+endif
+
+ifeq ($(CONFIG_BUILD_FLAT),y)
+CSRCS += wdog.c
+endif
 
 include $(APPDIR)/Application.mk

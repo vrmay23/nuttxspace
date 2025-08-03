@@ -1,45 +1,26 @@
 /****************************************************************************
  * apps/wireless/ieee802154/i8sak/i8sak_blaster.c
- * IEEE 802.15.4 Swiss Army Knife
  *
- *   Copyright (C) 2014-2015, 2017 Gregory Nutt. All rights reserved.
- *   Copyright (C) 2014-2015 Sebastien Lorquet. All rights reserved.
- *   Copyright (C) 2017 Verge Inc. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- *   Author: Sebastien Lorquet <sebastien@lorquet.fr>
- *   Author: Anthony Merlino <anthony@vergeaero.com>
- *   Author: Gregory Nuttx <gnutt@nuttx.org>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
- /****************************************************************************
+/****************************************************************************
  * Included Files
  ****************************************************************************/
 
@@ -49,6 +30,7 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
 
@@ -133,7 +115,8 @@ void i8sak_blaster_cmd(FAR struct i8sak_s *i8sak, int argc, FAR char *argv[])
             break;
 
           case 'f': /* Inline change blaster frame */
-            i8sak->payload_len = i8sak_str2payload(optarg, &i8sak->payload[0]);
+            i8sak->payload_len = i8sak_str2payload(optarg,
+                                                   &i8sak->payload[0]);
             i8sak_blaster_start(i8sak);
             break;
 
@@ -172,7 +155,7 @@ pthread_addr_t i8sak_blaster_thread(pthread_addr_t arg)
 #ifdef CONFIG_NET_6LOWPAN
   if (i8sak->mode == I8SAK_MODE_NETIF)
     {
-      if (bind(i8sak->fd, (struct sockaddr*)&i8sak->ep_in6addr,
+      if (bind(i8sak->fd, (struct sockaddr *)&i8sak->ep_in6addr,
                sizeof(struct sockaddr_in6)) < 0)
         {
           fprintf(stderr, "ERROR: failure to bind sock: %d\n", errno);
@@ -183,7 +166,7 @@ pthread_addr_t i8sak_blaster_thread(pthread_addr_t arg)
 
   while (i8sak->blasterenabled)
     {
-      usleep(i8sak->blasterperiod*1000);
+      usleep(i8sak->blasterperiod * 1000);
 
       if (i8sak->mode == I8SAK_MODE_CHAR)
         {
@@ -198,7 +181,8 @@ pthread_addr_t i8sak_blaster_thread(pthread_addr_t arg)
           tx.meta.ranging = IEEE802154_NON_RANGING;
 
           tx.meta.srcmode = i8sak->addrmode;
-          memcpy(&tx.meta.destaddr, &i8sak->ep_addr, sizeof(struct ieee802154_addr_s));
+          memcpy(&tx.meta.destaddr, &i8sak->ep_addr,
+                 sizeof(struct ieee802154_addr_s));
 
           /* Each byte is represented by 2 chars */
 
@@ -211,7 +195,8 @@ pthread_addr_t i8sak_blaster_thread(pthread_addr_t arg)
       else if (i8sak->mode == I8SAK_MODE_NETIF)
         {
           sendto(i8sak->fd, i8sak->payload, i8sak->payload_len, 0,
-                 (struct sockaddr*)&i8sak->ep_in6addr, sizeof(struct sockaddr_in6));
+                 (struct sockaddr *)&i8sak->ep_in6addr,
+                 sizeof(struct sockaddr_in6));
         }
 #endif
     }

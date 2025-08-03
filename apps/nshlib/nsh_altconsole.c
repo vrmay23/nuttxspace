@@ -1,36 +1,22 @@
 /****************************************************************************
  * apps/nshlib/nsh_altconsole.c
  *
- *   Copyright (C) 2018 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *   Author: Alan Carvalho de Assis <acassis@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,17 +26,15 @@
 
 #include <nuttx/config.h>
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <assert.h>
 #include <debug.h>
+#include <string.h>
 
 #include "nsh.h"
 #include "nsh_console.h"
-
-#include "netutils/netinit.h"
 
 #if defined(CONFIG_NSH_ALTCONDEV) && !defined(HAVE_USB_CONSOLE)
 
@@ -78,10 +62,6 @@ static int nsh_clone_console(FAR struct console_stdio_s *pstate)
       return -ENODEV;
     }
 
-  /* Close stderr: note we only close stderr if we opened the alternative one */
-
-  fclose(stderr);
-
   /* Associate the new opened file descriptor to stderr */
 
   dup2(fd, 2);
@@ -101,10 +81,6 @@ static int nsh_clone_console(FAR struct console_stdio_s *pstate)
       return -ENODEV;
     }
 
-  /* Close stdout: note we only close stdout if we opened the alternative one */
-
-  fclose(stdout);
-
   /* Associate the new opened file descriptor to stdout */
 
   dup2(fd, 1);
@@ -118,25 +94,15 @@ static int nsh_clone_console(FAR struct console_stdio_s *pstate)
 
   /* Setup the stderr */
 
-  pstate->cn_errfd     = 2;
-  pstate->cn_errstream = fdopen(pstate->cn_errfd, "a");
-  if (!pstate->cn_errstream)
-    {
-      close(pstate->cn_errfd);
-      free(pstate);
-      return -EIO;
-    }
+  ERRFD(pstate) = 2;
 
   /* Setup the stdout */
 
-  pstate->cn_outfd     = 1;
-  pstate->cn_outstream = fdopen(pstate->cn_outfd, "a");
-  if (!pstate->cn_outstream)
-    {
-      close(pstate->cn_outfd);
-      free(pstate);
-      return -EIO;
-    }
+  OUTFD(pstate) = 1;
+
+  /* Setup stdin */
+
+  INFD(pstate) = 0;
 
   return OK;
 }
@@ -190,8 +156,7 @@ static int nsh_wait_inputdev(FAR struct console_stdio_s *pstate,
                * to open the keyboard device.
                */
 
-              puts(msg);
-              fflush(stdout);
+              write(STDOUT_FILENO, msg, strlen(msg));
               msg = NULL;
             }
 
@@ -202,33 +167,19 @@ static int nsh_wait_inputdev(FAR struct console_stdio_s *pstate,
     }
   while (fd < 0);
 
-  /* Close stdin: note we only closed stdin if we opened the alternative one */
-
-  fclose(stdin);
-
   /* Okay.. we have successfully opened the input device.  Did
    * we just re-open fd 0?
    */
 
   if (fd != 0)
     {
-       /* No..  Dup the fd to create standard fd 0.  stdin should not know. */
+      /* No..  Dup the fd to create standard fd 0. stdin should not know. */
 
       dup2(fd, 0);
 
       /* Setup the input console */
 
       pstate->cn_confd = 0;
-
-      /* Create a standard C stream on the console device */
-
-      pstate->cn_constream = fdopen(pstate->cn_confd, "r+");
-      if (!pstate->cn_constream)
-        {
-          close(pstate->cn_confd);
-          free(pstate);
-          return -EIO;
-        }
 
       /* Close the input device that we just opened */
 
@@ -266,42 +217,17 @@ static int nsh_wait_inputdev(FAR struct console_stdio_s *pstate,
  *
  ****************************************************************************/
 
-int nsh_consolemain(int argc, char *argv[])
+int nsh_consolemain(int argc, FAR char *argv[])
 {
-  FAR struct console_stdio_s *pstate = nsh_newconsole();
+  FAR struct console_stdio_s *pstate = nsh_newconsole(true);
   FAR const char *msg;
   int ret;
 
   DEBUGASSERT(pstate);
 
-  /* Initialize any USB tracing options that were requested */
-
-#ifdef CONFIG_NSH_USBDEV_TRACE
-  usbtrace_enable(TRACE_BITSET);
-#endif
-
-  /* Execute the one-time start-up script.  Any output will go to /dev/console. */
-
-#ifdef CONFIG_NSH_ROMFSETC
-  nsh_initscript(&pstate->cn_vtbl);
-#endif
-
-#ifdef CONFIG_NSH_NETINIT
-  /* Bring up the network */
-
-  netinit_bringup();
-#endif
-
-#if defined(CONFIG_NSH_ARCHINIT) && defined(CONFIG_BOARDCTL_FINALINIT)
-  /* Perform architecture-specific final-initialization (if configured) */
-
-  boardctl(BOARDIOC_FINALINIT, 0);
-#endif
-
   /* First map stderr and stdout to alternative devices */
 
   ret = nsh_clone_console(pstate);
-
   if (ret < 0)
     {
       return ret;
@@ -323,7 +249,7 @@ int nsh_consolemain(int argc, char *argv[])
 
       /* Execute the session */
 
-      nsh_session(pstate);
+      nsh_session(pstate, NSH_LOGIN_LOCAL, argc, argv);
 
       /* We lost the connection.  Wait for the keyboard to
        * be re-connected.

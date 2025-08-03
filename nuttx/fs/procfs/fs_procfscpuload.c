@@ -1,35 +1,22 @@
 /****************************************************************************
  * fs/procfs/fs_procfscpuload.c
  *
- *   Copyright (C) 2014, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,13 +27,13 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
-#include <sys/statfs.h>
 #include <sys/stat.h>
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <inttypes.h>
 #include <time.h>
 #include <string.h>
 #include <fcntl.h>
@@ -59,8 +46,11 @@
 #include <nuttx/fs/fs.h>
 #include <nuttx/fs/procfs.h>
 
+#include "fs_heap.h"
+
 #if !defined(CONFIG_DISABLE_MOUNTPOINT) && defined(CONFIG_FS_PROCFS)
-#if defined(CONFIG_SCHED_CPULOAD) && !defined(CONFIG_FS_PROCFS_EXCLUDE_CPULOAD)
+#if !defined(CONFIG_SCHED_CPULOAD_NONE) && \
+    !defined(CONFIG_FS_PROCFS_EXCLUDE_CPULOAD)
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -109,12 +99,13 @@ static int     cpuload_stat(FAR const char *relpath, FAR struct stat *buf);
  * with any compiler.
  */
 
-const struct procfs_operations cpuload_operations =
+const struct procfs_operations g_cpuload_operations =
 {
   cpuload_open,       /* open */
   cpuload_close,      /* close */
   cpuload_read,       /* read */
   NULL,               /* write */
+  NULL,               /* poll */
 
   cpuload_dup,        /* dup */
 
@@ -153,17 +144,9 @@ static int cpuload_open(FAR struct file *filep, FAR const char *relpath,
       return -EACCES;
     }
 
-  /* "cpuload" is the only acceptable value for the relpath */
-
-  if (strcmp(relpath, "cpuload") != 0)
-    {
-      ferr("ERROR: relpath is '%s'\n", relpath);
-      return -ENOENT;
-    }
-
   /* Allocate a container to hold the file attributes */
 
-  attr = (FAR struct cpuload_file_s *)kmm_zalloc(sizeof(struct cpuload_file_s));
+  attr = fs_heap_zalloc(sizeof(struct cpuload_file_s));
   if (!attr)
     {
       ferr("ERROR: Failed to allocate file attributes\n");
@@ -191,7 +174,7 @@ static int cpuload_close(FAR struct file *filep)
 
   /* Release the file attributes structure */
 
-  kmm_free(attr);
+  fs_heap_free(attr);
   filep->f_priv = NULL;
   return OK;
 }
@@ -224,7 +207,8 @@ static ssize_t cpuload_read(FAR struct file *filep, FAR char *buffer,
 
   if (filep->f_pos == 0)
     {
-      struct cpuload_s cpuload;
+      clock_t total = 0;
+      clock_t active = 0;
       uint32_t intpart;
       uint32_t fracpart;
 
@@ -232,18 +216,39 @@ static ssize_t cpuload_read(FAR struct file *filep, FAR char *buffer,
        * fail if the PID is not valid.  This, however, should never happen
        * for the IDLE thread.
        */
+#ifdef CONFIG_SMP
+      struct cpuload_s cpuloads[CONFIG_SMP_NCPUS];
+      uint32_t i;
+
+      for (i = 0; i < CONFIG_SMP_NCPUS; i++)
+        {
+          DEBUGVERIFY(clock_cpuload(i, &cpuloads[i]));
+          active += cpuloads[i].active;
+        }
+
+      total = cpuloads[0].total;
+#else
+      struct cpuload_s cpuload;
 
       DEBUGVERIFY(clock_cpuload(0, &cpuload));
+      active = cpuload.active;
+      total = cpuload.total;
+#endif
 
-      /* On the simulator, you may hit cpuload.total == 0, but probably never on
-       * real hardware.
+      if (active > total)
+        {
+          active = total;
+        }
+
+      /* On the simulator, you may hit cpuload.total == 0, but probably never
+       * on real hardware.
        */
 
-      if (cpuload.total > 0)
+      if (total > 0)
         {
           uint32_t tmp;
 
-          tmp      = 1000 - (1000 * cpuload.active) / cpuload.total;
+          tmp      = 1000 - (1000 * active) / total;
           intpart  = tmp / 10;
           fracpart = tmp - 10 * intpart;
         }
@@ -253,8 +258,9 @@ static ssize_t cpuload_read(FAR struct file *filep, FAR char *buffer,
           fracpart = 0;
         }
 
-      linesize = snprintf(attr->line, CPULOAD_LINELEN, "%3d.%01d%%\n",
-                          intpart, fracpart);
+      linesize = procfs_snprintf(attr->line, CPULOAD_LINELEN,
+                                 "%3" PRId32 ".%01" PRId32 "%%\n",
+                                 intpart, fracpart);
 
       /* Save the linesize in case we are re-entered with f_pos > 0 */
 
@@ -264,7 +270,7 @@ static ssize_t cpuload_read(FAR struct file *filep, FAR char *buffer,
   /* Transfer the system up time to user receive buffer */
 
   offset = filep->f_pos;
-  ret    = procfs_memcpy(attr->line, attr->linesize, buffer, buflen, &offset);
+  ret = procfs_memcpy(attr->line, attr->linesize, buffer, buflen, &offset);
 
   /* Update the file offset */
 
@@ -298,7 +304,7 @@ static int cpuload_dup(FAR const struct file *oldp, FAR struct file *newp)
 
   /* Allocate a new container to hold the task and attribute selection */
 
-  newattr = (FAR struct cpuload_file_s *)kmm_malloc(sizeof(struct cpuload_file_s));
+  newattr = fs_heap_malloc(sizeof(struct cpuload_file_s));
   if (!newattr)
     {
       ferr("ERROR: Failed to allocate file attributes\n");
@@ -324,14 +330,6 @@ static int cpuload_dup(FAR const struct file *oldp, FAR struct file *newp)
 
 static int cpuload_stat(const char *relpath, struct stat *buf)
 {
-  /* "cpuload" is the only acceptable value for the relpath */
-
-  if (strcmp(relpath, "cpuload") != 0)
-    {
-      ferr("ERROR: relpath is '%s'\n", relpath);
-      return -ENOENT;
-    }
-
   /* "cpuload" is the name for a read-only file */
 
   memset(buf, 0, sizeof(struct stat));

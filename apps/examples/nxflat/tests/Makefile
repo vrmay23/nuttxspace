@@ -1,37 +1,26 @@
 ############################################################################
 # apps/examples/nxflat/tests/Makefile
 #
-#   Copyright (C) 2009, 2011, 2014 Gregory Nutt. All rights reserved.
-#   Author: Gregory Nutt <gnutt@nuttx.org>
+# SPDX-License-Identifier: Apache-2.0
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
 #
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in
-#    the documentation and/or other materials provided with the
-#    distribution.
-# 3. Neither the name NuttX nor the names of its contributors may be
-#    used to endorse or promote products derived from this software
-#    without specific prior written permission.
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
-# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
-# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
 #
 ############################################################################
+
+include $(APPDIR)/Make.defs
 
 # Most of these do no build yet
 #SUBDIRS	= errno hello hello++ longjmp mutex pthread signal task struct
@@ -49,16 +38,16 @@ NXFLAT_DIR	= $(APPDIR)/examples/nxflat
 TESTS_DIR	= $(NXFLAT_DIR)/tests
 ROMFS_DIR	= $(TESTS_DIR)/romfs
 ROMFS_IMG	= $(TESTS_DIR)/romfs.img
-ROMFS_HDR	= $(TESTS_DIR)/romfs.h
-ROMFS_DIRLIST	= $(TESTS_DIR)/dirlist.h
-SYMTAB		= $(TESTS_DIR)/symtab.h
+ROMFS_SRC	= $(TESTS_DIR)/romfs.c
+DIRLIST_SRC	= $(TESTS_DIR)/dirlist.c
+SYMTAB_SRC	= $(TESTS_DIR)/symtab.c
 
 define DIR_template
 $(1)_$(2):
 	+$(Q) $(MAKE) -C $(1) $(2) TOPDIR="$(TOPDIR)" APPDIR="$(APPDIR)" ROMFS_DIR="$(ROMFS_DIR)" CROSSDEV=$(CROSSDEV)
 endef
 
-all: $(ROMFS_HDR) $(ROMFS_DIRLIST) $(SYMTAB)
+all: $(ROMFS_SRC) $(DIRLIST_SRC) $(SYMTAB_SRC)
 .PHONY: all clean install
 
 $(foreach DIR, $(SUBDIRS), $(eval $(call DIR_template,$(DIR),clean)))
@@ -74,25 +63,26 @@ $(ROMFS_IMG): install
 	$(Q) genromfs -f $@.tmp -d $(ROMFS_DIR) -V "NXFLATTEST"
 	$(Q) $(call TESTANDREPLACEFILE, $@.tmp, $@)
 
-# Create the romfs.h header file from the romfs.img file
+# Create the romfs.c file from the romfs.img file
 
-$(ROMFS_HDR): $(ROMFS_IMG)
-	$(Q) (cd $(TESTS_DIR); xxd -i romfs.img | sed -e "s/^unsigned/static const unsigned/g" >$@)
+$(ROMFS_SRC): $(ROMFS_IMG)
+	$(Q) (cd $(TESTS_DIR) && echo "#include <nuttx/compiler.h>" >$@ && \
+		xxd -i romfs.img | sed -e "s/^unsigned char/const unsigned char aligned_data(4)/g" >>$@)
 
-# Create the dirlist.h header file from the romfs directory
+# Create the dirlist.c file from the romfs directory
 
-$(ROMFS_DIRLIST): install
+$(DIRLIST_SRC): install
 	$(Q) $(TESTS_DIR)/mkdirlist.sh $(ROMFS_DIR) >$@.tmp
 	$(Q) $(call TESTANDREPLACEFILE, $@.tmp, $@)
 
 # Create the exported symbol table list from the derived *-thunk.S files
 
-$(SYMTAB): install
-	$(Q) $(TESTS_DIR)/mksymtab.sh $(ROMFS_DIR) >$@.tmp
+$(SYMTAB_SRC): install
+	$(Q) $(APPDIR)/tools/mksymtab.sh $(TESTS_DIR) g_nxflat >$@.tmp
 	$(Q) $(call TESTANDREPLACEFILE, $@.tmp, $@)
 
 # Clean each subdirectory
 
 clean: $(foreach DIR, $(SUBDIRS), $(DIR)_clean)
-	$(Q) rm -f $(ROMFS_HDR) $(ROMFS_DIRLIST) $(ROMFS_IMG) $(SYMTAB)
+	$(Q) rm -f $(ROMFS_SRC) $(DIRLIST_SRC) $(ROMFS_IMG) $(SYMTAB_SRC)
 	$(Q) rm -rf $(ROMFS_DIR)

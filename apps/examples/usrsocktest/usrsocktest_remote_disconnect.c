@@ -1,37 +1,22 @@
 /****************************************************************************
- * usrsocktest/usrsocktest_remote_disconnect.c
- * Remote end disconnects
+ * apps/examples/usrsocktest/usrsocktest_remote_disconnect.c
  *
- *   Copyright (C) 2015, 2017 Haltian Ltd. All rights reserved.
- *   Authors: Roman Saveljev <roman.saveljev@haltian.com>
- *            Jussi Kivilinna <jussi.kivilinna@haltian.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -49,6 +34,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "defines.h"
 
@@ -68,7 +54,10 @@
  * Private Data
  ****************************************************************************/
 
-static const uint8_t tevents[] = { POLLIN, POLLOUT, POLLOUT|POLLIN, 0};
+static const uint8_t tevents[] =
+{
+  POLLIN, POLLOUT, POLLOUT | POLLIN, 0
+};
 static bool started;
 static int sd;
 
@@ -81,7 +70,7 @@ static int sd;
  ****************************************************************************/
 
 /****************************************************************************
- * Name: ConnectReceive
+ * Name: connectreceive
  *
  * Description:
  *   Remote end is unreachable
@@ -97,7 +86,7 @@ static int sd;
  *
  ****************************************************************************/
 
-static void Unreachable(struct usrsocktest_daemon_conf_s *dconf)
+static void unreachable(struct usrsocktest_daemon_conf_s *dconf)
 {
   ssize_t ret;
   struct sockaddr_in addr;
@@ -215,11 +204,10 @@ static void Unreachable(struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(-ENODEV, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_endp_malloc_cnt);
   TEST_ASSERT_EQUAL(0, usrsocktest_dcmd_malloc_cnt);
-
 }
 
 /****************************************************************************
- * Name: Send
+ * Name: remote_disconnect_send
  *
  * Description:
  *   Send and disconnect
@@ -235,7 +223,7 @@ static void Unreachable(struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void Send(struct usrsocktest_daemon_conf_s *dconf)
+static void remote_disconnect_send(struct usrsocktest_daemon_conf_s *dconf)
 {
   ssize_t ret;
   size_t datalen;
@@ -276,18 +264,22 @@ static void Send(struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_unreachable_sockets());
-  TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+  TEST_ASSERT_EQUAL(0,
+                  usrsocktest_daemon_get_num_remote_disconnected_sockets());
 
   /* Disconnect connections. */
 
   TEST_ASSERT_TRUE(usrsocktest_send_delayed_command('D', 0));
-  for (count = 0; usrsocktest_daemon_get_num_connected_sockets() > 0; count++)
+  for (count = 0; usrsocktest_daemon_get_num_connected_sockets() > 0;
+       count++)
     {
       TEST_ASSERT_TRUE(count <= 3);
       usleep(5 * 1000);
     }
+
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
-  TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+  TEST_ASSERT_EQUAL(1,
+                  usrsocktest_daemon_get_num_remote_disconnected_sockets());
 
   for (count = 0; count < 2; count++)
     {
@@ -299,7 +291,8 @@ static void Send(struct usrsocktest_daemon_conf_s *dconf)
       TEST_ASSERT_EQUAL(-1, ret);
       TEST_ASSERT_EQUAL(EPIPE, errno);
       TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
-      TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+      TEST_ASSERT_EQUAL(1,
+                  usrsocktest_daemon_get_num_remote_disconnected_sockets());
       TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
       TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_send_bytes());
     }
@@ -322,7 +315,7 @@ static void Send(struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: Send2
+ * Name: remote_disconnect_send2
  *
  * Description:
  *   Send and disconnect
@@ -338,7 +331,7 @@ static void Send(struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void Send2(struct usrsocktest_daemon_conf_s *dconf)
+static void remote_disconnect_send2(struct usrsocktest_daemon_conf_s *dconf)
 {
   ssize_t ret;
   size_t datalen;
@@ -366,7 +359,8 @@ static void Send2(struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_recv_empty_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_unreachable_sockets());
-  TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+  TEST_ASSERT_EQUAL(0,
+                  usrsocktest_daemon_get_num_remote_disconnected_sockets());
 
   /* Try connect. */
 
@@ -379,7 +373,8 @@ static void Send2(struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_unreachable_sockets());
-  TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+  TEST_ASSERT_EQUAL(0,
+                  usrsocktest_daemon_get_num_remote_disconnected_sockets());
 
   /* Disconnect connections with delay. */
 
@@ -396,7 +391,8 @@ static void Send2(struct usrsocktest_daemon_conf_s *dconf)
       TEST_ASSERT_EQUAL(EPIPE, errno);
       TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
       TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
-      TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+      TEST_ASSERT_EQUAL(1,
+                  usrsocktest_daemon_get_num_remote_disconnected_sockets());
       TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_send_bytes());
     }
 
@@ -418,7 +414,7 @@ static void Send2(struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: Receive
+ * Name: receive
  *
  * Description:
  *   Receive and disconnect
@@ -434,7 +430,7 @@ static void Send2(struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void Receive(struct usrsocktest_daemon_conf_s *dconf)
+static void receive(struct usrsocktest_daemon_conf_s *dconf)
 {
   ssize_t ret;
   size_t datalen;
@@ -475,19 +471,23 @@ static void Receive(struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_unreachable_sockets());
-  TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+  TEST_ASSERT_EQUAL(0,
+                   usrsocktest_daemon_get_num_remote_disconnected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_recv_empty_sockets());
 
   /* Disconnect connections. */
 
   TEST_ASSERT_TRUE(usrsocktest_send_delayed_command('D', 0));
-  for (count = 0; usrsocktest_daemon_get_num_connected_sockets() > 0; count++)
+  for (count = 0; usrsocktest_daemon_get_num_connected_sockets() > 0;
+       count++)
     {
       TEST_ASSERT_TRUE(count <= 3);
       usleep(5 * 1000);
     }
+
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
-  TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+  TEST_ASSERT_EQUAL(1,
+                  usrsocktest_daemon_get_num_remote_disconnected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_recv_empty_sockets());
 
   for (count = 0; count < 2; count++)
@@ -499,7 +499,8 @@ static void Receive(struct usrsocktest_daemon_conf_s *dconf)
       ret = read(sd, data, datalen);
       TEST_ASSERT_EQUAL(0, ret);
       TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
-      TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+      TEST_ASSERT_EQUAL(1,
+                  usrsocktest_daemon_get_num_remote_disconnected_sockets());
       TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
       TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_recv_bytes());
     }
@@ -522,7 +523,7 @@ static void Receive(struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: Receive2
+ * Name: receive2
  *
  * Description:
  *   Receive and disconnect
@@ -538,7 +539,7 @@ static void Receive(struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void Receive2(struct usrsocktest_daemon_conf_s *dconf)
+static void receive2(struct usrsocktest_daemon_conf_s *dconf)
 {
   ssize_t ret;
   size_t datalen;
@@ -568,7 +569,8 @@ static void Receive2(struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_recv_empty_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_unreachable_sockets());
-  TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+  TEST_ASSERT_EQUAL(0,
+                  usrsocktest_daemon_get_num_remote_disconnected_sockets());
 
   /* Try connect. */
 
@@ -581,7 +583,8 @@ static void Receive2(struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_unreachable_sockets());
-  TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+  TEST_ASSERT_EQUAL(0,
+                  usrsocktest_daemon_get_num_remote_disconnected_sockets());
 
   /* Disconnect connections with delay. */
 
@@ -596,7 +599,8 @@ static void Receive2(struct usrsocktest_daemon_conf_s *dconf)
       ret = read(sd, data, datalen);
       TEST_ASSERT_EQUAL(0, ret);
       TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
-      TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+      TEST_ASSERT_EQUAL(1,
+                  usrsocktest_daemon_get_num_remote_disconnected_sockets());
       TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
       TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_recv_bytes());
     }
@@ -619,7 +623,7 @@ static void Receive2(struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: Poll
+ * Name: remote_disconnect_poll
  *
  * Description:
  *   Poll and disconnect
@@ -635,7 +639,7 @@ static void Receive2(struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void Poll(struct usrsocktest_daemon_conf_s *dconf)
+static void remote_disconnect_poll(struct usrsocktest_daemon_conf_s *dconf)
 {
   ssize_t ret;
   struct sockaddr_in addr;
@@ -713,7 +717,8 @@ static void Poll(struct usrsocktest_daemon_conf_s *dconf)
   TEST_ASSERT_EQUAL(0, pfd.revents & POLLOUT);
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
   TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
-  TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+  TEST_ASSERT_EQUAL(0,
+                  usrsocktest_daemon_get_num_remote_disconnected_sockets());
   TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_unreachable_sockets());
 
   /* Close socket */
@@ -734,7 +739,7 @@ static void Poll(struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: Poll2
+ * Name: remote_disconnect_poll2
  *
  * Description:
  *   Poll and disconnect
@@ -750,7 +755,7 @@ static void Poll(struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-static void Poll2(struct usrsocktest_daemon_conf_s *dconf)
+static void remote_disconnect_poll2(struct usrsocktest_daemon_conf_s *dconf)
 {
   ssize_t ret;
   size_t datalen;
@@ -776,7 +781,8 @@ static void Poll2(struct usrsocktest_daemon_conf_s *dconf)
 
   do
     {
-      TEST_ASSERT_TRUE(*events == POLLIN || *events == POLLOUT || *events == (POLLOUT|POLLIN));
+      TEST_ASSERT_TRUE(*events == POLLIN || *events == POLLOUT ||
+                       *events == (POLLOUT | POLLIN));
 
       /* Open socket */
 
@@ -784,7 +790,8 @@ static void Poll2(struct usrsocktest_daemon_conf_s *dconf)
       TEST_ASSERT_TRUE(sd >= 0);
       TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
       TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
-      TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
+      TEST_ASSERT_EQUAL(0,
+                    usrsocktest_daemon_get_num_waiting_connect_sockets());
 
       /* Make socket non-blocking */
 
@@ -821,29 +828,37 @@ static void Poll2(struct usrsocktest_daemon_conf_s *dconf)
         {
           TEST_ASSERT_EQUAL(0, ret);
           TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
-          TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
-          TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_waiting_connect_sockets());
-          TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_recv_empty_sockets());
+          TEST_ASSERT_EQUAL(1,
+                            usrsocktest_daemon_get_num_connected_sockets());
+          TEST_ASSERT_EQUAL(0,
+                      usrsocktest_daemon_get_num_waiting_connect_sockets());
+          TEST_ASSERT_EQUAL(1,
+                           usrsocktest_daemon_get_num_recv_empty_sockets());
         }
       else
         {
           TEST_ASSERT_EQUAL(-1, ret);
           TEST_ASSERT_EQUAL(EINPROGRESS, errno);
           TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
-          TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
+          TEST_ASSERT_EQUAL(0,
+                            usrsocktest_daemon_get_num_connected_sockets());
 
-          for (count = 0; usrsocktest_daemon_get_num_connected_sockets() != 1; count++)
+          for (count = 0;
+               usrsocktest_daemon_get_num_connected_sockets() != 1; count++)
             {
               TEST_ASSERT_TRUE(count <= 3);
               usleep(25 * 1000);
             }
 
-          ret = connect(sd, (FAR const struct sockaddr *)&addr, sizeof(addr));
+          ret = connect(sd, (FAR const struct sockaddr *)&addr,
+                        sizeof(addr));
           TEST_ASSERT_EQUAL(-1, ret);
           TEST_ASSERT_EQUAL(EISCONN, errno);
           TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
-          TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_connected_sockets());
-          TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_recv_empty_sockets());
+          TEST_ASSERT_EQUAL(1,
+                            usrsocktest_daemon_get_num_connected_sockets());
+          TEST_ASSERT_EQUAL(1,
+                           usrsocktest_daemon_get_num_recv_empty_sockets());
         }
 
       /* Poll for output (no timeout). Close connection. */
@@ -860,7 +875,8 @@ static void Poll2(struct usrsocktest_daemon_conf_s *dconf)
       TEST_ASSERT_EQUAL(0, pfd.revents & POLLOUT);
       TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
       TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
-      TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+      TEST_ASSERT_EQUAL(1,
+                 usrsocktest_daemon_get_num_remote_disconnected_sockets());
 
       for (count = 0; count < 2; count++)
         {
@@ -870,8 +886,10 @@ static void Poll2(struct usrsocktest_daemon_conf_s *dconf)
           datalen = sizeof(databuf);
           ret = read(sd, data, datalen);
           TEST_ASSERT_EQUAL(0, ret);
-          TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
-          TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+          TEST_ASSERT_EQUAL(0,
+                          usrsocktest_daemon_get_num_connected_sockets());
+          TEST_ASSERT_EQUAL(1,
+                  usrsocktest_daemon_get_num_remote_disconnected_sockets());
           TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
           TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_recv_bytes());
         }
@@ -885,9 +903,11 @@ static void Poll2(struct usrsocktest_daemon_conf_s *dconf)
           ret = write(sd, data, datalen);
           TEST_ASSERT_EQUAL(-1, ret);
           TEST_ASSERT_EQUAL(EPIPE, errno);
-          TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_num_connected_sockets());
+          TEST_ASSERT_EQUAL(0,
+                          usrsocktest_daemon_get_num_connected_sockets());
           TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_active_sockets());
-          TEST_ASSERT_EQUAL(1, usrsocktest_daemon_get_num_remote_disconnected_sockets());
+          TEST_ASSERT_EQUAL(1,
+                   usrsocktest_daemon_get_num_remote_disconnected_sockets());
           TEST_ASSERT_EQUAL(0, usrsocktest_daemon_get_send_bytes());
         }
 
@@ -913,7 +933,7 @@ static void Poll2(struct usrsocktest_daemon_conf_s *dconf)
 }
 
 /****************************************************************************
- * Name: RemoteDisconnect test group setup
+ * Name: remote_disconnect test group setup
  *
  * Description:
  *   Setup function executed before each testcase in this test group
@@ -929,14 +949,14 @@ static void Poll2(struct usrsocktest_daemon_conf_s *dconf)
  *
  ****************************************************************************/
 
-TEST_SETUP(RemoteDisconnect)
+TEST_SETUP(remote_disconnect)
 {
   sd = -1;
   started = false;
 }
 
 /****************************************************************************
- * Name: RemoteDisconnect test group teardown
+ * Name: remote_disconnect test group teardown
  *
  * Description:
  *   Setup function executed after each testcase in this test group
@@ -952,130 +972,132 @@ TEST_SETUP(RemoteDisconnect)
  *
  ****************************************************************************/
 
-TEST_TEAR_DOWN(RemoteDisconnect)
+TEST_TEAR_DOWN(remote_disconnect)
 {
-  int ret;
+  int unused_data ret;
+
   if (sd >= 0)
     {
       ret = close(sd);
-      assert(ret >= 0);
+      TEST_ASSERT_TRUE(ret >= 0);
     }
+
   if (started)
     {
       ret = usrsocktest_daemon_stop();
-      assert(ret == OK);
+      TEST_ASSERT_EQUAL(ret, OK);
     }
 }
 
-TEST(RemoteDisconnect, Unreachable)
+TEST(remote_disconnect, unreachable)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  Unreachable(&usrsocktest_daemon_config);
+  unreachable(&usrsocktest_daemon_config);
 }
 
-TEST(RemoteDisconnect, UnreachableDelay)
+TEST(remote_disconnect, unreachable_delay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  Unreachable(&usrsocktest_daemon_config);
+  unreachable(&usrsocktest_daemon_config);
 }
 
-TEST(RemoteDisconnect, Send)
+TEST(remote_disconnect, remote_disconnect_send)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  Send(&usrsocktest_daemon_config);
+  remote_disconnect_send(&usrsocktest_daemon_config);
 }
 
-TEST(RemoteDisconnect, SendDelay)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  usrsocktest_daemon_config.delay_all_responses = true;
-  Send(&usrsocktest_daemon_config);
-}
-
-TEST(RemoteDisconnect, Send2)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  Send2(&usrsocktest_daemon_config);
-}
-
-TEST(RemoteDisconnect, Send2Delay)
+TEST(remote_disconnect, remote_disconnect_send_delay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  Send2(&usrsocktest_daemon_config);
+  remote_disconnect_send(&usrsocktest_daemon_config);
 }
 
-TEST(RemoteDisconnect, Receive)
+TEST(remote_disconnect, remote_disconnect_send2)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  Receive(&usrsocktest_daemon_config);
+  remote_disconnect_send2(&usrsocktest_daemon_config);
 }
 
-TEST(RemoteDisconnect, ReceiveDelay)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  usrsocktest_daemon_config.delay_all_responses = true;
-  Receive(&usrsocktest_daemon_config);
-}
-
-TEST(RemoteDisconnect, Receive2)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  Receive2(&usrsocktest_daemon_config);
-}
-
-TEST(RemoteDisconnect, Receive2Delay)
+TEST(remote_disconnect, remote_disconnect_send2_delay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  Receive2(&usrsocktest_daemon_config);
+  remote_disconnect_send2(&usrsocktest_daemon_config);
 }
 
-TEST(RemoteDisconnect, Poll)
+TEST(remote_disconnect, receive)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  Poll(&usrsocktest_daemon_config);
+  receive(&usrsocktest_daemon_config);
 }
 
-TEST(RemoteDisconnect, PollDelay)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  usrsocktest_daemon_config.delay_all_responses = true;
-  Poll(&usrsocktest_daemon_config);
-}
-
-TEST(RemoteDisconnect, Poll2)
-{
-  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
-  Poll2(&usrsocktest_daemon_config);
-}
-
-TEST(RemoteDisconnect, Poll2Delay)
+TEST(remote_disconnect, receive_delay)
 {
   usrsocktest_daemon_config = usrsocktest_daemon_defconf;
   usrsocktest_daemon_config.delay_all_responses = true;
-  Poll2(&usrsocktest_daemon_config);
+  receive(&usrsocktest_daemon_config);
+}
+
+TEST(remote_disconnect, receive2)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  receive2(&usrsocktest_daemon_config);
+}
+
+TEST(remote_disconnect, receive2_delay)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  usrsocktest_daemon_config.delay_all_responses = true;
+  receive2(&usrsocktest_daemon_config);
+}
+
+TEST(remote_disconnect, remote_disconnect_poll)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  remote_disconnect_poll(&usrsocktest_daemon_config);
+}
+
+TEST(remote_disconnect, remote_disconnect_poll_delay)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  usrsocktest_daemon_config.delay_all_responses = true;
+  remote_disconnect_poll(&usrsocktest_daemon_config);
+}
+
+TEST(remote_disconnect, remote_disconnect_poll2)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  remote_disconnect_poll2(&usrsocktest_daemon_config);
+}
+
+TEST(remote_disconnect, remote_disconnect_poll2_delay)
+{
+  usrsocktest_daemon_config = usrsocktest_daemon_defconf;
+  usrsocktest_daemon_config.delay_all_responses = true;
+  remote_disconnect_poll2(&usrsocktest_daemon_config);
 }
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-TEST_GROUP(RemoteDisconnect)
+TEST_GROUP(remote_disconnect)
 {
-  RUN_TEST_CASE(RemoteDisconnect, Unreachable);
-  RUN_TEST_CASE(RemoteDisconnect, UnreachableDelay);
-  RUN_TEST_CASE(RemoteDisconnect, Send);
-  RUN_TEST_CASE(RemoteDisconnect, SendDelay);
-  RUN_TEST_CASE(RemoteDisconnect, Send2);
-  RUN_TEST_CASE(RemoteDisconnect, Send2Delay);
-  RUN_TEST_CASE(RemoteDisconnect, Receive);
-  RUN_TEST_CASE(RemoteDisconnect, ReceiveDelay);
-  RUN_TEST_CASE(RemoteDisconnect, Receive2);
-  RUN_TEST_CASE(RemoteDisconnect, Receive2Delay);
-  RUN_TEST_CASE(RemoteDisconnect, Poll);
-  RUN_TEST_CASE(RemoteDisconnect, PollDelay);
-  RUN_TEST_CASE(RemoteDisconnect, Poll2);
-  RUN_TEST_CASE(RemoteDisconnect, Poll2Delay);
+  RUN_TEST_CASE(remote_disconnect, unreachable);
+  RUN_TEST_CASE(remote_disconnect, unreachable_delay);
+  RUN_TEST_CASE(remote_disconnect, remote_disconnect_send);
+  RUN_TEST_CASE(remote_disconnect, remote_disconnect_send_delay);
+  RUN_TEST_CASE(remote_disconnect, remote_disconnect_send2);
+  RUN_TEST_CASE(remote_disconnect, remote_disconnect_send2_delay);
+  RUN_TEST_CASE(remote_disconnect, receive);
+  RUN_TEST_CASE(remote_disconnect, receive_delay);
+  RUN_TEST_CASE(remote_disconnect, receive2);
+  RUN_TEST_CASE(remote_disconnect, receive2_delay);
+  RUN_TEST_CASE(remote_disconnect, remote_disconnect_poll);
+  RUN_TEST_CASE(remote_disconnect, remote_disconnect_poll_delay);
+  RUN_TEST_CASE(remote_disconnect, remote_disconnect_poll2);
+  RUN_TEST_CASE(remote_disconnect, remote_disconnect_poll2_delay);
 }

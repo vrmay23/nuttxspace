@@ -1,19 +1,17 @@
 /****************************************************************************
  * apps/wireless/wapi/src/util.h
  *
- *   Copyright (C) 2011, 2017Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
- *
- * Adapted for Nuttx from WAPI:
- *
- *   Copyright (c) 2010, Volkan YAZICI <volkan.yazici@gmail.com>
- *   All rights reserved.
+ * SPDX-License-Identifier: BSD-2-Clause
+ * SPDX-FileCopyrightText: 2011, 2017 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2010 Volkan YAZICI <volkan.yazici@gmail.com>
+ * SPDX-FileContributor: Gregory Nutt <gnutt@nuttx.org>
  *
  * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
+ * modification, are permitted provided that the following conditions are
+ * met:
  *
- *  - Redistributions of  source code must  retain the above copyright notice,
- *    this list of conditions and the following disclaimer.
+ *  - Redistributions of  source code must  retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
  *
  *  - Redistributions in binary form must reproduce the above copyright
  *    notice, this list of  conditions and the  following disclaimer in the
@@ -41,73 +39,33 @@
  ****************************************************************************/
 
 #include <string.h>
+#include <debug.h>
 #include <errno.h>
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifdef DEBUG_WIRELESS_ERROR
-#  ifdef CONFIG_LIBC_STRERROR
-#    define WAPI_IOCTL_STRERROR(cmd,errcode) \
-      fprintf( \
-        stderr, "%s:%d:%s():ioctl(%s): %s\n", \
-        __FILE__, __LINE__, __func__, \
-        wapi_ioctl_command_name(cmd), strerror(errcode))
+#ifdef CONFIG_LIBC_STRERROR
+#  define WAPI_IOCTL_STRERROR(cmd,errcode) \
+    wlerr("ioctl(%s): %s\n", \
+      wapi_ioctl_command_name(cmd), strerror(errcode))
 
-#    define WAPI_STRERROR(fmt, ...) \
-      fprintf( \
-          stderr, "%s:%d:%s():" fmt ": %s\n", \
-        __FILE__, __LINE__, __func__, \
-        ## __VA_ARGS__, strerror(errno))
-#  else
-#    define WAPI_IOCTL_STRERROR(cmd,errcode) \
-      fprintf( \
-        stderr, "%s:%d:%s():ioctl(%s): %d\n", \
-        __FILE__, __LINE__, __func__, \
-        wapi_ioctl_command_name(cmd), errcode)
-
-#    define WAPI_STRERROR(fmt, ...) \
-      fprintf( \
-          stderr, "%s:%d:%s():" fmt ": %d\n", \
-        __FILE__, __LINE__, __func__, \
-        ## __VA_ARGS__, errno)
-#  endif
-
-#  define WAPI_ERROR(fmt, ...) \
-    fprintf( \
-      stderr, "%s:%d:%s(): " fmt , \
-      __FILE__, __LINE__, __func__, ## __VA_ARGS__)
-
+#  define WAPI_STRERROR(fmt, ...) \
+    wlerr(fmt ": %s\n", \
+      ## __VA_ARGS__, strerror(errno))
 #else
-#  ifdef CONFIG_LIBC_STRERROR
-#    define WAPI_IOCTL_STRERROR(cmd,errcode) \
-      fprintf( \
-        stderr, "ioctl(%s): %s\n", \
-        wapi_ioctl_command_name(cmd), strerror(errcode))
+#  define WAPI_IOCTL_STRERROR(cmd,errcode) \
+    wlerr("ioctl(%s): %d\n", \
+      wapi_ioctl_command_name(cmd), errcode)
 
-#    define WAPI_STRERROR(fmt, ...) \
-      fprintf( \
-        stderr, fmt ": %s\n", \
-        ## __VA_ARGS__, strerror(errno))
-#  else
-#    define WAPI_IOCTL_STRERROR(cmd,errcode) \
-      fprintf( \
-        stderr, "ioctl(%s): %d\n", \
-        wapi_ioctl_command_name(cmd), errcode)
-
-#    define WAPI_STRERROR(fmt, ...) \
-      fprintf( \
-        stderr, fmt ": %d\n", \
-        ## __VA_ARGS__, errno)
-#  endif
-
-#  define WAPI_ERROR(fmt, ...) \
-    fprintf( \
-      stderr, fmt , \
-      ## __VA_ARGS__)
-
+#  define WAPI_STRERROR(fmt, ...) \
+    wlerr(fmt ": %d\n", \
+      ## __VA_ARGS__, errno)
 #endif
+
+#define WAPI_ERROR(fmt, ...) \
+  wlerr(fmt , ## __VA_ARGS__)
 
 #define WAPI_VALIDATE_PTR(ptr) \
   if (ptr == NULL) \

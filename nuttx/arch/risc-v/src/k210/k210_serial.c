@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/risc-v/src/k210/k210_serial.c
  *
- *   Copyright (C) 2019 Masayuki Ishikawa. All rights reserved.
- *   Author: Masayuki Ishikawa <masayuki.ishikawa@gmail.com>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -44,18 +31,18 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/serial/serial.h>
+#include <nuttx/spinlock.h>
 
 #include <arch/board/board.h>
 
-#include "up_arch.h"
-#include "up_internal.h"
-
+#include "riscv_internal.h"
 #include "k210_config.h"
 #include "chip.h"
 #include "k210.h"
@@ -98,7 +85,7 @@
 
 /* Common initialization logic will not not know that the all of the UARTs
  * have been disabled.  So, as a result, we may still have to provide
- * stub implementations of up_earlyserialinit(), up_serialinit(), and
+ * stub implementations of riscv_earlyserialinit(), riscv_serialinit(), and
  * up_putc().
  */
 
@@ -114,6 +101,7 @@ struct up_dev_s
   uint32_t  baud;     /* Configured baud */
   uint8_t   irq;      /* IRQ associated with this UART */
   uint8_t   im;       /* Interrupt mask state */
+  spinlock_t lock;    /* Spinllock */
 };
 
 /****************************************************************************
@@ -133,9 +121,9 @@ static int  up_setup(struct uart_dev_s *dev);
 static void up_shutdown(struct uart_dev_s *dev);
 static int  up_attach(struct uart_dev_s *dev);
 static void up_detach(struct uart_dev_s *dev);
-static int  up_interrupt(int irq, void *context, FAR void *arg);
+static int  up_interrupt(int irq, void *context, void *arg);
 static int  up_ioctl(struct file *filep, int cmd, unsigned long arg);
-static int  up_receive(struct uart_dev_s *dev, uint32_t *status);
+static int  up_receive(struct uart_dev_s *dev, unsigned int *status);
 static void up_rxint(struct uart_dev_s *dev, bool enable);
 static bool up_rxavailable(struct uart_dev_s *dev);
 static void up_send(struct uart_dev_s *dev, int ch);
@@ -180,6 +168,7 @@ static struct up_dev_s g_uart0priv =
   .uartbase  = K210_UART0_BASE,
   .baud      = CONFIG_UART0_BAUD,
   .irq       = K210_IRQ_UART0,
+  .lock      = SP_UNLOCKED
 };
 
 static uart_dev_t g_uart0port =
@@ -230,12 +219,12 @@ static void up_serialout(struct up_dev_s *priv, int offset, uint32_t value)
 
 static void up_restoreuartint(struct up_dev_s *priv, uint8_t im)
 {
-  irqstate_t flags = enter_critical_section();
+  irqstate_t flags = spin_lock_irqsave(&priv->lock);
 
   priv->im = im;
   up_serialout(priv, UART_IE_OFFSET, im);
 
-  leave_critical_section(flags);
+  spin_unlock_irqrestore(&priv->lock, flags);
 }
 
 /****************************************************************************
@@ -244,7 +233,7 @@ static void up_restoreuartint(struct up_dev_s *priv, uint8_t im)
 
 static void up_disableuartint(struct up_dev_s *priv, uint8_t *im)
 {
-  irqstate_t flags = enter_critical_section();
+  irqstate_t flags = spin_lock_irqsave(&priv->lock);
 
   /* Return the current interrupt mask value */
 
@@ -257,7 +246,7 @@ static void up_disableuartint(struct up_dev_s *priv, uint8_t *im)
 
   priv->im = 0;
   up_serialout(priv, UART_IE_OFFSET, 0);
-  leave_critical_section(flags);
+  spin_unlock_irqrestore(&priv->lock, flags);
 }
 
 /****************************************************************************
@@ -309,7 +298,7 @@ static void up_shutdown(struct uart_dev_s *dev)
  * Name: up_attach
  *
  * Description:
- *   Configure the UART to operation in interrupt driven mode.  This method is
+ *   Configure the UART to operation in interrupt driven mode. This method is
  *   called when the serial port is opened.  Normally, this is just after the
  *   the setup() method is called, however, the serial console may operate in
  *   a non-interrupt driven mode during the boot phase.
@@ -348,7 +337,7 @@ static int up_attach(struct uart_dev_s *dev)
  *
  * Description:
  *   Detach UART interrupts.  This method is called when the serial port is
- *   closed normally just before the shutdown method is called.  The exception
+ *   closed normally just before the shutdown method is called. The exception
  *   is the serial console which is never shutdown.
  *
  ****************************************************************************/
@@ -371,14 +360,14 @@ static void up_detach(struct uart_dev_s *dev)
  *
  * Description:
  *   This is the UART interrupt handler.  It will be invoked when an
- *   interrupt received on the 'irq'  It should call uart_transmitchars or
- *   uart_receivechar to perform the appropriate data transfers.  The
- *   interrupt handling logic must be able to map the 'irq' number into the
+ *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
+ *   uart_recvchars to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'arg' to the
  *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
 
-static int up_interrupt(int irq, void *context, FAR void *arg)
+static int up_interrupt(int irq, void *context, void *arg)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
   struct up_dev_s   *priv;
@@ -444,7 +433,7 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int up_receive(struct uart_dev_s *dev, uint32_t *status)
+static int up_receive(struct uart_dev_s *dev, unsigned int *status)
 {
   /* Return status information */
 
@@ -604,18 +593,18 @@ static bool up_txempty(struct uart_dev_s *dev)
 #ifdef USE_EARLYSERIALINIT
 
 /****************************************************************************
- * Name: up_earlyserialinit
+ * Name: riscv_earlyserialinit
  *
  * Description:
  *   Performs the low level UART initialization early in debug so that the
- *   serial console will be available during bootup.  This must be called
- *   before up_serialinit.  NOTE:  This function depends on GPIO pin
- *   configuration performed in up_consoleinit() and main clock iniialization
- *   performed in up_clkinitialize().
+ *   serial console will be available during boot up.  This must be called
+ *   before riscv_serialinit.  NOTE:  This function depends on GPIO pin
+ *   configuration performed in up_consoleinit() and main clock
+ *   initialization performed in up_clkinitialize().
  *
  ****************************************************************************/
 
-void up_earlyserialinit(void)
+void riscv_earlyserialinit(void)
 {
   /* Disable interrupts from all UARTS.  The console is enabled in
    * k210_consoleinit().
@@ -636,15 +625,15 @@ void up_earlyserialinit(void)
 #endif
 
 /****************************************************************************
- * Name: up_serialinit
+ * Name: riscv_serialinit
  *
  * Description:
  *   Register serial console and serial ports.  This assumes
- *   that up_earlyserialinit was called previously.
+ *   that riscv_earlyserialinit was called previously.
  *
  ****************************************************************************/
 
-void up_serialinit(void)
+void riscv_serialinit(void)
 {
   /* Register the console */
 
@@ -668,31 +657,20 @@ void up_serialinit(void)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
   struct up_dev_s *priv = (struct up_dev_s *)CONSOLE_DEV.priv;
   uint8_t imr;
 
   up_disableuartint(priv, &imr);
-
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      up_lowputc('\r');
-    }
-
-  up_lowputc(ch);
+  riscv_lowputc(ch);
   up_restoreuartint(priv, imr);
 #endif
-  return ch;
 }
 
 /****************************************************************************
- * Name: up_earlyserialinit, up_serialinit, and up_putc
+ * Name: riscv_earlyserialinit, riscv_serialinit, and up_putc
  *
  * Description:
  *   stubs that may be needed.  These stubs would be used if all UARTs are
@@ -703,17 +681,16 @@ int up_putc(int ch)
  ****************************************************************************/
 
 #else /* HAVE_UART_DEVICE */
-void up_earlyserialinit(void)
+void riscv_earlyserialinit(void)
 {
 }
 
-void up_serialinit(void)
+void riscv_serialinit(void)
 {
 }
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
-  return ch;
 }
 
 #endif /* HAVE_UART_DEVICE */
@@ -727,21 +704,11 @@ int up_putc(int ch)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      up_lowputc('\r');
-    }
-
-  up_lowputc(ch);
+  riscv_lowputc(ch);
 #endif
-  return ch;
 }
 
 #endif /* USE_SERIALDRIVER */

@@ -1,35 +1,22 @@
 /****************************************************************************
  * drivers/usbdev/usbmsc_desc.c
  *
- *   Copyright (C) 2011-2012, 2015, 2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -47,6 +34,10 @@
 
 #include <nuttx/usb/usb.h>
 #include <nuttx/usb/usbdev_trace.h>
+
+#ifdef CONFIG_BOARD_USBDEV_SERIALSTR
+#include <nuttx/board.h>
+#endif
 
 #include "usbmsc.h"
 
@@ -118,7 +109,9 @@ static const struct usb_qualdesc_s g_qualdesc =
 #ifndef CONFIG_USBMSC_COMPOSITE
 const char g_mscvendorstr[]  = CONFIG_USBMSC_VENDORSTR;
 const char g_mscproductstr[] = CONFIG_USBMSC_PRODUCTSTR;
+#ifndef CONFIG_BOARD_USBDEV_SERIALSTR
 const char g_mscserialstr[]  = CONFIG_USBMSC_SERIALSTR;
+#endif
 #endif
 
 /****************************************************************************
@@ -137,9 +130,10 @@ const char g_mscserialstr[]  = CONFIG_USBMSC_SERIALSTR;
  *
  ****************************************************************************/
 
-int usbmsc_mkstrdesc(uint8_t id, struct usb_strdesc_s *strdesc)
+int usbmsc_mkstrdesc(uint8_t id, struct FAR usb_strdesc_s *strdesc)
 {
-  const char *str;
+  FAR uint8_t *data = (FAR uint8_t *)(strdesc + 1);
+  FAR const char *str;
   int len;
   int ndata;
   int i;
@@ -151,10 +145,10 @@ int usbmsc_mkstrdesc(uint8_t id, struct usb_strdesc_s *strdesc)
       {
         /* Descriptor 0 is the language id */
 
-        strdesc->len     = 4;
-        strdesc->type    = USB_DESC_TYPE_STRING;
-        strdesc->data[0] = LSBYTE(USBMSC_STR_LANGUAGE);
-        strdesc->data[1] = MSBYTE(USBMSC_STR_LANGUAGE);
+        strdesc->len  = 4;
+        strdesc->type = USB_DESC_TYPE_STRING;
+        data[0] = LSBYTE(USBMSC_STR_LANGUAGE);
+        data[1] = MSBYTE(USBMSC_STR_LANGUAGE);
         return 4;
       }
 
@@ -167,7 +161,11 @@ int usbmsc_mkstrdesc(uint8_t id, struct usb_strdesc_s *strdesc)
       break;
 
     case USBMSC_SERIALSTRID:
+#ifdef CONFIG_BOARD_USBDEV_SERIALSTR
+      str = board_usbdev_serialstr();
+#else
       str = g_mscserialstr;
+#endif
       break;
 #endif
 
@@ -193,8 +191,8 @@ int usbmsc_mkstrdesc(uint8_t id, struct usb_strdesc_s *strdesc)
 
   for (i = 0, ndata = 0; i < len; i++, ndata += 2)
     {
-      strdesc->data[ndata]   = str[i];
-      strdesc->data[ndata + 1] = 0;
+      data[ndata]     = str[i];
+      data[ndata + 1] = 0;
     }
 
   strdesc->len  = ndata + 2;
@@ -218,6 +216,56 @@ FAR const struct usb_devdesc_s *usbmsc_getdevdesc(void)
 #endif
 
 /****************************************************************************
+ * Name: usbmsc_copy_epcompdesc
+ *
+ * Description:
+ *   Construct the endpoint companion descriptor
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_USBDEV_SUPERSPEED
+static void
+usbmsc_copy_epcompdesc(enum usbmsc_epdesc_e epid,
+                       FAR struct usb_ss_epcompdesc_s *epcompdesc)
+{
+    switch (epid)
+    {
+    case USBMSC_EPBULKOUT:  /* Bulk OUT endpoint */
+    case USBMSC_EPBULKIN:   /* Bulk IN endpoint */
+      {
+        epcompdesc->len  = USB_SIZEOF_SS_EPCOMPDESC;           /* Descriptor length */
+        epcompdesc->type = USB_DESC_TYPE_ENDPOINT_COMPANION;   /* Descriptor type */
+
+        if (USBMSC_SSBULKMAXBURST >= USB_SS_BULK_EP_MAXBURST)
+          {
+            epcompdesc->mxburst = USB_SS_BULK_EP_MAXBURST - 1;
+          }
+        else
+          {
+            epcompdesc->mxburst = USBMSC_SSBULKMAXBURST;
+          }
+
+        if (USBMSC_SSBULKMAXSTREAM > USB_SS_BULK_EP_MAXSTREAM)
+          {
+            epcompdesc->attr = USB_SS_BULK_EP_MAXSTREAM;
+          }
+        else
+          {
+            epcompdesc->attr = USBMSC_SSBULKMAXSTREAM;
+          }
+
+        epcompdesc->wbytes[0] = 0;
+        epcompdesc->wbytes[1] = 0;
+      }
+      break;
+
+    default:
+      break;
+    }
+}
+#endif
+
+/****************************************************************************
  * Name: usbmsc_copy_epdesc
  *
  * Description:
@@ -229,11 +277,25 @@ FAR const struct usb_devdesc_s *usbmsc_getdevdesc(void)
 int usbmsc_copy_epdesc(enum usbmsc_epdesc_e epid,
                        FAR struct usb_epdesc_s *epdesc,
                        FAR struct usbdev_devinfo_s *devinfo,
-                       bool hispeed)
+                       uint8_t speed)
 {
-#ifndef CONFIG_USBDEV_DUALSPEED
-    UNUSED(hispeed);
+  int len = sizeof(struct usb_epdesc_s);
+
+#if !defined(CONFIG_USBDEV_DUALSPEED) && !defined(CONFIG_USBDEV_SUPERSPEED)
+    UNUSED(speed);
 #endif
+
+#ifdef CONFIG_USBDEV_SUPERSPEED
+  if (speed == USB_SPEED_SUPER || speed == USB_SPEED_SUPER_PLUS)
+    {
+      len += sizeof(struct usb_ss_epcompdesc_s);
+    }
+#endif
+
+  if (epdesc == NULL)
+    {
+      return len;
+    }
 
     switch (epid)
     {
@@ -244,8 +306,24 @@ int usbmsc_copy_epdesc(enum usbmsc_epdesc_e epid,
         epdesc->addr = USBMSC_MKEPBULKOUT(devinfo); /* Endpoint address */
         epdesc->attr = USBMSC_EPOUTBULK_ATTR;       /* Endpoint attributes */
 
+#ifdef CONFIG_USBDEV_SUPERSPEED
+        if (speed == USB_SPEED_SUPER || speed == USB_SPEED_SUPER_PLUS)
+          {
+            /* Maximum packet size (super speed) */
+
+            epdesc->mxpacketsize[0] = LSBYTE(USBMSC_SSBULKMAXPACKET);
+            epdesc->mxpacketsize[1] = MSBYTE(USBMSC_SSBULKMAXPACKET);
+
+            /* Copy endpoint companion description */
+
+            epdesc++;
+            usbmsc_copy_epcompdesc(epid,
+                                   (FAR struct usb_ss_epcompdesc_s *)epdesc);
+          }
+        else
+#endif
 #ifdef CONFIG_USBDEV_DUALSPEED
-        if (hispeed)
+        if (speed == USB_SPEED_HIGH)
           {
             /* Maximum packet size (high speed) */
 
@@ -272,8 +350,24 @@ int usbmsc_copy_epdesc(enum usbmsc_epdesc_e epid,
         epdesc->addr = USBMSC_MKEPBULKIN(devinfo);  /* Endpoint address */
         epdesc->attr = USBMSC_EPINBULK_ATTR;        /* Endpoint attributes */
 
+#ifdef CONFIG_USBDEV_SUPERSPEED
+        if (speed == USB_SPEED_SUPER || speed == USB_SPEED_SUPER_PLUS)
+          {
+            /* Maximum packet size (super speed) */
+
+            epdesc->mxpacketsize[0] = LSBYTE(USBMSC_SSBULKMAXPACKET);
+            epdesc->mxpacketsize[1] = MSBYTE(USBMSC_SSBULKMAXPACKET);
+
+            /* Copy endpoint companion description */
+
+            epdesc++;
+            usbmsc_copy_epcompdesc(epid,
+                                   (FAR struct usb_ss_epcompdesc_s *)epdesc);
+          }
+        else
+#endif
 #ifdef CONFIG_USBDEV_DUALSPEED
-        if (hispeed)
+        if (speed == USB_SPEED_HIGH)
           {
             /* Maximum packet size (high speed) */
 
@@ -297,7 +391,7 @@ int usbmsc_copy_epdesc(enum usbmsc_epdesc_e epid,
         return 0;
     }
 
-  return sizeof(struct usb_epdesc_s);
+  return len;
 }
 
 /****************************************************************************
@@ -308,28 +402,22 @@ int usbmsc_copy_epdesc(enum usbmsc_epdesc_e epid,
  *
  ****************************************************************************/
 
-#ifdef CONFIG_USBDEV_DUALSPEED
 int16_t usbmsc_mkcfgdesc(uint8_t *buf,
                          FAR struct usbdev_devinfo_s *devinfo,
                          uint8_t speed, uint8_t type)
-#else
-int16_t usbmsc_mkcfgdesc(uint8_t *buf,
-                        FAR struct usbdev_devinfo_s *devinfo)
-#endif
 {
-  int length = 0;
-  bool hispeed = false;
-
-#ifdef CONFIG_USBDEV_DUALSPEED
-  hispeed = (speed == USB_SPEED_HIGH);
+#ifndef CONFIG_USBMSC_COMPOSITE
+  FAR struct usb_cfgdesc_s *cfgdesc = NULL;
+#endif
+  int16_t totallen = 0;
+  int ret;
 
   /* Check for switches between high and full speed */
 
-  if (type == USB_DESC_TYPE_OTHERSPEEDCONFIG)
+  if (type == USB_DESC_TYPE_OTHERSPEEDCONFIG && speed < USB_SPEED_SUPER)
     {
-      hispeed = !hispeed;
+      speed = speed == USB_SPEED_HIGH ? USB_SPEED_FULL : USB_SPEED_HIGH;
     }
-#endif
 
   /* Fill in all descriptors directly to the buf */
 
@@ -339,80 +427,75 @@ int16_t usbmsc_mkcfgdesc(uint8_t *buf,
    */
 
 #ifndef CONFIG_USBMSC_COMPOSITE
-  {
-    /* Configuration descriptor  If the USB mass storage device is configured as part
-     * of a composite device, then the configuration descriptor will be provided
-     * by the composite device logic.
-     */
+  /* Configuration descriptor  If the USB mass storage device is
+   * configured as part of a composite device, then the configuration
+   * descriptor will be provided by the composite device logic.
+   */
 
-    FAR struct usb_cfgdesc_s *dest = (FAR struct usb_cfgdesc_s *)buf;
+  cfgdesc = (FAR struct usb_cfgdesc_s *)buf;
 
-    dest->len         = USB_SIZEOF_CFGDESC;               /* Descriptor length */
-#ifdef CONFIG_USBDEV_DUALSPEED
-    dest->type        = type;                             /* Descriptor type */
-#else
-    dest->type        = USB_DESC_TYPE_CONFIG;             /* Descriptor type */
-#endif
-    dest->totallen[0] = LSBYTE(SIZEOF_USBMSC_CFGDESC);    /* LS Total length */
-    dest->totallen[1] = MSBYTE(SIZEOF_USBMSC_CFGDESC);    /* MS Total length */
-    dest->ninterfaces = USBMSC_NINTERFACES;               /* Number of interfaces */
-    dest->cfgvalue    = USBMSC_CONFIGID;                  /* Configuration value */
-    dest->icfg        = USBMSC_CONFIGSTRID;               /* Configuration */
-    dest->attr        = USB_CONFIG_ATTR_ONE |             /* Attributes */
-                        USBMSC_SELFPOWERED |
-                        USBMSC_REMOTEWAKEUP;
-    dest->mxpower     = (CONFIG_USBDEV_MAXPOWER + 1) / 2; /* Max power (mA/2) */
+  cfgdesc->len         = USB_SIZEOF_CFGDESC;               /* Descriptor length */
+  cfgdesc->type        = type;                             /* Descriptor type */
+  cfgdesc->ninterfaces = USBMSC_NINTERFACES;               /* Number of interfaces */
+  cfgdesc->cfgvalue    = USBMSC_CONFIGID;                  /* Configuration value */
+  cfgdesc->icfg        = USBMSC_CONFIGSTRID;               /* Configuration */
+  cfgdesc->attr        = USB_CONFIG_ATTR_ONE |             /* Attributes */
+                         USBMSC_SELFPOWERED |
+                         USBMSC_REMOTEWAKEUP;
+  cfgdesc->mxpower     = (CONFIG_USBDEV_MAXPOWER + 1) / 2; /* Max power (mA/2) */
 
-    buf    += sizeof(struct usb_cfgdesc_s);
-    length += sizeof(struct usb_cfgdesc_s);
-  }
+  buf += sizeof(struct usb_cfgdesc_s);
+  totallen += sizeof(struct usb_cfgdesc_s);
 #endif
 
   /* Copy the canned interface descriptor */
 
-  {
-    /* Single interface descriptor */
+  /* Single interface descriptor */
 
-    FAR struct usb_ifdesc_s * dest = (struct usb_ifdesc_s *)buf;
+  FAR struct usb_ifdesc_s * dest = (struct usb_ifdesc_s *)buf;
 
-    dest->len      = USB_SIZEOF_IFDESC;                        /* Descriptor length */
-    dest->type     = USB_DESC_TYPE_INTERFACE;                  /* Descriptor type */
-    dest->ifno     = devinfo->ifnobase;                        /* Interface number */
-    dest->alt      = USBMSC_ALTINTERFACEID;                    /* Alternate setting */
-    dest->neps     = USBMSC_NENDPOINTS;                        /* Number of endpoints */
-    dest->classid  = USB_CLASS_MASS_STORAGE;                   /* Interface class */
-    dest->subclass = USBMSC_SUBCLASS_SCSI;                     /* Interface sub-class */
-    dest->protocol = USBMSC_PROTO_BULKONLY;                    /* Interface protocol */
-    dest->iif      = devinfo->strbase + USBMSC_INTERFACESTRID; /* iInterface */
+  dest->len      = USB_SIZEOF_IFDESC;                        /* Descriptor length */
+  dest->type     = USB_DESC_TYPE_INTERFACE;                  /* Descriptor type */
+  dest->ifno     = devinfo->ifnobase;                        /* Interface number */
+  dest->alt      = USBMSC_ALTINTERFACEID;                    /* Alternate setting */
+  dest->neps     = USBMSC_NENDPOINTS;                        /* Number of endpoints */
+  dest->classid  = USB_CLASS_MASS_STORAGE;                   /* Interface class */
+  dest->subclass = USBMSC_SUBCLASS_SCSI;                     /* Interface sub-class */
+  dest->protocol = USBMSC_PROTO_BULKONLY;                    /* Interface protocol */
+  dest->iif      = devinfo->strbase + USBMSC_INTERFACESTRID; /* iInterface */
 
-    buf    += sizeof(struct usb_ifdesc_s);
-    length += sizeof(struct usb_ifdesc_s);
-  }
+  buf += sizeof(struct usb_ifdesc_s);
+  totallen += sizeof(struct usb_ifdesc_s);
 
   /* Make the two endpoint configurations */
 
   /* Bulk IN endpoint descriptor */
 
-  {
-    int len = usbmsc_copy_epdesc(USBMSC_EPBULKIN, (FAR struct usb_epdesc_s *)buf,
-                                 devinfo, hispeed);
+  ret = usbmsc_copy_epdesc(USBMSC_EPBULKIN,
+                            (FAR struct usb_epdesc_s *)buf,
+                            devinfo, speed);
 
-    buf += len;
-    length += len;
-  }
+  buf += ret;
+  totallen += ret;
 
   /* Bulk OUT endpoint descriptor */
 
-  {
-    int len = usbmsc_copy_epdesc(USBMSC_EPBULKOUT,
-                                 (FAR struct usb_epdesc_s *)buf, devinfo,
-                                 hispeed);
+  ret = usbmsc_copy_epdesc(USBMSC_EPBULKOUT,
+                            (FAR struct usb_epdesc_s *)buf,
+                            devinfo, speed);
 
-    buf += len;
-    length += len;
-  }
+  buf += ret;
+  totallen += ret;
 
-  return SIZEOF_USBMSC_CFGDESC;
+#ifndef CONFIG_USBMSC_COMPOSITE
+  if (cfgdesc)
+    {
+      cfgdesc->totallen[0] = LSBYTE(totallen);
+      cfgdesc->totallen[1] = MSBYTE(totallen);
+    }
+#endif
+
+  return totallen;
 }
 
 /****************************************************************************

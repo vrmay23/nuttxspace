@@ -1,5 +1,7 @@
 /****************************************************************************
- * boards/x86_64/intel/qemu/include/board.h
+ * boards/x86_64/intel64/qemu-intel64/include/board.h
+ *
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -18,8 +20,8 @@
  *
  ****************************************************************************/
 
-#ifndef __BOARDS_X86_64_INTEL64_QEMU_INCLUDE_BOARD_H
-#define __BOARDS_X86_64_INTEL64_QEMU_INCLUDE_BOARD_H
+#ifndef __BOARDS_X86_64_INTEL64_QEMU_INTEL64_INCLUDE_BOARD_H
+#define __BOARDS_X86_64_INTEL64_QEMU_INTEL64_INCLUDE_BOARD_H
 
 /****************************************************************************
  * Included Files
@@ -72,4 +74,4 @@ extern "C"
 #endif
 
 #endif /* __ASSEMBLY__ */
-#endif /* __BOARDS_X86_64_INTEL64_QEMU_INCLUDE_BOARD_H */
+#endif /* __BOARDS_X86_64_INTEL64_QEMU_INTEL64_INCLUDE_BOARD_H */

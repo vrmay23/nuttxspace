@@ -1,8 +1,9 @@
 /****************************************************************************
  * boards/arm/stm32l4/stm32l476-mdk/include/board.h
  *
- *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
- *   Copyright (C) 2016 Motorola Mobility, LLC.
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-FileCopyrightText: 2016 Gregory Nutt. All rights reserved.
+ * SPDX-FileCopyrightText: 2016 Motorola Mobility, LLC.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,8 +34,8 @@
  *
  ****************************************************************************/
 
-#ifndef __BOARDS_ARM_STM32L_STM32L476_MDK_INCLUDE_BOARD_H
-#define __BOARDS_ARM_STM32L_STM32L476_MDK_INCLUDE_BOARD_H
+#ifndef __BOARDS_ARM_STM32L4_STM32L476_MDK_INCLUDE_BOARD_H
+#define __BOARDS_ARM_STM32L4_STM32L476_MDK_INCLUDE_BOARD_H
 
 /****************************************************************************
  * Included Files
@@ -42,16 +43,16 @@
 
 #include <nuttx/config.h>
 #ifndef __ASSEMBLY__
-# include <stdint.h>
+#  include <stdint.h>
 #endif
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
 
 /* Clocking *****************************************************************/
 
 #include <arch/board/stm32l476-mdk-clocking.h>
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
 
 /* DMA Channel/Stream Selections ********************************************/
 
@@ -122,8 +123,8 @@
  * When the I/O is HIGH value, the LED is OFF.
  * When the I/O is LOW, the LED is ON.
  *
- * Following this convention, only the white LED is made available even though they
- * all could be user-application controlled if desired.
+ * Following this convention, only the white LED is made available even
+ * though they all could be user-application controlled if desired.
  */
 
 /* LED index values for use with board_userled() */
@@ -145,14 +146,15 @@
 #  define BOARD_WHITE_LED_BIT (1 << BOARD_WHITE_LED)
 #endif
 
-/* None of the LEDs are used by the board port unless CONFIG_ARCH_LEDS is defined.
- * In that case, the white LED (only) will be controlled.  Usage by the board port
- * is defined in include/board.h and src/stm32_autoleds.c.  The white LED will be
- * used to encode OS-related events as follows:
+/* None of the LEDs are used by the board port unless CONFIG_ARCH_LEDS is
+ * defined. In that case, the white LED (only) will be controlled.  Usage by
+ * the board port is defined in include/board.h and src/stm32_autoleds.c.
+ *  The white LED will be used to encode OS-related events as follows:
  *
  *   ------------------- ---------------------------- ------
  *   SYMBOL                  Meaning                  LED
- *   ------------------- ---------------------------- ------   */
+ *   ------------------- ---------------------------- ------
+ */
 
 #define LED_STARTED      0 /* NuttX has been started  OFF      */
 #define LED_HEAPALLOCATE 0 /* Heap has been allocated OFF      */
@@ -164,9 +166,10 @@
 #define LED_PANIC        3 /* The system has crashed  FLASH    */
 #undef  LED_IDLE           /* MCU is is sleep mode    Not used */
 
-/* Thus if the white LED is statically on, NuttX has successfully  booted and is,
- * apparently, running normally.  If white LED is flashing at approximately 2Hz,
- * then a fatal error has been detected and the system has halted.
+/* Thus if the white LED is statically on, NuttX has successfully  booted and
+ * is, apparently, running normally.  If white LED is flashing at
+ * approximately 2Hz, then a fatal error has been detected and the system has
+ * halted.
  */
 
 /* Buttons ******************************************************************/
@@ -200,9 +203,10 @@ extern "C"
  * Name: stm32l4_board_initialize
  *
  * Description:
- *   All STM32L4 architectures must provide the following entry point.  This entry
- *   point is called early in the initialization -- after all memory has been
- *   configured and mapped but before any devices have been initialized.
+ *   All STM32L4 architectures must provide the following entry point.  This
+ *   entry point is called early in the initialization -- after all memory
+ *   has been configured and mapped but before any devices have been
+ *   initialized.
  *
  ****************************************************************************/
 
@@ -214,4 +218,4 @@ void stm32l4_board_initialize(void);
 #endif
 
 #endif /* __ASSEMBLY__ */
-#endif /* __BOARDS_ARM_STM32L_STM32L476_MDK_INCLUDE_BOARD_H */
+#endif /* __BOARDS_ARM_STM32L4_STM32L476_MDK_INCLUDE_BOARD_H */

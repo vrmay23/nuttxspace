@@ -1,41 +1,30 @@
 /****************************************************************************
  * tools/mkdeps.c
  *
- *   Copyright (C) 2012-2013 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
 /****************************************************************************
  * Included Files
  ****************************************************************************/
+
+#define _FILE_OFFSET_BITS 64
 
 #include <sys/stat.h>
 
@@ -47,6 +36,7 @@
 #include <ctype.h>
 #include <libgen.h>
 #include <errno.h>
+#include <dirent.h>
 
 #ifdef HOST_CYGWIN
 #  include <sys/cygwin.h>
@@ -56,8 +46,9 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define MAX_BUFFER  (4096)
-#define MAX_EXPAND  (2048)
+#define MAX_BUFFER  (65536)
+#define MAX_EXPAND  (65536)
+#define MAX_SHQUOTE (65536)
 
 /* MAX_PATH might be defined in stdlib.h */
 
@@ -77,7 +68,6 @@
 
   /* MAXNAMELEN might be defined in dirent.h */
 
-#    include <dirent.h>
 #    if defined(MAXNAMLEN)
 #      define NAME_MAX MAXNAMLEN
 #    else
@@ -93,12 +83,12 @@
  * Private Types
  ****************************************************************************/
 
-enum slashmode_e
+typedef enum
 {
-  MODE_FSLASH  = 0,
-  MODE_BSLASH  = 1,
-  MODE_DBLBACK = 2
-};
+  COMPILER_GNU      = 0,
+  COMPILER_TASKING  = 1,
+  COMPILER_NUM      = 2
+} compiler_t;
 
 /****************************************************************************
  * Private Data
@@ -123,15 +113,45 @@ static char g_expand[MAX_EXPAND];
 static char g_dequoted[MAX_PATH];
 static char g_posixpath[MAX_PATH];
 #endif
+#ifndef CONFIG_WINDOWS_NATIVE
+static char g_shquote[MAX_SHQUOTE];
+#endif
+
+static const char * const g_moptions[COMPILER_NUM][2] =
+{
+  /* GNU C/C++ Compiler */
+
+  {
+    " -M ",
+    " -MT "
+  },
+
+  /* Tasking C/C++ Compiler */
+
+  {
+    " -Em ",
+    " --pass-c=--make-target="
+  }
+};
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
+static compiler_t get_compiler(char *ccname)
+{
+  if (strstr(ccname, "ctc") != NULL)
+    {
+      return COMPILER_TASKING;
+    }
+
+  return COMPILER_GNU;
+}
+
 /* MinGW does not seem to provide strtok_r */
 
 #ifndef HAVE_STRTOK_R
-static char *MY_strtok_r(char *str, const char *delim, char **saveptr)
+static char *my_strtok_r(char *str, const char *delim, char **saveptr)
 {
   char *pbegin;
   char *pend = NULL;
@@ -198,10 +218,10 @@ static char *MY_strtok_r(char *str, const char *delim, char **saveptr)
 }
 
 #undef strtok_r
-#define strtok_r MY_strtok_r
+#define strtok_r my_strtok_r
 #endif
 
-static void append(char **base, char *str)
+static void append(char **base, const char *str)
 {
   char *oldbase;
   char *newbase;
@@ -219,8 +239,9 @@ static void append(char **base, char *str)
     }
   else
     {
-      alloclen = strlen(oldbase) + strlen(str) + sizeof((char) ' ') + sizeof((char) '\0');
-      newbase = (char *)malloc(alloclen);
+      alloclen = strlen(oldbase) + strlen(str) +
+        sizeof((char) ' ') + sizeof((char) '\0');
+      newbase = malloc(alloclen);
       if (!newbase)
         {
           fprintf(stderr, "ERROR: Failed to allocate %d bytes\n", alloclen);
@@ -229,7 +250,7 @@ static void append(char **base, char *str)
 
       snprintf(newbase, alloclen, "%s %s", oldbase, str);
       free(oldbase);
-   }
+    }
 
   *base = newbase;
 }
@@ -248,33 +269,46 @@ static void show_usage(const char *progname, const char *msg, int exitcode)
   fprintf(stderr, "\n");
   fprintf(stderr, "Where:\n");
   fprintf(stderr, "  CC\n");
-  fprintf(stderr, "    A variable number of arguments that define how to execute the compiler\n");
+  fprintf(stderr, "    A variable number of arguments that define how to\n");
+  fprintf(stderr, "    execute the compiler\n");
   fprintf(stderr, "  CFLAGS\n");
   fprintf(stderr, "    The compiler compilation flags\n");
   fprintf(stderr, "  file\n");
-  fprintf(stderr, "    One or more C files whose dependencies will be checked.  Each file is expected\n");
-  fprintf(stderr, "    to reside in the current directory unless --dep-path is provided on the command line\n");
+  fprintf(stderr, "    One or more C files whose dependencies will be\n");
+  fprintf(stderr, "    checked.  Each file is expected\n");
+  fprintf(stderr, "    to reside in the current directory unless\n");
+  fprintf(stderr, "     --dep-path is provided on the command line\n");
   fprintf(stderr, "\n");
   fprintf(stderr, "And [OPTIONS] include:\n");
   fprintf(stderr, "  --dep-debug\n");
   fprintf(stderr, "    Enable script debug\n");
   fprintf(stderr, "  --dep-path <path>\n");
-  fprintf(stderr, "    Do not look in the current directory for the file.  Instead, look in <path> to see\n");
-  fprintf(stderr, "    if the file resides there.  --dep-path may be used multiple times to specify\n");
+  fprintf(stderr, "    Do not look in the current directory for the\n");
+  fprintf(stderr, "    file. Instead, look in <path> to see\n");
+  fprintf(stderr, "    if the file resides there.  --dep-path may be\n");
+  fprintf(stderr, "    used multiple times to specify\n");
   fprintf(stderr, "    multiple alternative location\n");
   fprintf(stderr, "  --obj-path <path>\n");
-  fprintf(stderr, "    The final objects will not reside in this path but, rather, at the path provided by\n");
-  fprintf(stderr, "    <path>.  if provided multiple time, only the last --obj-path will be used.\n");
+  fprintf(stderr, "    The final objects will not reside in this path\n");
+  fprintf(stderr, "    but, rather, at the path provided by\n");
+  fprintf(stderr, "    <path>.  if provided multiple time, only the last\n");
+  fprintf(stderr, "     --obj-path will be used.\n");
   fprintf(stderr, "  --obj-suffix <suffix>\n");
-  fprintf(stderr, "    If and object path is provided, then the extension will be assumed to be .o.  This\n");
-  fprintf(stderr, "    default suffix can be overriden with this command line option.\n");
+  fprintf(stderr, "    If an object path is provided, then the extension\n");
+  fprintf(stderr, "    will be assumed to be .o.  This\n");
+  fprintf(stderr, "    default suffix can be overridden with this\n");
+  fprintf(stderr, "    command line option.\n");
   fprintf(stderr, "  --winnative\n");
-  fprintf(stderr, "    By default, a POSIX-style environment is assumed (e.g., Linux, Cygwin, etc.)  This option is\n");
-  fprintf(stderr, "    inform the tool that is working in a pure Windows native environment.\n");
+  fprintf(stderr, "    By default, a POSIX-style environment is assumed\n");
+  fprintf(stderr, "    (e.g., Linux, Cygwin, etc.)  This option is\n");
+  fprintf(stderr, "    inform the tool that is working in a pure Windows\n");
+  fprintf(stderr, "    native environment.\n");
 #ifdef HOST_CYGWIN
   fprintf(stderr, "  --winpaths\n");
-  fprintf(stderr, "    This option is useful when using a Windows native toolchain in a POSIX environment (such\n");
-  fprintf(stderr, "    such as Cygwin).  In this case, will CC generates dependency lists using Windows paths\n");
+  fprintf(stderr, "    This option is useful when using a Windows native\n");
+  fprintf(stderr, "    toolchain in a POSIX environment (such such as\n");
+  fprintf(stderr, "    Cygwin).  In this case, will CC\n");
+  fprintf(stderr, "    generates dependency lists using Windows paths\n");
   fprintf(stderr, "    (e.g., C:\\blablah\\blabla).\n");
 #endif
   fprintf(stderr, "  --help\n");
@@ -282,10 +316,83 @@ static void show_usage(const char *progname, const char *msg, int exitcode)
   exit(exitcode);
 }
 
+/****************************************************************************
+ * Name: do_shquote
+ *
+ * Description:
+ *    Escape the given string for use with the shell.
+ *
+ *    The idea was taken from:
+ *    https://netbsd.gw.com/cgi-bin/man-cgi?shquote++NetBSD-current
+ *    However, this implementation doesn't try to elide extraneous quotes.
+ ****************************************************************************/
+#ifndef CONFIG_WINDOWS_NATIVE
+static const char *do_shquote(const char *argument)
+{
+  const char *src;
+  char *dest;
+  int len;
+
+  src  = argument;
+  dest = g_shquote;
+  len  = 0;
+
+  if (len < sizeof(g_shquote))
+    {
+      *dest++ = '\'';
+      len++;
+    }
+
+  while (*src && len < sizeof(g_shquote))
+    {
+      if (*src == '\'')
+        {
+          /* Expand single quote to '\'' */
+
+          if (len + 4 > sizeof(g_shquote))
+            {
+              break;
+            }
+
+          src++;
+          memcpy(dest, "\'\\\'\'", 4);
+          dest += 4;
+          len += 4;
+        }
+      else
+        {
+          *dest++ = *src++;
+          len++;
+        }
+    }
+
+  if (*src || len + 2 > sizeof(g_shquote))
+    {
+      fprintf(stderr,
+              "ERROR: Truncated during shquote string is too long"
+              "[%zu/%zu]\n", strlen(argument), sizeof(g_shquote));
+      exit(EXIT_FAILURE);
+    }
+
+  *dest++ = '\'';
+  *dest = '\0';
+  return g_shquote;
+}
+#endif
+
 static void parse_args(int argc, char **argv)
 {
   char *args = NULL;
   int argidx;
+  int group = 0;
+
+  /* Always look in the current directory */
+
+  g_altpath = strdup(".");
+
+  /* Ensure dep target obj path has a default value */
+
+  g_objpath = strdup(".");
 
   /* Accumulate CFLAGS up to "--" */
 
@@ -296,6 +403,7 @@ static void parse_args(int argc, char **argv)
           g_cc = g_cflags;
           g_cflags = args;
           args = NULL;
+          group++;
         }
       else if (strcmp(argv[argidx], "--dep-debug") == 0)
         {
@@ -306,7 +414,8 @@ static void parse_args(int argc, char **argv)
           argidx++;
           if (argidx >= argc)
             {
-              show_usage(argv[0], "ERROR: Missing argument to --dep-path", EXIT_FAILURE);
+              show_usage(argv[0], "ERROR: Missing argument to --dep-path",
+                         EXIT_FAILURE);
             }
 
           if (args)
@@ -323,7 +432,8 @@ static void parse_args(int argc, char **argv)
           argidx++;
           if (argidx >= argc)
             {
-              show_usage(argv[0], "ERROR: Missing argument to --obj-path", EXIT_FAILURE);
+              show_usage(argv[0], "ERROR: Missing argument to --obj-path",
+                         EXIT_FAILURE);
             }
 
           g_objpath = argv[argidx];
@@ -333,7 +443,8 @@ static void parse_args(int argc, char **argv)
           argidx++;
           if (argidx >= argc)
             {
-              show_usage(argv[0], "ERROR: Missing argument to --obj-suffix", EXIT_FAILURE);
+              show_usage(argv[0], "ERROR: Missing argument to --obj-suffix",
+                         EXIT_FAILURE);
             }
 
           g_suffix = argv[argidx];
@@ -354,7 +465,28 @@ static void parse_args(int argc, char **argv)
         }
       else
         {
-          append(&args, argv[argidx]);
+          const char *arg = argv[argidx];
+
+          /* This condition means "perform shquote for
+           * g_cflags, but not g_cc or g_files".
+           *
+           * It isn't safe to escape g_cc because, for some reasons,
+           * Makefile passes it as a single argument like:
+           *
+           *    $(MKDEP) $(DEPPATH) "$(CC)" -- $(CFLAGS) -- $(SRCS)
+           *
+           * It isn't safe to escape g_files because
+           * do_dependency() uses them as bare filenames as well.
+           * (In addition to passing them to system().)
+           */
+#ifndef CONFIG_WINDOWS_NATIVE
+          if (group == 1)
+            {
+               arg = do_shquote(arg);
+            }
+
+#endif
+          append(&args, arg);
         }
     }
 
@@ -362,20 +494,17 @@ static void parse_args(int argc, char **argv)
 
   g_files = args;
 
-  /* If no paths were specified, then look in the current directory only */
-
-  if (!g_altpath)
-    {
-      g_altpath = strdup(".");
-    }
-
   if (g_debug)
     {
       fprintf(stderr, "SELECTIONS\n");
-      fprintf(stderr, "  CC             : [%s]\n", g_cc ? g_cc : "(None)");
-      fprintf(stderr, "  CFLAGS         : [%s]\n", g_cflags ? g_cflags : "(None)");
-      fprintf(stderr, "  FILES          : [%s]\n", g_files ? g_files : "(None)");
-      fprintf(stderr, "  PATHS          : [%s]\n", g_altpath ? g_altpath : "(None)");
+      fprintf(stderr, "  CC             : [%s]\n",
+              g_cc ? g_cc : "(None)");
+      fprintf(stderr, "  CFLAGS         : [%s]\n",
+              g_cflags ? g_cflags : "(None)");
+      fprintf(stderr, "  FILES          : [%s]\n",
+              g_files ? g_files : "(None)");
+      fprintf(stderr, "  PATHS          : [%s]\n",
+              g_altpath ? g_altpath : "(None)");
       if (g_objpath)
         {
           fprintf(stderr, "  OBJDIR         : [%s]\n", g_objpath);
@@ -387,9 +516,11 @@ static void parse_args(int argc, char **argv)
         }
 
 #ifdef HOST_CYGWIN
-      fprintf(stderr, "  Windows Paths  : [%s]\n", g_winpath ? "TRUE" : "FALSE");
+      fprintf(stderr, "  Windows Paths  : [%s]\n",
+              g_winpath ? "TRUE" : "FALSE");
 #endif
-      fprintf(stderr, "  Windows Native : [%s]\n", g_winnative ? "TRUE" : "FALSE");
+      fprintf(stderr, "  Windows Native : [%s]\n",
+              g_winnative ? "TRUE" : "FALSE");
     }
 
   /* Check for required parameters */
@@ -401,16 +532,20 @@ static void parse_args(int argc, char **argv)
 
   if (!g_files)
     {
-      /* Don't report an error -- this happens normally in some configurations */
+      /* Don't report an error --
+       * this happens normally in some configurations
+       */
 
-      printf("# No files specified for dependency generataion\n");
+      printf("# No files specified for dependency generation\n");
       exit(EXIT_SUCCESS);
     }
 
 #ifdef HOST_CYGWIN
   if (g_winnative && g_winpath)
     {
-      show_usage(argv[0], "ERROR: Both --winnative and --winpath makes no sense", EXIT_FAILURE);
+      show_usage(argv[0],
+                 "ERROR: Both --winnative and --winpath makes no sense",
+                 EXIT_FAILURE);
     }
 #endif
 }
@@ -468,16 +603,17 @@ static const char *do_expand(const char *argument)
                 }
             }
           else
-          {
-            *dest++ = *src++;
-            len++;
-          }
+            {
+              *dest++ = *src++;
+              len++;
+            }
         }
 
       if (*src)
         {
-          fprintf(stderr, "ERROR: Truncated during expansion string is too long [%lu/%u]\n",
-                  (unsigned long)strlen(argument), MAX_EXPAND);
+          fprintf(stderr,
+                  "ERROR: Truncated during expansion string is too long"
+                  "[%zu/%u]\n", strlen(argument), MAX_EXPAND);
           exit(EXIT_FAILURE);
         }
 
@@ -501,7 +637,7 @@ static bool dequote_path(const char *winpath)
 
   while (*src && len < MAX_PATH)
     {
-      if (src[0] != '\\' || (src[1] != ' ' && src[1] != '(' && src[1] != ')'))
+      if (*src != '\\' || (src[1] != ' ' && src[1] != '(' && src[1] != ')'))
         {
           *dest++ = *src;
           len++;
@@ -547,15 +683,14 @@ static const char *convert_path(const char *path)
 
       size = cygwin_conv_path(CCP_POSIX_TO_WIN_A | CCP_RELATIVE, g_dequoted,
                              NULL, 0);
-      if (size > (MAX_PATH-3))
+      if (size > (MAX_PATH - 3))
         {
-          fprintf(stderr, "# ERROR: POSIX path too long: %lu\n",
-                  (unsigned long)size);
+          fprintf(stderr, "# ERROR: POSIX path too long: %zd\n", size);
           exit(EXIT_FAILURE);
         }
 
       ret = cygwin_conv_path(CCP_POSIX_TO_WIN_A | CCP_RELATIVE, g_dequoted,
-                             &g_posixpath[1], MAX_PATH-3);
+                             &g_posixpath[1], MAX_PATH - 3);
       if (ret < 0)
         {
           fprintf(stderr, "# ERROR: cygwin_conv_path '%s' failed: %s\n",
@@ -570,7 +705,7 @@ static const char *convert_path(const char *path)
           g_posixpath[size] = '"';
         }
 
-      g_posixpath[size+1] = '\0';
+      g_posixpath[size + 1] = '\0';
       return retptr;
     }
   else
@@ -582,7 +717,7 @@ static const char *convert_path(const char *path)
 
 static void do_dependency(const char *file)
 {
-  static const char moption[] = " -M ";
+  const char * const * moption;
   struct stat buf;
   char *alloc;
   char *altpath;
@@ -603,6 +738,8 @@ static void do_dependency(const char *file)
   separator =  g_winnative ? '\\' : '/';
 #endif
 
+  moption = g_moptions[get_compiler(g_cc)];
+
   /* Copy the compiler into the command buffer */
 
   cmdlen = strlen(g_cc);
@@ -619,7 +756,7 @@ static void do_dependency(const char *file)
 
   if (g_objpath)
     {
-      char tmp[NAME_MAX+6];
+      char tmp[NAME_MAX + 6];
       char *dupname;
       char *objname;
       char *dotptr;
@@ -632,22 +769,34 @@ static void do_dependency(const char *file)
           exit(EXIT_FAILURE);
         }
 
-      objname = basename(dupname);
+      /* Check g_altpath. If only the CURRENT path is included,
+       * the obj target use its own full path.
+       */
+
+      if (strcmp(g_altpath, ".") == 0)
+        {
+          objname = dupname;
+        }
+      else
+        {
+          objname = basename(dupname);
+        }
+
       dotptr  = strrchr(objname, '.');
       if (dotptr)
         {
           *dotptr = '\0';
         }
 
-      snprintf(tmp, NAME_MAX+6, " -MT %s%c%s%s ",
-               g_objpath, separator, objname, g_suffix);
+      snprintf(tmp, NAME_MAX + 6, "%s%s%c%s%s ",
+               moption[1], g_objpath, separator, objname, g_suffix);
       expanded = do_expand(tmp);
 
       cmdlen += strlen(expanded);
       if (cmdlen >= MAX_BUFFER)
         {
           fprintf(stderr, "ERROR: Option string is too long [%d/%d]: %s\n",
-                  cmdlen, MAX_BUFFER, moption);
+                  cmdlen, MAX_BUFFER, moption[0]);
           exit(EXIT_FAILURE);
         }
 
@@ -657,15 +806,15 @@ static void do_dependency(const char *file)
 
   /* Copy " -M " */
 
-  cmdlen += strlen(moption);
+  cmdlen += strlen(moption[0]);
   if (cmdlen >= MAX_BUFFER)
     {
       fprintf(stderr, "ERROR: Option string is too long [%d/%d]: %s\n",
-              cmdlen, MAX_BUFFER, moption);
+              cmdlen, MAX_BUFFER, moption[0]);
       exit(EXIT_FAILURE);
     }
 
-  strcat(g_command, moption);
+  strcat(g_command, moption[0]);
 
   /* Copy the CFLAGS into the command buffer */
 
@@ -692,8 +841,8 @@ static void do_dependency(const char *file)
   cmdlen++;
   g_command[cmdlen] = '\0';
 
-  /* Make a copy of g_altpath. We need to do this because at least the version
-   * of strtok_r above does modify it.
+  /* Make a copy of g_altpath. We need to do this because at least the
+   * version of strtok_r above does modify it.
    */
 
   alloc = strdup(g_altpath);
@@ -732,10 +881,10 @@ static void do_dependency(const char *file)
           exit(EXIT_FAILURE);
         }
 
-      if (g_path[pathlen-1] != separator)
+      if (g_path[pathlen - 1] != separator)
         {
           g_path[pathlen] = separator;
-          g_path[pathlen+1] = '\0';
+          g_path[pathlen + 1] = '\0';
           pathlen++;
         }
 
@@ -768,7 +917,8 @@ static void do_dependency(const char *file)
 
       if (!S_ISREG(buf.st_mode))
         {
-          fprintf(stderr, "ERROR: File %s exists but is not a regular file\n",
+          fprintf(stderr,
+                  "ERROR: File %s exists but is not a regular file\n",
                   g_path);
           exit(EXIT_FAILURE);
         }
@@ -808,7 +958,8 @@ static void do_dependency(const char *file)
             }
           else
             {
-              fprintf(stderr, "ERROR: %s failed: %d\n", g_cc, WEXITSTATUS(ret));
+              fprintf(stderr,
+                      "ERROR: %s failed: %d\n", g_cc, WEXITSTATUS(ret));
             }
 
           fprintf(stderr, "       command: %s\n", g_command);
@@ -823,14 +974,16 @@ static void do_dependency(const char *file)
         }
 #endif
 
-      /* We don't really know that the command succeeded... Let's assume that it did */
+      /* We don't really know that the command succeeded...
+       * Let's assume that it did
+       */
 
       free(alloc);
       return;
     }
 
-   printf("# ERROR: File \"%s\" not found at any location\n", file);
-   exit(EXIT_FAILURE);
+  printf("# ERROR: File \"%s\" not found at any location\n", file);
+  exit(EXIT_FAILURE);
 }
 
 /****************************************************************************

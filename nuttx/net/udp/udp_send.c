@@ -1,6 +1,8 @@
 /****************************************************************************
  * net/udp/udp_send.c
  *
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  *   Copyright (C) 2007-2009, 2011, 2015 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
  *
@@ -58,22 +60,66 @@
 
 #include "devif/devif.h"
 #include "inet/inet.h"
+#include "socket/socket.h"
 #include "utils/utils.h"
 #include "udp/udp.h"
 
 /****************************************************************************
- * Pre-processor Definitions
+ * Private Functions
  ****************************************************************************/
 
-#define IPv4BUF \
-  ((struct ipv4_hdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev)])
-#define IPv6BUF \
-  ((struct ipv6_hdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev)])
+/****************************************************************************
+ * Name: udp_send_loopback
+ *
+ * Description:
+ *   Send a copy of the UDP packet to ourself.
+ *
+ * Input Parameters:
+ *   dev - The device driver structure to use in the send operation
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
 
-#define UDPIPv4BUF \
-  ((struct udp_hdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev) + IPv4_HDRLEN])
-#define UDPIPv6BUF \
-  ((struct udp_hdr_s *)&dev->d_buf[NET_LL_HDRLEN(dev) + IPv6_HDRLEN])
+#if defined(CONFIG_NET_SOCKOPTS) && \
+    (defined(CONFIG_NET_IGMP) || defined(CONFIG_NET_MLD))
+static void udp_send_loopback(FAR struct net_driver_s *dev)
+{
+  FAR struct iob_s *iob = netdev_iob_clone(dev, true);
+  if (iob == NULL)
+    {
+      nerr("ERROR: IOB clone failed when looping UDP.\n");
+      return;
+    }
+
+#ifdef CONFIG_NET_IPv4
+#ifdef CONFIG_NET_IPv6
+  if (IFF_IS_IPv4(dev->d_flags))
+#endif
+    {
+      ninfo("IPv4 frame\n");
+      NETDEV_RXIPV4(dev);
+      ipv4_input(dev);
+    }
+#endif /* CONFIG_NET_IPv4 */
+
+#ifdef CONFIG_NET_IPv6
+#ifdef CONFIG_NET_IPv4
+  else
+#endif
+    {
+      ninfo("IPv6 frame\n");
+      NETDEV_RXIPV6(dev);
+      ipv6_input(dev);
+    }
+#endif /* CONFIG_NET_IPv6 */
+
+  /* Restore device IOB with backup IOB */
+
+  netdev_iob_replace(dev, iob);
+}
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -100,13 +146,17 @@
 void udp_send(FAR struct net_driver_s *dev, FAR struct udp_conn_s *conn)
 {
   FAR struct udp_hdr_s *udp;
+#ifdef CONFIG_NET_IPv6
+  FAR const uint16_t *laddr;
+#endif
+#ifdef CONFIG_NET_IPv4
+  in_addr_t raddr;
+#endif
 
   ninfo("UDP payload: %d (%d) bytes\n", dev->d_sndlen, dev->d_len);
 
   if (dev->d_sndlen > 0)
     {
-      /* Initialize the IP header. */
-
 #ifdef CONFIG_NET_IPv4
 #ifdef CONFIG_NET_IPv6
       if (conn->domain == PF_INET ||
@@ -114,39 +164,18 @@ void udp_send(FAR struct net_driver_s *dev, FAR struct udp_conn_s *conn)
            ip6_is_ipv4addr((FAR struct in6_addr *)conn->u.ipv6.raddr)))
 #endif
         {
-          /* Get pointers to the IPv4 header and the offset UDP header */
-
-          FAR struct ipv4_hdr_s *ipv4 = IPv4BUF;
-
           DEBUGASSERT(IFF_IS_IPv4(dev->d_flags));
           udp = UDPIPv4BUF;
-
-          /* Initialize the IPv4 header. */
-
-          ipv4->vhl         = 0x45;
-          ipv4->tos         = 0;
-          ++g_ipid;
-          ipv4->ipid[0]     = g_ipid >> 8;
-          ipv4->ipid[1]     = g_ipid & 0xff;
-          ipv4->ipoffset[0] = 0;
-          ipv4->ipoffset[1] = 0;
-          ipv4->ttl         = conn->ttl;
-          ipv4->proto       = IP_PROTO_UDP;
-
-          net_ipv4addr_hdrcopy(ipv4->srcipaddr, &dev->d_ipaddr);
-
 #ifdef CONFIG_NET_IPv6
           if (conn->domain == PF_INET6 &&
               ip6_is_ipv4addr((FAR struct in6_addr *)conn->u.ipv6.raddr))
             {
-              in_addr_t raddr =
-                ip6_get_ipv4addr((FAR struct in6_addr *)conn->u.ipv6.raddr);
-              net_ipv4addr_hdrcopy(ipv4->destipaddr, &raddr);
+              raddr = ip6_get_ipv4addr(conn->u.ipv6.raddr);
             }
           else
 #endif
             {
-              net_ipv4addr_hdrcopy(ipv4->destipaddr, &conn->u.ipv4.raddr);
+              raddr = conn->u.ipv4.raddr;
             }
 
           /* The total length to send is the size of the application data
@@ -156,15 +185,9 @@ void udp_send(FAR struct net_driver_s *dev, FAR struct udp_conn_s *conn)
 
           dev->d_len        = dev->d_sndlen + IPv4UDP_HDRLEN;
 
-          /* The IPv4 length includes the size of the IPv4 header */
-
-          ipv4->len[0]      = (dev->d_len >> 8);
-          ipv4->len[1]      = (dev->d_len & 0xff);
-
-          /* Calculate IP checksum. */
-
-          ipv4->ipchksum    = 0;
-          ipv4->ipchksum    = ~ipv4_chksum(dev);
+          ipv4_build_header(IPv4BUF, dev->d_len, IP_PROTO_UDP,
+                            &dev->d_ipaddr, &raddr, conn->sconn.s_ttl,
+                            conn->sconn.s_tos, NULL);
 
 #ifdef CONFIG_NET_STATISTICS
           g_netstats.ipv4.sent++;
@@ -179,31 +202,26 @@ void udp_send(FAR struct net_driver_s *dev, FAR struct udp_conn_s *conn)
         {
           /* Get pointers to the IPv6 header and the offset UDP header */
 
-          FAR struct ipv6_hdr_s *ipv6 = IPv6BUF;
-
           DEBUGASSERT(IFF_IS_IPv6(dev->d_flags));
           udp = UDPIPv6BUF;
-
-          /* Initialize the IPv6 header.  Note that the IP length field
-           * does not include the IPv6 IP header length.
-           */
-
-          ipv6->vtc         = 0x60;
-          ipv6->tcf         = 0x00;
-          ipv6->flow        = 0x00;
-          ipv6->proto       = IP_PROTO_UDP;
-          ipv6->ttl         = conn->ttl;
-
-          net_ipv6addr_copy(ipv6->srcipaddr, dev->d_ipv6addr);
-          net_ipv6addr_copy(ipv6->destipaddr, conn->u.ipv6.raddr);
 
           /* The IPv6 length, Includes the UDP header size but not the IPv6
            * header size
            */
 
           dev->d_len        = dev->d_sndlen + UDP_HDRLEN;
-          ipv6->len[0]      = (dev->d_len >> 8);
-          ipv6->len[1]      = (dev->d_len & 0xff);
+
+          /* We use the laddr if the conn is bounded to an address, otherwise
+           * find a suitable source address corresponding to the raddr
+           */
+
+          laddr = !net_ipv6addr_cmp(conn->u.ipv6.laddr, g_ipv6_unspecaddr) ?
+                    conn->u.ipv6.laddr :
+                    netdev_ipv6_srcaddr(dev, conn->u.ipv6.raddr);
+
+          ipv6_build_header(IPv6BUF, dev->d_len, IP_PROTO_UDP,
+                            laddr, conn->u.ipv6.raddr,
+                            conn->sconn.s_ttl, conn->sconn.s_tclass);
 
           /* The total length to send is the size of the application data
            * plus the IPv6 and UDP headers (and, eventually, the link layer
@@ -225,14 +243,16 @@ void udp_send(FAR struct net_driver_s *dev, FAR struct udp_conn_s *conn)
       udp->udplen      = HTONS(dev->d_sndlen + UDP_HDRLEN);
       udp->udpchksum   = 0;
 
+      /* Update the device buffer length */
+
+      iob_update_pktlen(dev->d_iob, dev->d_len, false);
+
 #ifdef CONFIG_NET_UDP_CHECKSUMS
       /* Calculate UDP checksum. */
 
 #ifdef CONFIG_NET_IPv4
 #ifdef CONFIG_NET_IPv6
-      if (conn->domain == PF_INET ||
-          (conn->domain == PF_INET6 &&
-           ip6_is_ipv4addr((FAR struct in6_addr *)conn->u.ipv6.raddr)))
+      if (IFF_IS_IPv4(dev->d_flags))
 #endif
         {
           udp->udpchksum = ~udp_ipv4_chksum(dev);
@@ -259,6 +279,66 @@ void udp_send(FAR struct net_driver_s *dev, FAR struct udp_conn_s *conn)
 #ifdef CONFIG_NET_STATISTICS
       g_netstats.udp.sent++;
 #endif
+
+#ifdef CONFIG_NET_SOCKOPTS
+      /* Try loopback multicast to ourself. */
+
+#ifdef CONFIG_NET_IGMP
+      if (_SO_GETOPT(conn->sconn.s_options, IP_MULTICAST_LOOP) &&
+#ifdef CONFIG_NET_IPv6
+          IFF_IS_IPv4(dev->d_flags) &&
+#endif
+          IN_MULTICAST(NTOHL(raddr)))
+        {
+          udp_send_loopback(dev);
+        }
+#endif /* CONFIG_NET_IGMP */
+
+#ifdef CONFIG_NET_MLD
+      if (_SO_GETOPT(conn->sconn.s_options, IPV6_MULTICAST_LOOP) &&
+#ifdef CONFIG_NET_IPv4
+          IFF_IS_IPv6(dev->d_flags) &&
+#endif
+          IN6_IS_ADDR_MULTICAST((FAR struct in6_addr *)conn->u.ipv6.raddr))
+        {
+          udp_send_loopback(dev);
+        }
+#endif /* CONFIG_NET_MLD */
+#endif /* CONFIG_NET_SOCKOPTS */
     }
+}
+
+/****************************************************************************
+ * Name: udpip_hdrsize
+ *
+ * Description:
+ *   Get the total size of L3 and L4 UDP header
+ *
+ * Input Parameters:
+ *   conn     The connection structure associated with the socket
+ *
+ * Returned Value:
+ *   the total size of L3 and L4 TCP header
+ *
+ ****************************************************************************/
+
+uint16_t udpip_hdrsize(FAR struct udp_conn_s *conn)
+{
+  uint16_t hdrsize = sizeof(struct udp_hdr_s);
+
+#if defined(CONFIG_NET_IPv4) && defined(CONFIG_NET_IPv6)
+  if (conn->domain == PF_INET6 &&
+      ip6_is_ipv4addr((FAR struct in6_addr *)conn->u.ipv6.raddr))
+    {
+      /* Select the IPv4 domain for hybrid dual-stack IPv6/IPv4 socket */
+
+      return sizeof(struct ipv4_hdr_s) + hdrsize;
+    }
+#endif
+
+  UNUSED(conn);
+  return net_ip_domain_select(conn->domain,
+                              sizeof(struct ipv4_hdr_s) + hdrsize,
+                              sizeof(struct ipv6_hdr_s) + hdrsize);
 }
 #endif /* CONFIG_NET && CONFIG_NET_UDP */

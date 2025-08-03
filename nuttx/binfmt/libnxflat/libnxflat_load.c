@@ -1,35 +1,22 @@
 /****************************************************************************
  * binfmt/libnxflat/libnxflat_load.c
  *
- *   Copyright (C) 2009 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -39,9 +26,11 @@
 
 #include <nuttx/config.h>
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/mman.h>
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <nxflat.h>
@@ -53,14 +42,6 @@
 #include <nuttx/binfmt/nxflat.h>
 
 #include "libnxflat.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#ifndef MAX
-#define MAX(x,y) ((x) > (y) ? (x) : (y))
-#endif
 
 /****************************************************************************
  * Private Constant Data
@@ -100,9 +81,9 @@ int nxflat_load(struct nxflat_loadinfo_s *loadinfo)
 
   /* Calculate the extra space we need to allocate.  This extra space will be
    * the size of the BSS section.  This extra space will also be used
-   * temporarily to hold relocation information.  So the allocated size of this
-   * region will either be the size of .data + size of.bss section OR, the
-   * size of .data + the relocation entries, whichever is larger
+   * temporarily to hold relocation information.  So the allocated size of
+   * this region will either be the size of .data + size of.bss section OR,
+   * the size of .data + the relocation entries, whichever is larger
    *
    * This is the amount of memory that we have to have to hold the
    * relocations.
@@ -142,19 +123,20 @@ int nxflat_load(struct nxflat_loadinfo_s *loadinfo)
    */
 
   /* The following call will give as a pointer to the mapped file ISpace.
-   * This may be in ROM, RAM, Flash, ... We don't really care where the memory
-   * resides as long as it is fully initialized and ready to execute.
+   * This may be in ROM, RAM, Flash, ... We don't really care where the
+   * memory resides as long as it is fully initialized and ready to execute.
    */
 
-  loadinfo->ispace = (uint32_t)mmap(NULL, loadinfo->isize, PROT_READ,
-                                    MAP_SHARED | MAP_FILE, loadinfo->filfd, 0);
-  if (loadinfo->ispace == (uint32_t)MAP_FAILED)
+  ret = file_mmap(&loadinfo->file, NULL, loadinfo->isize, PROT_READ,
+                  MAP_SHARED | MAP_FILE, 0, (FAR void **)&loadinfo->ispace);
+  if (ret < 0)
     {
-      berr("Failed to map NXFLAT ISpace: %d\n", errno);
-      return -errno;
+      berr("Failed to map NXFLAT ISpace: %d\n", ret);
+      return ret;
     }
 
-  binfo("Mapped ISpace (%d bytes) at %08x\n", loadinfo->isize, loadinfo->ispace);
+  binfo("Mapped ISpace (%" PRId32 " bytes) at %08x\n",
+        loadinfo->isize, loadinfo->ispace);
 
   /* The following call allocate D-Space memory and will provide a pointer
    * to the allocated (but still uninitialized) D-Space memory.
@@ -167,7 +149,7 @@ int nxflat_load(struct nxflat_loadinfo_s *loadinfo)
       return ret;
     }
 
-  binfo("Allocated DSpace (%d bytes) at %p\n",
+  binfo("Allocated DSpace (%" PRId32 " bytes) at %p\n",
         loadinfo->dsize, loadinfo->dspace->region);
 
   /* If CONFIG_ARCH_ADDRENV=y, then the D-Space allocation lies in an address
@@ -197,8 +179,8 @@ int nxflat_load(struct nxflat_loadinfo_s *loadinfo)
       goto errout;
     }
 
-  binfo("TEXT: %08x Entry point offset: %08x Data offset: %08x\n",
-      loadinfo->ispace, loadinfo->entryoffs, doffset);
+  binfo("TEXT: %08x Entry point offset: %08" PRIx32 " Data offset: %08jx\n",
+        loadinfo->ispace, loadinfo->entryoffs, (intmax_t)doffset);
 
   /* Restore the original address environment */
 

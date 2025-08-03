@@ -1,35 +1,22 @@
 /****************************************************************************
  * arch/arm/src/lpc43xx/lpc43_serial.c
  *
- *   Copyright (C) 2012-2013, 2016-2017 Gregory Nutt. All rights reserved.
- *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/
 
@@ -40,10 +27,12 @@
 #include <nuttx/config.h>
 
 #include <sys/types.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
+#include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
@@ -59,9 +48,7 @@
 #include <arch/board/board.h>
 
 #include "chip.h"
-#include "up_arch.h"
-#include "up_internal.h"
-
+#include "arm_internal.h"
 #include "lpc43_config.h"
 #include "lpc43_serial.h"
 
@@ -114,7 +101,7 @@ static inline int up_set_rs485_mode(struct up_dev_s *priv,
 static inline int up_get_rs485_mode(struct up_dev_s *priv,
                                     struct serial_rs485 *mode);
 #endif
-static int  up_receive(struct uart_dev_s *dev, uint32_t *status);
+static int  up_receive(struct uart_dev_s *dev, unsigned int *status);
 static void up_rxint(struct uart_dev_s *dev, bool enable);
 static bool up_rxavailable(struct uart_dev_s *dev);
 static void up_send(struct uart_dev_s *dev, int ch);
@@ -356,7 +343,7 @@ static uart_dev_t g_usart3port =
 #    define CONSOLE_DEV     g_usart3port    /* USART3=console */
 #    define TTYS0_DEV       g_usart3port    /* USART3=ttyS0 */
 #    define USART3_ASSIGNED 1
-# endif
+#  endif
 #else
 /* No console, assign only ttyS0 */
 
@@ -372,7 +359,7 @@ static uart_dev_t g_usart3port =
 #  else /* elif defined(CONFIG_LPC43_USART3) */
 #    define TTYS0_DEV       g_usart3port    /* USART3=ttyS0 */
 #    define USART3_ASSIGNED 1
-# endif
+#  endif
 #endif
 
 /* Assign ttyS1 */
@@ -433,7 +420,8 @@ static inline uint32_t up_serialin(struct up_dev_s *priv, int offset)
  * Name: up_serialout
  ****************************************************************************/
 
-static inline void up_serialout(struct up_dev_s *priv, int offset, uint32_t value)
+static inline void up_serialout(struct up_dev_s *priv, int offset,
+                                uint32_t value)
 {
   putreg32(value, priv->uartbase + offset);
 }
@@ -457,11 +445,13 @@ static inline void up_disableuartint(struct up_dev_s *priv, uint32_t *ier)
  * Name: up_restoreuartint
  ****************************************************************************/
 
+#ifdef HAVE_SERIAL_CONSOLE
 static inline void up_restoreuartint(struct up_dev_s *priv, uint32_t ier)
 {
   priv->ier |= ier & UART_IER_ALLIE;
   up_serialout(priv, LPC43_UART_IER_OFFSET, priv->ier);
 }
+#endif
 
 /****************************************************************************
  * Name: up_enablebreaks
@@ -507,11 +497,13 @@ static int up_setup(struct uart_dev_s *dev)
 
   /* Clear fifos */
 
-  up_serialout(priv, LPC43_UART_FCR_OFFSET, (UART_FCR_RXRST | UART_FCR_TXRST));
+  up_serialout(priv, LPC43_UART_FCR_OFFSET,
+               (UART_FCR_RXRST | UART_FCR_TXRST));
 
   /* Set trigger */
 
-  up_serialout(priv, LPC43_UART_FCR_OFFSET, (UART_FCR_FIFOEN | UART_FCR_RXTRIGGER_8));
+  up_serialout(priv, LPC43_UART_FCR_OFFSET,
+               (UART_FCR_FIFOEN | UART_FCR_RXTRIGGER_8));
 
   /* Set up the IER */
 
@@ -563,7 +555,8 @@ static int up_setup(struct uart_dev_s *dev)
 #ifdef CONFIG_UART1_FLOWCONTROL
   if (priv->id == 1)
     {
-      up_serialout(priv, LPC43_UART_MCR_OFFSET, (UART_MCR_RTSEN | UART_MCR_CTSEN));
+      up_serialout(priv, LPC43_UART_MCR_OFFSET,
+                   (UART_MCR_RTSEN | UART_MCR_CTSEN));
     }
 #endif
 
@@ -642,14 +635,15 @@ static void up_shutdown(struct uart_dev_s *dev)
  * Name: up_attach
  *
  * Description:
- *   Configure the UART to operation in interrupt driven mode.  This method is
- *   called when the serial port is opened.  Normally, this is just after the
- *   the setup() method is called, however, the serial console may operate in
- *   a non-interrupt driven mode during the boot phase.
+ *   Configure the UART to operation in interrupt driven mode.  This method
+ *   is called when the serial port is opened.  Normally, this is just
+ *   after the the setup() method is called, however, the serial console may
+ *   operate in a non-interrupt driven mode during the boot phase.
  *
- *   RX and TX interrupts are not enabled when by the attach method (unless the
- *   hardware supports multiple levels of interrupt enabling).  The RX and TX
- *   interrupts are not enabled until the txint() and rxint() methods are called.
+ *   RX and TX interrupts are not enabled when by the attach method (unless
+ *   the hardware supports multiple levels of interrupt enabling).  The RX
+ *   and TX interrupts are not enabled until the txint() and rxint() methods
+ *   are called.
  *
  ****************************************************************************/
 
@@ -678,8 +672,8 @@ static int up_attach(struct uart_dev_s *dev)
  *
  * Description:
  *   Detach UART interrupts.  This method is called when the serial port is
- *   closed normally just before the shutdown method is called.  The exception is
- *   the serial console which is never shutdown.
+ *   closed normally just before the shutdown method is called.  The
+ *   exception is the serial console which is never shutdown.
  *
  ****************************************************************************/
 
@@ -695,9 +689,9 @@ static void up_detach(struct uart_dev_s *dev)
  *
  * Description:
  *   This is the UART interrupt handler.  It will be invoked when an
- *   interrupt received on the 'irq'  It should call uart_transmitchars or
- *   uart_receivechar to perform the appropriate data transfers.  The
- *   interrupt handling logic must be able to map the 'irq' number into the
+ *   interrupt is received on the 'irq'.  It should call uart_xmitchars or
+ *   uart_recvchars to perform the appropriate data transfers.  The
+ *   interrupt handling logic must be able to map the 'arg' to the
  *   appropriate uart_dev_s structure in order to call these functions.
  *
  ****************************************************************************/
@@ -765,7 +759,7 @@ static int up_interrupt(int irq, void *context, void *arg)
               /* Read the modem status register (MSR) to clear */
 
               status = up_serialin(priv, LPC43_UART_MSR_OFFSET);
-              _info("MSR: %02x\n", status);
+              _info("MSR: %02" PRIx32 "\n", status);
               break;
             }
 
@@ -776,7 +770,7 @@ static int up_interrupt(int irq, void *context, void *arg)
               /* Read the line status register (LSR) to clear */
 
               status = up_serialin(priv, LPC43_UART_LSR_OFFSET);
-              _info("LSR: %02x\n", status);
+              _info("LSR: %02" PRIx32 "\n", status);
               break;
             }
 
@@ -784,7 +778,7 @@ static int up_interrupt(int irq, void *context, void *arg)
 
           default:
             {
-              _err("ERROR: Unexpected IIR: %02x\n", status);
+              _err("ERROR: Unexpected IIR: %02" PRIx32 "\n", status);
               break;
             }
         }
@@ -804,35 +798,37 @@ static int up_interrupt(int irq, void *context, void *arg)
  *
  *     RS-485/EIA-485 Normal Multidrop Mode (NMM) -- NOT supported
  *
- *       In this mode, an address is detected when a received byte causes the
- *       USART to set the parity error and generate an interrupt.  When the
- *       parity error interrupt will be generated and the processor can decide
- *       whether or not to disable the receiver.
+ *       In this mode, an address is detected when a received byte causes
+ *       the USART to set the parity error and generate an interrupt.  When
+ *       the parity error interrupt will be generated and the processor can
+ *       decide whether or not to disable the receiver.
  *
  *     RS-485/EIA-485 Auto Address Detection (AAD) mode -- NOT supported
  *
  *       In this mode, the receiver will compare any address byte received
- *       (parity = �1�) to the 8-bit value programmed into the RS485ADRMATCH
+ *       (parity = 1) to the 8-bit value programmed into the RS485ADRMATCH
  *       register.  When a matching address character is detected it will be
  *       pushed onto the RXFIFO along with the parity bit, and the receiver
  *       will be automatically enabled.
  *
  *       When an address byte which does not match the RS485ADRMATCH value
- *       is received, the receiver will be automatically disabled in hardware.
+ *       is received, the receiver will be automatically disabled in
+ *       hardware.
  *
  *     RS-485/EIA-485 Auto Direction Control -- Supported
  *
  *       Allow the transmitter to automatically control the state of the DIR
- *       pin as a direction control output signal.  The DIR pin will be asserted
- *       (driven LOW) when the CPU writes data into the TXFIFO. The pin will be
- *       de-asserted (driven HIGH) once the last bit of data has been transmitted.
+ *       pin as a direction control output signal.  The DIR pin will be
+ *       asserted (driven LOW) when the CPU writes data into the TXFIFO. The
+ *       pin will be de-asserted (driven HIGH) once the last bit of data has
+ *       been transmitted.
  *
  *     RS485/EIA-485 driver delay time -- Supported
  *
  *       The driver delay time is the delay between the last stop bit leaving
- *       the TXFIFO and the de-assertion of the DIR pin. This delay time can be
- *       programmed in the 8-bit RS485DLY register. The delay time is in periods
- *       of the baud clock.
+ *       the TXFIFO and the de-assertion of the DIR pin. This delay time can
+ *       be programmed in the 8-bit RS485DLY register. The delay time is in
+ *       periods of the baud clock.
  *
  *     RS485/EIA-485 output inversion -- Supported
  *
@@ -991,8 +987,9 @@ static inline int up_get_rs485_mode(struct up_dev_s *priv,
         }
 
       /* We only have control of the delay after send.  Time must be
-       * returned in milliseconds; this must be converted from the baud clock.
-       * (The baud clock should be 16 times the currently selected BAUD.)
+       * returned in milliseconds; this must be converted from the baud
+       * clock. (The baud clock should be 16 times the currently
+       * selected BAUD.)
        *
        *   msec = 1000 * dly / baud
        */
@@ -1019,7 +1016,7 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
   struct inode      *inode = filep->f_inode;
   struct uart_dev_s *dev   = inode->i_private;
   struct up_dev_s   *priv  = (struct up_dev_s *)dev->priv;
-  int                ret    = OK;
+  int                ret   = OK;
 
   switch (cmd)
     {
@@ -1070,7 +1067,7 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
           }
 
         /* TODO:  Handle other termios settings.
-         * Note that only cfgetispeed is used besued we have knowledge
+         * Note that only cfgetispeed is used because we have knowledge
          * that only one speed is supported.
          */
 
@@ -1100,15 +1097,15 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
 #ifdef HAVE_RS485
     case TIOCSRS485:  /* Set RS485 mode, arg: pointer to struct serial_rs485 */
       {
-        ret = up_set_rs485_mode(priv,
-                                (const struct serial_rs485 *)((uintptr_t)arg));
+        ret = up_set_rs485_mode(
+          priv, (const struct serial_rs485 *)((uintptr_t)arg));
       }
       break;
 
     case TIOCGRS485:  /* Get RS485 mode, arg: pointer to struct serial_rs485 */
       {
-        ret = up_get_rs485_mode(priv,
-                                (struct serial_rs485 *)((uintptr_t)arg));
+        ret = up_get_rs485_mode(
+          priv, (struct serial_rs485 *)((uintptr_t)arg));
       }
       break;
 #endif
@@ -1131,7 +1128,7 @@ static int up_ioctl(struct file *filep, int cmd, unsigned long arg)
  *
  ****************************************************************************/
 
-static int up_receive(struct uart_dev_s *dev, uint32_t *status)
+static int up_receive(struct uart_dev_s *dev, unsigned int *status)
 {
   struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
   uint32_t rbr;
@@ -1263,12 +1260,12 @@ static bool up_txempty(struct uart_dev_s *dev)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: up_serialinit
+ * Name: arm_serialinit
  *
  * Description:
  *   Performs the low level UART initialization early in debug so that the
- *   serial console will be available during bootup.  This must be called
- *   before up_serialinit.
+ *   serial console will be available during boot up.  This must be called
+ *   before arm_serialinit.
  *
  *   NOTE: Configuration of the CONSOLE UART was performed by up_lowsetup()
  *   very early in the boot sequence.
@@ -1276,7 +1273,7 @@ static bool up_txempty(struct uart_dev_s *dev)
  ****************************************************************************/
 
 #ifdef USE_EARLYSERIALINIT
-void up_earlyserialinit(void)
+void arm_earlyserialinit(void)
 {
   /* Configure all UARTs (except the CONSOLE UART) and disable interrupts */
 
@@ -1318,15 +1315,15 @@ void up_earlyserialinit(void)
 #endif
 
 /****************************************************************************
- * Name: up_serialinit
+ * Name: arm_serialinit
  *
  * Description:
  *   Register serial console and serial ports.  This assumes that
- *   up_earlyserialinit was called previously.
+ *   arm_earlyserialinit was called previously.
  *
  ****************************************************************************/
 
-void up_serialinit(void)
+void arm_serialinit(void)
 {
 #ifdef CONSOLE_DEV
   uart_register("/dev/console", &CONSOLE_DEV);
@@ -1353,7 +1350,7 @@ void up_serialinit(void)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_SERIAL_CONSOLE
   struct up_dev_s *priv = (struct up_dev_s *)CONSOLE_DEV.priv;
@@ -1361,21 +1358,10 @@ int up_putc(int ch)
   up_disableuartint(priv, &ier);
 #endif
 
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      up_lowputc('\r');
-    }
-
-  up_lowputc(ch);
+  arm_lowputc(ch);
 #ifdef HAVE_SERIAL_CONSOLE
   up_restoreuartint(priv, ier);
 #endif
-
-  return ch;
 }
 
 #else /* USE_SERIALDRIVER */
@@ -1388,21 +1374,11 @@ int up_putc(int ch)
  *
  ****************************************************************************/
 
-int up_putc(int ch)
+void up_putc(int ch)
 {
 #ifdef HAVE_UART
-  /* Check for LF */
-
-  if (ch == '\n')
-    {
-      /* Add CR */
-
-      up_lowputc('\r');
-    }
-
-  up_lowputc(ch);
+  arm_lowputc(ch);
 #endif
-  return ch;
 }
 
 #endif /* USE_SERIALDRIVER */
