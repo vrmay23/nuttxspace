@@ -49,19 +49,21 @@ get_common_branches() {
 # Args:
 #   $1 - branch name (e.g. master, releases/12.10)
 # Returns:
-#   numeric string for sorting (master = 9999)
+#   numeric string for sorting (master = 9999.9999)
 # Why:
 #   Sort by version number descending, master always on top
 version_number() {
   local v=$1
   if [[ "$v" == "master" ]]; then
-    echo 9999
+    echo "9999.9999"
   else
     v="${v#releases/}"
-    if [[ $v =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
-      echo "$v"
+    if [[ "$v" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+      printf "%04d.%04d\n" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    elif [[ "$v" =~ ^([0-9]+)$ ]]; then
+      printf "%04d.0000\n" "${BASH_REMATCH[1]}"
     else
-      echo 0
+      echo "0000.0000"
     fi
   fi
 }
